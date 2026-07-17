@@ -20,8 +20,19 @@ type AgentRunProfileSpec struct {
 	IssueTracking *AgentRunIssueTrackingSpec `json:"issueTracking,omitempty"`
 	// Harness supplies default backend, prompt, skills, subagents, tools,
 	// service account, credentials, data volumes, and execution settings.
+	// New profiles should select reusable runtime mechanics through
+	// harnessProfileRef and reusable capabilities through skillSets; this field
+	// remains an inline compatibility and override layer in v1alpha1.
 	// +optional
 	Harness AgentRunHarnessSpec `json:"harness,omitempty"`
+	// HarnessProfileRef selects a reusable same-namespace backend and execution
+	// envelope. Inline harness runtime fields remain compatibility overrides.
+	// +optional
+	HarnessProfileRef *NamespacedObjectReference `json:"harnessProfileRef,omitempty"`
+	// SkillSets composes ordered backend-neutral capability packs and
+	// profile-local named skill overrides.
+	// +optional
+	SkillSets *AgentSkillCompositionSpec `json:"skillSets,omitempty"`
 	// Notifications supplies default operator notification routing.
 	// +optional
 	Notifications *AgentRunNotificationSpec `json:"notifications,omitempty"`
@@ -33,6 +44,7 @@ type AgentRunProfileSpec struct {
 // +kubebuilder:printcolumn:name="Target",type="string",JSONPath=".spec.scope.applicationTargetRef.name"
 // +kubebuilder:printcolumn:name="Intent",type="string",JSONPath=".spec.harness.intent"
 // +kubebuilder:printcolumn:name="Backend",type="string",JSONPath=".spec.harness.backend.kind"
+// +kubebuilder:printcolumn:name="HarnessProfile",type="string",JSONPath=".spec.harnessProfileRef.name"
 type AgentRunProfile struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`

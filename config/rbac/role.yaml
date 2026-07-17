@@ -7,7 +7,7 @@ rules:
     resources: ["adversesituations", "agentdatavolumes", "agentruncontrols", "agentruns", "agentschedules"]
     verbs: ["create", "delete", "get", "list", "patch", "update", "watch"]
   - apiGroups: ["control.anvil.hazyforge.io"]
-    resources: ["agentrunprofiles", "volumeprofiles"]
+    resources: ["agentharnessprofiles", "agentrunprofiles", "agentskillsets", "volumeprofiles"]
     verbs: ["get", "list", "watch"]
   - apiGroups: ["control.anvil.hazyforge.io"]
     resources:

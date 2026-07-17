@@ -3,8 +3,10 @@ kind: Kustomization
 resources:
   - bases/control.anvil.hazyforge.io_adversesituations.yaml
   - bases/control.anvil.hazyforge.io_agentdatavolumes.yaml
+  - bases/control.anvil.hazyforge.io_agentharnessprofiles.yaml
   - bases/control.anvil.hazyforge.io_agentruncontrols.yaml
   - bases/control.anvil.hazyforge.io_agentrunprofiles.yaml
   - bases/control.anvil.hazyforge.io_agentruns.yaml
   - bases/control.anvil.hazyforge.io_agentschedules.yaml
+  - bases/control.anvil.hazyforge.io_agentskillsets.yaml
   - bases/control.anvil.hazyforge.io_volumeprofiles.yaml

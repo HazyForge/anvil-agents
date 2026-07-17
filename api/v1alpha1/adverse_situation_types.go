@@ -48,6 +48,14 @@ type AdverseSituationAgentRunResponderSpec struct {
 	// creates the harness Job.
 	// +optional
 	ProfileRef *NamespacedObjectReference `json:"profileRef,omitempty"`
+	// HarnessProfileRef selects a reusable same-namespace runtime envelope for
+	// the created AgentRun.
+	// +optional
+	HarnessProfileRef *NamespacedObjectReference `json:"harnessProfileRef,omitempty"`
+	// SkillSets selects reusable capability packs and responder-local skill
+	// overrides for the created AgentRun.
+	// +optional
+	SkillSets *AgentSkillCompositionSpec `json:"skillSets,omitempty"`
 	// Prompt is copied onto the created AgentRun as its one-off operator
 	// request. Use profile and harness system prompts for durable standing
 	// instructions.
