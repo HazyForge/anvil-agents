@@ -10,6 +10,11 @@ spec:
     name: repository-review
   profileRef:
     name: repository-review
+  skillSets:
+    overrides:
+      - name: evidence-backed-review
+        operation: Augment
+        content: Focus this run on failing tests.
   prompt: Inspect the repository and report test failures with evidence.
   scope:
     applicationRef:

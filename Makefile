@@ -2,7 +2,7 @@ CONTROLLER_GEN ?= go run sigs.k8s.io/controller-tools/cmd/controller-gen@v0.19.0
 IMAGE_PREFIX ?=
 IMAGE_TAG ?= dev
 
-.PHONY: generate manifests test verify verify-runner-contract build docker-build images image-checks helm-lint chart-package kind-e2e
+.PHONY: generate manifests test verify verify-runner-contract build docker-build images image-checks helm-lint chart-package kind-upgrade-e2e kind-e2e
 
 generate:
 	$(CONTROLLER_GEN) object paths=./api/...
@@ -40,7 +40,10 @@ helm-lint:
 chart-package:
 	./hack/package-chart.sh --version "$${VERSION:?set VERSION, for example VERSION=0.1.0}"
 
-kind-e2e:
+kind-upgrade-e2e:
+	./hack/test-kind-upgrade.sh
+
+kind-e2e: kind-upgrade-e2e
 	./hack/test-kind.sh
 
 verify-runner-contract:
@@ -50,6 +53,7 @@ verify-runner-contract:
 	@bash -n hack/package-chart.sh
 	@bash -n hack/package-chart_test.sh
 	@bash -n hack/test-kind.sh
+	@bash -n hack/test-kind-upgrade.sh
 	@bash -n hack/stream-agent-run.sh
 	@hack/build-images.sh --help >/dev/null
 	@hack/build-images.sh --list >/dev/null

@@ -70,6 +70,11 @@ done
 if rg -q 'external-secrets.io' "${tmp_dir}/controller-rbac.yaml"; then
   fail "ExternalSecrets RBAC rendered while externalSecrets.enabled=false"
 fi
+rg -q 'resources: \["events"\]' "${tmp_dir}/controller-rbac.yaml" || fail "leader-election Event RBAC is missing"
+rg -q 'resources: \["storageclasses"\]' "${tmp_dir}/controller-rbac.yaml" || fail "WaitForFirstConsumer StorageClass RBAC is missing"
+if rg -q 'external-secrets.io' "${root_dir}/config/rbac/role.yaml"; then
+  fail "raw default RBAC must match externalSecrets.enabled=false"
+fi
 helm template "${release}" "${chart}" --set externalSecrets.enabled=true \
   --show-only templates/clusterrole.yaml >"${tmp_dir}/controller-rbac-external-secrets.yaml"
 rg -q 'external-secrets.io' "${tmp_dir}/controller-rbac-external-secrets.yaml" || fail "ExternalSecrets RBAC was not enabled"

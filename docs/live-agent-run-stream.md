@@ -29,6 +29,12 @@ URLs are rejected. Browser clients must use authenticated `fetch()` and parse
 the response stream because the browser `EventSource` API cannot set an
 Authorization header.
 
+List, detail, snapshot, and status events include sanitized
+`resolvedComposition` evidence when available: selected object identities,
+opaque inherited application/target names in the sanitized view, the
+effective-spec digest, and the mounted-payload digest. They never include
+Secret values or complete skill contents.
+
 The stream resolves the Pod from the AgentRun status and verifies its Job and
 AgentRun ownership before reading the fixed `agent` container. A client cannot
 select an arbitrary Pod, Job, or container through this API.

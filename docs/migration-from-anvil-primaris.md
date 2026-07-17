@@ -12,7 +12,7 @@ against two deployments that use different election IDs.
 
 ## Handoff
 
-1. Back up the seven agent CRDs and all agent custom resources.
+1. Back up the nine agent CRDs and all agent custom resources.
 2. Record the embedded controller replica count and confirm there are no
    unexpected terminating runs.
 3. Stage the standalone release with `crds.install=false` and zero replicas
@@ -27,6 +27,28 @@ against two deployments that use different election IDs.
    data volumes reconcile without child duplication.
 8. Remove transitional CRD templates from the old chart only after the new
    controller is healthy so GitOps pruning cannot race the initial install.
+
+## Profile composition migration
+
+Existing inline `AgentRunProfile.spec.harness` fields remain valid in v1alpha1.
+Migrate incrementally rather than rewriting every run at cutover:
+
+1. Create an `AgentHarnessProfile` in each consuming namespace with the
+   profile's backend, image, ServiceAccount, credential refs, data volumes,
+   placement, and resource settings.
+2. Create one or more `AgentSkillSet` objects for reusable skills, tools, and
+   delegated personas. Keep role intent and standing policy in the run profile.
+3. Add `harnessProfileRef` and `skillSets.refs` to the existing run profile.
+4. Remove migrated inline runtime and capability fields after a canary run
+   reports the expected `status.resolvedComposition` refs and digests.
+5. Test a run-local harness swap. Verify the replacement Job contains only the
+   new harness profile's provider credentials, storage, and identity.
+
+Profile-inline runtime fields overlay the profile-selected harness for
+compatibility. They are skipped during a run-local harness swap to prevent old
+provider credentials from leaking into the replacement. Legacy inline skills,
+tools, and subagents remain a final overlay even with `skillSets.mode: Replace`;
+remove them when a clean capability replacement is required.
 
 ## Client and stream migration
 

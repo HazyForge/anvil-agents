@@ -1,0 +1,33 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: agents-upgrade
+---
+apiVersion: control.anvil.hazyforge.io/v1alpha1
+kind: AgentRunProfile
+metadata:
+  name: legacy-review
+  namespace: agents-upgrade
+spec:
+  description: Existing profile retained across the standalone composition upgrade.
+  harness:
+    intent: observe
+    backend:
+      kind: custom
+      image: upgrade-test-agent:dev
+    execution:
+      serviceAccountName: default
+---
+apiVersion: control.anvil.hazyforge.io/v1alpha1
+kind: AgentRun
+metadata:
+  name: legacy-run
+  namespace: agents-upgrade
+spec:
+  purpose: manual
+  sourceRef:
+    kind: UpgradeFixture
+    name: baseline
+  profileRef:
+    name: legacy-review
+  prompt: Preserve this append-only run while the CRDs are upgraded.

@@ -9,9 +9,10 @@ with. These are product boundaries, not branding substitutions.
 - **Execution policy**: a namespaced policy or admission contract for allowed
   harness classes, image digests, ServiceAccounts, Secret/PVC refs, security
   contexts, placement, custom commands, and network classes.
-- **Immutable execution envelope**: snapshot the resolved profile UID and
-  generation, prompt, tools, source revision, image digest, and credential refs
-  when a run is accepted so queued work cannot drift.
+- **Earlier immutable acceptance**: Job materialization now snapshots profile,
+  harness-profile, and skill-set object versions plus effective-spec and payload
+  digests. A future acceptance phase should freeze queued work before it becomes
+  launchable and should record resolved image and source artifact digests.
 - **Workspace source**: provider-neutral Git HTTPS/SSH source with immutable
   revision, subdirectory, auth ref, resolved commit status, and fail-closed
   checkout behavior.
@@ -30,8 +31,9 @@ with. These are product boundaries, not branding substitutions.
   ServiceAccounts/Secrets, unschedulable Pods, PVC failures, and container
   configuration errors.
 - **Release provenance**: multi-architecture conformance where supported,
-  checksummed tool downloads, SBOMs, signatures, digest manifests, and OCI
-  chart publication.
+  checksummed tool downloads, SBOMs, signatures, and digest manifests. The
+  existing version-gated workflow publishes images and an OCI chart but does
+  not yet supply those stronger provenance artifacts.
 
 ## Workflow Boundary
 

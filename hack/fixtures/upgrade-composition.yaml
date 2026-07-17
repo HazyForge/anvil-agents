@@ -1,0 +1,21 @@
+apiVersion: control.anvil.hazyforge.io/v1alpha1
+kind: AgentHarnessProfile
+metadata:
+  name: custom-runtime
+  namespace: agents-upgrade
+spec:
+  backend:
+    kind: custom
+    image: upgrade-test-agent:dev
+  execution:
+    serviceAccountName: default
+---
+apiVersion: control.anvil.hazyforge.io/v1alpha1
+kind: AgentSkillSet
+metadata:
+  name: repository-review
+  namespace: agents-upgrade
+spec:
+  skills:
+    - name: evidence-first
+      content: Inspect current evidence before drawing conclusions.

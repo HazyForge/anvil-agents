@@ -8,18 +8,24 @@ state back onto the `AgentRun`.
 ## Control Loop
 
 1. A user or `AgentSchedule` creates an `AgentRun`.
-2. The controller merges its namespace-local `AgentRunProfile` defaults.
+2. The controller resolves its namespace-local `AgentRunProfile`,
+   `AgentHarnessProfile`, ordered `AgentSkillSet` refs, and local overrides.
 3. It validates backend, Secret, storage, and optional ExternalSecret refs.
-4. It writes `prompt.md`, `source.json`, skill files, and tool setup scripts.
+4. It writes `prompt.md`, `source.json`, skill files, and tool setup scripts,
+   then records composition and payload digests.
 5. It creates exactly one Job using the selected backend image and runner
    ServiceAccount.
-6. The harness checks out configured source, bootstraps tools, performs the
-   prompt, and emits structured status records.
+6. The selected built-in adapter prepares configured source and bootstraps
+   tools; a custom harness implements the same parts it needs. The harness then
+   performs the prompt and emits structured status records.
 7. The controller records terminal status and optionally archives it.
 
 A controller restart observes existing children. It does not replace a Job
-because a connection was lost. Terminal runs are append-only execution records;
-a new attempt requires a new `AgentRun`.
+because a connection was lost. Composition evidence and resolved data volumes
+are recoverable from the Job if a crash occurs before the status patch.
+Requested Job TTL is enabled only after terminal run status is durable.
+Terminal runs are append-only execution records; a new attempt requires a new
+`AgentRun`.
 
 ## Distributed And Multi-Harness
 
@@ -37,6 +43,20 @@ These runs do not share process memory or a live conversation. `subagents`
 describes personas or delegated passes to the selected harness; it does not
 cause the controller to create child Jobs. Durable coordination requires an
 explicit API, Git repository, message bus, database, or `AgentDataVolume`.
+
+## Composition Boundaries
+
+An `AgentRunProfile` owns why and where a role operates. An
+`AgentHarnessProfile` owns how one provider runtime executes, including its
+image, workload identity, credentials, storage, placement, and limits. An
+`AgentSkillSet` owns reusable backend-neutral capabilities: named instruction
+packs, setup/verification tools, and optional delegated personas.
+
+The split allows the same knowledge or review capability to run through Codex,
+Pi, or a custom harness without copying it. A skill set cannot select a Secret,
+ServiceAccount, image, or volume, so choosing a capability never silently
+grants runtime authority. See [Agent Composition](composition.md) for the exact
+merge and override rules.
 
 ## Policy Boundaries
 
@@ -57,6 +77,7 @@ unique between administrative tenants in v1alpha1.
 
 Use a built-in runner when its provider contract fits. Use `custom` for an
 existing agent image or an internal harness. Add external capabilities through
-`tools`, `envSecretRefs`, and a narrowly authorized service API. Keep provider
-or product semantics in profiles and tools rather than adding them to the
-controller core.
+an `AgentSkillSet`, provide their identities through an `AgentHarnessProfile`,
+and expose narrowly authorized service APIs. Keep provider-native semantics in
+harness profiles and product policy in run profiles rather than adding either
+to the controller core.
