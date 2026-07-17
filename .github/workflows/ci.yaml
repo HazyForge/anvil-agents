@@ -27,7 +27,7 @@ jobs:
       - name: Lint chart
         run: make helm-lint
       - name: Build controller image
-        run: docker build -t anvil-agents:test .
+        run: ./hack/build-images.sh --component controller --tag test
 
   runner-images:
     runs-on: ubuntu-latest
@@ -35,17 +35,12 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - image: codex
-            dockerfile: docker/agent-run-codex/Dockerfile
-          - image: grok-build
-            dockerfile: docker/agent-run-grok-build/Dockerfile
-          - image: hermes
-            dockerfile: docker/agent-run-hermes/Dockerfile
-          - image: openclaw
-            dockerfile: docker/agent-run-openclaw/Dockerfile
-          - image: pi
-            dockerfile: docker/agent-run-pi/Dockerfile
+          - component: codex
+          - component: grok-build
+          - component: hermes
+          - component: openclaw
+          - component: pi
     steps:
       - uses: actions/checkout@v6
       - name: Build runner image
-        run: docker build -f "${{ matrix.dockerfile }}" -t "anvil-agent-run-${{ matrix.image }}:test" .
+        run: ./hack/build-images.sh --component "${{ matrix.component }}" --tag test

@@ -1,7 +1,8 @@
 CONTROLLER_GEN ?= go run sigs.k8s.io/controller-tools/cmd/controller-gen@v0.19.0
-IMAGE ?= ghcr.io/hazyforge/anvil-agents:dev
+IMAGE_PREFIX ?=
+IMAGE_TAG ?= dev
 
-.PHONY: generate manifests test verify verify-runner-contract build docker-build helm-lint
+.PHONY: generate manifests test verify verify-runner-contract build docker-build images image-checks helm-lint
 
 generate:
 	$(CONTROLLER_GEN) object paths=./api/...
@@ -18,7 +19,15 @@ build:
 	go build ./cmd/anvil-agents ./cmd/anvil-agent-feedback
 
 docker-build:
-	docker build -f Dockerfile -t $(IMAGE) .
+	ANVIL_AGENTS_IMAGE_PREFIX="$(IMAGE_PREFIX)" ANVIL_AGENTS_IMAGE_TAG="$(IMAGE_TAG)" \
+		./hack/build-images.sh --component controller
+
+images:
+	ANVIL_AGENTS_IMAGE_PREFIX="$(IMAGE_PREFIX)" ANVIL_AGENTS_IMAGE_TAG="$(IMAGE_TAG)" \
+		./hack/build-images.sh
+
+image-checks:
+	./hack/build-images.sh --check
 
 helm-lint:
 	helm lint charts/anvil-agents
@@ -26,6 +35,11 @@ helm-lint:
 	helm template anvil-agents charts/anvil-agents --set crds.install=false >/dev/null
 
 verify-runner-contract:
+	@bash -n hack/build-images.sh
+	@bash -n hack/build-images_test.sh
+	@hack/build-images.sh --help >/dev/null
+	@hack/build-images.sh --list >/dev/null
+	@hack/build-images_test.sh
 	@for script in docker/agent-run-*/entrypoint.sh; do \
 		bash -n "$$script"; \
 		rg -q 'ANVIL_AGENT_RUN_TOOL_SETUP_FILES' "$$script"; \

@@ -20,4 +20,6 @@ documentation.
 ## Validation
 
 Run `make verify` before publishing. Regenerate API objects, CRDs, and chart CRDs
-with `make manifests` whenever API markers change.
+with `make manifests` whenever API markers change. Use
+`hack/build-images.sh` for local checks, builds, and registry pushes so local,
+CI, and release workflows keep one image/component mapping.

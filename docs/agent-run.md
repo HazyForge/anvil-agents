@@ -155,11 +155,15 @@ Useful operator flags:
 
 ```bash
 make verify
-docker build -t anvil-agents:dev .
+make images
 ```
 
 `make verify` regenerates deep copies and CRDs, copies CRDs into the chart,
 runs all Go tests, compiles both binaries, and lints/renders the Helm chart.
+`make images` calls `hack/build-images.sh`, which builds the controller and all
+five built-in runner images into local Docker by default. It can select
+individual components or push the same image set to any authenticated registry,
+so GitHub Actions is optional.
 
 ## Compatibility contract
 

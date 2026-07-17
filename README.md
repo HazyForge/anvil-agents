@@ -15,11 +15,10 @@ required.
 surface. The operator-wide flag is only the fallback for scopes without a
 matching control.
 
-Images are published from this repository to `ghcr.io/hazyforge/anvil-agents`
-and the five `ghcr.io/hazyforge/anvil-agent-run-*` repositories. This repository
-is the only build source for those images. GitHub Actions provides bootstrap
-publishing; `.hazyforge/artifact-build.yaml` is the cluster-native delivery
-contract.
+Images can be built and published directly from this repository without GitHub
+Actions. The optional workflows and local builds share
+`hack/build-images.sh`; `.hazyforge/artifact-build.yaml` remains the
+cluster-native delivery contract.
 
 ## Resources
 
@@ -39,8 +38,23 @@ contract.
 
 ```bash
 make verify
-docker build -t anvil-agents:dev .
+make images
 ```
+
+The default builds `anvil-agents:dev` and all five
+`anvil-agent-run-*:dev` images into local Docker. Build one image or push the
+same set to any authenticated registry with the underlying reusable script:
+
+```bash
+./hack/build-images.sh --component controller --tag test
+./hack/build-images.sh \
+  --prefix registry.example.com/hazyforge \
+  --tag sha-$(git rev-parse --short HEAD) \
+  --push
+```
+
+Run `./hack/build-images.sh --help` for component selection, platform, cache,
+pull, and multi-tag options.
 
 Install with Helm:
 
