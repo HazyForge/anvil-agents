@@ -7,12 +7,24 @@ root_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 phase="$(kubectl get agentrun demo-001 --namespace agents-quickstart --output=jsonpath='{.status.phase}')"
 decision="$(kubectl get agentrun demo-001 --namespace agents-quickstart --output=jsonpath='{.status.decision.summary}')"
+harness_profile="$(kubectl get agentrun demo-001 --namespace agents-quickstart --output=jsonpath='{.status.resolvedComposition.harnessProfileRef.name}')"
+skill_set="$(kubectl get agentrun demo-001 --namespace agents-quickstart --output=jsonpath='{.status.resolvedComposition.skillSetRefs[0].name}')"
+effective_digest="$(kubectl get agentrun demo-001 --namespace agents-quickstart --output=jsonpath='{.status.resolvedComposition.effectiveDigest}')"
+payload_digest="$(kubectl get agentrun demo-001 --namespace agents-quickstart --output=jsonpath='{.status.resolvedComposition.payloadDigest}')"
 [[ "${phase}" == "Succeeded" ]] || {
 	echo "quickstart AgentRun phase is ${phase}, want Succeeded" >&2
 	exit 1
 }
 [[ -n "${decision}" ]] || {
 	echo "quickstart AgentRun did not record a structured decision" >&2
+	exit 1
+}
+[[ "${harness_profile}" == "demo-runtime" && "${skill_set}" == "demo-contract" ]] || {
+	echo "quickstart composition resolved harness=${harness_profile} skillSet=${skill_set}" >&2
+	exit 1
+}
+[[ "${effective_digest}" == sha256:* && "${payload_digest}" == sha256:* ]] || {
+	echo "quickstart composition digests are incomplete" >&2
 	exit 1
 }
 

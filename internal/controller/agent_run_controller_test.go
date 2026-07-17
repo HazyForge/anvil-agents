@@ -13,6 +13,7 @@ import (
 
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
+	storagev1 "k8s.io/api/storage/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -1546,6 +1547,44 @@ func TestAgentRunDeletesJobAfterLaunchFailure(t *testing.T) {
 	}
 }
 
+func TestAgentRunActivatesJobTTLOnlyAfterTerminalStatus(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	scheme := runtime.NewScheme()
+	if err := batchv1.AddToScheme(scheme); err != nil {
+		t.Fatalf("add batch scheme: %v", err)
+	}
+	job := &batchv1.Job{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "completed-harness",
+			Namespace: "agents",
+			Annotations: map[string]string{
+				agentRunAnnotationRequestedTTL: "300",
+			},
+		},
+	}
+	reconciler := &AgentRunReconciler{Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(job).Build(), Scheme: scheme}
+	run := &controlv1alpha1.AgentRun{
+		ObjectMeta: metav1.ObjectMeta{Name: "completed", Namespace: "agents"},
+		Status: controlv1alpha1.AgentRunStatus{
+			Phase:  controlv1alpha1.AgentRunPhaseSucceeded,
+			JobRef: &controlv1alpha1.NamespacedObjectReference{Name: job.Name},
+		},
+	}
+
+	if err := reconciler.ensureTerminalAgentRunJobTTL(ctx, run); err != nil {
+		t.Fatalf("activate terminal job TTL: %v", err)
+	}
+	updated := &batchv1.Job{}
+	if err := reconciler.Get(ctx, types.NamespacedName{Name: job.Name, Namespace: job.Namespace}, updated); err != nil {
+		t.Fatalf("get updated job: %v", err)
+	}
+	if updated.Spec.TTLSecondsAfterFinished == nil || *updated.Spec.TTLSecondsAfterFinished != 300 {
+		t.Fatalf("job TTL = %#v, want 300", updated.Spec.TTLSecondsAfterFinished)
+	}
+}
+
 func TestAgentRunReconcileUsesExistingStatusJobRef(t *testing.T) {
 	t.Parallel()
 
@@ -1597,6 +1636,13 @@ func TestAgentRunReconcileUsesExistingStatusJobRef(t *testing.T) {
 		Status: batchv1.JobStatus{
 			Active: 1,
 		},
+		Spec: batchv1.JobSpec{Template: corev1.PodTemplateSpec{Spec: corev1.PodSpec{Containers: []corev1.Container{{
+			Name: "agent",
+			Env: []corev1.EnvVar{{
+				Name:  "ANVIL_AGENT_RUN_DATA_VOLUMES_JSON",
+				Value: `[{"name":"home","namespace":"anvilhub","claimName":"agent-home","mountPath":"/home/agent"}]`,
+			}},
+		}}, RestartPolicy: corev1.RestartPolicyNever}}},
 	}
 	reconciler := &AgentRunReconciler{
 		Client: fake.NewClientBuilder().
@@ -1630,6 +1676,9 @@ func TestAgentRunReconcileUsesExistingStatusJobRef(t *testing.T) {
 	}
 	if got, want := updated.Status.PromptHash, "oldhash"; got != want {
 		t.Fatalf("prompt hash = %q, want %q", got, want)
+	}
+	if len(updated.Status.DataVolumes) != 1 || updated.Status.DataVolumes[0].ClaimName != "agent-home" {
+		t.Fatalf("recovered data volumes = %#v", updated.Status.DataVolumes)
 	}
 }
 
@@ -1724,6 +1773,7 @@ func TestAgentRunReconcilePreservesJobRefAcrossGenerationChange(t *testing.T) {
 func TestAgentRunJobMountsDataVolumesAndEnv(t *testing.T) {
 	t.Parallel()
 
+	ttlSecondsAfterFinished := int32(600)
 	run := &controlv1alpha1.AgentRun{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "platform-health",
@@ -1739,7 +1789,8 @@ func TestAgentRunJobMountsDataVolumesAndEnv(t *testing.T) {
 					Kind: controlv1alpha1.AgentRunHarnessBackendCodex,
 				},
 				Execution: controlv1alpha1.AgentRunHarnessExecutionSpec{
-					NodeSelector: map[string]string{"kubernetes.io/arch": "amd64"},
+					NodeSelector:            map[string]string{"kubernetes.io/arch": "amd64"},
+					TTLSecondsAfterFinished: &ttlSecondsAfterFinished,
 				},
 			},
 		},
@@ -1760,6 +1811,12 @@ func TestAgentRunJobMountsDataVolumesAndEnv(t *testing.T) {
 	}}
 
 	job := agentRunJob(run, "platform-health-harness", "platform-health-context", dataVolumes)
+	if job.Spec.TTLSecondsAfterFinished != nil {
+		t.Fatalf("job TTL must remain disabled until terminal status is durable: %#v", job.Spec.TTLSecondsAfterFinished)
+	}
+	if got := job.Annotations[agentRunAnnotationRequestedTTL]; got != "600" {
+		t.Fatalf("requested TTL annotation = %q, want 600", got)
+	}
 	podSpec := job.Spec.Template.Spec
 	if got, want := podSpec.NodeSelector["hazyforge.io/home-lab"], "true"; got != want {
 		t.Fatalf("home-lab node selector = %q, want %q", got, want)
@@ -1842,6 +1899,63 @@ func TestResolveAgentRunDataVolumesRejectsBlockedDriftAndUsesResolvedClaim(t *te
 				t.Fatalf("resolved volumes = %#v, want claim %q", resolved, test.wantClaim)
 			}
 		})
+	}
+}
+
+func TestResolveAgentRunDataVolumesAllowsWaitForFirstConsumerClaim(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	scheme := runtime.NewScheme()
+	if err := controlv1alpha1.AddToScheme(scheme); err != nil {
+		t.Fatalf("add control scheme: %v", err)
+	}
+	if err := corev1.AddToScheme(scheme); err != nil {
+		t.Fatalf("add core scheme: %v", err)
+	}
+	if err := storagev1.AddToScheme(scheme); err != nil {
+		t.Fatalf("add storage scheme: %v", err)
+	}
+	storageClassName := "local-path"
+	bindingMode := storagev1.VolumeBindingWaitForFirstConsumer
+	volume := &controlv1alpha1.AgentDataVolume{
+		ObjectMeta: metav1.ObjectMeta{Name: "agent-home", Namespace: "agents", Generation: 1},
+		Spec:       controlv1alpha1.AgentDataVolumeSpec{MountPath: "/agent-home"},
+		Status: controlv1alpha1.AgentDataVolumeStatus{
+			ObservedGeneration: 1,
+			Phase:              controlv1alpha1.AgentDataVolumePhasePending,
+			ClaimRef:           &controlv1alpha1.NamespacedObjectReference{Name: "agent-data-agent-home", Namespace: "agents"},
+			Conditions: []metav1.Condition{{
+				Type: "Ready", Status: metav1.ConditionFalse, Reason: "ClaimPending",
+			}},
+		},
+	}
+	pvc := &corev1.PersistentVolumeClaim{
+		ObjectMeta: metav1.ObjectMeta{Name: "agent-data-agent-home", Namespace: "agents"},
+		Spec:       corev1.PersistentVolumeClaimSpec{StorageClassName: &storageClassName},
+		Status:     corev1.PersistentVolumeClaimStatus{Phase: corev1.ClaimPending},
+	}
+	storageClass := &storagev1.StorageClass{
+		ObjectMeta:        metav1.ObjectMeta{Name: storageClassName},
+		VolumeBindingMode: &bindingMode,
+	}
+	run := &controlv1alpha1.AgentRun{
+		ObjectMeta: metav1.ObjectMeta{Name: "run", Namespace: "agents"},
+		Spec: controlv1alpha1.AgentRunSpec{Harness: controlv1alpha1.AgentRunHarnessSpec{Execution: controlv1alpha1.AgentRunHarnessExecutionSpec{
+			DataVolumeRefs: []controlv1alpha1.AgentRunDataVolumeRef{{Name: volume.Name}},
+		}}},
+	}
+	reconciler := &AgentRunReconciler{
+		Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(volume, pvc, storageClass).Build(),
+		Scheme: scheme,
+	}
+
+	resolved, phase, reason, _, err := reconciler.resolveAgentRunDataVolumes(ctx, run)
+	if err != nil {
+		t.Fatalf("resolve WFFC data volume: %v", err)
+	}
+	if phase != "" || reason != "" || len(resolved) != 1 || resolved[0].ClaimName != pvc.Name {
+		t.Fatalf("resolved=%#v phase/reason=%q/%q, want pending WFFC claim accepted", resolved, phase, reason)
 	}
 }
 
