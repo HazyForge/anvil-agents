@@ -58,7 +58,7 @@ type AgentScheduleBackoffSpec struct {
 }
 
 type AgentScheduleSpec struct {
-	// ApplicationRef explicitly identifies the cluster-scoped Application owned
+	// ApplicationRef explicitly identifies the opaque workload or product owned
 	// by every run template in this schedule. The controller copies it into a
 	// child AgentRun scope when the selected template does not set one. Legacy
 	// schedules may omit this and resolve the application through template scope

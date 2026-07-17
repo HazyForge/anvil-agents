@@ -2,8 +2,8 @@ replicaCount: 1
 
 image:
   reference: ""
-  repository: ghcr.io/hazyforge/anvil-agents
-  tag: latest
+  repository: anvil-agents
+  tag: dev
   pullPolicy: IfNotPresent
 
 imagePullSecrets: []
@@ -19,6 +19,15 @@ watchNamespaces: ""
 applicationMaxConcurrentRuns: 1
 defaultStorageClass: ""
 
+# These defaults apply only when an AgentRun/Profile omits backend.image.
+# Production installs should pin immutable digests or use a private mirror.
+runnerImages:
+  codex: anvil-agent-run-codex:dev
+  hermesAgent: anvil-agent-run-hermes:dev
+  openClaw: anvil-agent-run-openclaw:dev
+  grokBuild: anvil-agent-run-grok-build:dev
+  piAgent: anvil-agent-run-pi:dev
+
 platformContext:
   repository: HazyForge/anvil-agents
   repositoryURL: https://github.com/HazyForge/anvil-agents.git
@@ -32,6 +41,10 @@ githubAPI:
   allowedHosts:
     - api.github.com
   allowInsecure: false
+# Grants mutation access to external-secrets.io ExternalSecrets for the
+# optional execution.externalSecretRefreshRefs freshness preflight.
+externalSecrets:
+  enabled: false
 extraRBACRules: []
 extraEnv: []
 envFrom: []
@@ -81,9 +94,7 @@ api:
         - scp
       roleClaims:
         - roles
-      roleObjectClaims:
-        - urn:zitadel:iam:org:project:roles
-        - urn:zitadel:iam:org:projects:roles
+      roleObjectClaims: []
       groupClaims:
         - groups
       namespaceClaim: anvil_agents_namespaces

@@ -37,12 +37,14 @@ const (
 	agentRunExternalSecretRefreshPollInterval       = 2 * time.Second
 	agentRunExternalSecretRefreshTimeout            = 2 * time.Minute
 	agentRunReady                                   = "Ready"
-	agentRunDefaultCodexImage                       = "ghcr.io/hazyforge/anvil-agent-run-codex:latest"
-	agentRunDefaultHermesAgentImage                 = "ghcr.io/hazyforge/anvil-agent-run-hermes:latest"
-	agentRunDefaultOpenClawImage                    = "ghcr.io/hazyforge/anvil-agent-run-openclaw:latest"
-	agentRunDefaultGrokBuildImage                   = "ghcr.io/hazyforge/anvil-agent-run-grok-build:latest"
-	agentRunDefaultPiAgentImage                     = "ghcr.io/hazyforge/anvil-agent-run-pi:latest"
+	agentRunDefaultCodexImage                       = "anvil-agent-run-codex:dev"
+	agentRunDefaultHermesAgentImage                 = "anvil-agent-run-hermes:dev"
+	agentRunDefaultOpenClawImage                    = "anvil-agent-run-openclaw:dev"
+	agentRunDefaultGrokBuildImage                   = "anvil-agent-run-grok-build:dev"
+	agentRunDefaultPiAgentImage                     = "anvil-agent-run-pi:dev"
 	agentRunDefaultGitHubAPIBaseURL                 = "https://api.github.com"
+	agentRunRemoteSkillMaxBytes                     = 256 * 1024
+	agentRunPayloadConfigMapMaxBytes                = 900 * 1024
 	agentRunPodLogTailLines                   int64 = 10_000
 	agentRunPodLogMaxBytes                    int64 = 4 * 1024 * 1024
 
@@ -168,7 +170,7 @@ func (r *AgentRunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		}
 		status.Backend = string(agentRunBackendKind(effective))
 		status.Intent = string(agentRunIntent(effective))
-		status.Image = agentRunImage(effective)
+		status.Image = r.agentRunImage(effective)
 		if phase != "" {
 			status.Phase = phase
 			if status.StartedAt == nil {
@@ -358,7 +360,7 @@ func (r *AgentRunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	if status.StartedAt == nil {
 		status.StartedAt = &now
 	}
-	status.Image = firstNonEmpty(agentRunJobContainerImage(job), agentRunImage(effective))
+	status.Image = firstNonEmpty(agentRunJobContainerImage(job), r.agentRunImage(effective))
 
 	runnerRef, runnerPod, err := r.findAgentRunRunnerPod(ctx, obj.Namespace, job.Name)
 	if err != nil {
@@ -533,7 +535,18 @@ func (r *AgentRunReconciler) agentRunConfigMapData(ctx context.Context, obj *con
 		}
 		data[agentRunToolSetupFileName(index, tool)] = agentRunToolSetupFileContent(tool)
 	}
+	if size := agentRunConfigMapDataSize(data); size > agentRunPayloadConfigMapMaxBytes {
+		return nil, fmt.Errorf("AgentRun payload is %d bytes; maximum supported ConfigMap payload is %d bytes", size, agentRunPayloadConfigMapMaxBytes)
+	}
 	return data, nil
+}
+
+func agentRunConfigMapDataSize(data map[string]string) int {
+	size := 0
+	for key, value := range data {
+		size += len(key) + len(value)
+	}
+	return size
 }
 
 func (r *AgentRunReconciler) ensureAgentRunJob(ctx context.Context, obj *controlv1alpha1.AgentRun, promptHash string, dataVolumes []resolvedAgentRunDataVolume) (*batchv1.Job, error) {
@@ -605,7 +618,7 @@ func (r *AgentRunReconciler) ensureAgentRunExternalSecretFreshness(ctx context.C
 				entry.PreviousRefreshTime = &previous
 			}
 			status.ExternalSecretRefreshes = append(status.ExternalSecretRefreshes, entry)
-			return false, controlv1alpha1.AgentRunPhasePending, "ExternalSecretRefreshRequested", fmt.Sprintf("Requested a fresh Key Vault reconciliation for ExternalSecret %s/%s before creating the AgentRun Job.", namespace, name), nil
+			return false, controlv1alpha1.AgentRunPhasePending, "ExternalSecretRefreshRequested", fmt.Sprintf("Requested a fresh provider reconciliation for ExternalSecret %s/%s before creating the AgentRun Job.", namespace, name), nil
 		}
 		if agentRunExternalSecretRefreshTimedOut(entry) {
 			return false, controlv1alpha1.AgentRunPhaseFailed, "ExternalSecretRefreshTimedOut", fmt.Sprintf("ExternalSecret %s/%s did not report a fresh target Secret within %s.", namespace, name, agentRunExternalSecretRefreshTimeout), nil
@@ -613,7 +626,7 @@ func (r *AgentRunReconciler) ensureAgentRunExternalSecretFreshness(ctx context.C
 
 		ready, readyMessage := agentRunExternalSecretReady(externalSecret)
 		if !ready {
-			return false, controlv1alpha1.AgentRunPhasePending, "WaitingForExternalSecretRefresh", fmt.Sprintf("Waiting for ExternalSecret %s/%s to finish its Key Vault reconciliation%s.", namespace, name, agentRunExternalSecretRefreshDetail(readyMessage)), nil
+			return false, controlv1alpha1.AgentRunPhasePending, "WaitingForExternalSecretRefresh", fmt.Sprintf("Waiting for ExternalSecret %s/%s to finish its provider reconciliation%s.", namespace, name, agentRunExternalSecretRefreshDetail(readyMessage)), nil
 		}
 		refreshTime, ok := agentRunExternalSecretRefreshTime(externalSecret)
 		if !ok || !agentRunExternalSecretRefreshChanged(entry, refreshTime) {
@@ -817,7 +830,7 @@ func (r *AgentRunReconciler) agentRunJob(obj *controlv1alpha1.AgentRun, jobName,
 	}
 	container := corev1.Container{
 		Name:            agentRunContainerName,
-		Image:           agentRunImage(obj),
+		Image:           r.agentRunImage(obj),
 		ImagePullPolicy: agentRunImagePullPolicy(obj),
 		SecurityContext: agentRunContainerSecurityContext(obj),
 		WorkingDir:      strings.TrimSpace(obj.Spec.Harness.Execution.Workdir),
@@ -1231,9 +1244,12 @@ func (r *AgentRunReconciler) resolveAgentRunGitHubSkillSource(ctx context.Contex
 		return resolvedAgentRunSkillSource{}, fmt.Errorf("GitHub contents request failed for %s:%s with HTTP %d: %s", spec.Repository, spec.Path, resp.StatusCode, strings.TrimSpace(string(body)))
 	}
 
-	content, err := io.ReadAll(io.LimitReader(resp.Body, 2*1024*1024))
+	content, err := io.ReadAll(io.LimitReader(resp.Body, agentRunRemoteSkillMaxBytes+1))
 	if err != nil {
 		return resolvedAgentRunSkillSource{}, err
+	}
+	if len(content) > agentRunRemoteSkillMaxBytes {
+		return resolvedAgentRunSkillSource{}, fmt.Errorf("GitHub contents response exceeds the %d-byte remote skill limit for %s:%s", agentRunRemoteSkillMaxBytes, spec.Repository, spec.Path)
 	}
 	if strings.TrimSpace(string(content)) == "" {
 		return resolvedAgentRunSkillSource{}, fmt.Errorf("GitHub contents request returned empty content for %s:%s", spec.Repository, spec.Path)
@@ -2214,13 +2230,16 @@ func (r *AgentRunReconciler) agentRunQueuedBehindSchedule(ctx context.Context, o
 	}
 
 	list := &controlv1alpha1.AgentRunList{}
-	if err := r.List(ctx, list, client.InNamespace(obj.Namespace), client.MatchingLabels{agentRunScheduleLabel: schedule.Name}); err != nil {
+	if err := r.List(ctx, list, client.InNamespace(obj.Namespace), client.MatchingLabels{agentRunScheduleLabel: sanitizeLabelValue(schedule.Name)}); err != nil {
 		return nil, fmt.Errorf("list queued scheduled agent runs: %w", err)
 	}
 	var blockedBy *controlv1alpha1.AgentRun
 	precedingRuns := 0
 	for i := range list.Items {
 		run := &list.Items[i]
+		if !agentRunBelongsToSchedule(run, schedule) {
+			continue
+		}
 		if run.Name == obj.Name {
 			continue
 		}
@@ -2451,27 +2470,27 @@ func (r *AgentRunReconciler) agentRunBlockingValidation(obj *controlv1alpha1.Age
 	}
 	switch agentRunBackendKind(obj) {
 	case controlv1alpha1.AgentRunHarnessBackendCodex:
-		if strings.TrimSpace(agentRunImage(obj)) == "" {
+		if strings.TrimSpace(r.agentRunImage(obj)) == "" {
 			return controlv1alpha1.AgentRunPhaseNeedsHuman, "CodexImageNotConfigured", "A Codex agent run container image is required."
 		}
 		return "", "", ""
 	case controlv1alpha1.AgentRunHarnessBackendHermesAgent:
-		if strings.TrimSpace(agentRunImage(obj)) == "" {
+		if strings.TrimSpace(r.agentRunImage(obj)) == "" {
 			return controlv1alpha1.AgentRunPhaseNeedsHuman, "HermesAgentImageNotConfigured", "A Hermes AgentRun container image is required."
 		}
 		return "", "", ""
 	case controlv1alpha1.AgentRunHarnessBackendOpenClaw:
-		if strings.TrimSpace(agentRunImage(obj)) == "" {
+		if strings.TrimSpace(r.agentRunImage(obj)) == "" {
 			return controlv1alpha1.AgentRunPhaseNeedsHuman, "OpenClawImageNotConfigured", "An OpenClaw AgentRun container image is required."
 		}
 		return "", "", ""
 	case controlv1alpha1.AgentRunHarnessBackendGrokBuild:
-		if strings.TrimSpace(agentRunImage(obj)) == "" {
+		if strings.TrimSpace(r.agentRunImage(obj)) == "" {
 			return controlv1alpha1.AgentRunPhaseNeedsHuman, "GrokBuildImageNotConfigured", "A Grok Build AgentRun container image is required."
 		}
 		return "", "", ""
 	case controlv1alpha1.AgentRunHarnessBackendPiAgent:
-		if strings.TrimSpace(agentRunImage(obj)) == "" {
+		if strings.TrimSpace(r.agentRunImage(obj)) == "" {
 			return controlv1alpha1.AgentRunPhaseNeedsHuman, "PiAgentImageNotConfigured", "A Pi AgentRun container image is required."
 		}
 		return "", "", ""
@@ -2548,20 +2567,31 @@ func agentRunIntent(obj *controlv1alpha1.AgentRun) controlv1alpha1.AgentRunInten
 }
 
 func agentRunImage(obj *controlv1alpha1.AgentRun) string {
+	return agentRunImageWithOptions(obj, nil)
+}
+
+func (r *AgentRunReconciler) agentRunImage(obj *controlv1alpha1.AgentRun) string {
+	return agentRunImageWithOptions(obj, r.Options)
+}
+
+func agentRunImageWithOptions(obj *controlv1alpha1.AgentRun, options *Options) string {
 	if image := strings.TrimSpace(obj.Spec.Harness.Backend.Image); image != "" {
 		return image
 	}
+	if options == nil {
+		options = DefaultOptions()
+	}
 	switch agentRunBackendKind(obj) {
 	case controlv1alpha1.AgentRunHarnessBackendCodex:
-		return agentRunDefaultCodexImage
+		return strings.TrimSpace(options.CodexRunnerImage)
 	case controlv1alpha1.AgentRunHarnessBackendHermesAgent:
-		return agentRunDefaultHermesAgentImage
+		return strings.TrimSpace(options.HermesAgentRunnerImage)
 	case controlv1alpha1.AgentRunHarnessBackendOpenClaw:
-		return agentRunDefaultOpenClawImage
+		return strings.TrimSpace(options.OpenClawRunnerImage)
 	case controlv1alpha1.AgentRunHarnessBackendGrokBuild:
-		return agentRunDefaultGrokBuildImage
+		return strings.TrimSpace(options.GrokBuildRunnerImage)
 	case controlv1alpha1.AgentRunHarnessBackendPiAgent:
-		return agentRunDefaultPiAgentImage
+		return strings.TrimSpace(options.PiAgentRunnerImage)
 	default:
 		return ""
 	}

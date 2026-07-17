@@ -1,0 +1,54 @@
+apiVersion: control.anvil.hazyforge.io/v1alpha1
+kind: AgentRunProfile
+metadata:
+  name: knowledge-aware-reviewer
+  namespace: agents
+spec:
+  description: Read-only repository review with an external knowledge service.
+  scope:
+    summary: Review a repository using organization runbooks as context.
+  harness:
+    intent: observe
+    backend:
+      kind: codex
+    execution:
+      serviceAccountName: agent-runner
+      workdir: /workspace
+      envSecretRefs:
+        - name: knowledge-reader
+      extraEnv:
+        - name: KNOWLEDGE_BASE_URL
+          value: https://knowledge-api.example.com
+      timeoutSeconds: 1800
+    tools:
+      - name: knowledge-search
+        description: Search the organization's read-only knowledge service.
+        setupScript: |
+          mkdir -p .anvil-tools
+          cat > .anvil-tools/knowledge-search <<'SCRIPT'
+          #!/usr/bin/env sh
+          set -eu
+          if [ "${1:-}" = "--help" ]; then
+            echo "usage: knowledge-search QUERY"
+            exit 0
+          fi
+          test -n "${KNOWLEDGE_BASE_URL:-}"
+          test -n "${KNOWLEDGE_BASE_TOKEN:-}"
+          curl --fail --silent --show-error \
+            --get \
+            --header "Authorization: Bearer ${KNOWLEDGE_BASE_TOKEN}" \
+            --header "Accept: application/json" \
+            --data-urlencode "q=$*" \
+            "${KNOWLEDGE_BASE_URL%/}/v1/search"
+          SCRIPT
+          chmod 0700 .anvil-tools/knowledge-search
+        verifyCommand: [".anvil-tools/knowledge-search", "--help"]
+    skillInjections:
+      - name: organization-knowledge
+        description: Use current organizational context without inventing it.
+        content: |
+          Before proposing a change, run `.anvil-tools/knowledge-search` with a
+          narrow query. Cite returned note IDs or paths in the report. Treat the
+          service as read-only. If it is unavailable or has no relevant result,
+          say so and continue from repository evidence; never invent guidance.
+    systemPrompt: Do not send secrets or unrelated source content to the knowledge service.

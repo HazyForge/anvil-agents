@@ -35,7 +35,7 @@ stream:
 	if config.BindAddress != ":9090" || config.Stream.HeartbeatInterval.Duration != 5*time.Second || config.Stream.MaxDuration.Duration != 2*time.Minute {
 		t.Fatalf("unexpected config: %#v", config)
 	}
-	if config.Stream.MaxTailLines != 10_000 || len(config.Authorization.RoleClaims) != 1 || len(config.Authorization.RoleObjectClaims) != 2 {
+	if config.Stream.MaxTailLines != 10_000 || len(config.Authorization.RoleClaims) != 1 || len(config.Authorization.RoleObjectClaims) != 0 {
 		t.Fatalf("expected defaults to survive partial config: %#v", config)
 	}
 }

@@ -10,11 +10,19 @@ image:
   pullPolicy: IfNotPresent
 imagePullSecrets:
   - name: ghcr-creds
+runnerImages:
+  codex: ghcr.io/hazyforge/anvil-agent-run-codex:latest
+  hermesAgent: ghcr.io/hazyforge/anvil-agent-run-hermes:latest
+  openClaw: ghcr.io/hazyforge/anvil-agent-run-openclaw:latest
+  grokBuild: ghcr.io/hazyforge/anvil-agent-run-grok-build:latest
+  piAgent: ghcr.io/hazyforge/anvil-agent-run-pi:latest
 crds:
   install: false
 leaderElection: true
 applicationMaxConcurrentRuns: 4
 defaultStorageClass: observability-local
+externalSecrets:
+  enabled: true
 adverseSourceGVKs:
   - control.anvil.hazyforge.io/v1alpha1/ApplicationRelease
   - control.anvil.hazyforge.io/v1alpha1/ArtifactBuild

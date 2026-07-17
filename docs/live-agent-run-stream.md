@@ -70,9 +70,7 @@ api:
       scopeClaims: [scope, scp]
       roleClaims:
         - roles
-      roleObjectClaims:
-        - urn:zitadel:iam:org:project:roles
-        - urn:zitadel:iam:org:projects:roles
+      roleObjectClaims: []
       groupClaims: [groups]
       namespaceClaim: anvil_agents_namespaces
       bindings:
@@ -81,7 +79,7 @@ api:
           permissions:
             - anvil-agents:runs:read
             - anvil-agents:runs:stream
-          namespaces: [hazy-trade]
+          namespaces: [agents]
     cors:
       allowedOrigins:
         - https://hub.example.com
@@ -117,6 +115,10 @@ explicit bindings. Prefer issuing a narrower `anvil_agents_viewer` role and a
 distinct `anvil-agents` API audience, then remove the administrative
 compatibility binding after clients have migrated. Claim names are chart
 configuration rather than ZITADEL constants.
+See `examples/live-api/zitadel-values.yaml` for the explicit ZITADEL object
+claim overlay. Keycloak, Auth0, Entra ID, and Dex deployments should map their
+tokens to configured top-level string/array role, group, scope, and namespace
+claims; nested claim paths are not interpreted.
 
 In ZITADEL, set **Access Token Type** to **JWT** on the OIDC application/client
 that issues the access token. Tokens minted before that change remain
@@ -176,7 +178,7 @@ Acquire an access token through the existing OIDC client, then use the helper:
 export ANVIL_AGENTS_API_URL=https://agents.example.com
 export ANVIL_AGENTS_ACCESS_TOKEN="$(existing-login-command)"
 ./hack/stream-agent-run.sh \
-  --namespace hazy-trade \
+  --namespace agents \
   --run agent-run-example \
   --tail-lines 200
 ```
@@ -186,7 +188,7 @@ A protected token file can be used instead of an environment variable:
 ```bash
 ./hack/stream-agent-run.sh \
   --endpoint https://agents.example.com \
-  --namespace hazy-trade \
+  --namespace agents \
   --run agent-run-example \
   --token-file /run/user/1000/anvil-agents-token
 ```

@@ -109,12 +109,8 @@ func DefaultConfig() Config {
 			DiscoveryRequestTimeout:  NewDuration(10 * time.Second),
 		},
 		Authorization: AuthorizationConfig{
-			ScopeClaims: []string{"scope", "scp"},
-			RoleClaims:  []string{"roles"},
-			RoleObjectClaims: []string{
-				"urn:zitadel:iam:org:project:roles",
-				"urn:zitadel:iam:org:projects:roles",
-			},
+			ScopeClaims:    []string{"scope", "scp"},
+			RoleClaims:     []string{"roles"},
 			GroupClaims:    []string{"groups"},
 			NamespaceClaim: "anvil_agents_namespaces",
 		},

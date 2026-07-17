@@ -40,6 +40,11 @@ The five built-in adapters share the repository checkout, injected tool setup,
 tool verification, and prompt-context contract. The operator image does not
 bundle another control-plane CLI.
 
+One run selects exactly one adapter. Named schedule templates can rotate or
+queue independent runs across adapters, but the controller does not create a
+shared multi-agent conversation. `subagents` are instructions to the selected
+harness, not controller-created child Jobs.
+
 ## Profiles and schedules
 
 Profiles contain durable defaults. Run-local scalar fields override profile
@@ -102,6 +107,8 @@ base chart deliberately avoids wildcard access.
 Secrets referenced by `envSecretRefs` are projected into the Job with
 `envFrom`. They must be in the run namespace. An optional ExternalSecret
 preflight can request and verify a fresh target Secret before Job creation.
+The chart grants ExternalSecret mutation only when
+`externalSecrets.enabled=true`.
 
 SPIFFE Workload API mounting is opt-in and requires an exact SPIFFE ID. The
 operator only mounts the CSI socket; workload registration and authorization
@@ -136,6 +143,10 @@ Configure concrete backend image digests in profiles. The chart defaults do
 not create credentials, workload service accounts, external source RBAC, or
 agent profiles.
 
+The CRDs carry `helm.sh/resource-policy: keep`; uninstalling the Helm release
+retains them. Deliberately deleting CRDs deletes their custom resources and may
+garbage-collect PVCs owned by `AgentDataVolume`.
+
 The optional `anvil-agents-api` serves sanitized run summaries and bounded live
 SSE logs to OIDC-authorized clients without Kubernetes credentials. It is
 disabled by default and runs with a separate read-only ServiceAccount. See
@@ -156,6 +167,7 @@ Useful operator flags:
 | `--adverse-source-gvks` | none |
 | `--archive-database-url` | disabled |
 | `--terminal-retention` | disabled |
+| `--runner-image-{codex,hermes-agent,openclaw,grok-build,pi-agent}` | local `:dev` image; packaged charts use matching `vVERSION` |
 
 ## Local verification
 

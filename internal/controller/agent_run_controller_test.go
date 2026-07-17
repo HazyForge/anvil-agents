@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"net/http"
@@ -852,6 +853,37 @@ func TestAgentRunAuthenticatedSkillSourceDoesNotFollowRedirects(t *testing.T) {
 	}
 }
 
+func TestAgentRunGitHubSkillSourceRejectsOversizedContent(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write(bytes.Repeat([]byte("x"), agentRunRemoteSkillMaxBytes+1))
+	}))
+	defer server.Close()
+	reconciler := &AgentRunReconciler{CommonReconcilerOptions: CommonReconcilerOptions{Options: &Options{
+		GitHubAPIAllowedHosts:  []string{mustURLHostname(t, server.URL)},
+		AllowInsecureGitHubAPI: true,
+	}}}
+	_, err := reconciler.resolveAgentRunGitHubSkillSource(context.Background(), &controlv1alpha1.AgentRun{}, controlv1alpha1.AgentRunGitHubSkillSourceSpec{
+		Repository: "example/skills",
+		Path:       "SKILL.md",
+		APIBaseURL: server.URL,
+	})
+	if err == nil || !strings.Contains(err.Error(), "remote skill limit") {
+		t.Fatalf("oversized skill error = %v, want explicit size limit", err)
+	}
+}
+
+func TestAgentRunConfigMapDataRejectsOversizedPayload(t *testing.T) {
+	t.Parallel()
+
+	reconciler := &AgentRunReconciler{}
+	_, err := reconciler.agentRunConfigMapData(context.Background(), &controlv1alpha1.AgentRun{}, strings.Repeat("p", agentRunPayloadConfigMapMaxBytes), "{}")
+	if err == nil || !strings.Contains(err.Error(), "maximum supported ConfigMap payload") {
+		t.Fatalf("oversized payload error = %v, want explicit ConfigMap limit", err)
+	}
+}
+
 func mustURLHostname(t *testing.T, raw string) string {
 	t.Helper()
 	parsed, err := url.Parse(raw)
@@ -1238,6 +1270,26 @@ func TestAgentRunBackendProviderAndGrokBuildEnv(t *testing.T) {
 			}
 		}
 	})
+}
+
+func TestAgentRunImageUsesConfiguredBackendDefault(t *testing.T) {
+	t.Parallel()
+
+	run := &controlv1alpha1.AgentRun{Spec: controlv1alpha1.AgentRunSpec{
+		Harness: controlv1alpha1.AgentRunHarnessSpec{
+			Backend: controlv1alpha1.AgentRunHarnessBackendSpec{Kind: controlv1alpha1.AgentRunHarnessBackendCodex},
+		},
+	}}
+	reconciler := &AgentRunReconciler{CommonReconcilerOptions: CommonReconcilerOptions{Options: &Options{
+		CodexRunnerImage: "registry.example/agents/codex@sha256:configured",
+	}}}
+	if got, want := reconciler.agentRunImage(run), "registry.example/agents/codex@sha256:configured"; got != want {
+		t.Fatalf("configured Codex image = %q, want %q", got, want)
+	}
+	run.Spec.Harness.Backend.Image = "registry.example/agents/codex@sha256:run-specific"
+	if got, want := reconciler.agentRunImage(run), "registry.example/agents/codex@sha256:run-specific"; got != want {
+		t.Fatalf("run-specific Codex image = %q, want %q", got, want)
+	}
 }
 
 func TestAgentRunMergeBackendMergesModelProviderAndGrokBuild(t *testing.T) {

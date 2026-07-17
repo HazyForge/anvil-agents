@@ -1,0 +1,62 @@
+apiVersion: control.anvil.hazyforge.io/v1alpha1
+kind: AgentRunProfile
+metadata:
+  name: codex-review
+  namespace: agents
+spec:
+  description: Codex implementation review lane.
+  harness:
+    intent: observe
+    backend:
+      kind: codex
+    execution:
+      serviceAccountName: agent-runner
+      envSecretRefs:
+        - name: codex-credentials
+      timeoutSeconds: 1800
+---
+apiVersion: control.anvil.hazyforge.io/v1alpha1
+kind: AgentRunProfile
+metadata:
+  name: pi-review
+  namespace: agents
+spec:
+  description: Independent Pi review lane.
+  harness:
+    intent: observe
+    backend:
+      kind: piAgent
+      modelProvider: xai
+      providerAuthMode: oauth
+    execution:
+      serviceAccountName: agent-runner
+      envSecretRefs:
+        - name: pi-credentials
+      timeoutSeconds: 1800
+---
+apiVersion: control.anvil.hazyforge.io/v1alpha1
+kind: AgentSchedule
+metadata:
+  name: multi-harness-review
+  namespace: agents
+spec:
+  applicationRef:
+    name: example-service
+  intervalSeconds: 3600
+  initialDelaySeconds: 300
+  concurrencyPolicy: Queue
+  maxConcurrentRuns: 1
+  templateSelectionPolicy: Sequential
+  runTemplates:
+    - name: codex
+      template:
+        purpose: scheduledHealthCheck
+        profileRef:
+          name: codex-review
+        prompt: Review current failures and record evidence-backed findings.
+    - name: pi
+      template:
+        purpose: scheduledHealthCheck
+        profileRef:
+          name: pi-review
+        prompt: Independently review the newest evidence and challenge prior assumptions.

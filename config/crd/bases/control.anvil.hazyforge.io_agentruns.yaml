@@ -231,8 +231,8 @@ spec:
                         type: object
                       image:
                         description: |-
-                          Image selects the agent container image. When empty, codex backends use
-                          the controller's default Codex agent-run image.
+                          Image selects the agent container image. When empty, built-in backends use
+                          the matching controller-configured runner image; custom requires a value.
                         type: string
                       imagePullPolicy:
                         description: ImagePullPolicy controls how Kubernetes pulls
@@ -2164,7 +2164,7 @@ spec:
                           description: |-
                             SourceRefs points at remote skill content that the controller resolves
                             when it creates the AgentRun payload ConfigMap. Use this for protected
-                            skill files that should be updated independently of Anvil controller
+                            skill files that should be updated independently of anvil-agents operator
                             releases.
                           items:
                             properties:
@@ -2262,10 +2262,9 @@ spec:
                     type: string
                   tools:
                     description: |-
-                      Tools describes app- or repo-specific commands needed by this run. The
-                      Codex adapter executes setup scripts before Codex starts and exposes tool
-                      metadata to the prompt. Other adapters may ignore these entries until
-                      they implement the same setup contract.
+                      Tools describes app- or repo-specific commands needed by this run. Every
+                      built-in adapter runs setup scripts and verify commands before its agent
+                      runtime starts and exposes tool metadata to the prompt.
                     items:
                       properties:
                         description:
@@ -2273,7 +2272,7 @@ spec:
                             during the run.
                           type: string
                         name:
-                          description: Name is a stable tool identifier such as hazytradectl.
+                          description: Name is a stable tool identifier such as kbctl.
                           minLength: 1
                           type: string
                         setupScript:
@@ -2287,7 +2286,7 @@ spec:
                         verifyCommand:
                           description: |-
                             VerifyCommand is an optional argv array run after SetupScript to prove
-                            the tool is available, for example ["hazytradectl", "--version"].
+                            the tool is available, for example ["kbctl", "--version"].
                           items:
                             type: string
                           type: array
@@ -2459,8 +2458,8 @@ spec:
                 properties:
                   applicationRef:
                     description: |-
-                      ApplicationRef points at the canonical Application identity when this is
-                      an application-owned run.
+                      ApplicationRef identifies the workload or product that owns this run. It
+                      is opaque metadata and does not require an Application CRD.
                     properties:
                       name:
                         minLength: 1
@@ -2470,8 +2469,8 @@ spec:
                     type: object
                   applicationTargetRef:
                     description: |-
-                      ApplicationTargetRef points at the deployable target/environment this run
-                      should inspect, such as Hazy Trade production.
+                      ApplicationTargetRef identifies the target or environment this run should
+                      inspect. It is opaque metadata and does not require another CRD.
                     properties:
                       name:
                         minLength: 1

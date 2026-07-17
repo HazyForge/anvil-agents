@@ -57,8 +57,21 @@ fi
 if rg -q '^kind: CustomResourceDefinition$' "${tmp_dir}/without-crds.yaml"; then
   fail "CRDs rendered while crds.install=false"
 fi
+[[ "$(rg -c 'helm.sh/resource-policy: keep' "${tmp_dir}/disabled.yaml")" -eq 7 ]] || fail "all seven CRDs must be retained on Helm uninstall"
+helm template "${release}" "${chart}" --show-only templates/clusterrole.yaml >"${tmp_dir}/controller-rbac.yaml"
+if rg -q 'external-secrets.io' "${tmp_dir}/controller-rbac.yaml"; then
+  fail "ExternalSecrets RBAC rendered while externalSecrets.enabled=false"
+fi
+helm template "${release}" "${chart}" --set externalSecrets.enabled=true \
+  --show-only templates/clusterrole.yaml >"${tmp_dir}/controller-rbac-external-secrets.yaml"
+rg -q 'external-secrets.io' "${tmp_dir}/controller-rbac-external-secrets.yaml" || fail "ExternalSecrets RBAC was not enabled"
+helm template "${release}" "${chart}" --set-string runnerImages.codex=registry.example/codex@sha256:abc \
+  --show-only templates/deployment.yaml >"${tmp_dir}/controller-runner-images.yaml"
+rg -q --fixed-strings -- '--runner-image-codex=registry.example/codex@sha256:abc' "${tmp_dir}/controller-runner-images.yaml" || fail "configured runner image was not rendered"
 
 helm template "${release}" "${chart}" "${api_args[@]}" >"${tmp_dir}/enabled.yaml"
+helm template "${release}" "${chart}" \
+  --values "${root_dir}/examples/live-api/zitadel-values.yaml" >"${tmp_dir}/zitadel.yaml"
 for resource in \
   'Deployment contract-anvil-agents-api' \
   'ServiceAccount contract-anvil-agents-api' \

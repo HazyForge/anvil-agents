@@ -37,6 +37,7 @@ func TestOIDCAuthenticatorVerifiesGenericAndZitadelClaims(t *testing.T) {
 	config.OIDC.Issuer = server.URL
 	config.OIDC.Audiences = []string{"anvil-agents-api"}
 	config.OIDC.AllowInsecureIssuer = true
+	config.Authorization.RoleObjectClaims = []string{"urn:zitadel:iam:org:project:roles"}
 	authenticator, err := NewOIDCAuthenticator(config.OIDC, config.Authorization, logr.Discard())
 	if err != nil {
 		t.Fatal(err)

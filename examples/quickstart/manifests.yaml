@@ -1,0 +1,55 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: agents-quickstart
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: agent-runner
+  namespace: agents-quickstart
+automountServiceAccountToken: false
+---
+apiVersion: control.anvil.hazyforge.io/v1alpha1
+kind: AgentRunProfile
+metadata:
+  name: demo
+  namespace: agents-quickstart
+spec:
+  description: Credential-free custom harness smoke test.
+  scope:
+    summary: Validate the standalone AgentRun execution contract.
+  harness:
+    intent: observe
+    backend:
+      kind: custom
+      image: anvil-agents-demo:dev
+      imagePullPolicy: Never
+    execution:
+      serviceAccountName: agent-runner
+      timeoutSeconds: 120
+      resources:
+        requests:
+          cpu: 10m
+          memory: 16Mi
+        limits:
+          cpu: 100m
+          memory: 64Mi
+    systemPrompt: Read the mounted payload and emit one structured decision.
+---
+apiVersion: control.anvil.hazyforge.io/v1alpha1
+kind: AgentRun
+metadata:
+  name: demo-001
+  namespace: agents-quickstart
+spec:
+  purpose: manual
+  sourceRef:
+    kind: ManualRequest
+    name: quickstart
+  profileRef:
+    name: demo
+  prompt: Prove the custom harness payload and status contract works.
+  scope:
+    applicationRef:
+      name: quickstart

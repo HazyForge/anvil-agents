@@ -5,6 +5,9 @@ metadata:
   namespace: agents
 spec:
   purpose: manual
+  sourceRef:
+    kind: ManualRequest
+    name: repository-review
   profileRef:
     name: repository-review
   prompt: Inspect the repository and report test failures with evidence.
