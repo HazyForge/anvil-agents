@@ -136,6 +136,12 @@ Configure concrete backend image digests in profiles. The chart defaults do
 not create credentials, workload service accounts, external source RBAC, or
 agent profiles.
 
+The optional `anvil-agents-api` serves sanitized run summaries and bounded live
+SSE logs to OIDC-authorized clients without Kubernetes credentials. It is
+disabled by default and runs with a separate read-only ServiceAccount. See
+[live-agent-run-stream.md](live-agent-run-stream.md) for its security boundary,
+provider-neutral OIDC configuration, and client workflow.
+
 Useful operator flags:
 
 | Flag | Default |

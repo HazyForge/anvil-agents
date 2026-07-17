@@ -1,0 +1,61 @@
+{{- if .Values.api.enabled }}
+{{- $issuer := required "api.config.oidc.issuer is required when api.enabled=true" .Values.api.config.oidc.issuer }}
+{{- if not .Values.api.config.oidc.audiences }}
+{{- fail "api.config.oidc.audiences must contain at least one audience when api.enabled=true" }}
+{{- end }}
+{{- range $audience := .Values.api.config.oidc.audiences }}
+{{- if not $audience }}
+{{- fail "api.config.oidc.audiences must not contain an empty audience" }}
+{{- end }}
+{{- end }}
+{{- if not .Values.api.config.authorization.bindings }}
+{{- fail "api.config.authorization.bindings must contain at least one explicit binding when api.enabled=true" }}
+{{- end }}
+{{- if ne .Values.api.config.bindAddress (printf ":%v" .Values.api.service.port) }}
+{{- fail "api.config.bindAddress must match api.service.port" }}
+{{- end }}
+{{- $caPath := "/etc/anvil-agents-api/oidc-ca/ca.crt" }}
+{{- if and .Values.api.oidcCA.configMapName (ne .Values.api.config.oidc.caFile $caPath) }}
+{{- fail (printf "api.config.oidc.caFile must be %s when api.oidcCA.configMapName is set" $caPath) }}
+{{- end }}
+{{- if and .Values.api.config.oidc.caFile (not .Values.api.oidcCA.configMapName) }}
+{{- fail "api.oidcCA.configMapName is required when api.config.oidc.caFile is set" }}
+{{- end }}
+{{- if and .Values.api.oidcCA.configMapName (not .Values.api.oidcCA.key) }}
+{{- fail "api.oidcCA.key is required when api.oidcCA.configMapName is set" }}
+{{- end }}
+{{- range $binding := .Values.api.config.authorization.bindings }}
+{{- if not (or $binding.roles $binding.groups $binding.subjects $binding.emails $binding.scopes) }}
+{{- fail "each api.config.authorization binding must contain an identity selector" }}
+{{- end }}
+{{- if not $binding.permissions }}
+{{- fail "each api.config.authorization binding must contain permissions" }}
+{{- end }}
+{{- range $permission := $binding.permissions }}
+{{- if not (has $permission (list "anvil-agents:runs:read" "anvil-agents:runs:stream")) }}
+{{- fail (printf "api.config.authorization binding contains unsupported permission %q" $permission) }}
+{{- end }}
+{{- end }}
+{{- if not (or $binding.namespaces $binding.namespacesFromClaim) }}
+{{- fail "each api.config.authorization binding must contain namespaces or enable namespacesFromClaim" }}
+{{- end }}
+{{- end }}
+{{- if and (not .Values.api.config.oidc.allowInsecureIssuer) (not (hasPrefix "https://" $issuer)) }}
+{{- fail "api.config.oidc.issuer must use https unless api.config.oidc.allowInsecureIssuer=true" }}
+{{- end }}
+{{- range $origin := .Values.api.config.cors.allowedOrigins }}
+{{- if or (contains "*" $origin) (not (regexMatch "^https?://[^/]+$" $origin)) }}
+{{- fail "api.config.cors.allowedOrigins must contain exact origins, never wildcards" }}
+{{- end }}
+{{- end }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "anvil-agents.apiFullname" . }}
+  labels:
+    app.kubernetes.io/name: {{ include "anvil-agents.apiName" . }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+data:
+  config.yaml: |
+{{ toYaml .Values.api.config | indent 4 }}
+{{- end }}

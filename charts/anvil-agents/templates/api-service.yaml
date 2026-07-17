@@ -1,0 +1,19 @@
+{{- if .Values.api.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "anvil-agents.apiFullname" . }}
+  labels:
+    app.kubernetes.io/name: {{ include "anvil-agents.apiName" . }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: {{ include "anvil-agents.apiName" . }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+  ports:
+    - name: http
+      port: {{ .Values.api.service.port }}
+      targetPort: api
+      protocol: TCP
+{{- end }}

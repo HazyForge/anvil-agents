@@ -50,6 +50,81 @@ archive:
 service:
   metricsPort: 8080
 
+# The read-only AgentRun API is a separate workload and security boundary from
+# the controller. It is disabled until an issuer, audience, and explicit
+# authorization bindings are configured.
+api:
+  enabled: false
+  replicaCount: 1
+  serviceAccount:
+    create: true
+    name: ""
+  service:
+    port: 8082
+  config:
+    bindAddress: ":8082"
+    oidc:
+      issuer: ""
+      audiences: []
+      allowedSigningAlgorithms:
+        - RS256
+        - ES256
+      additionalJWKSHosts: []
+      caFile: ""
+      allowInsecureIssuer: false
+      discoveryRetryInterval: 5s
+      discoveryRefreshInterval: 1h
+      discoveryRequestTimeout: 10s
+    authorization:
+      scopeClaims:
+        - scope
+        - scp
+      roleClaims:
+        - roles
+      roleObjectClaims:
+        - urn:zitadel:iam:org:project:roles
+        - urn:zitadel:iam:org:projects:roles
+      groupClaims:
+        - groups
+      namespaceClaim: anvil_agents_namespaces
+      bindings: []
+    cors:
+      allowedOrigins: []
+    stream:
+      heartbeatInterval: 15s
+      statusPollInterval: 2s
+      maxDuration: 15m
+      defaultTailLines: 200
+      maxTailLines: 10000
+      maxLogBytes: 4194304
+      maxLineBytes: 1048576
+      maxConnections: 50
+      maxConnectionsPerSubject: 5
+  httpRoute:
+    enabled: false
+    annotations: {}
+    parentRefs: []
+    hostnames: []
+  oidcCA:
+    configMapName: ""
+    key: ca.crt
+    # Change after rotating an externally managed CA ConfigMap to restart pods.
+    restartToken: ""
+  resources: {}
+  podSecurityContext:
+    runAsNonRoot: true
+    seccompProfile:
+      type: RuntimeDefault
+  securityContext:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop:
+        - ALL
+    readOnlyRootFilesystem: true
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
 resources: {}
 podSecurityContext:
   runAsNonRoot: true

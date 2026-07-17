@@ -16,7 +16,7 @@ test:
 	go test ./...
 
 build:
-	go build ./cmd/anvil-agents ./cmd/anvil-agent-feedback
+	go build ./cmd/anvil-agents ./cmd/anvil-agents-api ./cmd/anvil-agent-feedback
 
 docker-build:
 	ANVIL_AGENTS_IMAGE_PREFIX="$(IMAGE_PREFIX)" ANVIL_AGENTS_IMAGE_TAG="$(IMAGE_TAG)" \
@@ -30,16 +30,23 @@ image-checks:
 	./hack/build-images.sh --check
 
 helm-lint:
-	helm lint charts/anvil-agents
-	helm template anvil-agents charts/anvil-agents >/dev/null
-	helm template anvil-agents charts/anvil-agents --set crds.install=false >/dev/null
+	./hack/test-api-chart.sh
 
 verify-runner-contract:
 	@bash -n hack/build-images.sh
 	@bash -n hack/build-images_test.sh
+	@bash -n hack/test-api-chart.sh
+	@bash -n hack/stream-agent-run.sh
 	@hack/build-images.sh --help >/dev/null
 	@hack/build-images.sh --list >/dev/null
 	@hack/build-images_test.sh
+	@hack/stream-agent-run.sh --help >/dev/null
+	@if ANVIL_AGENTS_ACCESS_TOKEN=dummy hack/stream-agent-run.sh \
+		--endpoint https://agents.example.com@127.0.0.1 \
+		--namespace agents --run run-1 >/dev/null 2>&1; then \
+		echo "stream helper accepted an endpoint containing userinfo" >&2; \
+		exit 1; \
+	fi
 	@for script in docker/agent-run-*/entrypoint.sh; do \
 		bash -n "$$script"; \
 		rg -q 'ANVIL_AGENT_RUN_TOOL_SETUP_FILES' "$$script"; \

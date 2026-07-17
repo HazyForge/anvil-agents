@@ -6,3 +6,6 @@ bin
 dist
 tmp
 *.log
+anvil-agents
+anvil-agents-api
+anvil-agent-feedback
