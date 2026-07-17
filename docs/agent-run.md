@@ -36,7 +36,9 @@ children rather than creating a replacement Job.
 
 The backend adapters are `codex`, `hermesAgent`, `openClaw`, `grokBuild`,
 `piAgent`, and `custom`. Backend images are selected by each profile or run.
-The operator image does not bundle another control-plane CLI.
+The five built-in adapters share the repository checkout, injected tool setup,
+tool verification, and prompt-context contract. The operator image does not
+bundle another control-plane CLI.
 
 ## Profiles and schedules
 
@@ -55,9 +57,12 @@ Set `control.anvil.hazyforge.io/run-now` to a new token for a replay-safe manual
 nudge. When named templates are configured, set
 `control.anvil.hazyforge.io/run-template` on the same update to choose one.
 
-Direct runs that share `spec.scope.applicationRef.name` are also subject to the
-operator-wide `--application-max-concurrent-runs` limit. The default is one.
-This key is opaque and does not require an Application CRD.
+Runs that share `spec.scope.applicationRef.name` are subject to the matching
+active `AgentRunControl.spec.maxConcurrentRuns` values. The strictest matching
+positive value wins; the operator-wide
+`--application-max-concurrent-runs` value is the fallback when no control sets
+a limit. The default fallback is one. This key is opaque and does not require
+an Application CRD.
 
 ## Launch controls
 
