@@ -1,0 +1,206 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+	cat <<'EOF'
+Usage:
+  anvil-observability summary
+  anvil-observability prometheus-query '<promql>'
+  anvil-observability loki-query '<logql>' [limit]
+  anvil-observability tempo-search [query-string]
+  anvil-observability grafana-health
+  anvil-observability grafana-search [query]
+  anvil-observability k8s-events [namespace]
+
+Environment:
+  ANVIL_PROMETHEUS_BASE_URL
+  ANVIL_LOKI_BASE_URL
+  ANVIL_TEMPO_BASE_URL
+  ANVIL_GRAFANA_BASE_URL
+  ANVIL_PROMETHEUS_BEARER_TOKEN or ANVIL_OBSERVABILITY_BEARER_TOKEN
+  ANVIL_LOKI_BEARER_TOKEN or ANVIL_OBSERVABILITY_BEARER_TOKEN
+  ANVIL_TEMPO_BEARER_TOKEN or ANVIL_OBSERVABILITY_BEARER_TOKEN
+  ANVIL_GRAFANA_SERVICE_ACCOUNT_TOKEN, GRAFANA_SERVICE_ACCOUNT_TOKEN, ANVIL_GRAFANA_TOKEN, or GRAFANA_TOKEN
+EOF
+}
+
+service_url() {
+	local value="${1:-}"
+	value="${value%/}"
+	printf '%s' "${value}"
+}
+
+curl_auth_args() {
+	local service="${1}"
+	local token=""
+	case "${service}" in
+		prometheus) token="${ANVIL_PROMETHEUS_BEARER_TOKEN:-${ANVIL_OBSERVABILITY_BEARER_TOKEN:-}}" ;;
+		loki) token="${ANVIL_LOKI_BEARER_TOKEN:-${ANVIL_OBSERVABILITY_BEARER_TOKEN:-}}" ;;
+		tempo) token="${ANVIL_TEMPO_BEARER_TOKEN:-${ANVIL_OBSERVABILITY_BEARER_TOKEN:-}}" ;;
+		grafana) token="${ANVIL_GRAFANA_SERVICE_ACCOUNT_TOKEN:-${GRAFANA_SERVICE_ACCOUNT_TOKEN:-${ANVIL_GRAFANA_TOKEN:-${GRAFANA_TOKEN:-}}}}" ;;
+	esac
+	if [[ -n "${token}" ]]; then
+		printf '%s\n' "-H"
+		printf '%s\n' "Authorization: Bearer ${token}"
+	fi
+}
+
+curl_json() {
+	local service="${1}"
+	shift
+	local args=()
+	while IFS= read -r arg; do
+		args+=("${arg}")
+	done < <(curl_auth_args "${service}")
+	curl -fsS "${args[@]}" "$@" | jq .
+}
+
+endpoint_missing() {
+	local name="${1}"
+	local env_name="${2}"
+	echo "{\"service\":\"${name}\",\"configured\":false,\"env\":\"${env_name}\"}"
+}
+
+probe_http() {
+	local service="${1}"
+	local base="${2}"
+	local path="${3}"
+	if [[ -z "${base}" ]]; then
+		endpoint_missing "${service}" "ANVIL_${service^^}_BASE_URL"
+		return 0
+	fi
+	local code
+	local args=()
+	while IFS= read -r arg; do
+		args+=("${arg}")
+	done < <(curl_auth_args "${service}")
+	code="$(curl -k -sS -o /dev/null -w '%{http_code}' "${args[@]}" "${base}${path}" || true)"
+	jq -cn --arg service "${service}" --arg url "${base}${path}" --arg code "${code}" \
+		'{service:$service,configured:true,url:$url,httpStatus:$code}'
+}
+
+probe_loki() {
+	local base="${1}"
+	if [[ -z "${base}" ]]; then
+		endpoint_missing "loki" "ANVIL_LOKI_BASE_URL"
+		return 0
+	fi
+	local path code="000"
+	for path in "/ready" "/loki/api/v1/status/buildinfo" "/loki/api/v1/labels"; do
+		local args=()
+		while IFS= read -r arg; do
+			args+=("${arg}")
+		done < <(curl_auth_args "loki")
+		code="$(curl -k -sS -o /dev/null -w '%{http_code}' "${args[@]}" "${base}${path}" || true)"
+		if [[ "${code}" == "200" ]]; then
+			jq -cn --arg service "loki" --arg url "${base}${path}" --arg code "${code}" \
+				'{service:$service,configured:true,url:$url,httpStatus:$code}'
+			return 0
+		fi
+	done
+	jq -cn --arg service "loki" --arg url "${base}/ready" --arg code "${code}" \
+		'{service:$service,configured:true,url:$url,httpStatus:$code,note:"no Loki readiness or query endpoint returned 200"}'
+}
+
+summary() {
+	local prometheus loki tempo grafana
+	prometheus="$(service_url "${ANVIL_PROMETHEUS_BASE_URL:-}")"
+	loki="$(service_url "${ANVIL_LOKI_BASE_URL:-}")"
+	tempo="$(service_url "${ANVIL_TEMPO_BASE_URL:-}")"
+	grafana="$(service_url "${ANVIL_GRAFANA_BASE_URL:-}")"
+	echo "# Kubernetes"
+	kubectl version --client=true --output=yaml 2>/dev/null || true
+	kubectl auth can-i get pods -A 2>/dev/null || true
+	kubectl auth can-i get pods/log -A 2>/dev/null || true
+	echo "# Endpoints"
+	probe_http prometheus "${prometheus}" "/-/ready"
+	probe_loki "${loki}"
+	probe_http tempo "${tempo}" "/ready"
+	probe_http grafana "${grafana}" "/api/health"
+}
+
+prometheus_query() {
+	local base query
+	base="$(service_url "${ANVIL_PROMETHEUS_BASE_URL:-}")"
+	query="${1:-}"
+	if [[ -z "${base}" || -z "${query}" ]]; then
+		echo "ANVIL_PROMETHEUS_BASE_URL and query are required." >&2
+		exit 2
+	fi
+	curl_json prometheus -G "${base}/api/v1/query" --data-urlencode "query=${query}"
+}
+
+loki_query() {
+	local base query limit
+	base="$(service_url "${ANVIL_LOKI_BASE_URL:-}")"
+	query="${1:-}"
+	limit="${2:-50}"
+	if [[ -z "${base}" || -z "${query}" ]]; then
+		echo "ANVIL_LOKI_BASE_URL and query are required." >&2
+		exit 2
+	fi
+	curl_json loki -G "${base}/loki/api/v1/query_range" \
+		--data-urlencode "query=${query}" \
+		--data-urlencode "limit=${limit}" \
+		--data-urlencode "direction=BACKWARD"
+}
+
+tempo_search() {
+	local base query
+	base="$(service_url "${ANVIL_TEMPO_BASE_URL:-}")"
+	query="${1:-}"
+	if [[ -z "${base}" ]]; then
+		echo "ANVIL_TEMPO_BASE_URL is required." >&2
+		exit 2
+	fi
+	if [[ -n "${query}" ]]; then
+		curl_json tempo -G "${base}/api/search" --data-urlencode "q=${query}" --data-urlencode "limit=20"
+	else
+		curl_json tempo -G "${base}/api/search" --data-urlencode "limit=20"
+	fi
+}
+
+grafana_health() {
+	local base
+	base="$(service_url "${ANVIL_GRAFANA_BASE_URL:-}")"
+	if [[ -z "${base}" ]]; then
+		echo "ANVIL_GRAFANA_BASE_URL is required." >&2
+		exit 2
+	fi
+	curl_json grafana "${base}/api/health"
+}
+
+grafana_search() {
+	local base query
+	base="$(service_url "${ANVIL_GRAFANA_BASE_URL:-}")"
+	query="${1:-}"
+	if [[ -z "${base}" ]]; then
+		echo "ANVIL_GRAFANA_BASE_URL is required." >&2
+		exit 2
+	fi
+	curl_json grafana -G "${base}/api/search" --data-urlencode "query=${query}"
+}
+
+k8s_events() {
+	local namespace="${1:-}"
+	if [[ -n "${namespace}" ]]; then
+		kubectl get events -n "${namespace}" --sort-by=.lastTimestamp
+	else
+		kubectl get events -A --sort-by=.lastTimestamp
+	fi
+}
+
+case "${1:-}" in
+	summary) shift; summary "$@" ;;
+	prometheus-query) shift; prometheus_query "$@" ;;
+	loki-query) shift; loki_query "$@" ;;
+	tempo-search) shift; tempo_search "$@" ;;
+	grafana-health) shift; grafana_health "$@" ;;
+	grafana-search) shift; grafana_search "$@" ;;
+	k8s-events) shift; k8s_events "$@" ;;
+	-h|--help|help|"") usage ;;
+	*)
+		usage >&2
+		exit 2
+		;;
+esac

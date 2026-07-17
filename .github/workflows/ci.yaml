@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version: 1.25.5
+          cache: true
+      - name: Test
+        run: go test ./...
+      - name: Generate manifests
+        run: make manifests
+      - name: Verify generated files
+        run: git diff --exit-code
+      - uses: azure/setup-helm@v4
+      - name: Lint chart
+        run: make helm-lint
+      - name: Build controller image
+        run: docker build -t anvil-agents:test .
+
+  runner-images:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: codex
+            dockerfile: docker/agent-run-codex/Dockerfile
+          - image: grok-build
+            dockerfile: docker/agent-run-grok-build/Dockerfile
+          - image: hermes
+            dockerfile: docker/agent-run-hermes/Dockerfile
+          - image: openclaw
+            dockerfile: docker/agent-run-openclaw/Dockerfile
+          - image: pi
+            dockerfile: docker/agent-run-pi/Dockerfile
+    steps:
+      - uses: actions/checkout@v6
+      - name: Build runner image
+        run: docker build -f "${{ matrix.dockerfile }}" -t "anvil-agent-run-${{ matrix.image }}:test" .

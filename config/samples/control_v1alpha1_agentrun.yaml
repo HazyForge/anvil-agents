@@ -1,0 +1,13 @@
+apiVersion: control.anvil.hazyforge.io/v1alpha1
+kind: AgentRun
+metadata:
+  name: repository-review-001
+  namespace: agents
+spec:
+  purpose: manual
+  profileRef:
+    name: repository-review
+  prompt: Inspect the repository and report test failures with evidence.
+  scope:
+    applicationRef:
+      name: example-service

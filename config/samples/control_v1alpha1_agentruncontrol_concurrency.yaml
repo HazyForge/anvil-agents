@@ -1,0 +1,9 @@
+apiVersion: control.anvil.hazyforge.io/v1alpha1
+kind: AgentRunControl
+metadata:
+  name: example-service-concurrency
+spec:
+  applicationRef:
+    name: example-service
+  launchPolicy: Allowed
+  maxConcurrentRuns: 2

@@ -1,0 +1,6 @@
+domain: hazyforge.io
+layout:
+- go.kubebuilder.io/v4
+projectName: anvil-agents
+repo: github.com/hazyforge/anvil-agents
+version: "3"

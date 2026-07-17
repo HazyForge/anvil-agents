@@ -1,0 +1,6 @@
+apiVersion: v2
+name: anvil-agents
+description: Standalone Kubernetes operator for AgentRun execution
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

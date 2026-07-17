@@ -1,0 +1,17 @@
+apiVersion: control.anvil.hazyforge.io/v1alpha1
+kind: AdverseSituation
+metadata:
+  name: workload-health
+  namespace: agents
+spec:
+  groupKey: workload-health
+  buffer:
+    quietPeriodSeconds: 900
+    dedupeWindowSeconds: 300
+    maxEvents: 100
+  responders:
+    agentRun:
+      enabled: false
+      profileRef:
+        name: repository-review
+      prompt: Diagnose the adverse event stream without mutating workloads.

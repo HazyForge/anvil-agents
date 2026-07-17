@@ -1,0 +1,15 @@
+apiVersion: control.anvil.hazyforge.io/v1alpha1
+kind: VolumeProfile
+metadata:
+  name: agent-home
+  namespace: agents
+spec:
+  description: Durable backend state using the cluster default StorageClass.
+  volumes:
+    - name: home
+      purpose: agent-home
+      mountPath: /agent-home
+      size:
+        request: 10Gi
+      accessModes:
+        - ReadWriteOnce

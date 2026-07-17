@@ -1,0 +1,66 @@
+replicaCount: 1
+
+image:
+  reference: ""
+  repository: ghcr.io/hazyforge/anvil-agents
+  tag: latest
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  create: true
+  name: ""
+
+leaderElection: true
+watchNamespaces: ""
+applicationMaxConcurrentRuns: 1
+defaultStorageClass: ""
+
+platformContext:
+  repository: HazyForge/anvil-agents
+  repositoryURL: https://github.com/HazyForge/anvil-agents.git
+  docs:
+    - docs/agent-run.md
+    - internal/controller/prompts/agent-run-system.md
+    - internal/controller/agent_run_controller.go
+
+adverseSourceGVKs: []
+githubAPI:
+  allowedHosts:
+    - api.github.com
+  allowInsecure: false
+extraRBACRules: []
+extraEnv: []
+envFrom: []
+extraVolumes: []
+extraVolumeMounts: []
+
+crds:
+  install: true
+
+archive:
+  databaseURLSecret:
+    name: ""
+    key: url
+  terminalRetention: ""
+
+service:
+  metricsPort: 8080
+
+resources: {}
+podSecurityContext:
+  runAsNonRoot: true
+  seccompProfile:
+    type: RuntimeDefault
+securityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+      - ALL
+  readOnlyRootFilesystem: true
+nodeSelector: {}
+tolerations: []
+affinity: {}

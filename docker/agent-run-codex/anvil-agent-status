@@ -1,0 +1,171 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+	cat <<'EOF'
+Usage:
+  anvil-agent-status [type] [flags]
+
+Types:
+  progress        Record an intermediate status report.
+  decision        Record the final classification/action decision.
+  needsHuman      Record that human follow-up is required.
+
+Flags:
+  --type VALUE
+  --level VALUE
+  --stage VALUE
+  --classification VALUE
+  --action VALUE
+  --summary VALUE
+  --detail VALUE
+  --pull-request-url VALUE
+  --pr-url VALUE
+  --residual-risk VALUE
+  --human-follow-up VALUE
+  --needs-human
+EOF
+}
+
+need_value() {
+	if [[ $# -lt 2 || "${2:-}" == --* ]]; then
+		echo "missing value for $1" >&2
+		exit 2
+	fi
+}
+
+report_type="progress"
+if [[ $# -gt 0 && "${1:-}" != --* ]]; then
+	report_type="$1"
+	shift
+fi
+
+level="info"
+stage=""
+classification=""
+action=""
+summary=""
+detail=""
+pull_request_url=""
+residual_risk=""
+human_follow_up=""
+needs_human=false
+
+while [[ $# -gt 0 ]]; do
+	case "$1" in
+		--type)
+			need_value "$@"
+			report_type="$2"
+			shift 2
+			;;
+		--level)
+			need_value "$@"
+			level="$2"
+			shift 2
+			;;
+		--stage)
+			need_value "$@"
+			stage="$2"
+			shift 2
+			;;
+		--classification)
+			need_value "$@"
+			classification="$2"
+			shift 2
+			;;
+		--action)
+			need_value "$@"
+			action="$2"
+			shift 2
+			;;
+		--summary)
+			need_value "$@"
+			summary="$2"
+			shift 2
+			;;
+		--detail)
+			need_value "$@"
+			detail="$2"
+			shift 2
+			;;
+		--pull-request-url|--pr-url)
+			need_value "$@"
+			pull_request_url="$2"
+			shift 2
+			;;
+		--residual-risk)
+			need_value "$@"
+			residual_risk="$2"
+			shift 2
+			;;
+		--human-follow-up)
+			need_value "$@"
+			human_follow_up="$2"
+			shift 2
+			;;
+		--needs-human)
+			needs_human=true
+			shift
+			;;
+		-h|--help)
+			usage
+			exit 0
+			;;
+		*)
+			if [[ -z "${summary}" ]]; then
+				summary="$1"
+			else
+				summary="${summary} $1"
+			fi
+			shift
+			;;
+	esac
+done
+
+if [[ "${report_type}" == "needsHuman" || "${report_type}" == "needs-human" ]]; then
+	report_type="needsHuman"
+	needs_human=true
+fi
+
+observed_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+json="$(
+	jq -cn \
+		--arg type "${report_type}" \
+		--arg observedAt "${observed_at}" \
+		--arg level "${level}" \
+		--arg stage "${stage}" \
+		--arg classification "${classification}" \
+		--arg action "${action}" \
+		--arg summary "${summary}" \
+		--arg detail "${detail}" \
+		--arg pullRequestURL "${pull_request_url}" \
+		--arg residualRisk "${residual_risk}" \
+		--arg humanFollowUp "${human_follow_up}" \
+		--argjson needsHuman "${needs_human}" \
+		'{
+			type: $type,
+			observedAt: $observedAt,
+			level: $level,
+			stage: $stage,
+			classification: $classification,
+			action: $action,
+			summary: $summary,
+			detail: $detail,
+			pullRequestURL: $pullRequestURL,
+			residualRisk: $residualRisk,
+			needsHuman: $needsHuman,
+			humanFollowUp: $humanFollowUp
+		} | with_entries(select(.value != "" and .value != false and .value != null))'
+)"
+
+status_file="${ANVIL_AGENT_RUN_STATUS_FILE:-/tmp/anvil-agent-run-status/status.jsonl}"
+mkdir -p "$(dirname "${status_file}")"
+printf '%s\n' "${json}" >> "${status_file}"
+
+prefix="${ANVIL_AGENT_RUN_STATUS_LOG_PREFIX:-ANVIL_AGENT_RUN_STATUS_JSON=}"
+log_fd="${ANVIL_AGENT_RUN_STATUS_LOG_FD:-/proc/1/fd/1}"
+if [[ -n "${log_fd}" && -w "${log_fd}" ]]; then
+	printf '%s%s\n' "${prefix}" "${json}" > "${log_fd}" || true
+fi
+
+printf 'agent status recorded: %s\n' "${summary:-${report_type}}"

@@ -1,0 +1,16 @@
+apiVersion: control.anvil.hazyforge.io/v1alpha1
+kind: AgentSchedule
+metadata:
+  name: repository-review-hourly
+  namespace: agents
+spec:
+  intervalSeconds: 3600
+  initialDelaySeconds: 300
+  concurrencyPolicy: Forbid
+  applicationRef:
+    name: example-service
+  runTemplate:
+    purpose: scheduledHealthCheck
+    profileRef:
+      name: repository-review
+    prompt: Review current failures and report only evidence-backed findings.

@@ -1,0 +1,42 @@
+helmChartPath: charts/anvil-agents
+
+# Bootstrap is intentionally inert. The coordinated cutover pins the published
+# digest, switches CRD ownership, scales this to one, and deploys the old
+# operator build with embedded agent reconcilers removed in the same window.
+replicaCount: 0
+fullnameOverride: anvil-agents
+image:
+  reference: ghcr.io/hazyforge/anvil-agents:latest
+  pullPolicy: IfNotPresent
+imagePullSecrets:
+  - name: ghcr-creds
+crds:
+  install: false
+leaderElection: true
+applicationMaxConcurrentRuns: 4
+defaultStorageClass: observability-local
+adverseSourceGVKs:
+  - control.anvil.hazyforge.io/v1alpha1/ApplicationRelease
+  - control.anvil.hazyforge.io/v1alpha1/ArtifactBuild
+  - control.anvil.hazyforge.io/v1alpha1/IOSBuild
+  - control.anvil.hazyforge.io/v1alpha1/AnvilTask
+  - control.anvil.hazyforge.io/v1alpha1/TestRun
+extraRBACRules:
+  - apiGroups: [control.anvil.hazyforge.io]
+    resources: [applicationreleases, artifactbuilds, iosbuilds, anviltasks, testruns]
+    verbs: [get, list, watch]
+archive:
+  databaseURLSecret:
+    name: anvilhub-inventory-database
+    key: database-url
+  terminalRetention: 72h
+extraVolumes:
+  - name: anvilhub-inventory-database
+    secret:
+      secretName: anvilhub-inventory-database
+extraVolumeMounts:
+  - name: anvilhub-inventory-database
+    mountPath: /etc/anvilhub/inventory-database
+    readOnly: true
+nodeSelector:
+  kubernetes.io/arch: amd64

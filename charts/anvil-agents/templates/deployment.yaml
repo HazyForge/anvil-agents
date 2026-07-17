@@ -1,0 +1,97 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "anvil-agents.fullname" . }}
+  labels:
+    app.kubernetes.io/name: {{ include "anvil-agents.name" . }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "anvil-agents.name" . }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ include "anvil-agents.name" . }}
+        app.kubernetes.io/instance: {{ .Release.Name }}
+    spec:
+      serviceAccountName: {{ include "anvil-agents.serviceAccountName" . }}
+      securityContext:
+{{ toYaml .Values.podSecurityContext | indent 8 }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+{{ toYaml . | indent 8 }}
+      {{- end }}
+      containers:
+        - name: controller
+          image: {{ default (printf "%s:%s" .Values.image.repository .Values.image.tag) .Values.image.reference | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args:
+            - --leader-elect={{ .Values.leaderElection }}
+            - --watch-namespaces={{ .Values.watchNamespaces }}
+            - --application-max-concurrent-runs={{ .Values.applicationMaxConcurrentRuns }}
+            - --default-storage-class={{ .Values.defaultStorageClass }}
+            - --platform-repository={{ .Values.platformContext.repository }}
+            - --platform-repository-url={{ .Values.platformContext.repositoryURL }}
+            - --platform-docs={{ join "," .Values.platformContext.docs }}
+            - --adverse-source-gvks={{ join "," .Values.adverseSourceGVKs }}
+            - --github-api-allowed-hosts={{ join "," .Values.githubAPI.allowedHosts }}
+            - --allow-insecure-github-api={{ .Values.githubAPI.allowInsecure }}
+            {{- with .Values.archive.terminalRetention }}
+            - --terminal-retention={{ . }}
+            {{- end }}
+          ports:
+            - name: metrics
+              containerPort: 8080
+            - name: health
+              containerPort: 8081
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: health
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: health
+          securityContext:
+{{ toYaml .Values.securityContext | indent 12 }}
+          {{- if or .Values.archive.databaseURLSecret.name .Values.extraEnv }}
+          env:
+            {{- with .Values.archive.databaseURLSecret.name }}
+            - name: ANVIL_AGENTS_ARCHIVE_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ . }}
+                  key: {{ $.Values.archive.databaseURLSecret.key }}
+            {{- end }}
+            {{- with .Values.extraEnv }}
+{{ toYaml . | indent 12 }}
+            {{- end }}
+          {{- end }}
+          {{- with .Values.envFrom }}
+          envFrom:
+{{ toYaml . | indent 12 }}
+          {{- end }}
+          resources:
+{{ toYaml .Values.resources | indent 12 }}
+          {{- with .Values.extraVolumeMounts }}
+          volumeMounts:
+{{ toYaml . | indent 12 }}
+          {{- end }}
+      {{- with .Values.extraVolumes }}
+      volumes:
+{{ toYaml . | indent 8 }}
+      {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+{{ toYaml . | indent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+{{ toYaml . | indent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+{{ toYaml . | indent 8 }}
+      {{- end }}

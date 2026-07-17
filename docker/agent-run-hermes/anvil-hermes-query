@@ -1,0 +1,174 @@
+#!/usr/bin/env python3
+"""Run Hermes quiet single-query chat with the query body loaded from a file.
+
+Hermes CLI only accepts `-q` / `--query` as an in-process string for quiet
+single-shot mode. Passing the merged AgentRun prompt through shell expansion
+(`hermes chat -q "$(cat …)"`) places the full prompt on process argv, which is
+visible to other processes on the node via `ps` / `/proc`.
+
+This helper keeps only the prompt *path* on argv. The query body is read from
+disk and passed into Hermes in-process via `cli.main(query=..., quiet=True)`,
+matching the path used by `hermes_cli.main.cmd_chat` after argparse.
+
+Usage:
+  anvil-hermes-query <prompt-file>
+
+Optional environment:
+  ANVIL_HERMES_ADDITIONAL_ARGS_JSON  JSON array of extra hermes chat flags
+                                     (for example model/provider overrides).
+                                     -q/--query values are ignored so the file
+                                     always wins.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import sys
+from pathlib import Path
+from typing import Any
+
+
+def _load_additional_kwargs() -> dict[str, Any]:
+    """Map a small set of hermes chat flags from ADDITIONAL_ARGS_JSON to kwargs."""
+    raw = os.environ.get("ANVIL_HERMES_ADDITIONAL_ARGS_JSON", "").strip()
+    if not raw:
+        return {}
+    try:
+        items = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        print(
+            f"anvil-hermes-query: invalid ANVIL_HERMES_ADDITIONAL_ARGS_JSON: {exc}",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+    if not isinstance(items, list):
+        print(
+            "anvil-hermes-query: ANVIL_HERMES_ADDITIONAL_ARGS_JSON must be a JSON array",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+
+    kwargs: dict[str, Any] = {}
+    unknown: list[str] = []
+    i = 0
+    while i < len(items):
+        arg = items[i]
+        if not isinstance(arg, str):
+            i += 1
+            continue
+        if arg in ("-q", "--query") or arg.startswith("--query="):
+            # File-backed query always wins; skip any provided query body.
+            if arg in ("-q", "--query") and i + 1 < len(items):
+                i += 2
+            else:
+                i += 1
+            continue
+        if arg in ("--quiet", "-Q"):
+            kwargs["quiet"] = True
+            i += 1
+            continue
+        if arg in ("--verbose", "-v"):
+            kwargs["verbose"] = True
+            i += 1
+            continue
+        if arg in ("--model", "-m") and i + 1 < len(items):
+            kwargs["model"] = str(items[i + 1])
+            i += 2
+            continue
+        if arg.startswith("--model="):
+            kwargs["model"] = arg.split("=", 1)[1]
+            i += 1
+            continue
+        if arg == "--provider" and i + 1 < len(items):
+            kwargs["provider"] = str(items[i + 1])
+            i += 2
+            continue
+        if arg.startswith("--provider="):
+            kwargs["provider"] = arg.split("=", 1)[1]
+            i += 1
+            continue
+        if arg in ("--toolsets", "-t") and i + 1 < len(items):
+            kwargs["toolsets"] = str(items[i + 1])
+            i += 2
+            continue
+        if arg.startswith("--toolsets="):
+            kwargs["toolsets"] = arg.split("=", 1)[1]
+            i += 1
+            continue
+        if arg == "--skills" and i + 1 < len(items):
+            kwargs["skills"] = str(items[i + 1])
+            i += 2
+            continue
+        if arg.startswith("--skills="):
+            kwargs["skills"] = arg.split("=", 1)[1]
+            i += 1
+            continue
+        if arg == "--max-turns" and i + 1 < len(items):
+            kwargs["max_turns"] = int(items[i + 1])
+            i += 2
+            continue
+        if arg.startswith("--max-turns="):
+            kwargs["max_turns"] = int(arg.split("=", 1)[1])
+            i += 1
+            continue
+        if arg in ("--yolo",):
+            os.environ["HERMES_YOLO_MODE"] = "1"
+            i += 1
+            continue
+        # Fail closed: do not silently drop or reintroduce args on argv.
+        unknown.append(arg)
+        i += 1
+    if unknown:
+        print(
+            "anvil-hermes-query: unsupported additional args "
+            f"{unknown!r}; supported flags: --model/--provider/--toolsets/"
+            "--skills/--max-turns/--verbose/--quiet/--yolo "
+            "(query flags are ignored so the prompt file always wins)",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+    return kwargs
+
+
+def main() -> int:
+    if len(sys.argv) != 2 or sys.argv[1] in ("-h", "--help"):
+        print(__doc__.strip(), file=sys.stderr)
+        return 0 if len(sys.argv) > 1 and sys.argv[1] in ("-h", "--help") else 2
+
+    prompt_path = Path(sys.argv[1])
+    if not prompt_path.is_file():
+        print(f"anvil-hermes-query: prompt file not found: {prompt_path}", file=sys.stderr)
+        return 1
+
+    query = prompt_path.read_text(encoding="utf-8")
+    kwargs = _load_additional_kwargs()
+    kwargs["query"] = query
+    kwargs["quiet"] = True
+
+    try:
+        from cli import main as cli_main
+    except ImportError as exc:
+        print(
+            f"anvil-hermes-query: Hermes cli module unavailable: {exc}",
+            file=sys.stderr,
+        )
+        return 1
+
+    try:
+        cli_main(**kwargs)
+    except SystemExit as exc:
+        code = exc.code
+        if code is None:
+            return 0
+        if isinstance(code, int):
+            return code
+        return 1
+    except ValueError as exc:
+        print(f"anvil-hermes-query: {exc}", file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

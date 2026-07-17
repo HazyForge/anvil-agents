@@ -1,0 +1,184 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+prompt_file="${ANVIL_AGENT_RUN_PROMPT_FILE:-/var/run/anvil-agent-run/prompt.md}"
+context_file="${ANVIL_AGENT_RUN_CONTEXT_FILE:-/var/run/anvil-agent-run/source.json}"
+agents_file="${ANVIL_AGENT_RUN_AGENTS_FILE:-/opt/anvil-agent-run/AGENTS.md}"
+immutable_prompt_dir="/opt/anvil-agent-run/static-prompts"
+skill_files="${ANVIL_AGENT_RUN_SKILL_FILES:-}"
+skill_dir="${ANVIL_AGENT_RUN_SKILLS_DIR:-/opt/anvil-agent-run/skills}"
+workdir="${ANVIL_AGENT_RUN_WORKDIR:-/workspace}"
+status_file="${ANVIL_AGENT_RUN_STATUS_FILE:-/tmp/anvil-agent-run-status/status.jsonl}"
+hermes_home="${HERMES_HOME:-/opt/anvil/hermes}"
+codex_home="${CODEX_HOME:-/opt/anvil/codex}"
+
+source /opt/anvil-agent-run/lib/github-auth.sh
+
+mkdir -p "$(dirname "${status_file}")" "${hermes_home}" "${codex_home}" "${workdir}"
+: > "${status_file}"
+export ANVIL_AGENT_RUN_STATUS_FILE="${status_file}"
+export ANVIL_AGENT_RUN_STATUS_LOG_PREFIX="${ANVIL_AGENT_RUN_STATUS_LOG_PREFIX:-ANVIL_AGENT_RUN_STATUS_JSON=}"
+export HERMES_HOME="${hermes_home}"
+export CODEX_HOME="${codex_home}"
+export PATH="/opt/hermes/bin:/opt/hermes/.venv/bin:${PATH}"
+
+truthy() {
+	case "${1:-}" in
+		1|true|TRUE|yes|YES|on|ON) return 0 ;;
+		*) return 1 ;;
+	esac
+}
+
+if [[ -n "${GITHUB_TOKEN:-}" && -z "${GH_TOKEN:-}" ]]; then
+	export GH_TOKEN="${GITHUB_TOKEN}"
+fi
+if [[ -n "${GH_TOKEN:-}" && -z "${GITHUB_TOKEN:-}" ]]; then
+	export GITHUB_TOKEN="${GH_TOKEN}"
+fi
+if [[ -n "${CODEX_AUTH_JSON:-}" && ! -f "${CODEX_HOME}/auth.json" ]]; then
+	umask 077
+	printf '%s' "${CODEX_AUTH_JSON}" > "${CODEX_HOME}/auth.json"
+fi
+if [[ -n "${CODEX_AUTH_JSON:-}" && ! -f "${HERMES_HOME}/auth.json" ]]; then
+	if hermes_auth_json="$(jq -c '
+		if (.providers? | type) == "object" then
+			.
+		elif (.tokens? | type) == "object" then
+			{
+				active_provider: "openai-codex",
+				providers: {
+					"openai-codex": {
+						auth_mode: (.auth_mode // "chatgpt"),
+						tokens: .tokens,
+						last_refresh: (.last_refresh // null)
+					}
+				}
+			}
+		else
+			empty
+		end
+	' <<< "${CODEX_AUTH_JSON}" 2>/dev/null)" && [[ -n "${hermes_auth_json}" ]]; then
+		umask 077
+		printf '%s' "${hermes_auth_json}" > "${HERMES_HOME}/auth.json"
+	fi
+fi
+
+anvil_configure_github_auth
+
+cd "${workdir}"
+git config --global --add safe.directory "${workdir}" >/dev/null 2>&1 || true
+
+hermes_model_provider="${ANVIL_HERMES_MODEL_PROVIDER:-${ANVIL_AGENT_RUN_MODEL_PROVIDER:-openai-codex}}"
+hermes_openai_runtime="${ANVIL_HERMES_OPENAI_RUNTIME:-}"
+if [[ -z "${hermes_openai_runtime}" && "${hermes_model_provider}" == "openai-codex" ]]; then
+	hermes_openai_runtime="codex_app_server"
+fi
+
+if [[ ! -f "${HERMES_HOME}/config.yaml" || -n "${ANVIL_HERMES_MODEL_PROVIDER:-}" || -n "${ANVIL_AGENT_RUN_MODEL_PROVIDER:-}" || -n "${ANVIL_HERMES_MODEL:-}" || -n "${ANVIL_HERMES_REASONING_EFFORT:-}" || -n "${ANVIL_HERMES_SERVICE_TIER:-}" ]]; then
+	{
+		echo "model:"
+		echo "  provider: ${hermes_model_provider}"
+		echo "  name: ${ANVIL_HERMES_MODEL:-gpt-5.5}"
+		if [[ -n "${hermes_openai_runtime}" ]]; then
+			echo "  openai_runtime: ${hermes_openai_runtime}"
+		fi
+		if [[ -n "${ANVIL_HERMES_REASONING_EFFORT:-}" ]]; then
+			echo "  reasoning_effort: ${ANVIL_HERMES_REASONING_EFFORT}"
+		fi
+		if [[ -n "${ANVIL_HERMES_SERVICE_TIER:-}" ]]; then
+			echo "  service_tier: ${ANVIL_HERMES_SERVICE_TIER}"
+		fi
+	} > "${HERMES_HOME}/config.yaml"
+fi
+
+if [[ ! -f "${HERMES_HOME}/SOUL.md" ]]; then
+	{
+		echo "# AgentRun Hermes Agent"
+		echo
+		echo "This Hermes home belongs to the configured AgentRun scope."
+		echo "Keep durable memory limited to that scope and the evidence needed to operate it."
+		echo
+		if [[ -f "${agents_file}" ]]; then
+			cat "${agents_file}"
+		fi
+	} > "${HERMES_HOME}/SOUL.md"
+fi
+
+combined_prompt="$(mktemp)"
+{
+	echo "# Immutable AgentRun Prompt Layers"
+	if [[ -d "${immutable_prompt_dir}" ]]; then
+		while IFS= read -r -d '' prompt_part; do
+			echo
+			echo "## $(basename "${prompt_part}")"
+			cat "${prompt_part}"
+		done < <(find "${immutable_prompt_dir}" -maxdepth 1 -type f -name '*.md' -print0 | sort -z)
+	fi
+	echo
+	echo "# Dedicated Agent Instructions"
+	if [[ -f "${agents_file}" ]]; then
+		cat "${agents_file}"
+	fi
+	if [[ -n "${skill_dir}" && -d "${skill_dir}" ]]; then
+		echo
+		echo "# Bundled Agent Skills"
+		while IFS= read -r -d '' prompt_part; do
+			echo
+			echo "## $(basename "${prompt_part}")"
+			cat "${prompt_part}"
+		done < <(find "${skill_dir}" -maxdepth 1 -type f -name '*.md' -print0 | sort -z)
+	fi
+	if [[ -n "${skill_files}" ]]; then
+		echo
+		echo "# Injected AgentRun Skills"
+		while IFS= read -r prompt_part; do
+			[[ -z "${prompt_part}" ]] && continue
+			echo
+			echo "## $(basename "${prompt_part}")"
+			if [[ -f "${prompt_part}" ]]; then
+				cat "${prompt_part}"
+			else
+				echo "Configured skill file was not found at ${prompt_part}."
+			fi
+		done <<< "${skill_files}"
+	fi
+	echo
+	echo "# AgentRun Context"
+	if [[ -f "${context_file}" ]]; then
+		cat "${context_file}"
+	else
+		echo "{}"
+	fi
+	echo
+	echo "# AgentRun Prompt"
+	if [[ -f "${prompt_file}" ]]; then
+		cat "${prompt_file}"
+	else
+		echo "The AgentRun prompt file is missing at ${prompt_file}."
+	fi
+	if [[ -n "${ANVIL_AGENT_RUN_PROMPT_APPEND:-}" ]]; then
+		echo
+		echo "# Runtime Prompt Append"
+		printf '%s\n' "${ANVIL_AGENT_RUN_PROMPT_APPEND}"
+	fi
+} > "${combined_prompt}"
+chmod 600 "${combined_prompt}"
+
+if ! command -v hermes >/dev/null 2>&1; then
+	anvil-agent-status needsHuman --stage backend-start --summary "Hermes executable is missing from the adapter image." >/dev/null || true
+	exit 1
+fi
+
+if ! command -v anvil-hermes-query >/dev/null 2>&1; then
+	anvil-agent-status needsHuman --stage backend-start --summary "anvil-hermes-query helper is missing from the adapter image." >/dev/null || true
+	exit 1
+fi
+
+# anvil-hermes-query reads the prompt from disk and invokes Hermes in-process so
+# only the prompt path appears on argv (AgentRun issue #399). Do not reintroduce
+# hermes chat -q "$(cat …)" shell expansion.
+echo "ANVIL_AGENT_RUN_START name=${ANVIL_AGENT_RUN:-unknown} namespace=${ANVIL_AGENT_RUN_NAMESPACE:-unknown} backend=hermesAgent intent=${ANVIL_AGENT_RUN_INTENT:-observe}"
+anvil-agent-status progress --stage harness-start --summary "Hermes AgentRun harness started." >/dev/null || true
+anvil-hermes-query "${combined_prompt}"
+anvil-agent-status progress --stage harness-complete --summary "Hermes AgentRun harness completed." >/dev/null || true
+echo "ANVIL_AGENT_RUN_COMPLETE name=${ANVIL_AGENT_RUN:-unknown}"

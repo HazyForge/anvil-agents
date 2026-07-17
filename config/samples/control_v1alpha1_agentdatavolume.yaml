@@ -1,0 +1,13 @@
+apiVersion: control.anvil.hazyforge.io/v1alpha1
+kind: AgentDataVolume
+metadata:
+  name: repository-review-home
+  namespace: agents
+spec:
+  agentName: repository-review
+  backend: custom
+  profileRef:
+    name: agent-home
+  profileVolumeName: home
+  applicationRef:
+    name: example-service
