@@ -48,7 +48,12 @@ set -euo pipefail
 printf 'helm %s\n' "$*" >> "${FAKE_LOG}"
 [[ "$1" == "push" && -f "$2" ]]
 EOF
-chmod 0755 "${repo_root}/hack/"*.sh "${tmp_dir}/bin/helm"
+cat > "${tmp_dir}/bin/make" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'make %s\n' "$*" >> "${FAKE_LOG}"
+EOF
+chmod 0755 "${repo_root}/hack/"*.sh "${tmp_dir}/bin/helm" "${tmp_dir}/bin/make"
 export PATH="${tmp_dir}/bin:${PATH}"
 
 fail() {
@@ -65,6 +70,8 @@ output="${tmp_dir}/dist"
 
 rg -q "^publish-images --prefix registry.example.com/team --version v0.2.3 --platform linux/amd64 --output ${output}/images-v0.2.3.lock.tsv$" "${FAKE_LOG}" ||
 	fail "image publication arguments were not forwarded"
+rg -q "^make -C ${repo_root} verify$" "${FAKE_LOG}" || fail "source verification did not run"
+rg -q "^make -C ${repo_root} kind-e2e$" "${FAKE_LOG}" || fail "Kind verification did not run"
 rg -q "^package-chart --version v0.2.3 --output ${output} --image-prefix registry.example.com/team$" "${FAKE_LOG}" ||
 	fail "chart packaging arguments were not forwarded"
 rg -q "^helm push ${output}/anvil-agents-0.2.3.tgz oci://registry.example.com/team/charts$" "${FAKE_LOG}" ||
@@ -77,5 +84,15 @@ if "${repo_root}/hack/publish-release.sh" \
 	fail "accepted a release version without the v prefix"
 fi
 rg -q 'v-prefixed SemVer' "${tmp_dir}/version.out" || fail "version error is unclear"
+
+: > "${FAKE_LOG}"
+"${repo_root}/hack/publish-release.sh" \
+	--prefix registry.example.com/team \
+	--version v0.2.3 \
+	--output "${output}" \
+	--skip-verification >/dev/null
+if grep -q '^make ' "${FAKE_LOG}"; then
+	fail "--skip-verification still ran the test gates"
+fi
 
 echo "publish-release contract tests passed"

@@ -108,9 +108,11 @@ existing lock with `--verify-lock FILE`; neither path requires GitHub Actions.
 `hack/publish-release.sh --prefix REGISTRY/PATH --version vX.Y.Z` is the
 complete reusable path. It calls the image publisher, packages the chart,
 pushes it to `oci://REGISTRY/PATH/charts` by default, and re-verifies the image
-lock after publication. Authenticate both Docker and Helm to the registry
-first. The tag must point at a clean checkout so OCI source labels and the lock
-refer to exactly the reviewed commit.
+lock after publication. By default it first runs `make verify` and
+`make kind-e2e`; `--skip-verification` records an explicit decision that those
+gates ran elsewhere for the exact tag. Authenticate both Docker and Helm to the
+registry first. The tag must point at a clean checkout so OCI source labels and
+the lock refer to exactly the reviewed commit.
 
 ## Optional Release Workflow
 

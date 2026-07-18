@@ -7,6 +7,7 @@ version=""
 platform="linux/amd64"
 output_dir="${repo_root}/dist"
 chart_registry=""
+skip_verification="false"
 
 usage() {
 	cat <<'EOF'
@@ -21,6 +22,8 @@ Options:
   --platform PLATFORM      Image platform. Default: linux/amd64.
   --output DIR             Chart and digest-lock directory. Default: ./dist.
   --chart-registry URL     OCI chart destination. Default: oci://PREFIX/charts.
+  --skip-verification      Skip make verify and make kind-e2e. Use only when
+                           equivalent checks already ran for this exact tag.
   -h, --help               Show this help.
 
 Log in to the image registry with Docker and Helm before running this script.
@@ -63,6 +66,10 @@ while [[ $# -gt 0 ]]; do
 			chart_registry="${2%/}"
 			shift 2
 			;;
+		--skip-verification)
+			skip_verification="true"
+			shift
+			;;
 		-h|--help)
 			usage
 			exit 0
@@ -84,6 +91,11 @@ done
 chart_registry="${chart_registry:-oci://${prefix}/charts}"
 [[ "${chart_registry}" == oci://* ]] || { echo "--chart-registry must use oci://" >&2; exit 2; }
 command -v helm >/dev/null 2>&1 || { echo "helm is required" >&2; exit 1; }
+
+if [[ "${skip_verification}" != "true" ]]; then
+	make -C "${repo_root}" verify
+	make -C "${repo_root}" kind-e2e
+fi
 
 mkdir -p "${output_dir}"
 lock="${output_dir}/images-${version}.lock.tsv"

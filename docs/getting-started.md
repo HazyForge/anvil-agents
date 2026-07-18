@@ -113,11 +113,14 @@ Helm into the registry, check out a clean `vX.Y.Z` tag, and run:
   --version vX.Y.Z
 ```
 
-The script publishes and verifies all six images, writes
+The script first runs `make verify` and the disposable Kind upgrade/install
+suite, then publishes and verifies all six images, writes
 `dist/images-vX.Y.Z.lock.tsv`, packages the chart, and pushes it to
 `oci://registry.example.com/platform/charts`. Use `--chart-registry` to select
-another OCI chart namespace. The optional GitHub workflow invokes the same
-repository-owned contracts; it is a convenience, not a release prerequisite.
+another OCI chart namespace. `--skip-verification` is an explicit escape hatch
+only when equivalent checks already ran for that exact tag. The optional GitHub
+workflow uses the same repository-owned contracts; it is a convenience, not a
+release prerequisite.
 
 ## Add A Real Harness
 

@@ -113,10 +113,11 @@ make kind-e2e
 local Docker. The reusable script supports component selection, platforms,
 cache import/export, multiple tags, custom registries, and fork-aware OCI
 source metadata. Image pushes reject dirty worktrees unless explicitly
-overridden. `publish-release.sh` publishes all six versioned images, verifies
-their immutable digests and source revision, writes a digest lock, and pushes
-the version-coupled OCI chart. GitHub workflows call the same repository-owned
-contracts and are optional.
+overridden. `publish-release.sh` runs `make verify` and `make kind-e2e`,
+publishes all six versioned images, verifies their immutable digests and source
+revision, writes a digest lock, and pushes the version-coupled OCI chart.
+GitHub workflows use the same repository-owned build and test contracts and are
+optional.
 The optional release workflow runs only for a `v*` tag push or a manual rerun
 of an existing tag. It runs the same verification and Kind upgrade/install
 tests before publishing versioned images and an OCI chart; it never publishes
