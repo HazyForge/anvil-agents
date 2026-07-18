@@ -1,0 +1,42 @@
+package v1alpha1
+
+import metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+// AgentSkillSetSpec is a reusable, backend-neutral capability pack. Skills,
+// their setup tools, and optional delegated personas stay together, while
+// images, workload identities, credentials, and placement remain owned by a
+// harness profile or run profile.
+type AgentSkillSetSpec struct {
+	// Description explains when this capability pack should be selected.
+	// +optional
+	Description string `json:"description,omitempty"`
+	// Skills are named instruction packs materialized for the selected harness.
+	// +kubebuilder:validation:MaxItems=64
+	// +optional
+	Skills []AgentRunSkillInjectionSpec `json:"skills,omitempty"`
+	// Tools are setup and verification contracts required by this skill set.
+	// +kubebuilder:validation:MaxItems=32
+	// +optional
+	Tools []AgentRunToolSpec `json:"tools,omitempty"`
+	// Subagents are named delegated personas used by skills in this set.
+	// +kubebuilder:validation:MaxItems=32
+	// +optional
+	Subagents []AgentRunSubagentSpec `json:"subagents,omitempty"`
+}
+
+// +kubebuilder:object:root=true
+// +kubebuilder:resource:path=agentskillsets,scope=Namespaced,shortName=agskills
+// +kubebuilder:printcolumn:name="Description",type="string",JSONPath=".spec.description"
+type AgentSkillSet struct {
+	metav1.TypeMeta   `json:",inline"`
+	metav1.ObjectMeta `json:"metadata,omitempty"`
+
+	Spec AgentSkillSetSpec `json:"spec"`
+}
+
+// +kubebuilder:object:root=true
+type AgentSkillSetList struct {
+	metav1.TypeMeta `json:",inline"`
+	metav1.ListMeta `json:"metadata,omitempty"`
+	Items           []AgentSkillSet `json:"items"`
+}

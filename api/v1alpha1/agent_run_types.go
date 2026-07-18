@@ -401,6 +401,75 @@ type AgentRunSkillInjectionSpec struct {
 	Paths []string `json:"paths,omitempty"`
 }
 
+type AgentSkillCompositionMode string
+
+const (
+	// AgentSkillCompositionAppend retains profile-selected sets and appends the
+	// current layer's refs. It is the default composition mode.
+	AgentSkillCompositionAppend AgentSkillCompositionMode = "Append"
+	// AgentSkillCompositionReplace discards the inherited profile skill-set
+	// composition, including its refs and overrides, before resolving the
+	// current layer.
+	AgentSkillCompositionReplace AgentSkillCompositionMode = "Replace"
+)
+
+type AgentSkillOverrideOperation string
+
+const (
+	AgentSkillOverrideAdd     AgentSkillOverrideOperation = "Add"
+	AgentSkillOverrideAugment AgentSkillOverrideOperation = "Augment"
+	AgentSkillOverrideReplace AgentSkillOverrideOperation = "Replace"
+	AgentSkillOverrideDisable AgentSkillOverrideOperation = "Disable"
+)
+
+// AgentSkillOverrideSpec changes one resolved skill for a profile or run
+// without mutating the referenced AgentSkillSet. Explicit operations avoid the
+// ambiguous null and list semantics of generic JSON merge patches.
+type AgentSkillOverrideSpec struct {
+	// Name is the stable skill identity to add, augment, replace, or disable.
+	// +kubebuilder:validation:MinLength=1
+	Name string `json:"name"`
+	// Operation defines how the supplied fields affect the named skill.
+	// +kubebuilder:validation:Enum=Add;Augment;Replace;Disable
+	Operation AgentSkillOverrideOperation `json:"operation"`
+	// Description replaces the description for Augment and supplies it for Add
+	// or Replace. Disable rejects all content fields.
+	// +optional
+	Description string `json:"description,omitempty"`
+	// Content supplies complete content for Add or Replace and is appended under
+	// a local-override heading for Augment.
+	// +optional
+	Content string `json:"content,omitempty"`
+	// SourceRefs replace the source list for Replace and append for Add or
+	// Augment.
+	// +optional
+	SourceRefs []AgentRunSkillSourceRef `json:"sourceRefs,omitempty"`
+	// Paths replace the path list for Replace and append uniquely for Add or
+	// Augment.
+	// +optional
+	Paths []string `json:"paths,omitempty"`
+}
+
+// AgentSkillCompositionSpec selects ordered reusable capability packs and
+// applies profile- or run-local named skill overrides.
+type AgentSkillCompositionSpec struct {
+	// Mode controls how this layer combines refs with inherited profile refs.
+	// Empty defaults to Append. Replace is useful for a run that needs a clean
+	// skill-set swap while retaining the same non-skill role/profile policy.
+	// +kubebuilder:validation:Enum=Append;Replace
+	// +optional
+	Mode AgentSkillCompositionMode `json:"mode,omitempty"`
+	// Refs selects AgentSkillSets in declaration order. References must resolve
+	// in the consuming AgentRun namespace.
+	// +kubebuilder:validation:MaxItems=16
+	// +optional
+	Refs []NamespacedObjectReference `json:"refs,omitempty"`
+	// Overrides are applied in declaration order after selected sets resolve.
+	// +kubebuilder:validation:MaxItems=64
+	// +optional
+	Overrides []AgentSkillOverrideSpec `json:"overrides,omitempty"`
+}
+
 type AgentRunSkillSourceRef struct {
 	// GitHub downloads one file from the GitHub Contents API.
 	// +optional
@@ -661,7 +730,16 @@ type AgentRunSpec struct {
 	// fields append profile entries first and run-local entries second.
 	// +optional
 	ProfileRef *NamespacedObjectReference `json:"profileRef,omitempty"`
-	Scope      AgentRunScopeSpec          `json:"scope,omitempty"`
+	// HarnessProfileRef selects a reusable same-namespace runtime envelope.
+	// A run-local ref atomically replaces the profile-selected harness runtime;
+	// inline spec.harness fields remain explicit compatibility overrides.
+	// +optional
+	HarnessProfileRef *NamespacedObjectReference `json:"harnessProfileRef,omitempty"`
+	// SkillSets selects reusable backend-neutral capability packs and named
+	// overrides. Run-local refs append to profile refs unless mode is Replace.
+	// +optional
+	SkillSets *AgentSkillCompositionSpec `json:"skillSets,omitempty"`
+	Scope     AgentRunScopeSpec          `json:"scope,omitempty"`
 	// Docs tells the harness which docs/runtime surfaces must be kept aligned.
 	// +optional
 	Docs *AgentRunDocsSpec `json:"docs,omitempty"`
@@ -732,6 +810,39 @@ type AgentRunArchiveStatus struct {
 	Error      string       `json:"error,omitempty"`
 }
 
+// AgentRunResolvedObjectReferenceStatus records the exact object version used
+// to materialize a run without copying object content or Secret references into
+// status.
+type AgentRunResolvedObjectReferenceStatus struct {
+	Name            string `json:"name"`
+	Namespace       string `json:"namespace,omitempty"`
+	UID             string `json:"uid,omitempty"`
+	Generation      int64  `json:"generation,omitempty"`
+	ResourceVersion string `json:"resourceVersion,omitempty"`
+	Digest          string `json:"digest,omitempty"`
+}
+
+// AgentRunResolvedScopeStatus records the opaque workload names inherited by
+// the effective run without copying a mutable profile or any runtime fields.
+type AgentRunResolvedScopeStatus struct {
+	Application       string `json:"application,omitempty"`
+	ApplicationTarget string `json:"applicationTarget,omitempty"`
+}
+
+// AgentRunResolvedCompositionStatus records the reusable inputs accepted for a
+// single execution. EffectiveDigest covers the complete resolved in-memory
+// AgentRun spec; PayloadDigest covers the final mounted payload including
+// remote skill bytes.
+type AgentRunResolvedCompositionStatus struct {
+	ResolvedAt        *metav1.Time                            `json:"resolvedAt,omitempty"`
+	ProfileRef        *AgentRunResolvedObjectReferenceStatus  `json:"profileRef,omitempty"`
+	HarnessProfileRef *AgentRunResolvedObjectReferenceStatus  `json:"harnessProfileRef,omitempty"`
+	SkillSetRefs      []AgentRunResolvedObjectReferenceStatus `json:"skillSetRefs,omitempty"`
+	Scope             *AgentRunResolvedScopeStatus            `json:"scope,omitempty"`
+	EffectiveDigest   string                                  `json:"effectiveDigest,omitempty"`
+	PayloadDigest     string                                  `json:"payloadDigest,omitempty"`
+}
+
 type AgentRunStatus struct {
 	ObservedGeneration      int64                                 `json:"observedGeneration,omitempty"`
 	Conditions              []metav1.Condition                    `json:"conditions,omitempty"`
@@ -745,6 +856,7 @@ type AgentRunStatus struct {
 	DataVolumes             []AgentRunDataVolumeStatus            `json:"dataVolumes,omitempty"`
 	ExternalSecretRefreshes []AgentRunExternalSecretRefreshStatus `json:"externalSecretRefreshes,omitempty"`
 	Archive                 *AgentRunArchiveStatus                `json:"archive,omitempty"`
+	ResolvedComposition     *AgentRunResolvedCompositionStatus    `json:"resolvedComposition,omitempty"`
 	StartedAt               *metav1.Time                          `json:"startedAt,omitempty"`
 	CompletedAt             *metav1.Time                          `json:"completedAt,omitempty"`
 	PromptHash              string                                `json:"promptHash,omitempty"`

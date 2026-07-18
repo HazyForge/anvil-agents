@@ -1,0 +1,21 @@
+apiVersion: control.anvil.hazyforge.io/v1alpha1
+kind: AgentHarnessProfile
+metadata:
+  name: codex-standard
+  namespace: agents
+spec:
+  description: Reusable Codex runtime with bounded Kubernetes execution.
+  backend:
+    kind: codex
+    codex:
+      sandbox: read-only
+  execution:
+    serviceAccountName: agent-runner
+    timeoutSeconds: 1800
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: "2"
+        memory: 2Gi

@@ -1,0 +1,216 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.19.0
+  name: agentskillsets.control.anvil.hazyforge.io
+spec:
+  group: control.anvil.hazyforge.io
+  names:
+    kind: AgentSkillSet
+    listKind: AgentSkillSetList
+    plural: agentskillsets
+    shortNames:
+    - agskills
+    singular: agentskillset
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.description
+      name: Description
+      type: string
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: |-
+              AgentSkillSetSpec is a reusable, backend-neutral capability pack. Skills,
+              their setup tools, and optional delegated personas stay together, while
+              images, workload identities, credentials, and placement remain owned by a
+              harness profile or run profile.
+            properties:
+              description:
+                description: Description explains when this capability pack should
+                  be selected.
+                type: string
+              skills:
+                description: Skills are named instruction packs materialized for the
+                  selected harness.
+                items:
+                  properties:
+                    content:
+                      description: |-
+                        Content is inline Markdown instruction text injected into the harness
+                        prompt layers. Keep durable, broadly reusable skills in repo files and
+                        use this field for the run-specific selection or checklist.
+                      type: string
+                    description:
+                      description: Description briefly explains when the skill should
+                        be applied.
+                      type: string
+                    name:
+                      description: |-
+                        Name is a stable, human-readable skill identifier. It is also used to
+                        derive the mounted skill prompt file name.
+                      minLength: 1
+                      type: string
+                    paths:
+                      description: |-
+                        Paths lists repo-relative skill, docs, runbook, or source files the
+                        harness should read before applying this skill.
+                      items:
+                        type: string
+                      type: array
+                    sourceRefs:
+                      description: |-
+                        SourceRefs points at remote skill content that the controller resolves
+                        when it creates the AgentRun payload ConfigMap. Use this for protected
+                        skill files that should be updated independently of anvil-agents operator
+                        releases.
+                      items:
+                        properties:
+                          github:
+                            description: GitHub downloads one file from the GitHub
+                              Contents API.
+                            properties:
+                              apiBaseURL:
+                                description: |-
+                                  APIBaseURL overrides the GitHub API base URL for GitHub Enterprise.
+                                  Empty defaults to https://api.github.com. The operator must explicitly
+                                  allowlist the host and requires HTTPS unless test-only insecure access is
+                                  enabled at process startup.
+                                type: string
+                              path:
+                                description: Path is the repository-relative file
+                                  path to download.
+                                minLength: 1
+                                type: string
+                              ref:
+                                description: |-
+                                  Ref is a branch, tag, or commit SHA. Empty uses the repository default
+                                  branch at the time the controller resolves the source.
+                                type: string
+                              repository:
+                                description: |-
+                                  Repository is the owner/name GitHub repository, for example
+                                  example/agent-skills.
+                                minLength: 1
+                                type: string
+                              tokenSecretRef:
+                                description: |-
+                                  TokenSecretRef optionally references a same-namespace Kubernetes Secret
+                                  key containing a GitHub token for private repositories or protected
+                                  contents.
+                                properties:
+                                  key:
+                                    type: string
+                                  name:
+                                    type: string
+                                  namespace:
+                                    type: string
+                                required:
+                                - key
+                                - name
+                                type: object
+                            required:
+                            - path
+                            - repository
+                            type: object
+                        type: object
+                      type: array
+                  required:
+                  - name
+                  type: object
+                maxItems: 64
+                type: array
+              subagents:
+                description: Subagents are named delegated personas used by skills
+                  in this set.
+                items:
+                  properties:
+                    description:
+                      description: Description summarizes the delegated responsibility.
+                      type: string
+                    name:
+                      description: Name is a stable workstream or persona identifier.
+                      minLength: 1
+                      type: string
+                    systemPrompt:
+                      description: |-
+                        SystemPrompt gives persona-specific instructions. Backends that do not
+                        support real subagents should run this as a separately labeled pass.
+                      type: string
+                    toolNames:
+                      description: ToolNames lists tools this subagent/persona is
+                        expected to use.
+                      items:
+                        type: string
+                      type: array
+                    when:
+                      description: When explains when the harness should use this
+                        subagent/persona.
+                      type: string
+                  required:
+                  - name
+                  type: object
+                maxItems: 32
+                type: array
+              tools:
+                description: Tools are setup and verification contracts required by
+                  this skill set.
+                items:
+                  properties:
+                    description:
+                      description: Description explains what this tool is for during
+                        the run.
+                      type: string
+                    name:
+                      description: Name is a stable tool identifier such as kbctl.
+                      minLength: 1
+                      type: string
+                    setupScript:
+                      description: |-
+                        SetupScript is an optional shell script run by compatible backend
+                        adapters after repository checkout and before the agent runtime starts.
+                        The script runs in the agent workdir as the agent container user. Keep it
+                        idempotent, install into writable agent data volumes or the workdir, and
+                        pass credentials through envSecretRefs instead of inline script text.
+                      type: string
+                    verifyCommand:
+                      description: |-
+                        VerifyCommand is an optional argv array run after SetupScript to prove
+                        the tool is available, for example ["kbctl", "--version"].
+                      items:
+                        type: string
+                      type: array
+                  required:
+                  - name
+                  type: object
+                maxItems: 32
+                type: array
+            type: object
+        required:
+        - spec
+        type: object
+    served: true
+    storage: true
+    subresources: {}

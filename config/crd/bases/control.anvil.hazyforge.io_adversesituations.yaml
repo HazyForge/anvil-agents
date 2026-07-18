@@ -2375,6 +2375,18 @@ spec:
                               type: object
                             type: array
                         type: object
+                      harnessProfileRef:
+                        description: |-
+                          HarnessProfileRef selects a reusable same-namespace runtime envelope for
+                          the created AgentRun.
+                        properties:
+                          name:
+                            type: string
+                          namespace:
+                            type: string
+                        required:
+                        - name
+                        type: object
                       issueTracking:
                         description: |-
                           IssueTracking is copied onto the created AgentRun so adverse responders
@@ -2560,6 +2572,141 @@ spec:
                               Summary describes the area the agent should inspect, such as a cluster,
                               namespace, product surface, or operational concern.
                             type: string
+                        type: object
+                      skillSets:
+                        description: |-
+                          SkillSets selects reusable capability packs and responder-local skill
+                          overrides for the created AgentRun.
+                        properties:
+                          mode:
+                            description: |-
+                              Mode controls how this layer combines refs with inherited profile refs.
+                              Empty defaults to Append. Replace is useful for a run that needs a clean
+                              skill-set swap while retaining the same non-skill role/profile policy.
+                            enum:
+                            - Append
+                            - Replace
+                            type: string
+                          overrides:
+                            description: Overrides are applied in declaration order
+                              after selected sets resolve.
+                            items:
+                              description: |-
+                                AgentSkillOverrideSpec changes one resolved skill for a profile or run
+                                without mutating the referenced AgentSkillSet. Explicit operations avoid the
+                                ambiguous null and list semantics of generic JSON merge patches.
+                              properties:
+                                content:
+                                  description: |-
+                                    Content supplies complete content for Add or Replace and is appended under
+                                    a local-override heading for Augment.
+                                  type: string
+                                description:
+                                  description: |-
+                                    Description replaces the description for Augment and supplies it for Add
+                                    or Replace. Disable rejects all content fields.
+                                  type: string
+                                name:
+                                  description: Name is the stable skill identity to
+                                    add, augment, replace, or disable.
+                                  minLength: 1
+                                  type: string
+                                operation:
+                                  description: Operation defines how the supplied
+                                    fields affect the named skill.
+                                  enum:
+                                  - Add
+                                  - Augment
+                                  - Replace
+                                  - Disable
+                                  type: string
+                                paths:
+                                  description: |-
+                                    Paths replace the path list for Replace and append uniquely for Add or
+                                    Augment.
+                                  items:
+                                    type: string
+                                  type: array
+                                sourceRefs:
+                                  description: |-
+                                    SourceRefs replace the source list for Replace and append for Add or
+                                    Augment.
+                                  items:
+                                    properties:
+                                      github:
+                                        description: GitHub downloads one file from
+                                          the GitHub Contents API.
+                                        properties:
+                                          apiBaseURL:
+                                            description: |-
+                                              APIBaseURL overrides the GitHub API base URL for GitHub Enterprise.
+                                              Empty defaults to https://api.github.com. The operator must explicitly
+                                              allowlist the host and requires HTTPS unless test-only insecure access is
+                                              enabled at process startup.
+                                            type: string
+                                          path:
+                                            description: Path is the repository-relative
+                                              file path to download.
+                                            minLength: 1
+                                            type: string
+                                          ref:
+                                            description: |-
+                                              Ref is a branch, tag, or commit SHA. Empty uses the repository default
+                                              branch at the time the controller resolves the source.
+                                            type: string
+                                          repository:
+                                            description: |-
+                                              Repository is the owner/name GitHub repository, for example
+                                              example/agent-skills.
+                                            minLength: 1
+                                            type: string
+                                          tokenSecretRef:
+                                            description: |-
+                                              TokenSecretRef optionally references a same-namespace Kubernetes Secret
+                                              key containing a GitHub token for private repositories or protected
+                                              contents.
+                                            properties:
+                                              key:
+                                                type: string
+                                              name:
+                                                type: string
+                                              namespace:
+                                                type: string
+                                            required:
+                                            - key
+                                            - name
+                                            type: object
+                                        required:
+                                        - path
+                                        - repository
+                                        type: object
+                                    type: object
+                                  type: array
+                              required:
+                              - name
+                              - operation
+                              type: object
+                            maxItems: 64
+                            type: array
+                          refs:
+                            description: |-
+                              Refs selects AgentSkillSets in declaration order. References must resolve
+                              in the consuming AgentRun namespace.
+                            items:
+                              description: |-
+                                NamespacedObjectReference identifies a Kubernetes object without importing
+                                another API group. Namespace may be omitted where same-namespace resolution
+                                is part of the containing resource contract.
+                              properties:
+                                name:
+                                  type: string
+                                namespace:
+                                  type: string
+                              required:
+                              - name
+                              type: object
+                            maxItems: 16
+                            type: array
                         type: object
                     type: object
                 type: object

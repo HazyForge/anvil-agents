@@ -1,0 +1,19 @@
+apiVersion: control.anvil.hazyforge.io/v1alpha1
+kind: AgentSkillSet
+metadata:
+  name: repository-review
+  namespace: agents
+spec:
+  description: Backend-neutral repository review capability pack.
+  skills:
+    - name: evidence-backed-review
+      description: Review repository behavior from current source and tests.
+      content: Cite concrete file paths and distinguish confirmed defects from risks.
+  tools:
+    - name: ripgrep
+      description: Fast repository text search.
+      verifyCommand: [rg, --version]
+  subagents:
+    - name: correctness-reviewer
+      when: The change affects shared behavior or runtime contracts.
+      systemPrompt: Independently challenge behavior and test coverage.

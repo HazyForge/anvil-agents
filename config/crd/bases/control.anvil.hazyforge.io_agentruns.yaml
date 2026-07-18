@@ -2295,6 +2295,19 @@ spec:
                       type: object
                     type: array
                 type: object
+              harnessProfileRef:
+                description: |-
+                  HarnessProfileRef selects a reusable same-namespace runtime envelope.
+                  A run-local ref atomically replaces the profile-selected harness runtime;
+                  inline spec.harness fields remain explicit compatibility overrides.
+                properties:
+                  name:
+                    type: string
+                  namespace:
+                    type: string
+                required:
+                - name
+                type: object
               issueTracking:
                 description: |-
                   IssueTracking tells the harness which GitHub issues to read and whether
@@ -2509,6 +2522,141 @@ spec:
                     type: string
                 required:
                 - name
+                type: object
+              skillSets:
+                description: |-
+                  SkillSets selects reusable backend-neutral capability packs and named
+                  overrides. Run-local refs append to profile refs unless mode is Replace.
+                properties:
+                  mode:
+                    description: |-
+                      Mode controls how this layer combines refs with inherited profile refs.
+                      Empty defaults to Append. Replace is useful for a run that needs a clean
+                      skill-set swap while retaining the same non-skill role/profile policy.
+                    enum:
+                    - Append
+                    - Replace
+                    type: string
+                  overrides:
+                    description: Overrides are applied in declaration order after
+                      selected sets resolve.
+                    items:
+                      description: |-
+                        AgentSkillOverrideSpec changes one resolved skill for a profile or run
+                        without mutating the referenced AgentSkillSet. Explicit operations avoid the
+                        ambiguous null and list semantics of generic JSON merge patches.
+                      properties:
+                        content:
+                          description: |-
+                            Content supplies complete content for Add or Replace and is appended under
+                            a local-override heading for Augment.
+                          type: string
+                        description:
+                          description: |-
+                            Description replaces the description for Augment and supplies it for Add
+                            or Replace. Disable rejects all content fields.
+                          type: string
+                        name:
+                          description: Name is the stable skill identity to add, augment,
+                            replace, or disable.
+                          minLength: 1
+                          type: string
+                        operation:
+                          description: Operation defines how the supplied fields affect
+                            the named skill.
+                          enum:
+                          - Add
+                          - Augment
+                          - Replace
+                          - Disable
+                          type: string
+                        paths:
+                          description: |-
+                            Paths replace the path list for Replace and append uniquely for Add or
+                            Augment.
+                          items:
+                            type: string
+                          type: array
+                        sourceRefs:
+                          description: |-
+                            SourceRefs replace the source list for Replace and append for Add or
+                            Augment.
+                          items:
+                            properties:
+                              github:
+                                description: GitHub downloads one file from the GitHub
+                                  Contents API.
+                                properties:
+                                  apiBaseURL:
+                                    description: |-
+                                      APIBaseURL overrides the GitHub API base URL for GitHub Enterprise.
+                                      Empty defaults to https://api.github.com. The operator must explicitly
+                                      allowlist the host and requires HTTPS unless test-only insecure access is
+                                      enabled at process startup.
+                                    type: string
+                                  path:
+                                    description: Path is the repository-relative file
+                                      path to download.
+                                    minLength: 1
+                                    type: string
+                                  ref:
+                                    description: |-
+                                      Ref is a branch, tag, or commit SHA. Empty uses the repository default
+                                      branch at the time the controller resolves the source.
+                                    type: string
+                                  repository:
+                                    description: |-
+                                      Repository is the owner/name GitHub repository, for example
+                                      example/agent-skills.
+                                    minLength: 1
+                                    type: string
+                                  tokenSecretRef:
+                                    description: |-
+                                      TokenSecretRef optionally references a same-namespace Kubernetes Secret
+                                      key containing a GitHub token for private repositories or protected
+                                      contents.
+                                    properties:
+                                      key:
+                                        type: string
+                                      name:
+                                        type: string
+                                      namespace:
+                                        type: string
+                                    required:
+                                    - key
+                                    - name
+                                    type: object
+                                required:
+                                - path
+                                - repository
+                                type: object
+                            type: object
+                          type: array
+                      required:
+                      - name
+                      - operation
+                      type: object
+                    maxItems: 64
+                    type: array
+                  refs:
+                    description: |-
+                      Refs selects AgentSkillSets in declaration order. References must resolve
+                      in the consuming AgentRun namespace.
+                    items:
+                      description: |-
+                        NamespacedObjectReference identifies a Kubernetes object without importing
+                        another API group. Namespace may be omitted where same-namespace resolution
+                        is part of the containing resource contract.
+                      properties:
+                        name:
+                          type: string
+                        namespace:
+                          type: string
+                      required:
+                      - name
+                      type: object
+                    maxItems: 16
+                    type: array
                 type: object
               sourceGeneration:
                 format: int64
@@ -2742,6 +2890,99 @@ spec:
                       type: string
                   type: object
                 type: array
+              resolvedComposition:
+                description: |-
+                  AgentRunResolvedCompositionStatus records the reusable inputs accepted for a
+                  single execution. EffectiveDigest covers the complete resolved in-memory
+                  AgentRun spec; PayloadDigest covers the final mounted payload including
+                  remote skill bytes.
+                properties:
+                  effectiveDigest:
+                    type: string
+                  harnessProfileRef:
+                    description: |-
+                      AgentRunResolvedObjectReferenceStatus records the exact object version used
+                      to materialize a run without copying object content or Secret references into
+                      status.
+                    properties:
+                      digest:
+                        type: string
+                      generation:
+                        format: int64
+                        type: integer
+                      name:
+                        type: string
+                      namespace:
+                        type: string
+                      resourceVersion:
+                        type: string
+                      uid:
+                        type: string
+                    required:
+                    - name
+                    type: object
+                  payloadDigest:
+                    type: string
+                  profileRef:
+                    description: |-
+                      AgentRunResolvedObjectReferenceStatus records the exact object version used
+                      to materialize a run without copying object content or Secret references into
+                      status.
+                    properties:
+                      digest:
+                        type: string
+                      generation:
+                        format: int64
+                        type: integer
+                      name:
+                        type: string
+                      namespace:
+                        type: string
+                      resourceVersion:
+                        type: string
+                      uid:
+                        type: string
+                    required:
+                    - name
+                    type: object
+                  resolvedAt:
+                    format: date-time
+                    type: string
+                  scope:
+                    description: |-
+                      AgentRunResolvedScopeStatus records the opaque workload names inherited by
+                      the effective run without copying a mutable profile or any runtime fields.
+                    properties:
+                      application:
+                        type: string
+                      applicationTarget:
+                        type: string
+                    type: object
+                  skillSetRefs:
+                    items:
+                      description: |-
+                        AgentRunResolvedObjectReferenceStatus records the exact object version used
+                        to materialize a run without copying object content or Secret references into
+                        status.
+                      properties:
+                        digest:
+                          type: string
+                        generation:
+                          format: int64
+                          type: integer
+                        name:
+                          type: string
+                        namespace:
+                          type: string
+                        resourceVersion:
+                          type: string
+                        uid:
+                          type: string
+                      required:
+                      - name
+                      type: object
+                    type: array
+                type: object
               result:
                 type: object
                 x-kubernetes-preserve-unknown-fields: true
