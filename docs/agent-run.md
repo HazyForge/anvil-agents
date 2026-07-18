@@ -77,6 +77,10 @@ Schedules create child runs from `runTemplate` or rotate through named
 - `Allow`: create due runs, optionally capped by `maxConcurrentRuns`.
 - `Queue`: create due runs but launch only the oldest eligible pending runs.
 
+`maxRunsPerDay` adds a UTC daily child-run budget across interval runs and
+manual run-now nudges. Omit it or set zero to preserve unlimited legacy
+behavior.
+
 `Allow`, or `Queue` with a cap above one, exposes independent Job parallelism
 to the Kubernetes scheduler so heavy lanes can land on different machines.
 `Forbid`, a schedule cap of one, or an application control can deliberately

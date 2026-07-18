@@ -112,6 +112,12 @@ spec:
                   behaves as a one-at-a-time schedule.
                 minimum: 0
                 type: integer
+              maxRunsPerDay:
+                description: |-
+                  MaxRunsPerDay caps all child runs created by this schedule during a UTC
+                  calendar day, including manual run-now nudges. Empty disables the cap.
+                minimum: 0
+                type: integer
               runTemplate:
                 description: |-
                   RunTemplate is copied into each scheduled AgentRun. The controller fills

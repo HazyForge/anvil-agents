@@ -89,6 +89,12 @@ default. Use `hack/build-images.sh --prefix ... --tag ... --push` to publish the
 same six components without GitHub Actions; the script refuses dirty pushes by
 default.
 
+For a tagged release, `hack/publish-images.sh --prefix REGISTRY/PATH --version
+vX.Y.Z` builds and pushes all six images, verifies that the version and commit
+tags resolve to the same registry digest, verifies the OCI source revision, and
+atomically writes a deployment-ready digest lock under `dist/`. Recheck an
+existing lock with `--verify-lock FILE`; neither path requires GitHub Actions.
+
 ## Optional Release Workflow
 
 `.github/workflows/publish.yaml` is a release convenience built on the same

@@ -143,8 +143,10 @@ audience, and explicit namespace authorization bindings are configured. See
 - [Migration from Anvil Primaris](docs/migration-from-anvil-primaris.md)
 
 Hazy Forge uses this same open-source repository for its own agent system. Its
-deployment overlay remains under `.hazyforge/` as a real integration example,
-not as a prerequisite for other installations.
+`.hazyforge/` integration deploys into a dedicated namespace and remains an
+optional real-world example, not an installation prerequisite. Environment
+access is supplied through namespace-local ExternalSecrets; portable installs
+use the Helm values documented above.
 
 ## Project Status
 

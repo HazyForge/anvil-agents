@@ -94,6 +94,11 @@ type AgentScheduleSpec struct {
 	// +kubebuilder:validation:Minimum=0
 	// +optional
 	MaxConcurrentRuns int `json:"maxConcurrentRuns,omitempty"`
+	// MaxRunsPerDay caps all child runs created by this schedule during a UTC
+	// calendar day, including manual run-now nudges. Empty disables the cap.
+	// +kubebuilder:validation:Minimum=0
+	// +optional
+	MaxRunsPerDay int `json:"maxRunsPerDay,omitempty"`
 	// RunTemplate is copied into each scheduled AgentRun. The controller fills
 	// purpose, sourceRef, trigger, and scheduleRef defaults when they are empty.
 	// +optional

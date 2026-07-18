@@ -12,7 +12,8 @@ manifests: generate
 	rm -rf charts/anvil-agents/crds
 	{ printf '%s\n' '{{- if .Values.crds.install }}'; \
 		for file in config/crd/bases/*.yaml; do \
-			sed '/^  annotations:$$/a\    helm.sh/resource-policy: keep' "$$file"; \
+			sed '/^  annotations:$$/a\    helm.sh/resource-policy: keep\
+    argocd.argoproj.io/sync-options: Prune=false' "$$file"; \
 		done; \
 		printf '%s\n' '{{- end }}'; \
 	} > charts/anvil-agents/templates/crds.yaml
@@ -49,6 +50,8 @@ kind-e2e: kind-upgrade-e2e
 verify-runner-contract:
 	@bash -n hack/build-images.sh
 	@bash -n hack/build-images_test.sh
+	@bash -n hack/publish-images.sh
+	@bash -n hack/publish-images_test.sh
 	@bash -n hack/test-api-chart.sh
 	@bash -n hack/package-chart.sh
 	@bash -n hack/package-chart_test.sh
@@ -57,9 +60,11 @@ verify-runner-contract:
 	@bash -n hack/stream-agent-run.sh
 	@hack/build-images.sh --help >/dev/null
 	@hack/build-images.sh --list >/dev/null
+	@hack/publish-images.sh --help >/dev/null
 	@hack/package-chart.sh --help >/dev/null
 	@hack/package-chart_test.sh
 	@hack/build-images_test.sh
+	@hack/publish-images_test.sh
 	@hack/stream-agent-run.sh --help >/dev/null
 	@if ANVIL_AGENTS_ACCESS_TOKEN=dummy hack/stream-agent-run.sh \
 		--endpoint https://agents.example.com@127.0.0.1 \

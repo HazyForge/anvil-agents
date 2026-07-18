@@ -115,6 +115,20 @@ func (r *AgentScheduleReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		obj.Status = status
 		return r.patchAgentScheduleStatus(ctx, original, obj, 0)
 	}
+	if obj.Spec.MaxRunsPerDay < 0 {
+		status.Phase = controlv1alpha1.AgentSchedulePhaseBlocked
+		status.LastError = "spec.maxRunsPerDay cannot be negative."
+		apimeta.SetStatusCondition(&status.Conditions, metav1.Condition{
+			Type:               agentScheduleReady,
+			Status:             metav1.ConditionFalse,
+			ObservedGeneration: obj.Generation,
+			LastTransitionTime: now,
+			Reason:             "InvalidMaxRunsPerDay",
+			Message:            status.LastError,
+		})
+		obj.Status = status
+		return r.patchAgentScheduleStatus(ctx, original, obj, 0)
+	}
 	if obj.Spec.Backoff != nil && (obj.Spec.Backoff.FailedSeconds < 0 || obj.Spec.Backoff.NeedsHumanSeconds < 0) {
 		status.Phase = controlv1alpha1.AgentSchedulePhaseBlocked
 		status.LastError = "spec.backoff failedSeconds and needsHumanSeconds cannot be negative."
@@ -146,7 +160,7 @@ func (r *AgentScheduleReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		return r.patchAgentScheduleStatus(ctx, original, obj, agentSchedulePollInterval)
 	}
 
-	activeRuns, last, lastIntervalTemplate, err := r.agentScheduleRuns(ctx, obj)
+	activeRuns, last, lastIntervalTemplate, runsToday, err := r.agentScheduleRuns(ctx, obj, now.Time)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
@@ -274,6 +288,25 @@ func (r *AgentScheduleReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		obj.Status = status
 		return r.patchAgentScheduleStatus(ctx, original, obj, nextRunAt.Time.Sub(now.Time))
 	}
+	if obj.Spec.MaxRunsPerDay > 0 && runsToday >= obj.Spec.MaxRunsPerDay {
+		status.Phase = controlv1alpha1.AgentSchedulePhaseBlocked
+		status.LastError = ""
+		dayEnd := now.Time.UTC().Truncate(24 * time.Hour).Add(24 * time.Hour)
+		message := fmt.Sprintf("Created %d AgentRuns today; waiting for the UTC daily maxRunsPerDay=%d budget to reset.", runsToday, obj.Spec.MaxRunsPerDay)
+		if manualPending {
+			message = fmt.Sprintf("Manual run token %q is pending; created %d AgentRuns today and is waiting for the UTC daily maxRunsPerDay=%d budget to reset.", manualToken, runsToday, obj.Spec.MaxRunsPerDay)
+		}
+		apimeta.SetStatusCondition(&status.Conditions, metav1.Condition{
+			Type:               agentScheduleReady,
+			Status:             metav1.ConditionFalse,
+			ObservedGeneration: obj.Generation,
+			LastTransitionTime: now,
+			Reason:             "DailyRunBudgetReached",
+			Message:            message,
+		})
+		obj.Status = status
+		return r.patchAgentScheduleStatus(ctx, original, obj, dayEnd.Sub(now.Time))
+	}
 
 	// Interval ticks are idempotent per dueAt. Queue may re-reconcile immediately
 	// after Owns(AgentRun) fires for the first create while status.nextRunAt is
@@ -392,14 +425,16 @@ func (r *AgentScheduleReconciler) patchAgentScheduleStatus(ctx context.Context, 
 	return ctrl.Result{}, nil
 }
 
-func (r *AgentScheduleReconciler) agentScheduleRuns(ctx context.Context, schedule *controlv1alpha1.AgentSchedule) ([]*controlv1alpha1.AgentRun, *controlv1alpha1.AgentRun, string, error) {
+func (r *AgentScheduleReconciler) agentScheduleRuns(ctx context.Context, schedule *controlv1alpha1.AgentSchedule, now time.Time) ([]*controlv1alpha1.AgentRun, *controlv1alpha1.AgentRun, string, int, error) {
 	list := &controlv1alpha1.AgentRunList{}
 	if err := r.List(ctx, list, client.InNamespace(schedule.Namespace), client.MatchingLabels{agentRunScheduleLabel: sanitizeLabelValue(schedule.Name)}); err != nil {
-		return nil, nil, "", fmt.Errorf("list scheduled agent runs: %w", err)
+		return nil, nil, "", 0, fmt.Errorf("list scheduled agent runs: %w", err)
 	}
 	active := []*controlv1alpha1.AgentRun{}
 	var last *controlv1alpha1.AgentRun
 	var lastInterval *controlv1alpha1.AgentRun
+	runsToday := 0
+	dayStart := now.UTC().Truncate(24 * time.Hour)
 	for i := range list.Items {
 		run := &list.Items[i]
 		if !agentRunBelongsToSchedule(run, schedule) {
@@ -408,8 +443,11 @@ func (r *AgentScheduleReconciler) agentScheduleRuns(ctx context.Context, schedul
 		original := run.DeepCopy()
 		if detachAgentRunControllerOwner(run, controlv1alpha1.GroupVersion.String(), "AgentSchedule", schedule.Name, schedule.UID) {
 			if err := r.Patch(ctx, run, client.MergeFrom(original)); err != nil {
-				return nil, nil, "", fmt.Errorf("detach durable AgentRun %s/%s from AgentSchedule garbage collection: %w", run.Namespace, run.Name, err)
+				return nil, nil, "", 0, fmt.Errorf("detach durable AgentRun %s/%s from AgentSchedule garbage collection: %w", run.Namespace, run.Name, err)
 			}
+		}
+		if !run.CreationTimestamp.Time.Before(dayStart) && run.CreationTimestamp.Time.Before(dayStart.Add(24*time.Hour)) {
+			runsToday++
 		}
 		if last == nil || run.CreationTimestamp.After(last.CreationTimestamp.Time) {
 			last = run
@@ -426,7 +464,7 @@ func (r *AgentScheduleReconciler) agentScheduleRuns(ctx context.Context, schedul
 	if lastInterval != nil {
 		lastIntervalTemplate = lastInterval.Labels[agentRunTemplateLabel]
 	}
-	return active, last, lastIntervalTemplate, nil
+	return active, last, lastIntervalTemplate, runsToday, nil
 }
 
 func (r *AgentScheduleReconciler) createScheduledAgentRun(ctx context.Context, schedule *controlv1alpha1.AgentSchedule, now metav1.Time, request agentScheduleRunRequest) (*controlv1alpha1.AgentRun, string, error) {

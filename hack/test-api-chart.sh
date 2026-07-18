@@ -58,11 +58,13 @@ if rg -q '^kind: CustomResourceDefinition$' "${tmp_dir}/without-crds.yaml"; then
   fail "CRDs rendered while crds.install=false"
 fi
 [[ "$(rg -c 'helm.sh/resource-policy: keep' "${tmp_dir}/disabled.yaml")" -eq 9 ]] || fail "all nine CRDs must be retained on Helm uninstall"
+[[ "$(rg -c 'argocd.argoproj.io/sync-options: Prune=false' "${tmp_dir}/disabled.yaml")" -eq 9 ]] || fail "all nine CRDs must be retained during Argo ownership transfer"
 for crd in agentharnessprofiles agentskillsets; do
   rg -q "name: ${crd}\.control\.anvil\.hazyforge\.io" "${tmp_dir}/disabled.yaml" || fail "${crd} CRD was not rendered"
 done
 rg -q 'harnessProfileRef:' "${tmp_dir}/disabled.yaml" || fail "composition harnessProfileRef schema is missing"
 rg -q 'skillSets:' "${tmp_dir}/disabled.yaml" || fail "composition skillSets schema is missing"
+rg -q 'maxRunsPerDay:' "${tmp_dir}/disabled.yaml" || fail "AgentSchedule daily run budget schema is missing"
 helm template "${release}" "${chart}" --show-only templates/clusterrole.yaml >"${tmp_dir}/controller-rbac.yaml"
 for resource in agentharnessprofiles agentskillsets; do
   rg -q "${resource}" "${tmp_dir}/controller-rbac.yaml" || fail "controller RBAC is missing ${resource}"
