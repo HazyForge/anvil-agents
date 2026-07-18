@@ -36,7 +36,9 @@ spec:
             - --platform-repository-url={{ .Values.platformContext.repositoryURL }}
             - --platform-docs={{ join "," .Values.platformContext.docs }}
             - --adverse-source-gvks={{ join "," .Values.adverseSourceGVKs }}
-            - {{ printf "--adverse-sources-json=%s" (toJson .Values.adverseSources) | quote }}
+            {{- with .Values.adverseSources }}
+            - {{ printf "--adverse-sources-json=%s" (toJson .) | quote }}
+            {{- end }}
             - --github-api-allowed-hosts={{ join "," .Values.githubAPI.allowedHosts }}
             - --allow-insecure-github-api={{ .Values.githubAPI.allowInsecure }}
             - --runner-image-codex={{ .Values.runnerImages.codex }}

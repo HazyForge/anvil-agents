@@ -110,7 +110,7 @@ type ExternalVolumeSyncStatus struct {
 }
 
 type VolumeProfileSpec struct {
-	// ApplicationRef optionally scopes this profile to one Application.
+	// ApplicationRef optionally scopes this profile to one opaque application key.
 	// +optional
 	ApplicationRef *ApplicationReferenceSpec `json:"applicationRef,omitempty"`
 	// Description documents the reusable storage shape in human terms.

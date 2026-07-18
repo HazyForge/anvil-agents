@@ -153,11 +153,13 @@ audience, and explicit namespace authorization bindings are configured. See
 - [AgentRun API reference](docs/agent-run.md)
 - [Migration from Anvil Primaris](docs/migration-from-anvil-primaris.md)
 
-Hazy Forge uses this same open-source runtime for its own agent system, but
-production cluster values, identities, secrets, routing, and application
-policy belong to the consuming deployment repository. The `.hazyforge/`
-files retained here are source-repository build and test contracts, not an
-installation dependency or bundled production environment.
+Hazy Forge uses this same open-source runtime for its own agent system. The
+repository-local `.hazyforge/artifact-build.yaml` and `.hazyforge/tests.yaml`
+files are maintainer build and test contracts. The
+`.hazyforge/clusters/anvil-primaris/` tree is an optional Hazy Forge consumer
+deployment with environment-specific identity, credentials, routing, storage,
+placement, and image pins. None of those files is a chart default or runtime
+dependency; other consumers provide their own Helm values or GitOps layer.
 
 ## Project Status
 

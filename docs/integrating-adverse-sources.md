@@ -72,7 +72,10 @@ terminal `Rejected`. The controller never auto-creates a signal destination.
 
 The minimal reporter role is in
 [`examples/adverse-signals/reporter-rbac.yaml`](../examples/adverse-signals/reporter-rbac.yaml).
-It grants only `create`, `get`, `list`, and `watch` on signals. Do not grant
+It grants only `create` on signals. This write-only role cannot read evidence
+submitted by other reporters in the namespace. If a reporter must observe
+acceptance status, grant `get`, `list`, and `watch` through a separate observer
+role only when namespace-wide signal visibility is acceptable. Do not grant
 signal status, update, patch, delete, situation mutation, runs, profiles, or
 Secrets to an ordinary reporter.
 

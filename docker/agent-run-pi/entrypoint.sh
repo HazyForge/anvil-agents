@@ -21,6 +21,7 @@ pi_home="${ANVIL_PI_USER_HOME:-${pi_root}/home}"
 pi_xai_extension="${ANVIL_PI_XAI_EXTENSION:-/usr/local/lib/node_modules/pi-xai-oauth/extensions/xai-oauth.ts}"
 
 source /opt/anvil-agent-run/lib/github-auth.sh
+source /opt/anvil-agent-run/lib/repository-checkout.sh
 
 mkdir -p "$(dirname "${status_file}")" "${pi_agent_dir}" "${pi_session_dir}" "${pi_home}/.grok" "${workdir}"
 : > "${status_file}"
@@ -126,8 +127,7 @@ if truthy "${ANVIL_AGENT_RUN_AUTO_CLONE_REPO:-true}" && [[ ! -d .git ]]; then
 fi
 
 if [[ -d .git && -n "${repository_ref}" ]]; then
-	git fetch --all --prune >/dev/null 2>&1 || { echo "ANVIL_AGENT_RUN_REPO_FETCH_FAILED" >&2; exit 21; }
-	git checkout "${repository_ref}" >/dev/null 2>&1 || git checkout -B agentrun-work "origin/${repository_ref}" >/dev/null 2>&1 || { echo "ANVIL_AGENT_RUN_REPO_CHECKOUT_FAILED ref=${repository_ref}" >&2; exit 22; }
+	anvil_checkout_repository_ref "${repository_ref}" || exit $?
 fi
 
 run_tool_setup

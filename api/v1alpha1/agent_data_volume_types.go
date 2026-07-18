@@ -16,9 +16,9 @@ const (
 
 // +kubebuilder:validation:XValidation:rule="has(self.claimName) == has(oldSelf.claimName) && (!has(self.claimName) || self.claimName == oldSelf.claimName)",message="spec.claimName is immutable; migrate data through a new AgentDataVolume"
 type AgentDataVolumeSpec struct {
-	// ApplicationRef scopes this durable home to one Application. New
-	// application-manager-owned volumes must set it; legacy unscoped volumes
-	// remain readable during migration.
+	// ApplicationRef scopes this durable home to one opaque application key. New
+	// application-scoped volumes must set it; legacy unscoped volumes remain
+	// readable during migration.
 	// +optional
 	ApplicationRef *ApplicationReferenceSpec `json:"applicationRef,omitempty"`
 	// AgentName is the stable logical agent identity this storage belongs to.

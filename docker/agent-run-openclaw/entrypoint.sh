@@ -19,6 +19,7 @@ openclaw_workspace="${OPENCLAW_WORKSPACE_DIR:-/opt/anvil/openclaw/workspace}"
 codex_home="${CODEX_HOME:-/codex-home}"
 
 source /opt/anvil-agent-run/lib/github-auth.sh
+source /opt/anvil-agent-run/lib/repository-checkout.sh
 
 mkdir -p "$(dirname "${status_file}")" "${openclaw_state}" "${openclaw_workspace}" "${codex_home}" "${workdir}"
 : > "${status_file}"
@@ -127,8 +128,7 @@ if truthy "${ANVIL_AGENT_RUN_AUTO_CLONE_REPO:-true}" && [[ ! -d .git ]]; then
 fi
 
 if [[ -d .git && -n "${repository_ref}" ]]; then
-	git fetch --all --prune >/dev/null 2>&1 || { echo "ANVIL_AGENT_RUN_REPO_FETCH_FAILED" >&2; exit 21; }
-	git checkout "${repository_ref}" >/dev/null 2>&1 || git checkout -B agentrun-work "origin/${repository_ref}" >/dev/null 2>&1 || { echo "ANVIL_AGENT_RUN_REPO_CHECKOUT_FAILED ref=${repository_ref}" >&2; exit 22; }
+	anvil_checkout_repository_ref "${repository_ref}" || exit $?
 fi
 
 run_tool_setup

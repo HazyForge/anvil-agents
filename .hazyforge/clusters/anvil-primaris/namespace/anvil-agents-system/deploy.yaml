@@ -1,0 +1,96 @@
+helmChartPath: charts/anvil-agents
+
+# Optional Hazy Forge consumer deployment discovered by the Anvil Primaris
+# remote Helm ApplicationSet. Portable installations do not depend on it.
+# Run one leader-elected controller in the system namespace. Agent workloads
+# are distributed independently across eligible cluster nodes.
+replicaCount: 1
+serviceAccount:
+  name: anvil-agents
+image:
+  reference: ghcr.io/hazyforge/anvil-agents@sha256:387b37dfa3c1940b858dc02dbd93ffd29b497cfeb24dcf35d9b9bb8421ddaffa
+  pullPolicy: IfNotPresent
+imagePullSecrets:
+  - name: ghcr-creds
+runnerImages:
+  codex: ghcr.io/hazyforge/anvil-agent-run-codex@sha256:d89acf145d0db4a386c69214b1764c3199c7b1656487b619ffd3a86f7c9f0e47
+  hermesAgent: ghcr.io/hazyforge/anvil-agent-run-hermes@sha256:afd4f3d4858062835ac27bac52f529a429b949ee632a79f6c13546374782328f
+  openClaw: ghcr.io/hazyforge/anvil-agent-run-openclaw@sha256:58d70d53acc2a1267eed0d62e867d8cc804bd6e467f6dc908170c0a2225ff2ee
+  grokBuild: ghcr.io/hazyforge/anvil-agent-run-grok-build@sha256:a67289b5e3021ec4303185fca3c6f11d18b656be999c24279885ed74855a7194
+  piAgent: ghcr.io/hazyforge/anvil-agent-run-pi@sha256:48e051914e51d7af3017fd5c09ad29753760e45ec23fd4a1ca93608bec499143
+crds:
+  install: true
+leaderElection: true
+applicationMaxConcurrentRuns: 4
+defaultStorageClass: observability-local
+externalSecrets:
+  enabled: true
+# Keep the legacy source list until this overlay pins a controller image that
+# supports structured adverseSources. The chart omits the new flag while the
+# structured list is empty, preserving compatibility with this pinned image.
+adverseSourceGVKs:
+  - control.anvil.hazyforge.io/v1alpha1/ApplicationRelease
+  - control.anvil.hazyforge.io/v1alpha1/ArtifactBuild
+  - control.anvil.hazyforge.io/v1alpha1/IOSBuild
+  - control.anvil.hazyforge.io/v1alpha1/AnvilTask
+  - control.anvil.hazyforge.io/v1alpha1/TestRun
+extraRBACRules:
+  - apiGroups: [control.anvil.hazyforge.io]
+    resources: [applicationreleases, artifactbuilds, iosbuilds, anviltasks, testruns]
+    verbs: [get, list, watch]
+archive:
+  databaseURLSecret:
+    name: anvilhub-inventory-database
+    key: database-url
+  terminalRetention: 72h
+# The read-only API uses the existing Anvil Primaris resource audience and an
+# explicit compatibility binding. Replace this administrative role with the
+# narrower anvil_agents_viewer role when that role is provisioned in ZITADEL.
+api:
+  enabled: true
+  config:
+    oidc:
+      issuer: https://hazyforge1-azsbgb.us1.zitadel.cloud
+      audiences:
+        - "376124473528572432"
+    authorization:
+      roleClaims: []
+      roleObjectClaims:
+        - urn:zitadel:iam:org:project:376124473528572432:roles
+      bindings:
+        - name: anvil-primaris-admin-compatibility
+          roles:
+            - anvil_primaris_admin
+          permissions:
+            - anvil-agents:runs:read
+            - anvil-agents:runs:stream
+          namespaces:
+            - anvilhub
+            - hazy-trade
+  httpRoute:
+    enabled: true
+    parentRefs:
+      - name: gateway
+        namespace: gateway
+        sectionName: https-agents-anvil-hazyforge-io
+    hostnames:
+      - agents.anvil.hazyforge.io
+extraVolumes:
+  - name: anvilhub-inventory-database
+    secret:
+      secretName: anvilhub-inventory-database
+extraVolumeMounts:
+  - name: anvilhub-inventory-database
+    mountPath: /etc/anvilhub/inventory-database
+    readOnly: true
+nodeSelector:
+  kubernetes.io/arch: amd64
+affinity:
+  podAffinity:
+    requiredDuringSchedulingIgnoredDuringExecution:
+      - labelSelector:
+          matchLabels:
+            app.kubernetes.io/name: anvilhub
+        namespaces:
+          - anvilhub
+        topologyKey: kubernetes.io/hostname

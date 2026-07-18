@@ -20,6 +20,8 @@ repository_url="${ANVIL_AGENT_RUN_REPOSITORY_URL:-}"
 repository_ref="${ANVIL_AGENT_RUN_REPOSITORY_REF:-}"
 github_host="${ANVIL_GITHUB_HOST:-github.com}"
 
+source /opt/anvil-agent-run/lib/repository-checkout.sh
+
 mkdir -p "$(dirname "${status_file}")"
 : > "${status_file}"
 export ANVIL_AGENT_RUN_STATUS_FILE="${status_file}"
@@ -251,8 +253,7 @@ if truthy "${ANVIL_AGENT_RUN_AUTO_CLONE_REPO:-true}" && [[ ! -d .git ]]; then
 fi
 
 if [[ -d .git && -n "${repository_ref}" ]]; then
-	git fetch --all --prune >/dev/null 2>&1 || { echo "ANVIL_AGENT_RUN_REPO_FETCH_FAILED" >&2; exit 21; }
-	git checkout "${repository_ref}" >/dev/null 2>&1 || git checkout -B agentrun-work "origin/${repository_ref}" >/dev/null 2>&1 || { echo "ANVIL_AGENT_RUN_REPO_CHECKOUT_FAILED ref=${repository_ref}" >&2; exit 22; }
+	anvil_checkout_repository_ref "${repository_ref}" || exit $?
 fi
 
 run_tool_setup

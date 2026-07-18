@@ -51,7 +51,7 @@ spec:
             properties:
               applicationRef:
                 description: ApplicationRef optionally scopes this profile to one
-                  Application.
+                  opaque application key.
                 properties:
                   name:
                     minLength: 1

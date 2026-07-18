@@ -86,14 +86,16 @@ repository mutation, or delivery. Those operations remain behind the existing
 policy broker. See [live-agent-run-stream.md](live-agent-run-stream.md) for the
 full provider-neutral configuration and access-token contract.
 
-Keep the initial safe stage in the consumer's deployment repository:
-`replicaCount: 0`, `crds.install: true`, and immutable references for the
-controller plus five runner images before scaling the controller. Anvil
-Primaris keeps its production values and explicit Argo Application under
-`manifests/overlays/cluster-apps/anvil-primaris-agents`; the public runtime
-repository does not contain that cluster overlay. Other consumers should keep
-identity, credentials, routes, storage, placement, image pins, and application
-policy in their own deployment layer.
+Keep the initial safe stage in the consumer deployment: `replicaCount: 0`,
+`crds.install: true`, and immutable references for the controller plus five
+runner images before scaling the controller. This repository retains Hazy
+Forge's optional consumer values and manifests under
+`.hazyforge/clusters/anvil-primaris/`. The Anvil Primaris repository owns the
+supporting remote ApplicationSet discovery under
+`manifests/bases/argocd-remote-apps` and its cluster instance configuration.
+Neither layer is a portable runtime prerequisite. Other consumers should keep identity,
+credentials, routes, storage, placement, image pins, and application policy in
+their own deployment layer.
 
 ## Storage compatibility
 

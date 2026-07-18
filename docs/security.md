@@ -28,12 +28,13 @@ NetworkPolicy. Never place broad production or cluster-admin credentials in an
 agent namespace.
 
 Creating an `AdverseSignal` is incident-trigger authority for enabled
-`AdverseSituation` responders in that namespace. A reporter role should grant
-only `create`, `get`, `list`, and `watch` on signals. Kubernetes RBAC cannot
-restrict create permission by destination name, so separate trust domains by
-namespace or use admission policy. Signal messages, links, source URLs, and
-external status fields are untrusted evidence, never instructions or implicit
-fetch requests.
+`AdverseSituation` responders in that namespace. A write-only reporter role
+should grant only `create` on signals. Grant `get`, `list`, and `watch` through
+a separate observer role only when that subject may read every signal in the
+namespace. Kubernetes RBAC cannot restrict create permission by destination
+name, so separate trust domains by namespace or use admission policy. Signal
+messages, links, source URLs, and external status fields are untrusted
+evidence, never instructions or implicit fetch requests.
 
 The chart controller ClusterRole is cluster-wide because the operator can
 watch multiple namespaces. `watchNamespaces` narrows the controller cache, not

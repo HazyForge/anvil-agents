@@ -51,6 +51,9 @@ document_exists() {
 helm lint "${chart}" >/dev/null
 helm template "${release}" "${chart}" >"${tmp_dir}/disabled.yaml"
 helm template "${release}" "${chart}" --set crds.install=false >"${tmp_dir}/without-crds.yaml"
+if grep -Fq -- '--adverse-sources-json=' "${tmp_dir}/disabled.yaml"; then
+  fail "structured adverse source flag rendered with empty adverseSources"
+fi
 if document_exists "${tmp_dir}/disabled.yaml" Deployment contract-anvil-agents-api; then
   fail "API resources rendered while api.enabled=false"
 fi
@@ -77,6 +80,12 @@ helm template "${release}" "${chart}" \
   --show-only templates/clusterrole.yaml >"${tmp_dir}/controller-rbac-adverse-source.yaml"
 grep -q 'apiGroups: \["apps.example.io"\]' "${tmp_dir}/controller-rbac-adverse-source.yaml" || fail "structured adverse source API group RBAC is missing"
 grep -q 'resources: \["releases"\]' "${tmp_dir}/controller-rbac-adverse-source.yaml" || fail "structured adverse source resource RBAC is missing"
+helm template "${release}" "${chart}" \
+  --set-json 'adverseSources=[{"apiVersion":"apps.example.io/v1","kind":"Release","resource":"releases","situationRef":{"name":"release-health"}}]' \
+  --show-only templates/deployment.yaml >"${tmp_dir}/controller-deployment-adverse-source.yaml"
+grep -Fq -- '--adverse-sources-json=' "${tmp_dir}/controller-deployment-adverse-source.yaml" || fail "structured adverse source controller flag is missing"
+grep -Fq 'apps.example.io/v1' "${tmp_dir}/controller-deployment-adverse-source.yaml" || fail "structured adverse source controller flag lost its API version"
+grep -Fq 'release-health' "${tmp_dir}/controller-deployment-adverse-source.yaml" || fail "structured adverse source controller flag lost its destination"
 if grep -q 'external-secrets.io' "${tmp_dir}/controller-rbac.yaml"; then
   fail "ExternalSecrets RBAC rendered while externalSecrets.enabled=false"
 fi

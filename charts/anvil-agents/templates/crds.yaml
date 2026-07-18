@@ -3230,9 +3230,9 @@ spec:
                 type: string
               applicationRef:
                 description: |-
-                  ApplicationRef scopes this durable home to one Application. New
-                  application-manager-owned volumes must set it; legacy unscoped volumes
-                  remain readable during migration.
+                  ApplicationRef scopes this durable home to one opaque application key. New
+                  application-scoped volumes must set it; legacy unscoped volumes remain
+                  readable during migration.
                 properties:
                   name:
                     minLength: 1
@@ -6070,8 +6070,8 @@ spec:
             properties:
               applicationRef:
                 description: |-
-                  ApplicationRef identifies the cluster-scoped Application whose AgentRun
-                  launches are governed by this control.
+                  ApplicationRef identifies the opaque application scope key whose AgentRun
+                  launches are governed by this cluster-scoped control.
                 properties:
                   name:
                     minLength: 1
@@ -17743,7 +17743,7 @@ spec:
             properties:
               applicationRef:
                 description: ApplicationRef optionally scopes this profile to one
-                  Application.
+                  opaque application key.
                 properties:
                   name:
                     minLength: 1
