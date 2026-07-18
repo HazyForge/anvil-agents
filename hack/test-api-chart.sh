@@ -54,35 +54,35 @@ helm template "${release}" "${chart}" --set crds.install=false >"${tmp_dir}/with
 if document_exists "${tmp_dir}/disabled.yaml" Deployment contract-anvil-agents-api; then
   fail "API resources rendered while api.enabled=false"
 fi
-if rg -q '^kind: CustomResourceDefinition$' "${tmp_dir}/without-crds.yaml"; then
+if grep -Eq '^kind: CustomResourceDefinition$' "${tmp_dir}/without-crds.yaml"; then
   fail "CRDs rendered while crds.install=false"
 fi
-[[ "$(rg -c 'helm.sh/resource-policy: keep' "${tmp_dir}/disabled.yaml")" -eq 9 ]] || fail "all nine CRDs must be retained on Helm uninstall"
-[[ "$(rg -c 'argocd.argoproj.io/sync-options: Prune=false' "${tmp_dir}/disabled.yaml")" -eq 9 ]] || fail "all nine CRDs must be retained during Argo ownership transfer"
+[[ "$(grep -c 'helm.sh/resource-policy: keep' "${tmp_dir}/disabled.yaml")" -eq 9 ]] || fail "all nine CRDs must be retained on Helm uninstall"
+[[ "$(grep -c 'argocd.argoproj.io/sync-options: Prune=false' "${tmp_dir}/disabled.yaml")" -eq 9 ]] || fail "all nine CRDs must be retained during Argo ownership transfer"
 for crd in agentharnessprofiles agentskillsets; do
-  rg -q "name: ${crd}\.control\.anvil\.hazyforge\.io" "${tmp_dir}/disabled.yaml" || fail "${crd} CRD was not rendered"
+  grep -Eq "name: ${crd}\.control\.anvil\.hazyforge\.io" "${tmp_dir}/disabled.yaml" || fail "${crd} CRD was not rendered"
 done
-rg -q 'harnessProfileRef:' "${tmp_dir}/disabled.yaml" || fail "composition harnessProfileRef schema is missing"
-rg -q 'skillSets:' "${tmp_dir}/disabled.yaml" || fail "composition skillSets schema is missing"
-rg -q 'maxRunsPerDay:' "${tmp_dir}/disabled.yaml" || fail "AgentSchedule daily run budget schema is missing"
+grep -q 'harnessProfileRef:' "${tmp_dir}/disabled.yaml" || fail "composition harnessProfileRef schema is missing"
+grep -q 'skillSets:' "${tmp_dir}/disabled.yaml" || fail "composition skillSets schema is missing"
+grep -q 'maxRunsPerDay:' "${tmp_dir}/disabled.yaml" || fail "AgentSchedule daily run budget schema is missing"
 helm template "${release}" "${chart}" --show-only templates/clusterrole.yaml >"${tmp_dir}/controller-rbac.yaml"
 for resource in agentharnessprofiles agentskillsets; do
-  rg -q "${resource}" "${tmp_dir}/controller-rbac.yaml" || fail "controller RBAC is missing ${resource}"
+  grep -q "${resource}" "${tmp_dir}/controller-rbac.yaml" || fail "controller RBAC is missing ${resource}"
 done
-if rg -q 'external-secrets.io' "${tmp_dir}/controller-rbac.yaml"; then
+if grep -q 'external-secrets.io' "${tmp_dir}/controller-rbac.yaml"; then
   fail "ExternalSecrets RBAC rendered while externalSecrets.enabled=false"
 fi
-rg -q 'resources: \["events"\]' "${tmp_dir}/controller-rbac.yaml" || fail "leader-election Event RBAC is missing"
-rg -q 'resources: \["storageclasses"\]' "${tmp_dir}/controller-rbac.yaml" || fail "WaitForFirstConsumer StorageClass RBAC is missing"
-if rg -q 'external-secrets.io' "${root_dir}/config/rbac/role.yaml"; then
+grep -q 'resources: \["events"\]' "${tmp_dir}/controller-rbac.yaml" || fail "leader-election Event RBAC is missing"
+grep -q 'resources: \["storageclasses"\]' "${tmp_dir}/controller-rbac.yaml" || fail "WaitForFirstConsumer StorageClass RBAC is missing"
+if grep -q 'external-secrets.io' "${root_dir}/config/rbac/role.yaml"; then
   fail "raw default RBAC must match externalSecrets.enabled=false"
 fi
 helm template "${release}" "${chart}" --set externalSecrets.enabled=true \
   --show-only templates/clusterrole.yaml >"${tmp_dir}/controller-rbac-external-secrets.yaml"
-rg -q 'external-secrets.io' "${tmp_dir}/controller-rbac-external-secrets.yaml" || fail "ExternalSecrets RBAC was not enabled"
+grep -q 'external-secrets.io' "${tmp_dir}/controller-rbac-external-secrets.yaml" || fail "ExternalSecrets RBAC was not enabled"
 helm template "${release}" "${chart}" --set-string runnerImages.codex=registry.example/codex@sha256:abc \
   --show-only templates/deployment.yaml >"${tmp_dir}/controller-runner-images.yaml"
-rg -q --fixed-strings -- '--runner-image-codex=registry.example/codex@sha256:abc' "${tmp_dir}/controller-runner-images.yaml" || fail "configured runner image was not rendered"
+grep -Fq -- '--runner-image-codex=registry.example/codex@sha256:abc' "${tmp_dir}/controller-runner-images.yaml" || fail "configured runner image was not rendered"
 
 helm template "${release}" "${chart}" "${api_args[@]}" >"${tmp_dir}/enabled.yaml"
 helm template "${release}" "${chart}" \
@@ -99,8 +99,8 @@ done
 
 helm template "${release}" "${chart}" "${api_args[@]}" \
   --show-only templates/api-clusterrole.yaml >"${tmp_dir}/rbac.yaml"
-rg -q 'resources: \["pods/log"\]' "${tmp_dir}/rbac.yaml" || fail "API RBAC cannot read pod logs"
-if rg -q '(^|[[:space:]])(secrets|watch|create|update|patch|delete)([[:space:]]|$)' "${tmp_dir}/rbac.yaml"; then
+grep -q 'resources: \["pods/log"\]' "${tmp_dir}/rbac.yaml" || fail "API RBAC cannot read pod logs"
+if grep -Eq '(^|[[:space:]])(secrets|watch|create|update|patch|delete)([[:space:]]|$)' "${tmp_dir}/rbac.yaml"; then
   fail "API RBAC contains a secret, watch, or mutation grant"
 fi
 
@@ -122,7 +122,7 @@ helm template "${release}" "${chart}" "${api_args[@]}" \
   --set-string api.oidcCA.restartToken=2026-07-17 \
   --set-string api.config.oidc.caFile=/etc/anvil-agents-api/oidc-ca/ca.crt \
   >"${tmp_dir}/ca.yaml"
-rg -q 'control.anvil.hazyforge.io/oidc-ca-restart: "2026-07-17"' "${tmp_dir}/ca.yaml" || fail "CA restart token was not rendered"
+grep -q 'control.anvil.hazyforge.io/oidc-ca-restart: "2026-07-17"' "${tmp_dir}/ca.yaml" || fail "CA restart token was not rendered"
 
 long_name="anvil-agents-release-with-a-name-long-enough-to-test-truncation-123456789"
 helm template "${release}" "${chart}" "${api_args[@]}" \
