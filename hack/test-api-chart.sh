@@ -75,6 +75,8 @@ for resource in agentharnessprofiles agentskillsets; do
   grep -q "${resource}" "${tmp_dir}/controller-rbac.yaml" || fail "controller RBAC is missing ${resource}"
 done
 grep -q 'adversesignals' "${tmp_dir}/controller-rbac.yaml" || fail "controller RBAC is missing adversesignals"
+grep -A1 'resources: \["adversesignals"\]' "${tmp_dir}/controller-rbac.yaml" | grep -q '"patch"' || fail "controller RBAC cannot patch AdverseSignal finalizers"
+grep -q 'adversesignals/finalizers' "${tmp_dir}/controller-rbac.yaml" || fail "controller RBAC is missing AdverseSignal finalizer updates"
 helm template "${release}" "${chart}" \
   --set-json 'adverseSources=[{"apiVersion":"apps.example.io/v1","kind":"Release","resource":"releases","situationRef":{"name":"release-health"}}]' \
   --show-only templates/clusterrole.yaml >"${tmp_dir}/controller-rbac-adverse-source.yaml"

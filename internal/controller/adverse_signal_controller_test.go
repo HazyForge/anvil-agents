@@ -7,6 +7,7 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -38,6 +39,9 @@ func TestAdverseSignalRecordsNamedSituationAndBecomesAccepted(t *testing.T) {
 	if storedSignal.Status.Phase != controlv1alpha1.AdverseSignalPhaseAccepted {
 		t.Fatalf("signal phase = %q, want Accepted", storedSignal.Status.Phase)
 	}
+	if len(storedSignal.Finalizers) != 0 {
+		t.Fatalf("accepted signal retained finalizers: %#v", storedSignal.Finalizers)
+	}
 	if storedSignal.Status.SituationUID != "situation-uid" || storedSignal.Status.EventID == "" {
 		t.Fatalf("accepted destination = %#v", storedSignal.Status)
 	}
@@ -55,6 +59,160 @@ func TestAdverseSignalRecordsNamedSituationAndBecomesAccepted(t *testing.T) {
 	}
 	if len(event.ReportIDs) != 0 {
 		t.Fatalf("accepted delivery receipts = %#v, want cleaned", event.ReportIDs)
+	}
+}
+
+func TestAdverseSignalInstallsReceiptFinalizerBeforeDelivery(t *testing.T) {
+	t.Parallel()
+
+	situation := &controlv1alpha1.AdverseSituation{
+		ObjectMeta: metav1.ObjectMeta{Name: "checkout-health", Namespace: "store", UID: types.UID("situation-uid")},
+	}
+	signal := testAdverseSignal("ProviderTimeout")
+	signal.Finalizers = nil
+	reconciler, c := testAdverseSignalReconciler(t, situation, signal)
+	request := ctrl.Request{NamespacedName: types.NamespacedName{Namespace: signal.Namespace, Name: signal.Name}}
+	result, err := reconciler.Reconcile(context.Background(), request)
+	if err != nil {
+		t.Fatalf("install receipt finalizer: %v", err)
+	}
+	if !result.Requeue {
+		t.Fatalf("initial finalizer install did not requeue")
+	}
+	storedSignal := &controlv1alpha1.AdverseSignal{}
+	if err := c.Get(context.Background(), client.ObjectKeyFromObject(signal), storedSignal); err != nil {
+		t.Fatalf("get signal: %v", err)
+	}
+	if len(storedSignal.Finalizers) != 1 || storedSignal.Finalizers[0] != adverseSignalReceiptFinalizer {
+		t.Fatalf("signal finalizers = %#v", storedSignal.Finalizers)
+	}
+	storedSituation := &controlv1alpha1.AdverseSituation{}
+	if err := c.Get(context.Background(), client.ObjectKeyFromObject(situation), storedSituation); err != nil {
+		t.Fatalf("get situation: %v", err)
+	}
+	if storedSituation.Status.EventCount != 0 || len(storedSituation.Status.Events) != 0 {
+		t.Fatalf("signal delivered before finalizer persisted: %#v", storedSituation.Status)
+	}
+}
+
+func TestTerminalAdverseSignalDoesNotReinstallReceiptFinalizer(t *testing.T) {
+	t.Parallel()
+
+	for _, phase := range []controlv1alpha1.AdverseSignalPhase{
+		controlv1alpha1.AdverseSignalPhaseAccepted,
+		controlv1alpha1.AdverseSignalPhaseRejected,
+	} {
+		phase := phase
+		t.Run(string(phase), func(t *testing.T) {
+			situation := &controlv1alpha1.AdverseSituation{
+				ObjectMeta: metav1.ObjectMeta{Name: "checkout-health", Namespace: "store", UID: types.UID("situation-uid")},
+			}
+			signal := testAdverseSignal("ProviderTimeout")
+			signal.Status.Phase = phase
+			reconciler, c := testAdverseSignalReconciler(t, situation, signal)
+			request := ctrl.Request{NamespacedName: types.NamespacedName{Namespace: signal.Namespace, Name: signal.Name}}
+
+			for attempt := 0; attempt < 2; attempt++ {
+				if _, err := reconciler.Reconcile(context.Background(), request); err != nil {
+					t.Fatalf("reconcile terminal signal attempt %d: %v", attempt+1, err)
+				}
+			}
+
+			storedSignal := &controlv1alpha1.AdverseSignal{}
+			if err := c.Get(context.Background(), client.ObjectKeyFromObject(signal), storedSignal); err != nil {
+				t.Fatalf("get signal: %v", err)
+			}
+			if len(storedSignal.Finalizers) != 0 {
+				t.Fatalf("terminal signal reinstalled finalizers: %#v", storedSignal.Finalizers)
+			}
+		})
+	}
+}
+
+func TestAcceptedSignalWithoutFinalizerClearsPreUpgradeReceipt(t *testing.T) {
+	t.Parallel()
+
+	situation := &controlv1alpha1.AdverseSituation{
+		ObjectMeta: metav1.ObjectMeta{Name: "checkout-health", Namespace: "store", UID: types.UID("situation-uid")},
+	}
+	signal := testAdverseSignal("ProviderTimeout")
+	event, reportID := adverseSignalEvent(signal, situation)
+	now := metav1.Now()
+	event.ReportIDs = []string{reportID}
+	event.Count = 1
+	event.FirstSeenAt = &now
+	event.LastSeenAt = &now
+	situation.Status = controlv1alpha1.AdverseSituationStatus{
+		Phase:      controlv1alpha1.AdverseSituationPhaseOpen,
+		Sequence:   1,
+		EventCount: 1,
+		Events:     []controlv1alpha1.AdverseSituationEvent{event},
+	}
+	signal.Finalizers = nil
+	signal.Status.Phase = controlv1alpha1.AdverseSignalPhaseAccepted
+
+	reconciler, c := testAdverseSignalReconciler(t, situation, signal)
+	request := ctrl.Request{NamespacedName: types.NamespacedName{Namespace: signal.Namespace, Name: signal.Name}}
+	if _, err := reconciler.Reconcile(context.Background(), request); err != nil {
+		t.Fatalf("reconcile pre-upgrade accepted signal: %v", err)
+	}
+
+	storedSituation := &controlv1alpha1.AdverseSituation{}
+	if err := c.Get(context.Background(), client.ObjectKeyFromObject(situation), storedSituation); err != nil {
+		t.Fatalf("get situation: %v", err)
+	}
+	if len(storedSituation.Status.Events) != 1 || len(storedSituation.Status.Events[0].ReportIDs) != 0 {
+		t.Fatalf("accepted signal left pre-upgrade receipt behind: %#v", storedSituation.Status.Events)
+	}
+	storedSignal := &controlv1alpha1.AdverseSignal{}
+	if err := c.Get(context.Background(), client.ObjectKeyFromObject(signal), storedSignal); err != nil {
+		t.Fatalf("get signal: %v", err)
+	}
+	if len(storedSignal.Finalizers) != 0 {
+		t.Fatalf("accepted signal installed finalizers during cleanup: %#v", storedSignal.Finalizers)
+	}
+}
+
+func TestDeletingSignalClearsReceiptBeforeFinalizerRemoval(t *testing.T) {
+	t.Parallel()
+
+	situation := &controlv1alpha1.AdverseSituation{
+		ObjectMeta: metav1.ObjectMeta{Name: "checkout-health", Namespace: "store", UID: types.UID("situation-uid")},
+	}
+	signal := testAdverseSignal("ProviderTimeout")
+	event, reportID := adverseSignalEvent(signal, situation)
+	now := metav1.Now()
+	event.ReportIDs = []string{reportID}
+	event.Count = 1
+	event.FirstSeenAt = &now
+	event.LastSeenAt = &now
+	situation.Status = controlv1alpha1.AdverseSituationStatus{
+		Phase:      controlv1alpha1.AdverseSituationPhaseOpen,
+		Sequence:   1,
+		EventCount: 1,
+		Events:     []controlv1alpha1.AdverseSituationEvent{event},
+	}
+	signal.DeletionTimestamp = &now
+
+	reconciler, c := testAdverseSignalReconciler(t, situation, signal)
+	request := ctrl.Request{NamespacedName: types.NamespacedName{Namespace: signal.Namespace, Name: signal.Name}}
+	if _, err := reconciler.Reconcile(context.Background(), request); err != nil {
+		t.Fatalf("reconcile deleting signal: %v", err)
+	}
+	storedSituation := &controlv1alpha1.AdverseSituation{}
+	if err := c.Get(context.Background(), client.ObjectKeyFromObject(situation), storedSituation); err != nil {
+		t.Fatalf("get situation: %v", err)
+	}
+	if len(storedSituation.Status.Events) != 1 || len(storedSituation.Status.Events[0].ReportIDs) != 0 {
+		t.Fatalf("deleting signal left receipt behind: %#v", storedSituation.Status.Events)
+	}
+	storedSignal := &controlv1alpha1.AdverseSignal{}
+	err := c.Get(context.Background(), client.ObjectKeyFromObject(signal), storedSignal)
+	if err == nil && len(storedSignal.Finalizers) != 0 {
+		t.Fatalf("deleting signal retained finalizer: %#v", storedSignal.Finalizers)
+	}
+	if err != nil && !apierrors.IsNotFound(err) {
+		t.Fatalf("get deleting signal: %v", err)
 	}
 }
 
@@ -384,7 +542,12 @@ func TestSignalEventRingBackpressuresBeforeEvictingReceipt(t *testing.T) {
 
 func testAdverseSignal(reason string) *controlv1alpha1.AdverseSignal {
 	return &controlv1alpha1.AdverseSignal{
-		ObjectMeta: metav1.ObjectMeta{Name: "checkout-alert-1", Namespace: "store", UID: types.UID("signal-uid")},
+		ObjectMeta: metav1.ObjectMeta{
+			Name:       "checkout-alert-1",
+			Namespace:  "store",
+			UID:        types.UID("signal-uid"),
+			Finalizers: []string{adverseSignalReceiptFinalizer},
+		},
 		Spec: controlv1alpha1.AdverseSignalSpec{
 			SituationRef: corev1.LocalObjectReference{Name: "checkout-health"},
 			SourceRef: controlv1alpha1.AgentRunSourceRef{

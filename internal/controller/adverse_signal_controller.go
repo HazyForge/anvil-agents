@@ -12,17 +12,20 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	controlv1alpha1 "github.com/hazyforge/anvil-agents/api/v1alpha1"
 )
 
 const (
-	adverseSignalAccepted       = "Accepted"
-	adverseSignalPendingRequeue = 15 * time.Second
+	adverseSignalAccepted         = "Accepted"
+	adverseSignalReceiptFinalizer = "control.anvil.hazyforge.io/adverse-signal-receipt"
+	adverseSignalPendingRequeue   = 15 * time.Second
 )
 
-// +kubebuilder:rbac:groups="control.anvil.hazyforge.io",resources=adversesignals,verbs=get;list;watch
+// +kubebuilder:rbac:groups="control.anvil.hazyforge.io",resources=adversesignals,verbs=get;list;patch;watch
 // +kubebuilder:rbac:groups="control.anvil.hazyforge.io",resources=adversesignals/status,verbs=get;patch;update
+// +kubebuilder:rbac:groups="control.anvil.hazyforge.io",resources=adversesignals/finalizers,verbs=update
 // +kubebuilder:rbac:groups="control.anvil.hazyforge.io",resources=adversesituations,verbs=get
 // +kubebuilder:rbac:groups="control.anvil.hazyforge.io",resources=adversesituations/status,verbs=get;patch;update
 type AdverseSignalReconciler struct {
@@ -36,13 +39,41 @@ func (r *AdverseSignalReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 	if !signal.GetDeletionTimestamp().IsZero() {
-		return ctrl.Result{}, nil
+		if !controllerutil.ContainsFinalizer(signal, adverseSignalReceiptFinalizer) {
+			return ctrl.Result{}, nil
+		}
+		result, err := r.clearAdverseSignalReceipt(ctx, signal, nil)
+		if err != nil || result.Requeue || result.RequeueAfter > 0 {
+			return result, err
+		}
+		return r.removeAdverseSignalFinalizer(ctx, client.ObjectKeyFromObject(signal))
 	}
 	if signal.Status.Phase == controlv1alpha1.AdverseSignalPhaseAccepted {
-		return r.clearAcceptedSignalReceipt(ctx, signal, nil)
+		result, err := r.clearAdverseSignalReceipt(ctx, signal, nil)
+		if err != nil || result.Requeue || result.RequeueAfter > 0 {
+			return result, err
+		}
+		if !controllerutil.ContainsFinalizer(signal, adverseSignalReceiptFinalizer) {
+			return ctrl.Result{}, nil
+		}
+		return r.removeAdverseSignalFinalizer(ctx, client.ObjectKeyFromObject(signal))
 	}
 	if signal.Status.Phase == controlv1alpha1.AdverseSignalPhaseRejected {
-		return ctrl.Result{}, nil
+		if !controllerutil.ContainsFinalizer(signal, adverseSignalReceiptFinalizer) {
+			return ctrl.Result{}, nil
+		}
+		return r.removeAdverseSignalFinalizer(ctx, client.ObjectKeyFromObject(signal))
+	}
+	if !controllerutil.ContainsFinalizer(signal, adverseSignalReceiptFinalizer) {
+		original := signal.DeepCopy()
+		controllerutil.AddFinalizer(signal, adverseSignalReceiptFinalizer)
+		if err := r.Patch(ctx, signal, client.MergeFrom(original)); err != nil {
+			if apierrors.IsConflict(err) {
+				return ctrl.Result{Requeue: true}, nil
+			}
+			return ctrl.Result{}, fmt.Errorf("install AdverseSignal receipt finalizer: %w", err)
+		}
+		return ctrl.Result{Requeue: true}, nil
 	}
 
 	if reason, message := adverseSignalValidationError(signal); reason != "" {
@@ -133,7 +164,11 @@ func (r *AdverseSignalReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	if err != nil || result.Requeue || result.RequeueAfter > 0 {
 		return result, err
 	}
-	return r.clearAcceptedSignalReceipt(ctx, signal, situation)
+	result, err = r.clearAdverseSignalReceipt(ctx, signal, situation)
+	if err != nil || result.Requeue || result.RequeueAfter > 0 {
+		return result, err
+	}
+	return r.removeAdverseSignalFinalizer(ctx, client.ObjectKeyFromObject(signal))
 }
 
 func adverseSignalValidationError(signal *controlv1alpha1.AdverseSignal) (string, string) {
@@ -196,21 +231,25 @@ func adverseSignalReportID(signal *controlv1alpha1.AdverseSignal) string {
 	return shortHash("adverse-signal-report/" + reportIdentity)
 }
 
-func (r *AdverseSignalReconciler) clearAcceptedSignalReceipt(ctx context.Context, signal *controlv1alpha1.AdverseSignal, situation *controlv1alpha1.AdverseSituation) (ctrl.Result, error) {
-	if signal == nil || signal.Status.Phase != controlv1alpha1.AdverseSignalPhaseAccepted {
+func (r *AdverseSignalReconciler) clearAdverseSignalReceipt(ctx context.Context, signal *controlv1alpha1.AdverseSignal, situation *controlv1alpha1.AdverseSituation) (ctrl.Result, error) {
+	if signal == nil {
 		return ctrl.Result{}, nil
 	}
 	if situation == nil {
-		if signal.Status.SituationRef == nil || strings.TrimSpace(signal.Status.SituationRef.Name) == "" {
+		situationName := strings.TrimSpace(signal.Spec.SituationRef.Name)
+		if signal.Status.SituationRef != nil && strings.TrimSpace(signal.Status.SituationRef.Name) != "" {
+			situationName = strings.TrimSpace(signal.Status.SituationRef.Name)
+		}
+		if situationName == "" {
 			return ctrl.Result{}, nil
 		}
 		situation = &controlv1alpha1.AdverseSituation{}
-		key := client.ObjectKey{Namespace: signal.Namespace, Name: signal.Status.SituationRef.Name}
+		key := client.ObjectKey{Namespace: signal.Namespace, Name: situationName}
 		if err := r.Get(ctx, key, situation); err != nil {
 			return ctrl.Result{}, client.IgnoreNotFound(err)
 		}
 	}
-	if string(situation.UID) != signal.Status.SituationUID {
+	if signal.Status.SituationUID != "" && string(situation.UID) != signal.Status.SituationUID {
 		return ctrl.Result{}, nil
 	}
 	reportID := adverseSignalReportID(signal)
@@ -234,7 +273,26 @@ func (r *AdverseSignalReconciler) clearAcceptedSignalReceipt(ctx context.Context
 		if apierrors.IsConflict(err) {
 			return ctrl.Result{Requeue: true}, nil
 		}
-		return ctrl.Result{}, fmt.Errorf("clear accepted AdverseSignal receipt: %w", err)
+		return ctrl.Result{}, fmt.Errorf("clear AdverseSignal receipt: %w", err)
+	}
+	return ctrl.Result{}, nil
+}
+
+func (r *AdverseSignalReconciler) removeAdverseSignalFinalizer(ctx context.Context, key client.ObjectKey) (ctrl.Result, error) {
+	signal := &controlv1alpha1.AdverseSignal{}
+	if err := r.Get(ctx, key, signal); err != nil {
+		return ctrl.Result{}, client.IgnoreNotFound(err)
+	}
+	if !controllerutil.ContainsFinalizer(signal, adverseSignalReceiptFinalizer) {
+		return ctrl.Result{}, nil
+	}
+	original := signal.DeepCopy()
+	controllerutil.RemoveFinalizer(signal, adverseSignalReceiptFinalizer)
+	if err := r.Patch(ctx, signal, client.MergeFrom(original)); err != nil {
+		if apierrors.IsConflict(err) {
+			return ctrl.Result{Requeue: true}, nil
+		}
+		return ctrl.Result{}, fmt.Errorf("remove AdverseSignal receipt finalizer: %w", err)
 	}
 	return ctrl.Result{}, nil
 }

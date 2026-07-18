@@ -74,7 +74,9 @@ new event would evict an unacknowledged receipt from the bounded event ring,
 new signals remain `Pending` with reason `SituationBusy` until receipt cleanup
 frees capacity. Pull ingress and new sequence creation apply the same
 backpressure; the controller never evicts an in-flight receipt or double-counts
-its retry.
+its retry. A narrow controller finalizer clears any persisted receipt before a
+signal deletion completes, preventing abandoned receipts from blocking the
+situation.
 
 The minimal reporter role is in
 [`examples/adverse-signals/reporter-rbac.yaml`](../examples/adverse-signals/reporter-rbac.yaml).
