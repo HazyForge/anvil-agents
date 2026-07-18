@@ -62,3 +62,12 @@ extraVolumeMounts:
     readOnly: true
 nodeSelector:
   kubernetes.io/arch: amd64
+affinity:
+  podAffinity:
+    requiredDuringSchedulingIgnoredDuringExecution:
+      - labelSelector:
+          matchLabels:
+            app.kubernetes.io/name: anvilhub
+        namespaces:
+          - anvilhub
+        topologyKey: kubernetes.io/hostname
