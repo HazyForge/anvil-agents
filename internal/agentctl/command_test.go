@@ -329,6 +329,49 @@ func TestRunDebugRejectsUnownedJobAndDoesNotTrustItsEvents(t *testing.T) {
 	}
 }
 
+func TestLikelyCauseSurfacesToolVerificationErrorBeforeJobBackoff(t *testing.T) {
+	run := testRun()
+	run.Status.Error = "Job has reached the specified backoff limit"
+	run.Status.Output = strings.Join([]string{
+		"ANVIL_AGENT_RUN_TOOL_VERIFY_START name=anvilctl",
+		`Error: unknown command "agent" for "anvilctl"`,
+		"Run 'anvilctl --help' for usage.",
+	}, "\n")
+
+	cause := likelyCause(run, nil, nil, nil)
+	if !strings.Contains(cause, "tool verification failed (name=anvilctl)") || !strings.Contains(cause, `unknown command "agent"`) {
+		t.Fatalf("likely cause = %q", cause)
+	}
+	if strings.Contains(cause, "backoff") {
+		t.Fatalf("generic backoff hid tool failure: %q", cause)
+	}
+}
+
+func TestLikelyCauseSurfacesRedactedToolFailureMarker(t *testing.T) {
+	run := testRun()
+	run.Status.Error = "Job has reached the specified backoff limit"
+	run.Status.Output = "ANVIL_AGENT_RUN_TOOL_CALL_FAILED name=knowledge-search error=<redacted>"
+
+	cause := likelyCause(run, nil, nil, nil)
+	if cause != "tool call failed: ANVIL_AGENT_RUN_TOOL_CALL_FAILED name=knowledge-search error=<redacted>" {
+		t.Fatalf("likely cause = %q", cause)
+	}
+}
+
+func TestLikelyCauseIgnoresUnassociatedModelErrorProse(t *testing.T) {
+	run := testRun()
+	run.Status.Error = "Job has reached the specified backoff limit"
+	run.Status.Output = strings.Join([]string{
+		"The model reviewed an example from the issue description.",
+		`Error: unknown command "agent" for "anvilctl"`,
+		"It concluded that the quoted example needs a regression test.",
+	}, "\n")
+
+	if cause := likelyCause(run, nil, nil, nil); cause != run.Status.Error {
+		t.Fatalf("model prose changed likely cause to %q", cause)
+	}
+}
+
 func testApp(backend Backend, output io.Writer) App {
 	return App{
 		In:  strings.NewReader(""),

@@ -737,6 +737,11 @@ func writeEvents(writer io.Writer, events []corev1.Event) {
 }
 
 func likelyCause(run *agentsv1alpha1.AgentRun, job *batchv1.Job, pod *corev1.Pod, events []corev1.Event) string {
+	if run.Status.Phase == agentsv1alpha1.AgentRunPhaseFailed {
+		if failure := agentRunToolFailure(run.Status.Output); failure != "" {
+			return failure
+		}
+	}
 	if text := strings.TrimSpace(run.Status.Error); text != "" {
 		return text
 	}
@@ -773,6 +778,47 @@ func likelyCause(run *agentsv1alpha1.AgentRun, job *batchv1.Job, pod *corev1.Pod
 		return "run completed successfully; no failure evidence found"
 	}
 	return "no single cause is recorded; inspect `anvil-agentctl run logs` for the verified agent container"
+}
+
+func agentRunToolFailure(output string) string {
+	lines := strings.Split(output, "\n")
+	for index, raw := range lines {
+		line := strings.TrimSpace(raw)
+		switch {
+		case hasHarnessMarker(line, "ANVIL_AGENT_RUN_TOOL_VERIFY_FAILED"):
+			return "tool verification failed: " + boundedDiagnostic(line)
+		case hasHarnessMarker(line, "ANVIL_AGENT_RUN_TOOL_CALL_FAILED"):
+			return "tool call failed: " + boundedDiagnostic(line)
+		case hasHarnessMarker(line, "ANVIL_AGENT_RUN_TOOL_VERIFY_START"):
+			if index+1 >= len(lines) {
+				continue
+			}
+			next := strings.TrimSpace(lines[index+1])
+			if len(next) < len("error:") || !strings.EqualFold(next[:len("error:")], "error:") {
+				continue
+			}
+			tool := strings.TrimSpace(strings.TrimPrefix(line, "ANVIL_AGENT_RUN_TOOL_VERIFY_START"))
+			if tool != "" {
+				return fmt.Sprintf("tool verification failed (%s): %s", boundedDiagnostic(tool), boundedDiagnostic(next))
+			}
+			return "tool verification failed: " + boundedDiagnostic(next)
+		}
+	}
+	return ""
+}
+
+func hasHarnessMarker(line, marker string) bool {
+	return line == marker || strings.HasPrefix(line, marker+" ")
+}
+
+func boundedDiagnostic(value string) string {
+	value = strings.TrimSpace(value)
+	const maxRunes = 500
+	runes := []rune(value)
+	if len(runes) > maxRunes {
+		return string(runes[:maxRunes])
+	}
+	return value
 }
 
 func childNamespace(parent, child string) string {
