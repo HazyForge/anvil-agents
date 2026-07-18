@@ -27,6 +27,13 @@ least-privilege RBAC, apply Pod Security Admission, and restrict egress with
 NetworkPolicy. Never place broad production or cluster-admin credentials in an
 agent namespace.
 
+`anvil-agentctl` uses the caller's kubeconfig and Kubernetes RBAC. It has no
+embedded service identity or authorization bypass. `run create` requires the
+caller to have `create` access to AgentRuns and never updates an existing run.
+The log command reads only the fixed `agent` container after verifying the
+controller-owned AgentRun-to-Job-to-Pod chain. The debug command marks child
+evidence as verified only after the same namespace and owner identities match.
+
 Creating an `AdverseSignal` is incident-trigger authority for enabled
 `AdverseSituation` responders in that namespace. A write-only reporter role
 should grant only `create` on signals. Grant `get`, `list`, and `watch` through

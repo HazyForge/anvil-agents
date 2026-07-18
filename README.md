@@ -43,6 +43,8 @@ references are opaque scope keys, not dependencies on other CRDs.
 - `AdverseSituation`: deduplicated event buffers with optional responders.
 - `AdverseSignal`: immutable, provider-neutral adverse evidence from any app.
 - `anvil-agents-api`: optional OIDC-protected summaries and live SSE logs.
+- `anvil-agentctl`: Kubernetes-authenticated creation and diagnosis of runs
+  without writing raw manifests.
 
 "Multi-harness" means every run uses one adapter behind a common payload,
 tool-bootstrap, and status contract. Schedules can distribute independent runs
@@ -86,6 +88,11 @@ harness, installs the chart, binds and mounts durable state, creates an
 
 See [Getting Started](docs/getting-started.md) for prerequisites, manual steps,
 existing-cluster installation, and cleanup.
+
+Operators with Kubernetes credentials can use `anvil-agentctl` to create one
+append-only run from a profile, inspect status, stream the verified runner
+container, and aggregate controller, Job, Pod, and Event evidence. See
+[AgentRun CLI](docs/cli.md).
 
 ## Build Without GitHub Actions
 
@@ -151,6 +158,7 @@ audience, and explicit namespace authorization bindings are configured. See
 - [Operations, upgrades, and uninstall](docs/operations.md)
 - [Design roadmap and known alpha boundaries](docs/design-roadmap.md)
 - [AgentRun API reference](docs/agent-run.md)
+- [Create and diagnose runs with anvil-agentctl](docs/cli.md)
 - [Migration from Anvil Primaris](docs/migration-from-anvil-primaris.md)
 
 Hazy Forge uses this same open-source runtime for its own agent system. The

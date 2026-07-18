@@ -1,0 +1,155 @@
+package agentctl
+
+import (
+	"context"
+	"fmt"
+	"io"
+	"strings"
+
+	batchv1 "k8s.io/api/batch/v1"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/fields"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/kubernetes"
+	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	"k8s.io/client-go/tools/clientcmd"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	agentsv1alpha1 "github.com/hazyforge/anvil-agents/api/v1alpha1"
+	"github.com/hazyforge/anvil-agents/internal/runapi"
+)
+
+type KubeOptions struct {
+	Kubeconfig string
+	Context    string
+}
+
+type Backend interface {
+	DefaultNamespace() string
+	CreateRun(context.Context, *agentsv1alpha1.AgentRun) error
+	ListRuns(context.Context, string, bool) (*agentsv1alpha1.AgentRunList, error)
+	GetRun(context.Context, string, string) (*agentsv1alpha1.AgentRun, error)
+	OpenLogs(context.Context, *agentsv1alpha1.AgentRun, corev1.PodLogOptions) (io.ReadCloser, error)
+	GetJob(context.Context, string, string) (*batchv1.Job, error)
+	GetPod(context.Context, string, string) (*corev1.Pod, error)
+	ListEvents(context.Context, string, []types.UID) ([]corev1.Event, error)
+}
+
+type KubernetesBackend struct {
+	runs             client.Client
+	clientset        kubernetes.Interface
+	defaultNamespace string
+}
+
+func NewKubernetesBackend(options KubeOptions) (Backend, error) {
+	loadingRules := clientcmd.NewDefaultClientConfigLoadingRules()
+	if path := strings.TrimSpace(options.Kubeconfig); path != "" {
+		loadingRules.ExplicitPath = path
+	}
+	overrides := &clientcmd.ConfigOverrides{CurrentContext: strings.TrimSpace(options.Context)}
+	loader := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(loadingRules, overrides)
+	namespace, _, err := loader.Namespace()
+	if err != nil {
+		return nil, fmt.Errorf("resolve Kubernetes namespace: %w", err)
+	}
+	if strings.TrimSpace(namespace) == "" {
+		namespace = "default"
+	}
+	restConfig, err := loader.ClientConfig()
+	if err != nil {
+		return nil, fmt.Errorf("load Kubernetes configuration: %w", err)
+	}
+	scheme := runtime.NewScheme()
+	if err := clientgoscheme.AddToScheme(scheme); err != nil {
+		return nil, fmt.Errorf("add Kubernetes API scheme: %w", err)
+	}
+	if err := agentsv1alpha1.AddToScheme(scheme); err != nil {
+		return nil, fmt.Errorf("add Anvil Agents API scheme: %w", err)
+	}
+	runClient, err := client.New(restConfig, client.Options{Scheme: scheme})
+	if err != nil {
+		return nil, fmt.Errorf("create AgentRun client: %w", err)
+	}
+	clientset, err := kubernetes.NewForConfig(restConfig)
+	if err != nil {
+		return nil, fmt.Errorf("create Kubernetes workload client: %w", err)
+	}
+	return &KubernetesBackend{runs: runClient, clientset: clientset, defaultNamespace: namespace}, nil
+}
+
+func (backend *KubernetesBackend) DefaultNamespace() string {
+	return backend.defaultNamespace
+}
+
+func (backend *KubernetesBackend) CreateRun(ctx context.Context, run *agentsv1alpha1.AgentRun) error {
+	if err := backend.runs.Create(ctx, run); err != nil {
+		return fmt.Errorf("create AgentRun: %w", err)
+	}
+	return nil
+}
+
+func (backend *KubernetesBackend) ListRuns(ctx context.Context, namespace string, allNamespaces bool) (*agentsv1alpha1.AgentRunList, error) {
+	list := &agentsv1alpha1.AgentRunList{}
+	var options []client.ListOption
+	if !allNamespaces {
+		options = append(options, client.InNamespace(namespace))
+	}
+	if err := backend.runs.List(ctx, list, options...); err != nil {
+		return nil, fmt.Errorf("list AgentRuns: %w", err)
+	}
+	return list, nil
+}
+
+func (backend *KubernetesBackend) GetRun(ctx context.Context, namespace, name string) (*agentsv1alpha1.AgentRun, error) {
+	run := &agentsv1alpha1.AgentRun{}
+	if err := backend.runs.Get(ctx, client.ObjectKey{Namespace: namespace, Name: name}, run); err != nil {
+		return nil, fmt.Errorf("get AgentRun %s/%s: %w", namespace, name, err)
+	}
+	return run, nil
+}
+
+func (backend *KubernetesBackend) OpenLogs(ctx context.Context, run *agentsv1alpha1.AgentRun, options corev1.PodLogOptions) (io.ReadCloser, error) {
+	stream, _, err := (runapi.KubernetesLogSource{Client: backend.clientset}).Open(ctx, run, options)
+	return stream, err
+}
+
+func (backend *KubernetesBackend) GetJob(ctx context.Context, namespace, name string) (*batchv1.Job, error) {
+	job, err := backend.clientset.BatchV1().Jobs(namespace).Get(ctx, name, metav1.GetOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("get Job %s/%s: %w", namespace, name, err)
+	}
+	return job, nil
+}
+
+func (backend *KubernetesBackend) GetPod(ctx context.Context, namespace, name string) (*corev1.Pod, error) {
+	pod, err := backend.clientset.CoreV1().Pods(namespace).Get(ctx, name, metav1.GetOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("get Pod %s/%s: %w", namespace, name, err)
+	}
+	return pod, nil
+}
+
+func (backend *KubernetesBackend) ListEvents(ctx context.Context, namespace string, uids []types.UID) ([]corev1.Event, error) {
+	events := make([]corev1.Event, 0)
+	seen := map[types.UID]struct{}{}
+	for _, uid := range uids {
+		if uid == "" {
+			continue
+		}
+		selector := fields.OneTermEqualSelector("involvedObject.uid", string(uid)).String()
+		list, err := backend.clientset.CoreV1().Events(namespace).List(ctx, metav1.ListOptions{FieldSelector: selector})
+		if err != nil {
+			return nil, fmt.Errorf("list Events for UID %s: %w", uid, err)
+		}
+		for _, event := range list.Items {
+			if _, ok := seen[event.UID]; ok && event.UID != "" {
+				continue
+			}
+			seen[event.UID] = struct{}{}
+			events = append(events, event)
+		}
+	}
+	return events, nil
+}
