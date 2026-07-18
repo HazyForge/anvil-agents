@@ -2832,6 +2832,9 @@ func (r *AgentRunReconciler) agentRunContextJSON(ctx context.Context, obj *contr
 		if err := r.Get(ctx, client.ObjectKey{Namespace: namespace, Name: strings.TrimSpace(obj.Spec.SituationRef.Name)}, situation); err == nil {
 			sanitized := situation.DeepCopy()
 			sanitized.Spec.Responders = controlv1alpha1.AdverseSituationRespondersSpec{}
+			for i := range sanitized.Status.Events {
+				sanitized.Status.Events[i].ReportIDs = nil
+			}
 			payload["adverseSituation"] = sanitized
 		}
 	}
@@ -2867,26 +2870,46 @@ func (r *AgentRunReconciler) platformContext() agentRunPlatformContext {
 }
 
 func agentRunTriggerForSource(obj *unstructured.Unstructured) (controlv1alpha1.AgentRunTriggerSnapshot, bool) {
-	statusMap, err := extractStatusMap(obj)
+	return agentRunTriggerForSourceWithClassifier(obj, AdverseSourceClassifier{})
+}
+
+func agentRunTriggerForSourceWithClassifier(obj *unstructured.Unstructured, configured AdverseSourceClassifier) (controlv1alpha1.AgentRunTriggerSnapshot, bool) {
+	if obj == nil {
+		return controlv1alpha1.AgentRunTriggerSnapshot{}, false
+	}
+	classifier := adverseSourceClassifierOrDefault(configured)
+	observedValue, _, err := unstructured.NestedFieldNoCopy(obj.Object, adverseSourceFieldPath(classifier.ObservedGenerationPath)...)
 	if err != nil {
 		return controlv1alpha1.AgentRunTriggerSnapshot{}, false
 	}
-	observedGeneration := int64FromMap(statusMap, "observedGeneration")
-	if observedGeneration == 0 || observedGeneration != obj.GetGeneration() {
+	observedGeneration := int64FromValue(observedValue)
+	if adverseSourceRequiresObservedGeneration(classifier) && (observedGeneration == 0 || observedGeneration != obj.GetGeneration()) {
 		return controlv1alpha1.AgentRunTriggerSnapshot{}, false
 	}
-
-	phase, _ := statusMap["phase"].(string)
-	conditions, _ := extractConditionsFromStatusMap(statusMap)
+	phaseValue, _, err := unstructured.NestedString(obj.Object, adverseSourceFieldPath(classifier.PhasePath)...)
+	if err != nil {
+		return controlv1alpha1.AgentRunTriggerSnapshot{}, false
+	}
+	conditionsValue, found, err := unstructured.NestedSlice(obj.Object, adverseSourceFieldPath(classifier.ConditionsPath)...)
+	if err != nil {
+		return controlv1alpha1.AgentRunTriggerSnapshot{}, false
+	}
+	var conditions []metav1.Condition
+	if found {
+		conditions, err = extractConditionsFromStatusMap(map[string]any{"conditions": conditionsValue})
+		if err != nil {
+			return controlv1alpha1.AgentRunTriggerSnapshot{}, false
+		}
+	}
 	now := metav1.Now()
 	trigger := controlv1alpha1.AgentRunTriggerSnapshot{
-		Phase:              strings.TrimSpace(phase),
+		Phase:              strings.TrimSpace(phaseValue),
 		ObservedGeneration: observedGeneration,
 		ResourceVersion:    obj.GetResourceVersion(),
 		DetectedAt:         &now,
 	}
 
-	if condition := agentRunNegativeCondition(conditions, phase); condition != nil {
+	if condition := agentRunNegativeConditionWithClassifier(conditions, phaseValue, obj.GetGeneration(), classifier); condition != nil {
 		trigger.ConditionType = condition.Type
 		trigger.ConditionStatus = condition.Status
 		trigger.Reason = condition.Reason
@@ -2894,43 +2917,67 @@ func agentRunTriggerForSource(obj *unstructured.Unstructured) (controlv1alpha1.A
 		trigger.ObservedGeneration = firstNonZero(condition.ObservedGeneration, observedGeneration)
 		return trigger, true
 	}
-	if agentRunNegativePhase(phase) {
+	if adverseSourceValueMatches(classifier.AdversePhases, phaseValue) {
 		trigger.Reason = obj.GetKind() + "NegativePhase"
-		trigger.Message = fmt.Sprintf("%s %s/%s reported phase %s.", obj.GetKind(), obj.GetNamespace(), obj.GetName(), strings.TrimSpace(phase))
+		trigger.Message = fmt.Sprintf("%s %s/%s reported phase %s.", obj.GetKind(), obj.GetNamespace(), obj.GetName(), strings.TrimSpace(phaseValue))
 		return trigger, true
 	}
 	return controlv1alpha1.AgentRunTriggerSnapshot{}, false
 }
 
-func agentRunNegativeCondition(conditions []metav1.Condition, phase string) *metav1.Condition {
+func agentRunNegativeConditionWithClassifier(conditions []metav1.Condition, phase string, generation int64, classifier AdverseSourceClassifier) *metav1.Condition {
 	for i := range conditions {
 		condition := conditions[i]
-		if condition.Status != metav1.ConditionTrue {
+		if condition.Status != metav1.ConditionTrue || adverseSourceConditionStale(condition, generation) {
 			continue
 		}
-		switch strings.ToLower(strings.TrimSpace(condition.Type)) {
-		case "failed", "needshuman", "actionrequired":
+		if adverseSourceValueMatches(classifier.AdverseConditionTypes, condition.Type) {
 			return &condition
 		}
 	}
-	if !agentRunNegativePhase(phase) {
+	if !adverseSourceValueMatches(classifier.AdversePhases, phase) {
 		return nil
 	}
 	for i := range conditions {
 		condition := conditions[i]
-		if strings.EqualFold(condition.Type, "Ready") && condition.Status == metav1.ConditionFalse {
+		if adverseSourceConditionStale(condition, generation) {
+			continue
+		}
+		if strings.EqualFold(condition.Type, classifier.DetailConditionType) && condition.Status == metav1.ConditionFalse {
 			return &condition
 		}
 	}
 	return nil
 }
 
-func agentRunNegativePhase(phase string) bool {
-	switch strings.ToLower(strings.TrimSpace(phase)) {
-	case "failed", "error", "needshuman", "actionrequired":
-		return true
+func adverseSourceConditionStale(condition metav1.Condition, generation int64) bool {
+	return condition.ObservedGeneration > 0 && generation > 0 && condition.ObservedGeneration != generation
+}
+
+func adverseSourceValueMatches(values []string, candidate string) bool {
+	for _, value := range values {
+		if strings.EqualFold(strings.TrimSpace(value), strings.TrimSpace(candidate)) {
+			return true
+		}
+	}
+	return false
+}
+
+func int64FromValue(value any) int64 {
+	switch typed := value.(type) {
+	case int64:
+		return typed
+	case int32:
+		return int64(typed)
+	case int:
+		return int64(typed)
+	case float64:
+		return int64(typed)
+	case json.Number:
+		parsed, _ := typed.Int64()
+		return parsed
 	default:
-		return false
+		return 0
 	}
 }
 

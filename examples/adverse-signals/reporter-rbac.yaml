@@ -1,0 +1,29 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: adverse-signal-reporter
+  namespace: agents
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: adverse-signal-reporter
+  namespace: agents
+rules:
+  - apiGroups: ["control.anvil.hazyforge.io"]
+    resources: ["adversesignals"]
+    verbs: ["create", "get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: adverse-signal-reporter
+  namespace: agents
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: adverse-signal-reporter
+subjects:
+  - kind: ServiceAccount
+    name: adverse-signal-reporter
+    namespace: agents

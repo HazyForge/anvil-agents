@@ -64,7 +64,7 @@ github_preflight() {
 	export ANVIL_AGENT_RUN_GITHUB_CAN_PUSH="false"
 
 	git config --global user.name "${ANVIL_AGENT_GIT_AUTHOR_NAME:-Anvil AgentRun}" >/dev/null 2>&1 || true
-	git config --global user.email "${ANVIL_AGENT_GIT_AUTHOR_EMAIL:-anvil-agent-run@users.noreply.github.com}" >/dev/null 2>&1 || true
+	git config --global user.email "${ANVIL_AGENT_GIT_AUTHOR_EMAIL:-agent-run@anvil-agents.invalid}" >/dev/null 2>&1 || true
 	git config --global init.defaultBranch "${ANVIL_AGENT_GIT_DEFAULT_BRANCH:-main}" >/dev/null 2>&1 || true
 
 	if [[ -z "${GH_TOKEN:-}" ]]; then
@@ -236,14 +236,14 @@ if truthy "${ANVIL_AGENT_RUN_AUTO_CLONE_REPO:-true}" && [[ ! -d .git ]]; then
 	if [[ -n "${repository_url}" ]]; then
 		if workspace_empty; then
 			echo "ANVIL_AGENT_RUN_REPO_CLONE repository_url_configured=true"
-			git clone "${repository_url}" . >/dev/null 2>&1 || echo "ANVIL_AGENT_RUN_REPO_CLONE_FAILED repository_url_configured=true"
+			git clone "${repository_url}" . >/dev/null 2>&1 || { echo "ANVIL_AGENT_RUN_REPO_CLONE_FAILED repository_url_configured=true" >&2; exit 20; }
 		else
 			echo "ANVIL_AGENT_RUN_REPO_CLONE_SKIPPED reason=workspace-not-empty"
 		fi
 	elif [[ -n "${repository}" ]]; then
 		if workspace_empty; then
 			echo "ANVIL_AGENT_RUN_REPO_CLONE repository=${repository}"
-			gh repo clone "${repository}" . >/dev/null 2>&1 || echo "ANVIL_AGENT_RUN_REPO_CLONE_FAILED repository=${repository}"
+			gh repo clone "${repository}" . >/dev/null 2>&1 || { echo "ANVIL_AGENT_RUN_REPO_CLONE_FAILED repository=${repository}" >&2; exit 20; }
 		else
 			echo "ANVIL_AGENT_RUN_REPO_CLONE_SKIPPED reason=workspace-not-empty repository=${repository}"
 		fi
@@ -251,8 +251,8 @@ if truthy "${ANVIL_AGENT_RUN_AUTO_CLONE_REPO:-true}" && [[ ! -d .git ]]; then
 fi
 
 if [[ -d .git && -n "${repository_ref}" ]]; then
-	git fetch --all --prune >/dev/null 2>&1 || true
-	git checkout "${repository_ref}" >/dev/null 2>&1 || git checkout -B agentrun-work "origin/${repository_ref}" >/dev/null 2>&1 || true
+	git fetch --all --prune >/dev/null 2>&1 || { echo "ANVIL_AGENT_RUN_REPO_FETCH_FAILED" >&2; exit 21; }
+	git checkout "${repository_ref}" >/dev/null 2>&1 || git checkout -B agentrun-work "origin/${repository_ref}" >/dev/null 2>&1 || { echo "ANVIL_AGENT_RUN_REPO_CHECKOUT_FAILED ref=${repository_ref}" >&2; exit 22; }
 fi
 
 run_tool_setup

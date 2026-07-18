@@ -70,6 +70,7 @@ func Run(ctx context.Context, options *Options) error {
 		{"AgentRunControl", (&AgentRunControlReconciler{Client: mgr.GetClient(), Scheme: mgr.GetScheme()}).SetupWithManager},
 		{"AgentRun", (&AgentRunReconciler{Client: mgr.GetClient(), Scheme: mgr.GetScheme(), CommonReconcilerOptions: common, AgentRunArchive: archiveStore}).SetupWithManager},
 		{"AgentSchedule", (&AgentScheduleReconciler{Client: mgr.GetClient(), Scheme: mgr.GetScheme()}).SetupWithManager},
+		{"AdverseSignal", (&AdverseSignalReconciler{Client: mgr.GetClient(), Scheme: mgr.GetScheme()}).SetupWithManager},
 		{"AdverseSituation", (&AdverseSituationReconciler{Client: mgr.GetClient(), Scheme: mgr.GetScheme()}).SetupWithManager},
 	}
 	for _, registration := range registrations {
@@ -77,7 +78,7 @@ func Run(ctx context.Context, options *Options) error {
 			return fmt.Errorf("setup %s controller: %w", registration.name, err)
 		}
 	}
-	if err := SetupAdverseSituationTriggerReconcilers(mgr, options.AdverseSourceGVKs); err != nil {
+	if err := SetupAdverseSituationTriggerReconcilers(mgr, options.AdverseSourceGVKs, options.AdverseSources); err != nil {
 		return err
 	}
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {

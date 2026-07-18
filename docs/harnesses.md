@@ -101,4 +101,6 @@ The built-in images honor their documented repository environment variables,
 but v0.1 does not have a provider-neutral repository source object. Supply
 repository URL/ref variables through a profile or Secret, or build source
 preparation into a custom image. Do not assume that `applicationRef` clones a
-repository; it is only scope metadata.
+repository; it is only scope metadata. When a built-in image is asked to clone
+or check out a repository, clone, fetch, and ref-resolution failures terminate
+the Job instead of silently running against an empty or wrong workspace.

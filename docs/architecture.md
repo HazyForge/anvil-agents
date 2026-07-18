@@ -100,3 +100,10 @@ an `AgentSkillSet`, provide their identities through an `AgentHarnessProfile`,
 and expose narrowly authorized service APIs. Keep provider-native semantics in
 harness profiles and product policy in run profiles rather than adding either
 to the controller core.
+
+Applications connect adverse events through the immutable `AdverseSignal`
+contract or an administrator-owned structured GVK watch. Both boundaries use
+generic references and unstructured status; the controller never imports the
+consumer's API. Reporters provide evidence only. The destination
+`AdverseSituation` remains the authority boundary that selects whether and how
+an agent responder may run.

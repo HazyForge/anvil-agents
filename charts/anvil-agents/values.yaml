@@ -37,6 +37,10 @@ platformContext:
     - internal/controller/agent_run_controller.go
 
 adverseSourceGVKs: []
+# Structured pull integrations. Each entry binds one exact Kubernetes resource
+# to a classifier and destination AdverseSituation. The chart derives read-only
+# RBAC from apiVersion/resource; no wildcard permissions are added.
+adverseSources: []
 githubAPI:
   allowedHosts:
     - api.github.com

@@ -13,7 +13,11 @@ func TestCompositionResourcesAreRegistered(t *testing.T) {
 	if err := AddToScheme(scheme); err != nil {
 		t.Fatalf("add agent scheme: %v", err)
 	}
-	for _, object := range []runtime.Object{&AgentHarnessProfile{}, &AgentHarnessProfileList{}, &AgentSkillSet{}, &AgentSkillSetList{}} {
+	for _, object := range []runtime.Object{
+		&AgentHarnessProfile{}, &AgentHarnessProfileList{},
+		&AgentSkillSet{}, &AgentSkillSetList{},
+		&AdverseSignal{}, &AdverseSignalList{},
+	} {
 		gvks, _, err := scheme.ObjectKinds(object)
 		if err != nil {
 			t.Fatalf("resolve kind for %T: %v", object, err)

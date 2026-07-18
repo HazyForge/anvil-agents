@@ -57,18 +57,26 @@ fi
 if grep -Eq '^kind: CustomResourceDefinition$' "${tmp_dir}/without-crds.yaml"; then
   fail "CRDs rendered while crds.install=false"
 fi
-[[ "$(grep -c 'helm.sh/resource-policy: keep' "${tmp_dir}/disabled.yaml")" -eq 9 ]] || fail "all nine CRDs must be retained on Helm uninstall"
-[[ "$(grep -c 'argocd.argoproj.io/sync-options: Prune=false' "${tmp_dir}/disabled.yaml")" -eq 9 ]] || fail "all nine CRDs must be retained during Argo ownership transfer"
-for crd in agentharnessprofiles agentskillsets; do
+[[ "$(grep -c 'helm.sh/resource-policy: keep' "${tmp_dir}/disabled.yaml")" -eq 10 ]] || fail "all ten CRDs must be retained on Helm uninstall"
+[[ "$(grep -c 'argocd.argoproj.io/sync-options: Prune=false' "${tmp_dir}/disabled.yaml")" -eq 10 ]] || fail "all ten CRDs must be retained during Argo ownership transfer"
+for crd in agentharnessprofiles agentskillsets adversesignals; do
   grep -Eq "name: ${crd}\.control\.anvil\.hazyforge\.io" "${tmp_dir}/disabled.yaml" || fail "${crd} CRD was not rendered"
 done
 grep -q 'harnessProfileRef:' "${tmp_dir}/disabled.yaml" || fail "composition harnessProfileRef schema is missing"
 grep -q 'skillSets:' "${tmp_dir}/disabled.yaml" || fail "composition skillSets schema is missing"
 grep -q 'maxRunsPerDay:' "${tmp_dir}/disabled.yaml" || fail "AgentSchedule daily run budget schema is missing"
+grep -q 'name: adversesignals.control.anvil.hazyforge.io' "${tmp_dir}/disabled.yaml" || fail "AdverseSignal CRD is missing"
+grep -q 'AdverseSignal spec is immutable' "${tmp_dir}/disabled.yaml" || fail "AdverseSignal immutability validation is missing"
 helm template "${release}" "${chart}" --show-only templates/clusterrole.yaml >"${tmp_dir}/controller-rbac.yaml"
 for resource in agentharnessprofiles agentskillsets; do
   grep -q "${resource}" "${tmp_dir}/controller-rbac.yaml" || fail "controller RBAC is missing ${resource}"
 done
+grep -q 'adversesignals' "${tmp_dir}/controller-rbac.yaml" || fail "controller RBAC is missing adversesignals"
+helm template "${release}" "${chart}" \
+  --set-json 'adverseSources=[{"apiVersion":"apps.example.io/v1","kind":"Release","resource":"releases","situationRef":{"name":"release-health"}}]' \
+  --show-only templates/clusterrole.yaml >"${tmp_dir}/controller-rbac-adverse-source.yaml"
+grep -q 'apiGroups: \["apps.example.io"\]' "${tmp_dir}/controller-rbac-adverse-source.yaml" || fail "structured adverse source API group RBAC is missing"
+grep -q 'resources: \["releases"\]' "${tmp_dir}/controller-rbac-adverse-source.yaml" || fail "structured adverse source resource RBAC is missing"
 if grep -q 'external-secrets.io' "${tmp_dir}/controller-rbac.yaml"; then
   fail "ExternalSecrets RBAC rendered while externalSecrets.enabled=false"
 fi

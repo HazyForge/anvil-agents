@@ -17,6 +17,8 @@ var (
 func addKnownTypes(scheme *runtime.Scheme) error {
 	scheme.AddKnownTypes(
 		GroupVersion,
+		&AdverseSignal{},
+		&AdverseSignalList{},
 		&AdverseSituation{},
 		&AdverseSituationList{},
 		&AgentDataVolume{},

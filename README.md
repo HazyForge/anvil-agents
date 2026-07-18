@@ -41,6 +41,7 @@ references are opaque scope keys, not dependencies on other CRDs.
 - `AgentRunControl`: cluster-wide pause and concurrency policy by scope key.
 - `AgentDataVolume` and `VolumeProfile`: explicit durable PVC-backed state.
 - `AdverseSituation`: deduplicated event buffers with optional responders.
+- `AdverseSignal`: immutable, provider-neutral adverse evidence from any app.
 - `anvil-agents-api`: optional OIDC-protected summaries and live SSE logs.
 
 "Multi-harness" means every run uses one adapter behind a common payload,
@@ -146,16 +147,17 @@ audience, and explicit namespace authorization bindings are configured. See
 - [Getting started](docs/getting-started.md)
 - [Harness contract and adapter matrix](docs/harnesses.md)
 - [Knowledge bases, tools, and external services](docs/integrating-knowledge-and-tools.md)
+- [Connect any application or Kubernetes API to adverse streams](docs/integrating-adverse-sources.md)
 - [Operations, upgrades, and uninstall](docs/operations.md)
 - [Design roadmap and known alpha boundaries](docs/design-roadmap.md)
 - [AgentRun API reference](docs/agent-run.md)
 - [Migration from Anvil Primaris](docs/migration-from-anvil-primaris.md)
 
-Hazy Forge uses this same open-source repository for its own agent system. Its
-`.hazyforge/` integration deploys into a dedicated namespace and remains an
-optional real-world example, not an installation prerequisite. Environment
-access is supplied through namespace-local ExternalSecrets; portable installs
-use the Helm values documented above.
+Hazy Forge uses this same open-source runtime for its own agent system, but
+production cluster values, identities, secrets, routing, and application
+policy belong to the consuming deployment repository. The `.hazyforge/`
+files retained here are source-repository build and test contracts, not an
+installation dependency or bundled production environment.
 
 ## Project Status
 
