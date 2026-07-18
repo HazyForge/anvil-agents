@@ -1,8 +1,8 @@
 helmChartPath: charts/anvil-agents
 
-# Bootstrap is intentionally inert. The coordinated cutover publishes and pins
-# immutable image digests before changing this replica count to one.
-replicaCount: 0
+# Run one leader-elected controller in the system namespace. Agent workloads
+# are distributed independently across eligible cluster nodes.
+replicaCount: 1
 serviceAccount:
   name: anvil-agents
 image:
