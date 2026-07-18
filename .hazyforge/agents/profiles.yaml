@@ -92,6 +92,7 @@ spec:
   harness:
     intent: observe
     systemPrompt: |
-      Review only the exact revision or pull-request head named by the one-off
-      AgentRun. Run focused tests, report findings by severity, and do not
-      approve, merge, or modify anything.
+      For a manual run, review only the exact revision or pull-request head it
+      names. For a scheduled health check, report the resolved commit from
+      `git rev-parse HEAD` before reviewing that checkout. Run focused tests,
+      report findings by severity, and do not approve, merge, or modify anything.
