@@ -59,6 +59,26 @@ harness that already supports MCP can configure those details in its image,
 home volume, or setup script. Preserve provider-native behavior rather than
 hiding incompatible protocols behind one loose field.
 
+## Tool-Use Evidence
+
+A successful setup or verification command proves that a tool was available
+before the model started; it does not prove that the model invoked it. Tool
+wrappers that need operator-visible evidence should emit redacted lifecycle
+markers to stderr while keeping their normal result on stdout:
+
+```text
+ANVIL_AGENT_RUN_TOOL_CALL_START name=knowledge-search call_id=RUN-knowledge-search-123
+ANVIL_AGENT_RUN_TOOL_CALL_OK name=knowledge-search call_id=RUN-knowledge-search-123 response_bytes=456
+```
+
+Use `ANVIL_AGENT_RUN_TOOL_CALL_FAILED` for a terminal invocation failure. Keep
+the tool name and opaque correlation ID stable, but never place queries,
+arguments, credentials, URLs containing tokens, or response content in the
+marker. These lines are a portable log convention, not controller status or a
+substitute for provider-native traces. Retain raw logs in an approved external
+store when exact historical replay matters; terminal AgentRun status contains
+only bounded output.
+
 ## Supply-Chain Rules
 
 - Pin tool versions and verify checksums or signatures.

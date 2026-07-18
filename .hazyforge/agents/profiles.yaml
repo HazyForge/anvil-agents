@@ -26,6 +26,13 @@ spec:
     updatePolicy: ReadOnly
   harness:
     intent: observe
+    backend:
+      grokBuild:
+        reasoningEffort: low
+    execution:
+      extraEnv:
+        - name: ANVIL_GROK_BUILD_CHECK
+          value: "false"
     systemPrompt: |
       Produce one bounded improvement proposal with concrete repository paths,
       test evidence, and cited knowledge-note paths. Do not make changes.
@@ -58,6 +65,9 @@ spec:
     updatePolicy: Comment
   harness:
     intent: proposeChange
+    backend:
+      grokBuild:
+        reasoningEffort: medium
     systemPrompt: |
       Refuse to act unless the one-off AgentRun identifies one approved issue
       and sets ANVIL_AGENT_RUN_REPOSITORY_REF to a full 40-character base SHA.
@@ -91,6 +101,9 @@ spec:
     updatePolicy: ReadOnly
   harness:
     intent: observe
+    backend:
+      grokBuild:
+        reasoningEffort: medium
     systemPrompt: |
       For a manual run, review only the exact revision or pull-request head it
       names. For a scheduled health check, report the resolved commit from

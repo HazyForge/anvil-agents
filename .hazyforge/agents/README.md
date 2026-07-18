@@ -39,7 +39,22 @@ no credential that the current unauthenticated deployment does not have.
 
 Start with one manually created scout run pinned to a full commit SHA. Confirm
 the log reports that exact `git rev-parse HEAD`, performs a real
-`knowledge-search`, cites returned note paths, and leaves the repository and
-cluster unchanged. Then run the independent reviewer. Keep the implementer
-manual-only; its AgentRun must identify one approved issue and inject an exact
-40-character `ANVIL_AGENT_RUN_REPOSITORY_REF`.
+`knowledge-search`, emits a matching redacted
+`ANVIL_AGENT_RUN_TOOL_CALL_START` / `ANVIL_AGENT_RUN_TOOL_CALL_OK` pair, cites
+returned note paths, and leaves the repository and cluster unchanged. A
+`TOOL_VERIFY_OK` line proves only preflight availability, not model use. Then
+run the independent reviewer. Keep the implementer manual-only; its AgentRun
+must identify one approved issue and inject an exact 40-character
+`ANVIL_AGENT_RUN_REPOSITORY_REF`.
+
+The wrapper requires a non-empty query and a working bounded search index. It
+fails with a redacted `reason=index-unavailable` marker rather than falling
+back to the service's unbounded raw-line search. Repair/rebuild the external
+service index separately rather than granting this fleet write access or
+placing broad personal knowledge excerpts into model context and Pod logs.
+
+The scout uses low Grok reasoning effort and skips Grok's extra `--check` loop
+to keep routine discovery bounded. The independent reviewer and implementer
+use medium effort; raise a one-off run to high only when the approved task
+needs it. Grok has no Codex-style response-verbosity setting, and plain output
+remains the normal human-readable log format.

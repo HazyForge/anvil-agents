@@ -58,18 +58,56 @@ spec:
           echo "usage: knowledge-search QUERY"
           exit 0
         fi
-        test -n "${KNOWLEDGE_BASE_URL:-}"
-        payload="$(jq -nc --arg query "$*" \
+        call_id="${ANVIL_AGENT_RUN:-unknown}-knowledge-search-$$"
+        if [ -z "${KNOWLEDGE_BASE_URL:-}" ]; then
+          printf 'ANVIL_AGENT_RUN_TOOL_CALL_FAILED name=knowledge-search call_id=%s reason=missing-url\n' \
+            "$call_id" >&2
+          exit 2
+        fi
+        query="$*"
+        case "$query" in
+          *[![:space:]]*) ;;
+          *)
+            printf 'ANVIL_AGENT_RUN_TOOL_CALL_FAILED name=knowledge-search call_id=%s reason=empty-query\n' \
+              "$call_id" >&2
+            exit 2
+            ;;
+        esac
+        payload="$(jq -nc --arg query "$query" \
           '{operation:"search-index",params:{query:$query,limit:10}}')"
-        set -- --fail --silent --show-error \
+        set -- --silent --show-error \
           --request POST \
           --header "Content-Type: application/json" \
           --header "Accept: application/json"
         if [ -n "${KNOWLEDGE_BASE_TOKEN:-}" ]; then
           set -- "$@" --header "Authorization: Bearer ${KNOWLEDGE_BASE_TOKEN}"
         fi
-        curl "$@" --data "$payload" \
-          "${KNOWLEDGE_BASE_URL%/}/v1/operations"
+        printf 'ANVIL_AGENT_RUN_TOOL_CALL_START name=knowledge-search call_id=%s\n' \
+          "$call_id" >&2
+        if response="$(curl "$@" --data "$payload" \
+          "${KNOWLEDGE_BASE_URL%/}/v1/operations")"; then
+          :
+        else
+          status="$?"
+          printf 'ANVIL_AGENT_RUN_TOOL_CALL_FAILED name=knowledge-search call_id=%s exit_code=%s\n' \
+            "$call_id" "$status" >&2
+          exit "$status"
+        fi
+        if ! printf %s "$response" | jq -e '.ok == true' >/dev/null 2>&1; then
+          failure_reason="operation-rejected"
+          if printf %s "$response" | jq -e \
+            '(.error // "") | contains(".knowledge-based/search-index")' \
+            >/dev/null 2>&1; then
+            failure_reason="index-unavailable"
+          fi
+          printf 'ANVIL_AGENT_RUN_TOOL_CALL_FAILED name=knowledge-search call_id=%s reason=%s\n' \
+            "$call_id" "$failure_reason" >&2
+          exit 1
+        fi
+        response_bytes="$(printf %s "$response" | wc -c | tr -d ' ')"
+        printf 'ANVIL_AGENT_RUN_TOOL_CALL_OK name=knowledge-search call_id=%s operation=search-index response_bytes=%s\n' \
+          "$call_id" "$response_bytes" >&2
+        printf '%s\n' "$response"
         SCRIPT
         chmod 0700 .anvil-tools/knowledge-search
       verifyCommand: [".anvil-tools/knowledge-search", "--help"]
