@@ -10,4 +10,5 @@ resources:
   - bases/control.anvil.hazyforge.io_agentruns.yaml
   - bases/control.anvil.hazyforge.io_agentschedules.yaml
   - bases/control.anvil.hazyforge.io_agentskillsets.yaml
+  - bases/control.anvil.hazyforge.io_agenttoolsets.yaml
   - bases/control.anvil.hazyforge.io_volumeprofiles.yaml

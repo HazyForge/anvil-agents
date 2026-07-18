@@ -426,6 +426,7 @@ func adverseSituationAgentRunFor(situation *controlv1alpha1.AdverseSituation, na
 	var profileRef *controlv1alpha1.NamespacedObjectReference
 	var harnessProfileRef *controlv1alpha1.NamespacedObjectReference
 	var skillSets *controlv1alpha1.AgentSkillCompositionSpec
+	var toolSets *controlv1alpha1.AgentToolCompositionSpec
 	prompt := ""
 	scope := controlv1alpha1.AgentRunScopeSpec{}
 	if responder != nil {
@@ -433,14 +434,25 @@ func adverseSituationAgentRunFor(situation *controlv1alpha1.AdverseSituation, na
 		if strings.TrimSpace(string(harness.Intent)) == "" {
 			harness.Intent = controlv1alpha1.AgentRunIntentObserve
 		}
-		docs = responder.Docs
-		issueTracking = responder.IssueTracking
-		notifications = responder.Notifications
-		profileRef = responder.ProfileRef
-		harnessProfileRef = responder.HarnessProfileRef
-		skillSets = responder.SkillSets
+		if responder.Docs != nil {
+			docs = responder.Docs.DeepCopy()
+		}
+		if responder.IssueTracking != nil {
+			issueTracking = responder.IssueTracking.DeepCopy()
+		}
+		if responder.Notifications != nil {
+			notifications = responder.Notifications.DeepCopy()
+		}
+		profileRef = deepCopyNamespacedObjectReference(responder.ProfileRef)
+		harnessProfileRef = deepCopyNamespacedObjectReference(responder.HarnessProfileRef)
+		if responder.SkillSets != nil {
+			skillSets = responder.SkillSets.DeepCopy()
+		}
+		if responder.ToolSets != nil {
+			toolSets = responder.ToolSets.DeepCopy()
+		}
 		prompt = responder.Prompt
-		scope = responder.Scope
+		scope = *responder.Scope.DeepCopy()
 	}
 	lastEvent := adverseSituationLastEvent(situation.Status.Events)
 	sourceRef := controlv1alpha1.AgentRunSourceRef{
@@ -473,6 +485,7 @@ func adverseSituationAgentRunFor(situation *controlv1alpha1.AdverseSituation, na
 			ProfileRef:        profileRef,
 			HarnessProfileRef: harnessProfileRef,
 			SkillSets:         skillSets,
+			ToolSets:          toolSets,
 			Prompt:            prompt,
 			Scope:             scope,
 			Docs:              docs,

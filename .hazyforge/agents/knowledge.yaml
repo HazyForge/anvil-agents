@@ -1,0 +1,75 @@
+apiVersion: control.anvil.hazyforge.io/v1alpha1
+kind: AgentSkillSet
+metadata:
+  name: anvil-agents-self-development
+spec:
+  description: Evidence-first, knowledge-aware maintenance of anvil-agents.
+  skills:
+    - name: repository-self-development
+      description: Improve this repository through bounded, reviewable work.
+      content: |
+        Treat the checked-out anvil-agents repository as the only product in
+        scope. Read AGENTS.md and current repository evidence before proposing
+        work. Query organizational knowledge before deciding, cite returned
+        note paths, and distinguish durable policy from stale notes.
+
+        Observe roles must not modify Git, GitHub, Kubernetes, the knowledge
+        service, or any external system. A proposeChange role may create one
+        focused branch and pull request only when its one-off AgentRun names an
+        approved issue and exact base commit. It must never merge, release,
+        alter cluster policy, or push master. Every proposed code change must
+        run the narrowest relevant tests and make a clean handoff for an
+        independent reviewer.
+    - name: external-knowledge-read-policy
+      description: Use the cluster knowledge service only for bounded reads.
+      content: |
+        Run `.anvil-tools/knowledge-search QUERY` before selecting an
+        improvement. The wrapper exposes only search-index, but that is a
+        client-side convention, not server authorization. Never call the
+        service directly, never send source code or secrets, and never invoke
+        a write operation. If search is unavailable, report that explicitly.
+  subagents:
+    - name: api-compatibility-reviewer
+      when: A change affects CRDs, generated manifests, or stored objects.
+      toolNames: [knowledge-search]
+      systemPrompt: Preserve the documented v1alpha1 wire identity and check generated API artifacts.
+    - name: test-contract-reviewer
+      when: A change affects controller, runner, chart, or upgrade behavior.
+      toolNames: [knowledge-search]
+      systemPrompt: Challenge the proposed test coverage and identify unverified release boundaries.
+---
+apiVersion: control.anvil.hazyforge.io/v1alpha1
+kind: AgentToolSet
+metadata:
+  name: anvil-agents-cluster-knowledge
+spec:
+  description: Read-only client wrapper for the separately deployed knowledge-based service.
+  tools:
+    - name: knowledge-search
+      description: Search the external Hazy Forge Markdown knowledge index.
+      setupScript: |
+        command -v curl >/dev/null
+        command -v jq >/dev/null
+        mkdir -p .anvil-tools
+        cat > .anvil-tools/knowledge-search <<'SCRIPT'
+        #!/usr/bin/env sh
+        set -eu
+        if [ "${1:-}" = "--help" ]; then
+          echo "usage: knowledge-search QUERY"
+          exit 0
+        fi
+        test -n "${KNOWLEDGE_BASE_URL:-}"
+        payload="$(jq -nc --arg query "$*" \
+          '{operation:"search-index",params:{query:$query,limit:10}}')"
+        set -- --fail --silent --show-error \
+          --request POST \
+          --header "Content-Type: application/json" \
+          --header "Accept: application/json"
+        if [ -n "${KNOWLEDGE_BASE_TOKEN:-}" ]; then
+          set -- "$@" --header "Authorization: Bearer ${KNOWLEDGE_BASE_TOKEN}"
+        fi
+        curl "$@" --data "$payload" \
+          "${KNOWLEDGE_BASE_URL%/}/v1/operations"
+        SCRIPT
+        chmod 0700 .anvil-tools/knowledge-search
+      verifyCommand: [".anvil-tools/knowledge-search", "--help"]

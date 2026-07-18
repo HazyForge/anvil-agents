@@ -43,10 +43,10 @@ spec:
             type: object
           spec:
             description: |-
-              AgentSkillSetSpec is a reusable, backend-neutral capability pack. Skills,
-              their setup tools, and optional delegated personas stay together, while
-              images, workload identities, credentials, and placement remain owned by a
-              harness profile or run profile.
+              AgentSkillSetSpec is a reusable, backend-neutral instruction pack. Skills
+              and optional delegated personas stay together, while independently owned
+              tools should use AgentToolSet. Images, workload identities, credentials, and
+              placement remain owned by a harness profile or run profile.
             properties:
               description:
                 description: Description explains when this capability pack should
@@ -175,8 +175,9 @@ spec:
                 maxItems: 32
                 type: array
               tools:
-                description: Tools are setup and verification contracts required by
-                  this skill set.
+                description: |-
+                  Tools are legacy setup and verification contracts required by this skill
+                  set. Prefer AgentToolSet when a tool has an independent lifecycle.
                 items:
                   properties:
                     description:

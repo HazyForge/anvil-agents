@@ -14,7 +14,8 @@ The operator owns these resources:
 | `AgentRun` | namespaced | Immutable request and controller-owned execution status |
 | `AgentRunProfile` | namespaced | Reusable role, scope, policy, and composition defaults |
 | `AgentHarnessProfile` | namespaced | Reusable backend and Kubernetes execution envelope |
-| `AgentSkillSet` | namespaced | Reusable backend-neutral capability pack |
+| `AgentSkillSet` | namespaced | Reusable backend-neutral instruction and persona pack |
+| `AgentToolSet` | namespaced | Reusable external tool setup and verification contracts |
 | `AgentSchedule` | namespaced | Interval and manual child-run creation |
 | `AgentRunControl` | cluster | Pause or allow launches for an opaque application key |
 | `AgentDataVolume` | namespaced | Durable PVC lifecycle and expansion-only resizing |
@@ -28,7 +29,8 @@ looks up another API group.
 ## Run lifecycle
 
 An `AgentRun` resolves its optional `AgentRunProfile`, selected
-`AgentHarnessProfile`, and ordered `AgentSkillSet` references, validates
+`AgentHarnessProfile`, and ordered `AgentSkillSet` and `AgentToolSet`
+references, validates
 credentials and durable volume references, writes a payload ConfigMap, and
 creates one Job. The Job and ConfigMap are owned by the run. Status is derived
 from the Job, pod state, logs, and the structured harness status contract.
@@ -55,7 +57,8 @@ Profiles contain durable role, scope, and policy defaults plus references to a
 runtime and capability packs. Run-local non-empty and non-zero compatibility
 fields override profile values; lists use field-specific append/deduplication
 rules. Use a harness-profile swap when inherited false/zero runtime values must
-be cleared. All profile, harness, and skill-set references are namespace-local.
+be cleared. All profile, harness, skill-set, and tool-set references are
+namespace-local.
 See
 [Agent Composition](composition.md) for precedence, atomic harness swaps, skill
 collision rules, and the four explicit override operations.

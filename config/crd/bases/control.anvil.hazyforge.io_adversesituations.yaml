@@ -2626,7 +2626,7 @@ spec:
                         type: object
                       skillSets:
                         description: |-
-                          SkillSets selects reusable capability packs and responder-local skill
+                          SkillSets selects reusable instruction packs and responder-local skill
                           overrides for the created AgentRun.
                         properties:
                           mode:
@@ -2742,6 +2742,39 @@ spec:
                           refs:
                             description: |-
                               Refs selects AgentSkillSets in declaration order. References must resolve
+                              in the consuming AgentRun namespace.
+                            items:
+                              description: |-
+                                NamespacedObjectReference identifies a Kubernetes object without importing
+                                another API group. Namespace may be omitted where same-namespace resolution
+                                is part of the containing resource contract.
+                              properties:
+                                name:
+                                  type: string
+                                namespace:
+                                  type: string
+                              required:
+                              - name
+                              type: object
+                            maxItems: 16
+                            type: array
+                        type: object
+                      toolSets:
+                        description: |-
+                          ToolSets selects reusable external tool contracts for the created
+                          AgentRun.
+                        properties:
+                          mode:
+                            description: |-
+                              Mode controls how this layer combines refs with inherited profile refs.
+                              Empty defaults to Append.
+                            enum:
+                            - Append
+                            - Replace
+                            type: string
+                          refs:
+                            description: |-
+                              Refs selects AgentToolSets in declaration order. References must resolve
                               in the consuming AgentRun namespace.
                             items:
                               description: |-

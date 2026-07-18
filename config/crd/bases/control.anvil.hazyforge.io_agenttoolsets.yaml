@@ -1,0 +1,94 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.19.0
+  name: agenttoolsets.control.anvil.hazyforge.io
+spec:
+  group: control.anvil.hazyforge.io
+  names:
+    kind: AgentToolSet
+    listKind: AgentToolSetList
+    plural: agenttoolsets
+    shortNames:
+    - agtools
+    singular: agenttoolset
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.description
+      name: Description
+      type: string
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: |-
+              AgentToolSetSpec is a reusable collection of setup and verification
+              contracts for tools supplied by external systems. It does not deploy a
+              service or own credentials, identities, networking, storage, or placement;
+              those stay with the external service and the consuming harness.
+            properties:
+              description:
+                description: Description explains what integration this tool set exposes.
+                type: string
+              tools:
+                description: |-
+                  Tools are materialized into compatible agent harnesses in declaration
+                  order.
+                items:
+                  properties:
+                    description:
+                      description: Description explains what this tool is for during
+                        the run.
+                      type: string
+                    name:
+                      description: Name is a stable tool identifier such as kbctl.
+                      minLength: 1
+                      type: string
+                    setupScript:
+                      description: |-
+                        SetupScript is an optional shell script run by compatible backend
+                        adapters after repository checkout and before the agent runtime starts.
+                        The script runs in the agent workdir as the agent container user. Keep it
+                        idempotent, install into writable agent data volumes or the workdir, and
+                        pass credentials through envSecretRefs instead of inline script text.
+                      type: string
+                    verifyCommand:
+                      description: |-
+                        VerifyCommand is an optional argv array run after SetupScript to prove
+                        the tool is available, for example ["kbctl", "--version"].
+                      items:
+                        type: string
+                      type: array
+                  required:
+                  - name
+                  type: object
+                maxItems: 32
+                type: array
+            type: object
+        required:
+        - spec
+        type: object
+    served: true
+    storage: true
+    subresources: {}

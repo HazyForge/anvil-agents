@@ -38,13 +38,13 @@ is pinned to `kind-anvil-agents` (or the selected
 cluster available for inspection.
 
 `make kind-e2e` first uses a disposable cluster to upgrade a portable seven-CRD
-legacy-object baseline to the ten-CRD composition and signal API without losing
+legacy-object baseline to the eleven-CRD composition and signal API without losing
 existing objects. It then runs the current execution, validates every sample with
-server-side dry-run, uninstalls the chart, proves all ten CRDs plus the run,
-profiles, skill set, data volume, and PVC were retained, and reinstalls the
+server-side dry-run, uninstalls the chart, proves all eleven CRDs plus the run,
+profiles, skill set, tool set, data volume, and PVC were retained, and reinstalls the
 controller. A second run then executes through the retained composition and
-storage objects. The quickstart also asserts the resolved harness/skill-set
-refs, data-volume claim, and both composition digests.
+storage objects. The quickstart also asserts the resolved harness, skill-set,
+and tool-set refs, data-volume claim, and both composition digests.
 
 ```bash
 kubectl --context kind-anvil-agents get agentrun -n agents-quickstart demo-001 -o yaml
@@ -129,8 +129,10 @@ release prerequisite.
 3. Create one provider credential Secret in that namespace.
 4. Create an `AgentHarnessProfile` selecting the adapter, digest-pinned image,
    ServiceAccount, provider Secret, timeout, and resource limits.
-5. Create any backend-neutral `AgentSkillSet` capability packs.
-6. Create an `AgentRunProfile` that composes the role, harness, and skill sets.
+5. Create any backend-neutral `AgentSkillSet` instruction packs and
+   `AgentToolSet` external tool contracts.
+6. Create an `AgentRunProfile` that composes the role, harness, skills, and
+   tools.
 7. Create a run with a non-empty `sourceRef.kind` and `sourceRef.name`.
 8. Observe status and logs, then enable schedules only after the manual path is
    bounded and repeatable.

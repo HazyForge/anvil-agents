@@ -72,6 +72,9 @@ func TestAdverseSituationAgentRunCopiesDocsAndIssueTracking(t *testing.T) {
 					SkillSets: &controlv1alpha1.AgentSkillCompositionSpec{
 						Refs: []controlv1alpha1.NamespacedObjectReference{{Name: "release-response"}},
 					},
+					ToolSets: &controlv1alpha1.AgentToolCompositionSpec{
+						Refs: []controlv1alpha1.NamespacedObjectReference{{Name: "release-tools"}},
+					},
 					Prompt: "Diagnose the adverse stream and repair or propose a release-gate fix.",
 					Scope: controlv1alpha1.AgentRunScopeSpec{
 						Summary:    "Checkout production",
@@ -122,6 +125,9 @@ func TestAdverseSituationAgentRunCopiesDocsAndIssueTracking(t *testing.T) {
 	if run.Spec.SkillSets == nil || len(run.Spec.SkillSets.Refs) != 1 || run.Spec.SkillSets.Refs[0].Name != "release-response" {
 		t.Fatalf("skill sets = %#v, want release-response", run.Spec.SkillSets)
 	}
+	if run.Spec.ToolSets == nil || len(run.Spec.ToolSets.Refs) != 1 || run.Spec.ToolSets.Refs[0].Name != "release-tools" {
+		t.Fatalf("tool sets = %#v, want release-tools", run.Spec.ToolSets)
+	}
 	if got, want := run.Spec.Prompt, "Diagnose the adverse stream and repair or propose a release-gate fix."; got != want {
 		t.Fatalf("prompt = %q, want %q", got, want)
 	}
@@ -154,6 +160,12 @@ func TestAdverseSituationAgentRunCopiesDocsAndIssueTracking(t *testing.T) {
 	}
 	if run.Spec.Scope.ApplicationTargetRef == nil || run.Spec.Scope.ApplicationTargetRef.Name != "checkout-prod" {
 		t.Fatalf("scope target ref = %#v, want checkout-prod", run.Spec.Scope.ApplicationTargetRef)
+	}
+	run.Spec.SkillSets.Refs[0].Name = "mutated-skills"
+	run.Spec.ToolSets.Refs[0].Name = "mutated-tools"
+	responder := situation.Spec.Responders.AgentRun
+	if responder.SkillSets.Refs[0].Name != "release-response" || responder.ToolSets.Refs[0].Name != "release-tools" {
+		t.Fatalf("created AgentRun aliases responder composition: skills=%#v tools=%#v", responder.SkillSets, responder.ToolSets)
 	}
 }
 

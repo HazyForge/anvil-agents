@@ -8,7 +8,7 @@ rewrites all seven defaults to the selected `vVERSION` and registry prefix.
 Production values should replace every image with an immutable digest. Do not
 mix runner versions without testing their payload and status contracts.
 
-Back up all ten custom-resource kinds and relevant PVCs before an upgrade.
+Back up all eleven custom-resource kinds and relevant PVCs before an upgrade.
 Run `helm template` and review CRD changes first. Only one controller may
 reconcile the branded API group during a migration or rollback.
 
@@ -27,7 +27,7 @@ The controller exposes `/healthz` and `/readyz` on port 8081 and metrics on
 ```bash
 kubectl get agentruns,agentschedules,agentdatavolumes -A
 kubectl describe agentrun -n <namespace> <name>
-kubectl get agentharnessprofiles,agentskillsets -n <namespace>
+kubectl get agentharnessprofiles,agentskillsets,agenttoolsets -n <namespace>
 kubectl get jobs,pods -n <namespace> \
   -l control.anvil.hazyforge.io/agent-run=<name>
 ```

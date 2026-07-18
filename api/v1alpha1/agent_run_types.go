@@ -775,11 +775,15 @@ type AgentRunSpec struct {
 	// inline spec.harness fields remain explicit compatibility overrides.
 	// +optional
 	HarnessProfileRef *NamespacedObjectReference `json:"harnessProfileRef,omitempty"`
-	// SkillSets selects reusable backend-neutral capability packs and named
+	// SkillSets selects reusable backend-neutral instruction packs and named
 	// overrides. Run-local refs append to profile refs unless mode is Replace.
 	// +optional
 	SkillSets *AgentSkillCompositionSpec `json:"skillSets,omitempty"`
-	Scope     AgentRunScopeSpec          `json:"scope,omitempty"`
+	// ToolSets selects reusable external tool contracts. Run-local refs append
+	// to profile refs unless mode is Replace.
+	// +optional
+	ToolSets *AgentToolCompositionSpec `json:"toolSets,omitempty"`
+	Scope    AgentRunScopeSpec         `json:"scope,omitempty"`
 	// Docs tells the harness which docs/runtime surfaces must be kept aligned.
 	// +optional
 	Docs *AgentRunDocsSpec `json:"docs,omitempty"`
@@ -878,6 +882,7 @@ type AgentRunResolvedCompositionStatus struct {
 	ProfileRef        *AgentRunResolvedObjectReferenceStatus  `json:"profileRef,omitempty"`
 	HarnessProfileRef *AgentRunResolvedObjectReferenceStatus  `json:"harnessProfileRef,omitempty"`
 	SkillSetRefs      []AgentRunResolvedObjectReferenceStatus `json:"skillSetRefs,omitempty"`
+	ToolSetRefs       []AgentRunResolvedObjectReferenceStatus `json:"toolSetRefs,omitempty"`
 	Scope             *AgentRunResolvedScopeStatus            `json:"scope,omitempty"`
 	EffectiveDigest   string                                  `json:"effectiveDigest,omitempty"`
 	PayloadDigest     string                                  `json:"payloadDigest,omitempty"`

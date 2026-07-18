@@ -52,9 +52,18 @@ func TestAgentRunCompositionSwapsHarnessAndAppliesSkillLayers(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Name: "repository-review", Namespace: "agents", UID: "repository-review-uid", Generation: 5},
 		Spec: controlv1alpha1.AgentSkillSetSpec{
 			Skills:    []controlv1alpha1.AgentRunSkillInjectionSpec{{Name: "evidence-review", Content: "Review current repository evidence."}},
-			Tools:     []controlv1alpha1.AgentRunToolSpec{{Name: "knowledge-search", VerifyCommand: []string{"knowledge-search", "--help"}}},
+			Tools:     []controlv1alpha1.AgentRunToolSpec{{Name: "legacy-repository-status", VerifyCommand: []string{"git", "status", "--short"}}},
 			Subagents: []controlv1alpha1.AgentRunSubagentSpec{{Name: "correctness-reviewer", When: "Shared behavior changes."}},
 		},
+	}
+	knowledgeTools := &controlv1alpha1.AgentToolSet{
+		ObjectMeta: metav1.ObjectMeta{Name: "knowledge-tools", Namespace: "agents", UID: "knowledge-tools-uid", Generation: 4},
+		Spec: controlv1alpha1.AgentToolSetSpec{Tools: []controlv1alpha1.AgentRunToolSpec{{
+			Name: "knowledge-search", VerifyCommand: []string{"knowledge-search", "--help"},
+		}}},
+	}
+	profile.Spec.ToolSets = &controlv1alpha1.AgentToolCompositionSpec{
+		Refs: []controlv1alpha1.NamespacedObjectReference{{Name: knowledgeTools.Name}},
 	}
 	runSet := &controlv1alpha1.AgentSkillSet{
 		ObjectMeta: metav1.ObjectMeta{Name: "incident-review", Namespace: "agents", UID: "incident-review-uid", Generation: 2},
@@ -63,7 +72,6 @@ func TestAgentRunCompositionSwapsHarnessAndAppliesSkillLayers(t *testing.T) {
 				{Name: "evidence-review", Content: "Review the incident evidence."},
 				{Name: "timeline", Content: "Build an incident timeline."},
 			},
-			Tools:     append([]controlv1alpha1.AgentRunToolSpec(nil), baseSet.Spec.Tools...),
 			Subagents: append([]controlv1alpha1.AgentRunSubagentSpec(nil), baseSet.Spec.Subagents...),
 		},
 	}
@@ -86,7 +94,7 @@ func TestAgentRunCompositionSwapsHarnessAndAppliesSkillLayers(t *testing.T) {
 		},
 	}
 
-	reconciler := testCompositionReconciler(t, profile, codexHarness, piHarness, baseSet, runSet)
+	reconciler := testCompositionReconciler(t, profile, codexHarness, piHarness, baseSet, runSet, knowledgeTools)
 	effective, resolution, phase, reason, message, err := reconciler.resolveAgentRunComposition(context.Background(), run)
 	if err != nil {
 		t.Fatalf("resolve composition: %v", err)
@@ -111,13 +119,13 @@ func TestAgentRunCompositionSwapsHarnessAndAppliesSkillLayers(t *testing.T) {
 	} else if !strings.Contains(got[0].Content, "Review the incident evidence.") || !strings.Contains(got[0].Content, "Local override:\nOnly incident 42.") || strings.Contains(got[0].Content, "profile review policy") {
 		t.Fatalf("resolved evidence skill content = %q", got[0].Content)
 	}
-	if len(effective.Spec.Harness.Tools) != 1 || len(effective.Spec.Harness.Subagents) != 1 {
+	if len(effective.Spec.Harness.Tools) != 2 || effective.Spec.Harness.Tools[0].Name != "legacy-repository-status" || effective.Spec.Harness.Tools[1].Name != "knowledge-search" || len(effective.Spec.Harness.Subagents) != 1 {
 		t.Fatalf("resolved tools/subagents = %#v / %#v", effective.Spec.Harness.Tools, effective.Spec.Harness.Subagents)
 	}
-	if resolution == nil || resolution.ProfileRef == nil || resolution.HarnessProfileRef == nil || len(resolution.SkillSetRefs) != 2 {
+	if resolution == nil || resolution.ProfileRef == nil || resolution.HarnessProfileRef == nil || len(resolution.SkillSetRefs) != 2 || len(resolution.ToolSetRefs) != 1 {
 		t.Fatalf("resolution status = %#v", resolution)
 	}
-	if resolution.HarnessProfileRef.Name != "pi-standard" || resolution.EffectiveDigest == "" || resolution.SkillSetRefs[0].Digest == "" {
+	if resolution.HarnessProfileRef.Name != "pi-standard" || resolution.EffectiveDigest == "" || resolution.SkillSetRefs[0].Digest == "" || resolution.ToolSetRefs[0].Digest == "" {
 		t.Fatalf("incomplete resolution status = %#v", resolution)
 	}
 	if resolution.Scope == nil || resolution.Scope.Application != "payments" || resolution.Scope.ApplicationTarget != "production" {
@@ -182,6 +190,10 @@ func TestAgentRunJobPreservesResolvedCompositionSnapshot(t *testing.T) {
 		SkillSetRefs: []controlv1alpha1.AgentRunResolvedObjectReferenceStatus{{
 			Name: "repository-review", Namespace: "agents", UID: "skills-uid", Generation: 3,
 			ResourceVersion: "12", Digest: "sha256:skills",
+		}},
+		ToolSetRefs: []controlv1alpha1.AgentRunResolvedObjectReferenceStatus{{
+			Name: "knowledge-tools", Namespace: "agents", UID: "tools-uid", Generation: 2,
+			ResourceVersion: "9", Digest: "sha256:tools",
 		}},
 		EffectiveDigest: "sha256:effective",
 		PayloadDigest:   "sha256:payload",
@@ -365,6 +377,102 @@ func TestAgentRunCompositionReplaceDoesNotResolveBrokenProfileSkillComposition(t
 	}
 }
 
+func TestAgentRunCompositionComposesToolSetsAndAppliesInlineOverlay(t *testing.T) {
+	t.Parallel()
+
+	profileTools := &controlv1alpha1.AgentToolSet{
+		ObjectMeta: metav1.ObjectMeta{Name: "knowledge-tools", Namespace: "agents", UID: "knowledge-uid", Generation: 7},
+		Spec: controlv1alpha1.AgentToolSetSpec{Tools: []controlv1alpha1.AgentRunToolSpec{{
+			Name: "knowledge-query", VerifyCommand: []string{"knowledge-query", "--help"},
+		}}},
+	}
+	runTools := &controlv1alpha1.AgentToolSet{
+		ObjectMeta: metav1.ObjectMeta{Name: "repository-tools", Namespace: "agents", UID: "repository-uid", Generation: 2},
+		Spec: controlv1alpha1.AgentToolSetSpec{Tools: []controlv1alpha1.AgentRunToolSpec{{
+			Name: "repository-status", VerifyCommand: []string{"git", "status", "--short"},
+		}}},
+	}
+	profile := &controlv1alpha1.AgentRunProfile{
+		ObjectMeta: metav1.ObjectMeta{Name: "maintainer", Namespace: "agents"},
+		Spec: controlv1alpha1.AgentRunProfileSpec{
+			SkillSets: &controlv1alpha1.AgentSkillCompositionSpec{Refs: []controlv1alpha1.NamespacedObjectReference{{Name: "legacy-knowledge-tools"}}},
+			ToolSets:  &controlv1alpha1.AgentToolCompositionSpec{Refs: []controlv1alpha1.NamespacedObjectReference{{Name: profileTools.Name}}},
+		},
+	}
+	legacyTools := &controlv1alpha1.AgentSkillSet{
+		ObjectMeta: metav1.ObjectMeta{Name: "legacy-knowledge-tools", Namespace: "agents"},
+		Spec: controlv1alpha1.AgentSkillSetSpec{Tools: []controlv1alpha1.AgentRunToolSpec{{
+			Name: "knowledge-query", VerifyCommand: []string{"knowledge-query", "--help"},
+		}}},
+	}
+	run := &controlv1alpha1.AgentRun{
+		ObjectMeta: metav1.ObjectMeta{Name: "review", Namespace: "agents"},
+		Spec: controlv1alpha1.AgentRunSpec{
+			ProfileRef: &controlv1alpha1.NamespacedObjectReference{Name: profile.Name},
+			ToolSets: &controlv1alpha1.AgentToolCompositionSpec{
+				Refs: []controlv1alpha1.NamespacedObjectReference{{Name: runTools.Name}},
+			},
+			Harness: controlv1alpha1.AgentRunHarnessSpec{Tools: []controlv1alpha1.AgentRunToolSpec{{
+				Name: "knowledge-query", VerifyCommand: []string{"knowledge-query", "--version"},
+			}}},
+		},
+	}
+
+	effective, resolution, phase, reason, message, err := testCompositionReconciler(t, profile, profileTools, runTools, legacyTools).
+		resolveAgentRunComposition(context.Background(), run)
+	if err != nil || phase != "" {
+		t.Fatalf("resolve tool composition: phase=%q reason=%q message=%q err=%v", phase, reason, message, err)
+	}
+	if got := effective.Spec.Harness.Tools; len(got) != 2 || got[0].Name != "knowledge-query" || got[0].VerifyCommand[1] != "--version" || got[1].Name != "repository-status" {
+		t.Fatalf("resolved tools = %#v", got)
+	}
+	if resolution == nil || len(resolution.ToolSetRefs) != 2 || resolution.ToolSetRefs[0].Name != profileTools.Name || resolution.ToolSetRefs[1].Name != runTools.Name {
+		t.Fatalf("resolved tool refs = %#v", resolution)
+	}
+}
+
+func TestAgentRunCompositionReplaceDoesNotResolveBrokenProfileToolComposition(t *testing.T) {
+	t.Parallel()
+
+	runTools := &controlv1alpha1.AgentToolSet{
+		ObjectMeta: metav1.ObjectMeta{Name: "run-tools", Namespace: "agents"},
+		Spec:       controlv1alpha1.AgentToolSetSpec{Tools: []controlv1alpha1.AgentRunToolSpec{{Name: "run-only"}}},
+	}
+	legacyTools := &controlv1alpha1.AgentSkillSet{
+		ObjectMeta: metav1.ObjectMeta{Name: "legacy-tools", Namespace: "agents"},
+		Spec:       controlv1alpha1.AgentSkillSetSpec{Tools: []controlv1alpha1.AgentRunToolSpec{{Name: "legacy-only"}}},
+	}
+	profile := &controlv1alpha1.AgentRunProfile{
+		ObjectMeta: metav1.ObjectMeta{Name: "broken-profile", Namespace: "agents"},
+		Spec: controlv1alpha1.AgentRunProfileSpec{
+			SkillSets: &controlv1alpha1.AgentSkillCompositionSpec{Refs: []controlv1alpha1.NamespacedObjectReference{{Name: legacyTools.Name}}},
+			ToolSets:  &controlv1alpha1.AgentToolCompositionSpec{Refs: []controlv1alpha1.NamespacedObjectReference{{Name: "missing-profile-tools"}}},
+		},
+	}
+	run := &controlv1alpha1.AgentRun{
+		ObjectMeta: metav1.ObjectMeta{Name: "replace", Namespace: "agents"},
+		Spec: controlv1alpha1.AgentRunSpec{
+			ProfileRef: &controlv1alpha1.NamespacedObjectReference{Name: profile.Name},
+			ToolSets: &controlv1alpha1.AgentToolCompositionSpec{
+				Mode: controlv1alpha1.AgentToolCompositionReplace,
+				Refs: []controlv1alpha1.NamespacedObjectReference{{Name: runTools.Name}},
+			},
+		},
+	}
+
+	effective, resolution, phase, reason, message, err := testCompositionReconciler(t, profile, runTools, legacyTools).
+		resolveAgentRunComposition(context.Background(), run)
+	if err != nil || phase != "" {
+		t.Fatalf("resolve tool replacement: phase=%q reason=%q message=%q err=%v", phase, reason, message, err)
+	}
+	if got := effective.Spec.Harness.Tools; len(got) != 2 || got[0].Name != "legacy-only" || got[1].Name != "run-only" {
+		t.Fatalf("replacement tools = %#v", got)
+	}
+	if resolution == nil || len(resolution.ToolSetRefs) != 1 || resolution.ToolSetRefs[0].Name != runTools.Name {
+		t.Fatalf("replacement resolution = %#v", resolution)
+	}
+}
+
 func TestAgentRunCompositionRejectsInvalidReferencesAndOverrides(t *testing.T) {
 	t.Parallel()
 
@@ -375,6 +483,14 @@ func TestAgentRunCompositionRejectsInvalidReferencesAndOverrides(t *testing.T) {
 	conflictingB := &controlv1alpha1.AgentSkillSet{
 		ObjectMeta: metav1.ObjectMeta{Name: "tools-b", Namespace: "agents"},
 		Spec:       controlv1alpha1.AgentSkillSetSpec{Tools: []controlv1alpha1.AgentRunToolSpec{{Name: "query", VerifyCommand: []string{"query", "--version"}}}},
+	}
+	toolSetA := &controlv1alpha1.AgentToolSet{
+		ObjectMeta: metav1.ObjectMeta{Name: "external-a", Namespace: "agents"},
+		Spec:       controlv1alpha1.AgentToolSetSpec{Tools: []controlv1alpha1.AgentRunToolSpec{{Name: "query", VerifyCommand: []string{"query", "--help"}}}},
+	}
+	toolSetB := &controlv1alpha1.AgentToolSet{
+		ObjectMeta: metav1.ObjectMeta{Name: "external-b", Namespace: "agents"},
+		Spec:       controlv1alpha1.AgentToolSetSpec{Tools: []controlv1alpha1.AgentRunToolSpec{{Name: "query", VerifyCommand: []string{"query", "--version"}}}},
 	}
 	tests := []struct {
 		name       string
@@ -407,6 +523,34 @@ func TestAgentRunCompositionRejectsInvalidReferencesAndOverrides(t *testing.T) {
 			name:    "conflicting tool",
 			run:     testCompositionRun(&controlv1alpha1.AgentRunSpec{SkillSets: &controlv1alpha1.AgentSkillCompositionSpec{Refs: []controlv1alpha1.NamespacedObjectReference{{Name: conflictingA.Name}, {Name: conflictingB.Name}}}}),
 			objects: []client.Object{conflictingA, conflictingB}, wantPhase: controlv1alpha1.AgentRunPhaseFailed, wantReason: "ConflictingToolName",
+		},
+		{
+			name:      "missing tool set",
+			run:       testCompositionRun(&controlv1alpha1.AgentRunSpec{ToolSets: &controlv1alpha1.AgentToolCompositionSpec{Refs: []controlv1alpha1.NamespacedObjectReference{{Name: "missing"}}}}),
+			wantPhase: controlv1alpha1.AgentRunPhaseNeedsHuman, wantReason: "ToolSetNotFound",
+		},
+		{
+			name:      "cross namespace tool set",
+			run:       testCompositionRun(&controlv1alpha1.AgentRunSpec{ToolSets: &controlv1alpha1.AgentToolCompositionSpec{Refs: []controlv1alpha1.NamespacedObjectReference{{Name: "external", Namespace: "other"}}}}),
+			wantPhase: controlv1alpha1.AgentRunPhaseFailed, wantReason: "CrossNamespaceToolSetRef",
+		},
+		{
+			name:    "duplicate tool set ref",
+			run:     testCompositionRun(&controlv1alpha1.AgentRunSpec{ToolSets: &controlv1alpha1.AgentToolCompositionSpec{Refs: []controlv1alpha1.NamespacedObjectReference{{Name: toolSetA.Name}, {Name: toolSetA.Name}}}}),
+			objects: []client.Object{toolSetA}, wantPhase: controlv1alpha1.AgentRunPhaseFailed, wantReason: "DuplicateToolSetRef",
+		},
+		{
+			name:    "conflicting external tools",
+			run:     testCompositionRun(&controlv1alpha1.AgentRunSpec{ToolSets: &controlv1alpha1.AgentToolCompositionSpec{Refs: []controlv1alpha1.NamespacedObjectReference{{Name: toolSetA.Name}, {Name: toolSetB.Name}}}}),
+			objects: []client.Object{toolSetA, toolSetB}, wantPhase: controlv1alpha1.AgentRunPhaseFailed, wantReason: "ConflictingToolName",
+		},
+		{
+			name: "conflicting skill and tool set contracts",
+			run: testCompositionRun(&controlv1alpha1.AgentRunSpec{
+				SkillSets: &controlv1alpha1.AgentSkillCompositionSpec{Refs: []controlv1alpha1.NamespacedObjectReference{{Name: conflictingA.Name}}},
+				ToolSets:  &controlv1alpha1.AgentToolCompositionSpec{Refs: []controlv1alpha1.NamespacedObjectReference{{Name: toolSetB.Name}}},
+			}),
+			objects: []client.Object{conflictingA, toolSetB}, wantPhase: controlv1alpha1.AgentRunPhaseFailed, wantReason: "ConflictingToolName",
 		},
 	}
 	for _, test := range tests {
