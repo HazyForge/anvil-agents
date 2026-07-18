@@ -1,0 +1,55 @@
+# Security
+
+Anvil Agents is a privileged workload orchestrator. It is suitable for trusted
+platform operators and controlled agent namespaces; v0.1 is not a hard
+multi-tenant sandbox.
+
+## Authority Model
+
+An `AgentRun` or `AgentRunProfile` author can select an image, custom command,
+ServiceAccount, same-namespace Secrets, pull credentials, security context,
+node placement, and tolerations. Granting write access to these resources is
+therefore equivalent to granting substantial code-execution authority in that
+namespace. An admission controller should enforce your allowed registries,
+ServiceAccounts, security contexts, resources, and placement rules.
+
+Use a dedicated namespace per trust domain. Put only agent-consumable Secrets
+there. Disable unnecessary token mounting on runner ServiceAccounts, grant
+least-privilege RBAC, apply Pod Security Admission, and restrict egress with
+NetworkPolicy. Never place broad production or cluster-admin credentials in an
+agent namespace.
+
+The chart controller ClusterRole is cluster-wide because the operator can
+watch multiple namespaces. `watchNamespaces` narrows the controller cache, not
+RBAC. For a namespace-limited installation, render and maintain a matching
+Role/RoleBinding policy for the exact namespaces rather than assuming the flag
+changes authorization.
+
+`externalSecrets.enabled` is false by default. Enable it only when runs use
+`externalSecretRefreshRefs`; it grants the controller mutation access to those
+ExternalSecret objects. The normal Secret read grant remains necessary for
+private skill tokens and run credential preflight.
+
+## Public Read API
+
+The optional API has a separate read-only ServiceAccount. It validates signed
+JWT access tokens using exact OIDC issuer and audience values, then applies
+explicit permissions and namespace grants. Provider-neutral defaults read
+top-level `roles`, `groups`, `scope`/`scp`, and
+`anvil_agents_namespaces`. Provider-specific object claims, such as ZITADEL
+project-role maps, must be explicitly configured.
+
+The API still has cluster-wide read access to AgentRuns, Jobs, Pods, and logs,
+so compromise can expose workload output. Terminate TLS at a trusted Gateway,
+apply rate limits and NetworkPolicy, and avoid logging secrets in agent output.
+
+## Data Lifecycle
+
+Prompts, source context, tool metadata, logs, status, and archives may contain
+sensitive material. Set retention deliberately. `AgentDataVolume` creates or
+adopts only its own compatible PVC identity and sets a controller owner
+reference; deleting the custom resource can delete the PVC. The chart marks
+CRDs with `helm.sh/resource-policy: keep`, so uninstalling the release does not
+delete all custom resources or their volumes.
+
+Report vulnerabilities privately using [SECURITY.md](../SECURITY.md).

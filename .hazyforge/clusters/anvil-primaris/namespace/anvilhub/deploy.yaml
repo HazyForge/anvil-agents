@@ -10,11 +10,19 @@ image:
   pullPolicy: IfNotPresent
 imagePullSecrets:
   - name: ghcr-creds
+runnerImages:
+  codex: ghcr.io/hazyforge/anvil-agent-run-codex:latest
+  hermesAgent: ghcr.io/hazyforge/anvil-agent-run-hermes:latest
+  openClaw: ghcr.io/hazyforge/anvil-agent-run-openclaw:latest
+  grokBuild: ghcr.io/hazyforge/anvil-agent-run-grok-build:latest
+  piAgent: ghcr.io/hazyforge/anvil-agent-run-pi:latest
 crds:
   install: false
 leaderElection: true
 applicationMaxConcurrentRuns: 4
 defaultStorageClass: observability-local
+externalSecrets:
+  enabled: true
 adverseSourceGVKs:
   - control.anvil.hazyforge.io/v1alpha1/ApplicationRelease
   - control.anvil.hazyforge.io/v1alpha1/ArtifactBuild
@@ -30,6 +38,23 @@ archive:
     name: anvilhub-inventory-database
     key: database-url
   terminalRetention: 72h
+# The issuer and ZITADEL claim shapes are staged, but audience and authorization
+# bindings intentionally remain empty. Enabling the API must fail until a
+# reviewed change supplies a dedicated anvil-agents audience and namespace
+# grants; do not reuse the interactive client ID or a wildcard compatibility
+# binding in the production enablement.
+api:
+  enabled: false
+  config:
+    oidc:
+      issuer: https://hazyforge1-azsbgb.us1.zitadel.cloud
+    authorization:
+      roleClaims:
+        - roles
+      roleObjectClaims:
+        - urn:zitadel:iam:org:project:roles
+        - urn:zitadel:iam:org:projects:roles
+        - urn:zitadel:iam:org:project:376124473528572432:roles
 extraVolumes:
   - name: anvilhub-inventory-database
     secret:

@@ -4,9 +4,11 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 image_prefix="${ANVIL_AGENTS_IMAGE_PREFIX:-}"
 platform="${ANVIL_AGENTS_IMAGE_PLATFORM:-}"
+source_url="${ANVIL_AGENTS_IMAGE_SOURCE:-}"
 mode="load"
 no_cache="false"
 pull="false"
+allow_dirty="false"
 components=()
 tags=()
 cache_from=()
@@ -29,8 +31,10 @@ Options:
                          ghcr.io/hazyforge. Default: local Docker names.
   --tag TAG              Image tag; repeatable. Default: dev.
   --platform PLATFORM    Docker platform, for example linux/amd64.
+  --source-url URL       OCI source label. Default: the Git origin URL.
   --load                 Build into the local Docker image store (default).
   --push                 Push with docker buildx; requires --prefix.
+  --allow-dirty          Permit --push from a dirty Git worktree.
   --check                Validate Dockerfiles without building images.
   --cache-from VALUE     Pass a buildx cache source; repeatable.
   --cache-to VALUE       Pass a buildx cache destination; repeatable.
@@ -43,6 +47,7 @@ Environment defaults:
   ANVIL_AGENTS_IMAGE_PREFIX
   ANVIL_AGENTS_IMAGE_TAG
   ANVIL_AGENTS_IMAGE_PLATFORM
+  ANVIL_AGENTS_IMAGE_SOURCE
 
 Examples:
   ./hack/build-images.sh
@@ -87,7 +92,7 @@ list_components() {
 require_value() {
 	local option="$1"
 	local value="${2:-}"
-	if [[ -z "${value}" ]]; then
+	if [[ -z "${value}" || "${value}" == --* ]]; then
 		echo "${option} requires a value" >&2
 		exit 2
 	fi
@@ -115,12 +120,21 @@ while [[ $# -gt 0 ]]; do
 			platform="$2"
 			shift 2
 			;;
+		--source-url)
+			require_value "$1" "${2:-}"
+			source_url="$2"
+			shift 2
+			;;
 		--load)
 			mode="load"
 			shift
 			;;
 		--push)
 			mode="push"
+			shift
+			;;
+		--allow-dirty)
+			allow_dirty="true"
 			shift
 			;;
 		--check)
@@ -171,6 +185,11 @@ if [[ "${mode}" == "push" && -z "${image_prefix}" ]]; then
 	echo "--push requires --prefix or ANVIL_AGENTS_IMAGE_PREFIX" >&2
 	exit 2
 fi
+if [[ "${mode}" == "push" && "${allow_dirty}" != "true" ]] &&
+	[[ -n "$(git -C "${repo_root}" status --porcelain --untracked-files=normal)" ]]; then
+	echo "refusing to push images from a dirty worktree; commit changes or pass --allow-dirty" >&2
+	exit 2
+fi
 if [[ "${mode}" != "push" && ${#cache_to[@]} -gt 0 ]]; then
 	echo "--cache-to requires --push" >&2
 	exit 2
@@ -199,6 +218,13 @@ if [[ "${mode}" == "push" ]]; then
 fi
 
 revision="$(git -C "${repo_root}" rev-parse HEAD 2>/dev/null || printf 'unknown')"
+if [[ -z "${source_url}" ]]; then
+	source_url="$(git -C "${repo_root}" remote get-url origin 2>/dev/null || true)"
+fi
+source_url="${source_url:-https://github.com/HazyForge/anvil-agents}"
+if [[ "${source_url}" =~ ^git@([^:]+):(.+)$ ]]; then
+	source_url="https://${BASH_REMATCH[1]}/${BASH_REMATCH[2]%.git}"
+fi
 built_refs=()
 component_index=0
 
@@ -236,7 +262,7 @@ for component in "${selected_components[@]}"; do
 		build_command+=(--cache-to "${value}")
 	done
 	build_command+=(
-		--label "org.opencontainers.image.source=https://github.com/HazyForge/anvil-agents"
+		--label "org.opencontainers.image.source=${source_url}"
 		--label "org.opencontainers.image.revision=${revision}"
 	)
 

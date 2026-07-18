@@ -20,6 +20,11 @@ fail() {
 	exit 1
 }
 
+if "${repo_root}/hack/build-images.sh" --tag --push >"${tmp_dir}/missing-value" 2>&1; then
+	fail "accepted --tag without a value"
+fi
+rg -q -- '--tag requires a value' "${tmp_dir}/missing-value" || fail "did not explain the missing --tag value"
+
 : > "${FAKE_DOCKER_LOG}"
 "${repo_root}/hack/build-images.sh" \
 	--component controller \
@@ -33,6 +38,7 @@ local_command="$(tail -n 1 "${FAKE_DOCKER_LOG}")"
 [[ "${local_command}" == *"--platform linux/amd64"* ]] || fail "platform was not forwarded"
 [[ "${local_command}" == *"--tag registry.example.com/team/anvil-agents:first"* ]] || fail "first tag is missing"
 [[ "${local_command}" == *"--tag registry.example.com/team/anvil-agents:second"* ]] || fail "second tag is missing"
+[[ "${local_command}" == *"--label org.opencontainers.image.source=https://github.com/HazyForge/anvil-agents"* ]] || fail "Git SSH origin was not normalized for the OCI source label"
 
 : > "${FAKE_DOCKER_LOG}"
 "${repo_root}/hack/build-images.sh" --check >/dev/null
@@ -59,6 +65,7 @@ rg -q --fixed-strings -- "--push requires --prefix" "${tmp_dir}/push-error" || f
 	--tag release \
 	--cache-from local-cache \
 	--cache-to remote-cache \
+	--allow-dirty \
 	--push >/dev/null
 rg -q '^buildx version$' "${FAKE_DOCKER_LOG}" || fail "push did not verify buildx"
 push_command="$(tail -n 1 "${FAKE_DOCKER_LOG}")"
@@ -66,5 +73,11 @@ push_command="$(tail -n 1 "${FAKE_DOCKER_LOG}")"
 [[ "${push_command}" == *"--cache-from local-cache"* ]] || fail "cache source was not forwarded"
 [[ "${push_command}" == *"--cache-to remote-cache"* ]] || fail "cache destination was not forwarded"
 [[ "${push_command}" == *"--tag registry.example.com/team/anvil-agent-run-pi:release"* ]] || fail "Pi image mapping is wrong"
+
+: > "${FAKE_DOCKER_LOG}"
+ANVIL_AGENTS_IMAGE_SOURCE=https://code.example.com/fork/anvil-agents \
+	"${repo_root}/hack/build-images.sh" --component controller --tag source-test >/dev/null
+source_command="$(tail -n 1 "${FAKE_DOCKER_LOG}")"
+[[ "${source_command}" == *"--label org.opencontainers.image.source=https://code.example.com/fork/anvil-agents"* ]] || fail "source label override is missing"
 
 echo "build-images contract tests passed"

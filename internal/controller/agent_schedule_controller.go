@@ -394,7 +394,7 @@ func (r *AgentScheduleReconciler) patchAgentScheduleStatus(ctx context.Context, 
 
 func (r *AgentScheduleReconciler) agentScheduleRuns(ctx context.Context, schedule *controlv1alpha1.AgentSchedule) ([]*controlv1alpha1.AgentRun, *controlv1alpha1.AgentRun, string, error) {
 	list := &controlv1alpha1.AgentRunList{}
-	if err := r.List(ctx, list, client.InNamespace(schedule.Namespace), client.MatchingLabels{agentRunScheduleLabel: schedule.Name}); err != nil {
+	if err := r.List(ctx, list, client.InNamespace(schedule.Namespace), client.MatchingLabels{agentRunScheduleLabel: sanitizeLabelValue(schedule.Name)}); err != nil {
 		return nil, nil, "", fmt.Errorf("list scheduled agent runs: %w", err)
 	}
 	active := []*controlv1alpha1.AgentRun{}
@@ -402,6 +402,9 @@ func (r *AgentScheduleReconciler) agentScheduleRuns(ctx context.Context, schedul
 	var lastInterval *controlv1alpha1.AgentRun
 	for i := range list.Items {
 		run := &list.Items[i]
+		if !agentRunBelongsToSchedule(run, schedule) {
+			continue
+		}
 		original := run.DeepCopy()
 		if detachAgentRunControllerOwner(run, controlv1alpha1.GroupVersion.String(), "AgentSchedule", schedule.Name, schedule.UID) {
 			if err := r.Patch(ctx, run, client.MergeFrom(original)); err != nil {
@@ -581,12 +584,15 @@ func (r *AgentScheduleReconciler) agentScheduleIntervalRunForMessage(ctx context
 		return nil, nil
 	}
 	list := &controlv1alpha1.AgentRunList{}
-	if err := r.List(ctx, list, client.InNamespace(schedule.Namespace), client.MatchingLabels{agentRunScheduleLabel: schedule.Name}); err != nil {
+	if err := r.List(ctx, list, client.InNamespace(schedule.Namespace), client.MatchingLabels{agentRunScheduleLabel: sanitizeLabelValue(schedule.Name)}); err != nil {
 		return nil, fmt.Errorf("list scheduled agent runs for due interval: %w", err)
 	}
 	var match *controlv1alpha1.AgentRun
 	for i := range list.Items {
 		run := &list.Items[i]
+		if !agentRunBelongsToSchedule(run, schedule) {
+			continue
+		}
 		if run.Spec.Trigger.Reason != "ScheduledAgentRun" {
 			continue
 		}
@@ -598,6 +604,17 @@ func (r *AgentScheduleReconciler) agentScheduleIntervalRunForMessage(ctx context
 		}
 	}
 	return match, nil
+}
+
+func agentRunBelongsToSchedule(run *controlv1alpha1.AgentRun, schedule *controlv1alpha1.AgentSchedule) bool {
+	if run == nil || schedule == nil || run.Spec.ScheduleRef == nil {
+		return false
+	}
+	namespace := firstNonEmpty(strings.TrimSpace(run.Spec.ScheduleRef.Namespace), run.Namespace)
+	if namespace != schedule.Namespace || strings.TrimSpace(run.Spec.ScheduleRef.Name) != schedule.Name {
+		return false
+	}
+	return strings.TrimSpace(run.Spec.SourceUID) == "" || run.Spec.SourceUID == string(schedule.UID)
 }
 
 func agentScheduleManualRunRequest(schedule *controlv1alpha1.AgentSchedule, token, templateName string, now metav1.Time) agentScheduleRunRequest {

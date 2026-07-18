@@ -1,6 +1,16 @@
 apiVersion: v2
 name: anvil-agents
-description: Standalone Kubernetes operator for AgentRun execution
+description: Distributed multi-harness agent loops on Kubernetes
 type: application
 version: 0.1.0
 appVersion: "0.1.0"
+home: https://github.com/HazyForge/anvil-agents
+sources:
+  - https://github.com/HazyForge/anvil-agents
+keywords:
+  - agents
+  - kubernetes-operator
+  - codex
+  - oidc
+maintainers:
+  - name: Hazy Forge

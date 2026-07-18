@@ -267,6 +267,40 @@ func TestAgentRunQueuedBehindScheduleBlocksNewerRun(t *testing.T) {
 	}
 }
 
+func TestAgentRunQueueGateUsesSanitizedLabelAndExactScheduleIdentity(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	scheme := runtime.NewScheme()
+	if err := controlv1alpha1.AddToScheme(scheme); err != nil {
+		t.Fatalf("add control scheme: %v", err)
+	}
+	schedule := testAgentScheduleWithPolicy(controlv1alpha1.AgentScheduleConcurrencyQueue)
+	schedule.Name = "platform.health"
+	schedule.UID = "platform-health-uid"
+	older := testScheduledAgentRun("platform-health-older", time.Date(2026, 7, 8, 12, 0, 0, 0, time.UTC))
+	newer := testScheduledAgentRun("platform-health-newer", time.Date(2026, 7, 8, 12, 30, 0, 0, time.UTC))
+	for _, run := range []*controlv1alpha1.AgentRun{older, newer} {
+		run.Labels[agentRunScheduleLabel] = "platform-health"
+		run.Spec.ScheduleRef.Name = "platform.health"
+		run.Spec.SourceUID = "platform-health-uid"
+	}
+	collision := testScheduledAgentRun("collision", time.Date(2026, 7, 8, 11, 0, 0, 0, time.UTC))
+	collision.Labels[agentRunScheduleLabel] = "platform-health"
+	collision.Spec.ScheduleRef.Name = "platform-health"
+	reconciler := &AgentRunReconciler{
+		Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(schedule, older, newer, collision).Build(),
+		Scheme: scheme,
+	}
+	blockedBy, err := reconciler.agentRunQueuedBehindSchedule(ctx, newer)
+	if err != nil {
+		t.Fatalf("check queue block: %v", err)
+	}
+	if blockedBy == nil || blockedBy.Name != older.Name {
+		t.Fatalf("blocked by %#v, want exact schedule run %q", blockedBy, older.Name)
+	}
+}
+
 func TestAgentRunQueuePolicyAllowsOldestRun(t *testing.T) {
 	t.Parallel()
 
@@ -1230,6 +1264,45 @@ func TestAgentScheduleRunsKeepsManualTemplateOutOfIntervalRotation(t *testing.T)
 	}
 	if got, want := agentScheduleNextTemplateName(schedule, lastIntervalTemplate), "composer-2-5"; got != want {
 		t.Fatalf("next interval template = %q, want %q", got, want)
+	}
+}
+
+func TestAgentScheduleRunsUsesSanitizedLabelAndExactScheduleIdentity(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	scheme := runtime.NewScheme()
+	if err := controlv1alpha1.AddToScheme(scheme); err != nil {
+		t.Fatalf("add control scheme: %v", err)
+	}
+	schedule := &controlv1alpha1.AgentSchedule{
+		ObjectMeta: metav1.ObjectMeta{Name: "review.v1", Namespace: "agents", UID: "review-v1-uid"},
+		Spec:       controlv1alpha1.AgentScheduleSpec{IntervalSeconds: 3600},
+	}
+	matching := &controlv1alpha1.AgentRun{
+		ObjectMeta: metav1.ObjectMeta{Name: "matching", Namespace: "agents", Labels: map[string]string{agentRunScheduleLabel: "review-v1"}},
+		Spec: controlv1alpha1.AgentRunSpec{
+			ScheduleRef: &controlv1alpha1.NamespacedObjectReference{Name: "review.v1", Namespace: "agents"},
+			SourceUID:   "review-v1-uid",
+		},
+	}
+	collision := &controlv1alpha1.AgentRun{
+		ObjectMeta: metav1.ObjectMeta{Name: "collision", Namespace: "agents", Labels: map[string]string{agentRunScheduleLabel: "review-v1"}},
+		Spec: controlv1alpha1.AgentRunSpec{
+			ScheduleRef: &controlv1alpha1.NamespacedObjectReference{Name: "review-v1", Namespace: "agents"},
+			SourceUID:   "other-uid",
+		},
+	}
+	reconciler := &AgentScheduleReconciler{
+		Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(schedule, matching, collision).Build(),
+		Scheme: scheme,
+	}
+	active, last, _, err := reconciler.agentScheduleRuns(ctx, schedule)
+	if err != nil {
+		t.Fatalf("list schedule runs: %v", err)
+	}
+	if len(active) != 1 || active[0].Name != matching.Name || last == nil || last.Name != matching.Name {
+		t.Fatalf("schedule runs = active:%v last:%v, want only %s", active, last, matching.Name)
 	}
 }
 

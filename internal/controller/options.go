@@ -23,6 +23,11 @@ const (
 	defaultStorageClassEnv          = "ANVIL_AGENTS_DEFAULT_STORAGE_CLASS"
 	githubAPIAllowedHostsEnv        = "ANVIL_AGENTS_GITHUB_API_ALLOWED_HOSTS"
 	allowInsecureGitHubAPIEnv       = "ANVIL_AGENTS_ALLOW_INSECURE_GITHUB_API"
+	codexRunnerImageEnv             = "ANVIL_AGENTS_RUNNER_IMAGE_CODEX"
+	hermesAgentRunnerImageEnv       = "ANVIL_AGENTS_RUNNER_IMAGE_HERMES_AGENT"
+	openClawRunnerImageEnv          = "ANVIL_AGENTS_RUNNER_IMAGE_OPENCLAW"
+	grokBuildRunnerImageEnv         = "ANVIL_AGENTS_RUNNER_IMAGE_GROK_BUILD"
+	piAgentRunnerImageEnv           = "ANVIL_AGENTS_RUNNER_IMAGE_PI_AGENT"
 )
 
 var defaultGitHubAPIAllowedHosts = []string{"api.github.com"}
@@ -49,6 +54,11 @@ type Options struct {
 	AdverseSourceGVKs            []string
 	GitHubAPIAllowedHosts        []string
 	AllowInsecureGitHubAPI       bool
+	CodexRunnerImage             string
+	HermesAgentRunnerImage       string
+	OpenClawRunnerImage          string
+	GrokBuildRunnerImage         string
+	PiAgentRunnerImage           string
 }
 
 func DefaultOptions() *Options {
@@ -65,6 +75,11 @@ func DefaultOptions() *Options {
 		DefaultStorageClass:          strings.TrimSpace(os.Getenv(defaultStorageClassEnv)),
 		GitHubAPIAllowedHosts:        csvOrDefault(os.Getenv(githubAPIAllowedHostsEnv), defaultGitHubAPIAllowedHosts),
 		AllowInsecureGitHubAPI:       boolEnv(allowInsecureGitHubAPIEnv),
+		CodexRunnerImage:             firstNonEmpty(strings.TrimSpace(os.Getenv(codexRunnerImageEnv)), agentRunDefaultCodexImage),
+		HermesAgentRunnerImage:       firstNonEmpty(strings.TrimSpace(os.Getenv(hermesAgentRunnerImageEnv)), agentRunDefaultHermesAgentImage),
+		OpenClawRunnerImage:          firstNonEmpty(strings.TrimSpace(os.Getenv(openClawRunnerImageEnv)), agentRunDefaultOpenClawImage),
+		GrokBuildRunnerImage:         firstNonEmpty(strings.TrimSpace(os.Getenv(grokBuildRunnerImageEnv)), agentRunDefaultGrokBuildImage),
+		PiAgentRunnerImage:           firstNonEmpty(strings.TrimSpace(os.Getenv(piAgentRunnerImageEnv)), agentRunDefaultPiAgentImage),
 	}
 }
 

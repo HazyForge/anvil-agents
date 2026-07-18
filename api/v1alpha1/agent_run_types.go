@@ -82,12 +82,12 @@ type AgentRunScopeSpec struct {
 	// namespace, product surface, or operational concern.
 	// +optional
 	Summary string `json:"summary,omitempty"`
-	// ApplicationRef points at the canonical Application identity when this is
-	// an application-owned run.
+	// ApplicationRef identifies the workload or product that owns this run. It
+	// is opaque metadata and does not require an Application CRD.
 	// +optional
 	ApplicationRef *ApplicationReferenceSpec `json:"applicationRef,omitempty"`
-	// ApplicationTargetRef points at the deployable target/environment this run
-	// should inspect, such as Hazy Trade production.
+	// ApplicationTargetRef identifies the target or environment this run should
+	// inspect. It is opaque metadata and does not require another CRD.
 	// +optional
 	ApplicationTargetRef *ApplicationTargetReferenceSpec `json:"applicationTargetRef,omitempty"`
 	// Namespaces optionally limits Kubernetes inspection to known namespaces.
@@ -330,8 +330,8 @@ type AgentRunHarnessBackendSpec struct {
 	// +kubebuilder:validation:Enum=codex;hermesAgent;openClaw;grokBuild;piAgent;custom
 	// +optional
 	Kind AgentRunHarnessBackendKind `json:"kind,omitempty"`
-	// Image selects the agent container image. When empty, codex backends use
-	// the controller's default Codex agent-run image.
+	// Image selects the agent container image. When empty, built-in backends use
+	// the matching controller-configured runner image; custom requires a value.
 	// +optional
 	Image string `json:"image,omitempty"`
 	// ModelProvider selects the model/tool-caller provider for provider-aware
@@ -391,7 +391,7 @@ type AgentRunSkillInjectionSpec struct {
 	Content string `json:"content,omitempty"`
 	// SourceRefs points at remote skill content that the controller resolves
 	// when it creates the AgentRun payload ConfigMap. Use this for protected
-	// skill files that should be updated independently of Anvil controller
+	// skill files that should be updated independently of anvil-agents operator
 	// releases.
 	// +optional
 	SourceRefs []AgentRunSkillSourceRef `json:"sourceRefs,omitempty"`
@@ -452,7 +452,7 @@ type AgentRunSubagentSpec struct {
 }
 
 type AgentRunToolSpec struct {
-	// Name is a stable tool identifier such as hazytradectl.
+	// Name is a stable tool identifier such as kbctl.
 	// +kubebuilder:validation:MinLength=1
 	Name string `json:"name"`
 	// Description explains what this tool is for during the run.
@@ -466,7 +466,7 @@ type AgentRunToolSpec struct {
 	// +optional
 	SetupScript string `json:"setupScript,omitempty"`
 	// VerifyCommand is an optional argv array run after SetupScript to prove
-	// the tool is available, for example ["hazytradectl", "--version"].
+	// the tool is available, for example ["kbctl", "--version"].
 	// +optional
 	VerifyCommand []string `json:"verifyCommand,omitempty"`
 }
@@ -605,10 +605,9 @@ type AgentRunHarnessSpec struct {
 	// treat each entry as a separately labeled pass in the same run.
 	// +optional
 	Subagents []AgentRunSubagentSpec `json:"subagents,omitempty"`
-	// Tools describes app- or repo-specific commands needed by this run. The
-	// Codex adapter executes setup scripts before Codex starts and exposes tool
-	// metadata to the prompt. Other adapters may ignore these entries until
-	// they implement the same setup contract.
+	// Tools describes app- or repo-specific commands needed by this run. Every
+	// built-in adapter runs setup scripts and verify commands before its agent
+	// runtime starts and exposes tool metadata to the prompt.
 	// +optional
 	Tools []AgentRunToolSpec `json:"tools,omitempty"`
 	// SystemPrompt appends standing system-level instructions to the generated

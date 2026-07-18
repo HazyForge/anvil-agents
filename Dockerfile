@@ -12,10 +12,13 @@ COPY . .
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
-    go build -trimpath -ldflags="-s -w" -o /out/anvil-agents ./cmd/anvil-agents
+    go build -trimpath -ldflags="-s -w" -o /out/anvil-agents ./cmd/anvil-agents && \
+    CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
+    go build -trimpath -ldflags="-s -w" -o /out/anvil-agents-api ./cmd/anvil-agents-api
 
 FROM gcr.io/distroless/static-debian12:nonroot
 LABEL org.opencontainers.image.source=https://github.com/HazyForge/anvil-agents
 COPY --from=build /out/anvil-agents /usr/local/bin/anvil-agents
-EXPOSE 8080 8081
+COPY --from=build /out/anvil-agents-api /usr/local/bin/anvil-agents-api
+EXPOSE 8080 8081 8082
 ENTRYPOINT ["/usr/local/bin/anvil-agents"]

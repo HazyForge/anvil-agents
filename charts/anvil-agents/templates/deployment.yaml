@@ -38,6 +38,11 @@ spec:
             - --adverse-source-gvks={{ join "," .Values.adverseSourceGVKs }}
             - --github-api-allowed-hosts={{ join "," .Values.githubAPI.allowedHosts }}
             - --allow-insecure-github-api={{ .Values.githubAPI.allowInsecure }}
+            - --runner-image-codex={{ .Values.runnerImages.codex }}
+            - --runner-image-hermes-agent={{ .Values.runnerImages.hermesAgent }}
+            - --runner-image-openclaw={{ .Values.runnerImages.openClaw }}
+            - --runner-image-grok-build={{ .Values.runnerImages.grokBuild }}
+            - --runner-image-pi-agent={{ .Values.runnerImages.piAgent }}
             {{- with .Values.archive.terminalRetention }}
             - --terminal-retention={{ . }}
             {{- end }}

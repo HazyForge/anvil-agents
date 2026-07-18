@@ -1,0 +1,44 @@
+{{- if and .Values.api.enabled .Values.api.httpRoute.enabled }}
+{{- if not .Values.api.httpRoute.parentRefs }}
+{{- fail "api.httpRoute.parentRefs must contain at least one Gateway parent when api.httpRoute.enabled=true" }}
+{{- end }}
+{{- if not .Values.api.httpRoute.hostnames }}
+{{- fail "api.httpRoute.hostnames must contain an explicit hostname when api.httpRoute.enabled=true" }}
+{{- end }}
+{{- range $hostname := .Values.api.httpRoute.hostnames }}
+{{- if or (contains "*" $hostname) (not (regexMatch "^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?$" $hostname)) }}
+{{- fail "api.httpRoute.hostnames must contain exact hostnames, never wildcards" }}
+{{- end }}
+{{- end }}
+{{- range $parent := .Values.api.httpRoute.parentRefs }}
+{{- if not $parent.sectionName }}
+{{- fail "each api.httpRoute.parentRefs entry must select an explicit HTTPS listener with sectionName" }}
+{{- end }}
+{{- end }}
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: {{ include "anvil-agents.apiFullname" . }}
+  labels:
+    app.kubernetes.io/name: {{ include "anvil-agents.apiName" . }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+  {{- with .Values.api.httpRoute.annotations }}
+  annotations:
+{{ toYaml . | indent 4 }}
+  {{- end }}
+spec:
+  parentRefs:
+{{ toYaml .Values.api.httpRoute.parentRefs | indent 4 }}
+  {{- with .Values.api.httpRoute.hostnames }}
+  hostnames:
+{{ toYaml . | indent 4 }}
+  {{- end }}
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /api/v1
+      backendRefs:
+        - name: {{ include "anvil-agents.apiFullname" . }}
+          port: {{ .Values.api.service.port }}
+{{- end }}

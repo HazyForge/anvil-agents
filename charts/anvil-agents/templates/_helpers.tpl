@@ -2,6 +2,24 @@
 {{- default .Chart.Name .Values.nameOverride | trunc 63 | trimSuffix "-" }}
 {{- end }}
 
+{{- define "anvil-agents.apiName" -}}
+{{- $base := include "anvil-agents.name" . | trunc 59 | trimSuffix "-" -}}
+{{- printf "%s-api" $base }}
+{{- end }}
+
+{{- define "anvil-agents.apiFullname" -}}
+{{- $base := include "anvil-agents.fullname" . | trunc 59 | trimSuffix "-" -}}
+{{- printf "%s-api" $base }}
+{{- end }}
+
+{{- define "anvil-agents.apiServiceAccountName" -}}
+{{- if .Values.api.serviceAccount.create }}
+{{- default (include "anvil-agents.apiFullname" .) .Values.api.serviceAccount.name }}
+{{- else }}
+{{- required "api.serviceAccount.name is required when api.serviceAccount.create=false" .Values.api.serviceAccount.name }}
+{{- end }}
+{{- end }}
+
 {{- define "anvil-agents.fullname" -}}
 {{- if .Values.fullnameOverride }}
 {{- .Values.fullnameOverride | trunc 63 | trimSuffix "-" }}

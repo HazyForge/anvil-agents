@@ -1,0 +1,21 @@
+api:
+  enabled: true
+  config:
+    oidc:
+      issuer: https://identity.example.com
+      audiences:
+        - anvil-agents
+    authorization:
+      roleClaims: [roles]
+      roleObjectClaims:
+        - urn:zitadel:iam:org:project:roles
+        - urn:zitadel:iam:org:projects:roles
+      groupClaims: [groups]
+      namespaceClaim: anvil_agents_namespaces
+      bindings:
+        - name: agent-viewers
+          roles: [anvil_agents_viewer]
+          permissions:
+            - anvil-agents:runs:read
+            - anvil-agents:runs:stream
+          namespacesFromClaim: true

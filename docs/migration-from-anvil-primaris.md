@@ -28,6 +28,39 @@ against two deployments that use different election IDs.
 8. Remove transitional CRD templates from the old chart only after the new
    controller is healthy so GitOps pruning cannot race the initial install.
 
+## Client and stream migration
+
+The read-only `anvil-agents-api` can be enabled before the reconciler handoff.
+It has a separate ServiceAccount and cannot mutate runs, Jobs, or other cluster
+objects. This lets browsers, mobile clients, and operator tools move away from
+Hub AgentRun projections and direct `kubectl logs` independently of the
+controller cutover.
+
+1. Register a distinct `anvil-agents` API audience with the existing OIDC
+   issuer. Keep the existing login client if it can request that audience, but
+   ensure the audience is not the login client's own client ID.
+2. Add explicit authorization bindings for the existing read role. A temporary
+   `anvil_primaris_admin` binding can preserve administrative access, but it
+   must still list permissions and namespaces explicitly.
+3. Enable the API while the standalone controller remains at zero replicas if
+   the embedded reconciler is still active.
+4. Expose the API on its own HTTPS hostname. The optional HTTPRoute expects TLS
+   at its parent Gateway; never send access tokens over plaintext HTTP.
+5. Obtain a newly minted signed JWT access token. For ZITADEL, configure Access
+   Token Type as JWT first; opaque and JWE tokens are unsupported. Verify list,
+   detail, and live SSE access with a read-only user and confirm a user outside
+   the configured namespace binding receives a denial.
+6. Move `anvilctl`, browser, and mobile consumers to the standalone endpoint.
+   Token acquisition remains in the existing OIDC client; the API only
+   validates access tokens.
+7. Retire the old AgentRun projection after clients are migrated. Leave
+   unrelated Hub build, release, and mutation-policy surfaces intact.
+
+The streaming API does not authorize run creation, approval, cancellation,
+repository mutation, or delivery. Those operations remain behind the existing
+policy broker. See [live-agent-run-stream.md](live-agent-run-stream.md) for the
+full provider-neutral configuration and access-token contract.
+
 The repository-owned Anvil Primaris deployment encodes the initial safe stage:
 `replicaCount: 0` and `crds.install: false`. The cutover change must also pin
 `image.reference` to a verified digest before scaling up.

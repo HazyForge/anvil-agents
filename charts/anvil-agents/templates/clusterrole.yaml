@@ -27,9 +27,11 @@ rules:
   - apiGroups: [""]
     resources: ["secrets"]
     verbs: ["get"]
+  {{- if .Values.externalSecrets.enabled }}
   - apiGroups: ["external-secrets.io"]
     resources: ["externalsecrets"]
     verbs: ["get", "patch", "update"]
+  {{- end }}
   - apiGroups: ["coordination.k8s.io"]
     resources: ["leases"]
     verbs: ["create", "delete", "get", "list", "patch", "update", "watch"]

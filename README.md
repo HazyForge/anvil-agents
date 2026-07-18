@@ -1,81 +1,117 @@
-# anvil-agents
+# Anvil Agents
 
-`anvil-agents` is the standalone Kubernetes operator for Hazy Forge agent
-execution. It owns AgentRun Jobs, reusable profiles, schedules, launch controls,
-durable data volumes, volume profiles, adverse streams, and optional terminal
-run archives.
+Anvil Agents is an open-source Hazy Forge project for durable, distributed
+agent loops on Kubernetes. Declarative runs, reusable profiles, schedules, and
+event streams become isolated Jobs, and each run can select Codex, Hermes
+Agent, OpenClaw, Grok Build, Pi, or a custom harness.
 
-The operator intentionally preserves `control.anvil.hazyforge.io/v1alpha1` so
-existing AgentRun resources and PVC owner references can be adopted without a
-data migration. Application references are opaque scope names; no Anvil
-Primaris, Anvil Hub, Application, Repository, AnvilTask, or delivery CRD is
-required.
+```text
+AgentRun/Profile/Schedule       Kubernetes Job
+           |                         |
+           v                         v
+    anvil-agents controller -> selected harness -> tools and services
+           |                         |
+           +---- status/archive <----+
+           |
+           +---- optional OIDC read API and live SSE logs
+```
 
-`AgentRunControl.spec.maxConcurrentRuns` is the standalone per-scope policy
-surface. The operator-wide flag is only the fallback for scopes without a
-matching control.
+Kubernetes provides scheduling, isolation, and distribution. Explicit
+`AgentDataVolume` resources and external services provide durable memory.
+Profiles provide reusable policy and harness configuration. The operator does
+not require Anvil Primaris, Anvil Hub, or another Hazy Forge control plane.
 
-Images can be built and published directly from this repository without GitHub
-Actions. The optional workflows and local builds share
-`hack/build-images.sh`; `.hazyforge/artifact-build.yaml` remains the
-cluster-native delivery contract.
+The branded API group `control.anvil.hazyforge.io/v1alpha1` is retained as a
+stable API identity and for migration compatibility. Application and target
+references are opaque scope keys, not dependencies on other CRDs.
 
-## Resources
+## What It Owns
 
-- `AgentRun`: append-only execution record that materializes one ConfigMap and
-  one Kubernetes Job.
-- `AgentRunProfile`: reusable prompt, tool, backend, policy, and execution
-  defaults.
-- `AgentSchedule`: interval and manual `run-now` child-run creation with
-  `Forbid`, `Allow`, and `Queue` concurrency.
-- `AgentRunControl`: cluster-scoped pause/allow policy keyed by opaque
-  application scope.
-- `AgentDataVolume`: durable PVC ownership and expansion-only resize.
-- `VolumeProfile`: reusable storage shapes.
-- `AdverseSituation`: buffered adverse events and optional AgentRun responders.
+- `AgentRun`: one append-only execution record and one harness Job.
+- `AgentRunProfile`: reusable prompt, tool, backend, and execution defaults.
+- `AgentSchedule`: interval and manual run creation across named templates.
+- `AgentRunControl`: cluster-wide pause and concurrency policy by scope key.
+- `AgentDataVolume` and `VolumeProfile`: explicit durable PVC-backed state.
+- `AdverseSituation`: deduplicated event buffers with optional responders.
+- `anvil-agents-api`: optional OIDC-protected summaries and live SSE logs.
 
-## Local validation
+"Multi-harness" means every run uses one adapter behind a common payload,
+tool-bootstrap, and status contract. Schedules can distribute independent runs
+across harnesses and nodes. It does not mean the controller creates an agent
+mesh or a shared live conversation; cross-run state must be explicit.
+
+## Try It Locally
+
+The credential-free Kind quickstart builds the controller and a minimal custom
+harness, installs the chart, creates an `AgentRun`, and waits for structured
+success:
+
+```bash
+./examples/quickstart/run.sh
+```
+
+See [Getting Started](docs/getting-started.md) for prerequisites, manual steps,
+existing-cluster installation, and cleanup.
+
+## Build Without GitHub Actions
+
+Local scripts are the canonical build and validation entry points:
 
 ```bash
 make verify
 make images
-```
+make kind-e2e
 
-The default builds `anvil-agents:dev` and all five
-`anvil-agent-run-*:dev` images into local Docker. Build one image or push the
-same set to any authenticated registry with the underlying reusable script:
-
-```bash
 ./hack/build-images.sh --component controller --tag test
 ./hack/build-images.sh \
-  --prefix registry.example.com/hazyforge \
-  --tag sha-$(git rev-parse --short HEAD) \
+  --prefix registry.example.com/team \
+  --tag v0.1.0 \
   --push
+
+./hack/package-chart.sh --version 0.1.0
 ```
 
-Run `./hack/build-images.sh --help` for component selection, platform, cache,
-pull, and multi-tag options.
+`make images` builds the controller plus all five built-in runner images into
+local Docker. The reusable script supports component selection, platforms,
+cache import/export, multiple tags, custom registries, and fork-aware OCI
+source metadata. Image pushes reject dirty worktrees unless explicitly
+overridden. GitHub workflows call the same repository-owned contract.
 
-Install with Helm:
+## Security Boundary
 
-```bash
-helm upgrade --install anvil-agents charts/anvil-agents \
-  --namespace anvil-agents-system --create-namespace
-```
+An `AgentRun` author can choose executable code, a same-namespace ServiceAccount
+and Secrets, resource placement, and a custom command. Treat permission to
+create or edit runs and profiles as privileged workload execution. Use
+dedicated namespaces, narrowly scoped runner identities, admission policy, and
+secrets created only for agents. `watchNamespaces` narrows the controller cache;
+it does not narrow the chart's ClusterRole.
 
-The checked-in Anvil Primaris `.hazyforge` deployment is intentionally staged
-with zero replicas and CRD installation disabled. It must not be activated
-until the embedded reconciler is stopped and CRD ownership is switched in the
-same reviewed cutover.
+The OIDC API is a separate read-only workload and is disabled until an issuer,
+audience, and explicit namespace authorization bindings are configured. See
+[Security](docs/security.md) and
+[Live AgentRun API](docs/live-agent-run-stream.md).
 
-Configured adverse source watches use `--adverse-source-gvks` values such as
-`apps/v1/Deployment`. The operator ServiceAccount needs separate read RBAC for
-every configured external GVK; the base chart never grants broad wildcard
-access.
+## Documentation
 
-Remote GitHub skill sources default to `api.github.com`. GitHub Enterprise API
-hosts must be explicitly added through `githubAPI.allowedHosts`; token-bearing
-requests require HTTPS and do not follow redirects.
+- [Architecture and multi-harness semantics](docs/architecture.md)
+- [Getting started](docs/getting-started.md)
+- [Harness contract and adapter matrix](docs/harnesses.md)
+- [Knowledge bases, tools, and external services](docs/integrating-knowledge-and-tools.md)
+- [Operations, upgrades, and uninstall](docs/operations.md)
+- [Design roadmap and known alpha boundaries](docs/design-roadmap.md)
+- [AgentRun API reference](docs/agent-run.md)
+- [Migration from Anvil Primaris](docs/migration-from-anvil-primaris.md)
 
-See [docs/agent-run.md](docs/agent-run.md) and
-[docs/migration-from-anvil-primaris.md](docs/migration-from-anvil-primaris.md).
+Hazy Forge uses this same open-source repository for its own agent system. Its
+deployment overlay remains under `.hazyforge/` as a real integration example,
+not as a prerequisite for other installations.
+
+## Project Status
+
+The API is `v1alpha1`. Pin chart and image versions, test upgrades against a
+cluster backup, and expect compatible additions before a stable API release.
+The initial v0.1 release contract targets Linux amd64. Source builds may work
+on arm64, but arm64 is not yet part of the published release gate.
+
+Licensed under Apache-2.0. See [Contributing](CONTRIBUTING.md),
+[Security Policy](SECURITY.md), and [Support](SUPPORT.md).
