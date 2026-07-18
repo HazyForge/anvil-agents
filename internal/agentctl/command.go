@@ -25,6 +25,7 @@ import (
 	"github.com/spf13/pflag"
 
 	agentsv1alpha1 "github.com/hazyforge/anvil-agents/api/v1alpha1"
+	"github.com/hazyforge/anvil-agents/internal/runapi"
 )
 
 const (
@@ -37,10 +38,11 @@ const (
 type BackendFactory func(KubeOptions) (Backend, error)
 
 type App struct {
-	In      io.Reader
-	Out     io.Writer
-	Err     io.Writer
-	Factory BackendFactory
+	In           io.Reader
+	Out          io.Writer
+	Err          io.Writer
+	Factory      BackendFactory
+	PollInterval time.Duration
 }
 
 type usageError struct {
@@ -55,7 +57,7 @@ func Main(ctx context.Context, args []string, in io.Reader, out, errOut io.Write
 		if errors.Is(err, pflag.ErrHelp) {
 			return 0
 		}
-		fmt.Fprintf(errOut, "error: %v\n", err)
+		fmt.Fprintf(errOut, "error: %s\n", terminalSafe(err.Error()))
 		var usage *usageError
 		if errors.As(err, &usage) {
 			return 2
@@ -398,11 +400,13 @@ func (app App) runLogs(ctx context.Context, kubeOptions KubeOptions, args []stri
 	var namespace string
 	var follow, timestamps bool
 	var tail int64 = 200
+	var podTimeout time.Duration = 2 * time.Minute
 	flags := newCommandFlags("run logs", app.Err)
 	flags.StringVarP(&namespace, "namespace", "n", "", "Namespace; defaults to the current kubeconfig context.")
 	flags.BoolVarP(&follow, "follow", "f", false, "Follow the verified agent container log stream.")
 	flags.BoolVar(&timestamps, "timestamps", false, "Include Kubernetes log timestamps.")
 	flags.Int64Var(&tail, "tail", tail, "Number of recent lines; use -1 for all available logs.")
+	flags.DurationVar(&podTimeout, "pod-timeout", podTimeout, "When following, wait this long for the runner Pod and logs to become ready.")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
@@ -411,6 +415,12 @@ func (app App) runLogs(ctx context.Context, kubeOptions KubeOptions, args []stri
 	}
 	if tail == 0 || tail < -1 {
 		return &usageError{message: "--tail must be -1 or a positive integer"}
+	}
+	if podTimeout <= 0 {
+		return &usageError{message: "--pod-timeout must be positive"}
+	}
+	if !follow && flags.Changed("pod-timeout") {
+		return &usageError{message: "--pod-timeout requires --follow"}
 	}
 	backend, err := app.Factory(kubeOptions)
 	if err != nil {
@@ -424,7 +434,7 @@ func (app App) runLogs(ctx context.Context, kubeOptions KubeOptions, args []stri
 	if tail >= 0 {
 		options.TailLines = &tail
 	}
-	stream, err := backend.OpenLogs(ctx, run, options)
+	stream, err := app.openLogs(ctx, backend, run, options, follow, podTimeout)
 	if err != nil {
 		return fmt.Errorf("open verified AgentRun logs: %w", err)
 	}
@@ -433,6 +443,47 @@ func (app App) runLogs(ctx context.Context, kubeOptions KubeOptions, args []stri
 		return fmt.Errorf("read AgentRun logs: %w", err)
 	}
 	return nil
+}
+
+func (app App) openLogs(ctx context.Context, backend Backend, run *agentsv1alpha1.AgentRun, options corev1.PodLogOptions, wait bool, timeout time.Duration) (io.ReadCloser, error) {
+	if !wait {
+		return backend.OpenLogs(ctx, run, options)
+	}
+	waitCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	var lastErr error
+	for {
+		stream, err := backend.OpenLogs(waitCtx, run, options)
+		if err == nil {
+			return stream, nil
+		}
+		if !errors.Is(err, runapi.ErrLogsPending) && !apierrors.IsNotFound(err) {
+			return nil, err
+		}
+		lastErr = err
+		timer := time.NewTimer(app.pollInterval())
+		select {
+		case <-waitCtx.Done():
+			timer.Stop()
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+			return nil, fmt.Errorf("runner Pod/logs did not become ready within %s: %w", timeout, lastErr)
+		case <-timer.C:
+		}
+		latest, err := backend.GetRun(waitCtx, run.Namespace, run.Name)
+		if err != nil {
+			return nil, err
+		}
+		run = latest
+	}
+}
+
+func (app App) pollInterval() time.Duration {
+	if app.PollInterval > 0 {
+		return app.PollInterval
+	}
+	return 500 * time.Millisecond
 }
 
 func (app App) runDebug(ctx context.Context, kubeOptions KubeOptions, args []string) error {
@@ -461,13 +512,13 @@ func (app App) runDebug(ctx context.Context, kubeOptions KubeOptions, args []str
 	if run.Status.JobRef == nil || strings.TrimSpace(run.Status.JobRef.Name) == "" {
 		fmt.Fprintln(app.Out, "  unavailable: AgentRun status has no Job reference")
 	} else if childNamespace(run.Namespace, run.Status.JobRef.Namespace) != run.Namespace {
-		fmt.Fprintf(app.Out, "  verification failed: Job reference crosses namespaces to %q\n", run.Status.JobRef.Namespace)
+		fmt.Fprintf(app.Out, "  verification failed: Job reference crosses namespaces to %q\n", terminalSafe(run.Status.JobRef.Namespace))
 	} else {
 		job, err = backend.GetJob(ctx, run.Namespace, run.Status.JobRef.Name)
 		if err != nil {
-			fmt.Fprintf(app.Out, "  unavailable: %v\n", err)
+			fmt.Fprintf(app.Out, "  unavailable: %s\n", terminalSafe(err.Error()))
 		} else if err := verifyJob(run, job); err != nil {
-			fmt.Fprintf(app.Out, "  verification failed: %v\n", err)
+			fmt.Fprintf(app.Out, "  verification failed: %s\n", terminalSafe(err.Error()))
 			job = nil
 		} else {
 			verifiedUIDs = append(verifiedUIDs, job.UID)
@@ -480,15 +531,15 @@ func (app App) runDebug(ctx context.Context, kubeOptions KubeOptions, args []str
 	if run.Status.RunnerPodRef == nil || strings.TrimSpace(run.Status.RunnerPodRef.Name) == "" {
 		fmt.Fprintln(app.Out, "  unavailable: AgentRun status has no runner Pod reference")
 	} else if childNamespace(run.Namespace, run.Status.RunnerPodRef.Namespace) != run.Namespace {
-		fmt.Fprintf(app.Out, "  verification failed: Pod reference crosses namespaces to %q\n", run.Status.RunnerPodRef.Namespace)
+		fmt.Fprintf(app.Out, "  verification failed: Pod reference crosses namespaces to %q\n", terminalSafe(run.Status.RunnerPodRef.Namespace))
 	} else if job == nil {
 		fmt.Fprintln(app.Out, "  not verified: the referenced Job was not verified")
 	} else {
 		pod, err = backend.GetPod(ctx, run.Namespace, run.Status.RunnerPodRef.Name)
 		if err != nil {
-			fmt.Fprintf(app.Out, "  unavailable: %v\n", err)
+			fmt.Fprintf(app.Out, "  unavailable: %s\n", terminalSafe(err.Error()))
 		} else if err := verifyPod(run, job, pod); err != nil {
-			fmt.Fprintf(app.Out, "  verification failed: %v\n", err)
+			fmt.Fprintf(app.Out, "  verification failed: %s\n", terminalSafe(err.Error()))
 			pod = nil
 		} else {
 			verifiedUIDs = append(verifiedUIDs, pod.UID)
@@ -499,13 +550,13 @@ func (app App) runDebug(ctx context.Context, kubeOptions KubeOptions, args []str
 	fmt.Fprintln(app.Out, "\nEVENTS")
 	events, eventsErr := backend.ListEvents(ctx, run.Namespace, verifiedUIDs)
 	if eventsErr != nil {
-		fmt.Fprintf(app.Out, "  unavailable: %v\n", eventsErr)
+		fmt.Fprintf(app.Out, "  unavailable: %s\n", terminalSafe(eventsErr.Error()))
 	} else {
 		writeEvents(app.Out, events)
 	}
 
 	fmt.Fprintln(app.Out, "\nLIKELY CAUSE")
-	fmt.Fprintf(app.Out, "  %s\n", likelyCause(run, job, pod, events))
+	fmt.Fprintf(app.Out, "  %s\n", terminalSafe(likelyCause(run, job, pod, events)))
 	return nil
 }
 
@@ -649,7 +700,7 @@ func writeRunSummary(writer io.Writer, run *agentsv1alpha1.AgentRun, includeOutp
 	if len(run.Status.Conditions) > 0 {
 		fmt.Fprintln(writer, "  Conditions:")
 		for _, condition := range run.Status.Conditions {
-			fmt.Fprintf(writer, "    %s=%s reason=%s message=%s\n", condition.Type, condition.Status, valueOrDash(condition.Reason), valueOrDash(condition.Message))
+			fmt.Fprintf(writer, "    %s=%s reason=%s message=%s\n", valueOrDash(condition.Type), valueOrDash(string(condition.Status)), valueOrDash(condition.Reason), valueOrDash(condition.Message))
 		}
 	}
 	if len(run.Status.Reports) > 0 {
@@ -659,15 +710,15 @@ func writeRunSummary(writer io.Writer, run *agentsv1alpha1.AgentRun, includeOutp
 		}
 	}
 	if run.Status.Error != "" {
-		fmt.Fprintf(writer, "  Error: %s\n", run.Status.Error)
+		fmt.Fprintf(writer, "  Error: %s\n", terminalSafe(run.Status.Error))
 	}
 	if run.Status.PullRequestURL != "" {
-		fmt.Fprintf(writer, "  Pull request: %s\n", run.Status.PullRequestURL)
+		fmt.Fprintf(writer, "  Pull request: %s\n", terminalSafe(run.Status.PullRequestURL))
 	}
 	if includeOutput && run.Status.Output != "" {
 		fmt.Fprintln(writer, "  Status output:")
 		for _, line := range strings.Split(strings.TrimSpace(run.Status.Output), "\n") {
-			fmt.Fprintf(writer, "    %s\n", line)
+			fmt.Fprintf(writer, "    %s\n", terminalSafe(line))
 		}
 	}
 }
@@ -712,14 +763,14 @@ func writeJobDebug(writer io.Writer, job *batchv1.Job) {
 	fmt.Fprintf(writer, "  verified: %s/%s uid=%s\n", job.Namespace, job.Name, job.UID)
 	fmt.Fprintf(writer, "  active=%d succeeded=%d failed=%d\n", job.Status.Active, job.Status.Succeeded, job.Status.Failed)
 	for _, condition := range job.Status.Conditions {
-		fmt.Fprintf(writer, "  condition %s=%s reason=%s message=%s\n", condition.Type, condition.Status, valueOrDash(condition.Reason), valueOrDash(condition.Message))
+		fmt.Fprintf(writer, "  condition %s=%s reason=%s message=%s\n", valueOrDash(string(condition.Type)), valueOrDash(string(condition.Status)), valueOrDash(condition.Reason), valueOrDash(condition.Message))
 	}
 }
 
 func writePodDebug(writer io.Writer, pod *corev1.Pod) {
 	fmt.Fprintf(writer, "  verified: %s/%s uid=%s node=%s phase=%s\n", pod.Namespace, pod.Name, pod.UID, valueOrDash(pod.Spec.NodeName), valueOrDash(string(pod.Status.Phase)))
 	for _, status := range append(append([]corev1.ContainerStatus{}, pod.Status.InitContainerStatuses...), pod.Status.ContainerStatuses...) {
-		fmt.Fprintf(writer, "  container %s ready=%t restarts=%d state=%s\n", status.Name, status.Ready, status.RestartCount, containerState(status.State))
+		fmt.Fprintf(writer, "  container %s ready=%t restarts=%d state=%s\n", terminalSafe(status.Name), status.Ready, status.RestartCount, terminalSafe(containerState(status.State)))
 	}
 }
 
@@ -731,8 +782,8 @@ func writeEvents(writer io.Writer, events []corev1.Event) {
 	sort.Slice(events, func(i, j int) bool { return eventTime(events[i]).Before(eventTime(events[j])) })
 	for _, event := range events {
 		fmt.Fprintf(writer, "  %s %s %s/%s reason=%s count=%d message=%s\n",
-			eventTime(event).UTC().Format(time.RFC3339), valueOrDash(event.Type), event.InvolvedObject.Kind,
-			event.InvolvedObject.Name, valueOrDash(event.Reason), event.Count, valueOrDash(event.Message))
+			eventTime(event).UTC().Format(time.RFC3339), valueOrDash(event.Type), terminalSafe(event.InvolvedObject.Kind),
+			terminalSafe(event.InvolvedObject.Name), valueOrDash(event.Reason), event.Count, valueOrDash(event.Message))
 	}
 }
 
@@ -812,7 +863,7 @@ func hasHarnessMarker(line, marker string) bool {
 }
 
 func boundedDiagnostic(value string) string {
-	value = strings.TrimSpace(value)
+	value = terminalSafe(strings.TrimSpace(value))
 	const maxRunes = 500
 	runes := []rune(value)
 	if len(runes) > maxRunes {
@@ -833,9 +884,9 @@ func referenceName(reference *agentsv1alpha1.NamespacedObjectReference) string {
 		return "-"
 	}
 	if strings.TrimSpace(reference.Namespace) == "" {
-		return reference.Name
+		return terminalSafe(reference.Name)
 	}
-	return reference.Namespace + "/" + reference.Name
+	return terminalSafe(reference.Namespace + "/" + reference.Name)
 }
 
 func timeValue(value *metav1.Time) string {
@@ -894,9 +945,28 @@ func sanitizeLabelValue(value string) string {
 
 func valueOrDash(value string) string {
 	if value = strings.TrimSpace(value); value != "" {
-		return value
+		return terminalSafe(value)
 	}
 	return "-"
+}
+
+func terminalSafe(value string) string {
+	var builder strings.Builder
+	for _, character := range value {
+		switch {
+		case character == '\n':
+			builder.WriteString(`\n`)
+		case character == '\r':
+			builder.WriteString(`\r`)
+		case character == '\t':
+			builder.WriteString(`\t`)
+		case character < 0x20 || character == 0x7f || (character >= 0x80 && character <= 0x9f):
+			fmt.Fprintf(&builder, `\u%04x`, character)
+		default:
+			builder.WriteRune(character)
+		}
+	}
+	return builder.String()
 }
 
 func firstNonEmpty(values ...string) string {

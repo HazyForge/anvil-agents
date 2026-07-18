@@ -107,13 +107,23 @@ bounded `.status.output` field is needed without the fuller debug view.
 ```bash
 anvil-agentctl run logs -n agents repository-review-abc12
 anvil-agentctl run logs -n agents repository-review-abc12 --tail 1000 --follow
+anvil-agentctl run logs -n agents repository-review-abc12 --follow --pod-timeout 3m
 ```
 
 The command does not select an arbitrary Pod or container. It resolves the
 Pod recorded in AgentRun status, verifies the same-namespace
 AgentRun-to-Job-to-Pod controller-owner chain and labels, then reads the fixed
 `agent` container. The default tail is 200 lines. Use `--tail=-1` for all logs
-still retained by Kubernetes.
+still retained by Kubernetes. `--follow` waits up to two minutes by default for
+the controller to publish a runner Pod and for that Pod's logs to become
+available; `--pod-timeout` changes that bound. Only pending or not-yet-created
+Pod/log states are retried. Ownership failures return immediately.
+
+Kubernetes opens the Pod log subresource by name and offers no UID
+precondition. The CLI verifies the Pod UID and owner chain immediately before
+opening logs, but a subject able to replace controller-owned Pods can race that
+check and inject log content. Treat Pod replacement authority as log-injection
+authority.
 
 ## Aggregate Debug Evidence
 
@@ -138,3 +148,7 @@ This command makes current Kubernetes evidence easier to inspect but is not a
 durable transcript. AgentRun status retains bounded output and reports, and
 Kubernetes can expire Pod logs and Events. Send logs to a durable external
 store when exact historical model and tool-call investigation is required.
+Table, summary, and debug views escape terminal control characters from
+untrusted status and Event text. `run logs` deliberately preserves the raw log
+stream; redirect or inspect it in a non-terminal parser when the runner is not
+trusted.

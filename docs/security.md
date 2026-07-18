@@ -33,6 +33,11 @@ caller to have `create` access to AgentRuns and never updates an existing run.
 The log command reads only the fixed `agent` container after verifying the
 controller-owned AgentRun-to-Job-to-Pod chain. The debug command marks child
 evidence as verified only after the same namespace and owner identities match.
+Kubernetes fetches Pod logs by name without a UID precondition, so an actor
+able to replace a verified controller-owned Pod can race the subsequent log
+request and inject output. Treat Pod replacement authority as log-injection
+authority. Structured CLI views escape terminal control characters; the
+explicit `run logs` stream remains raw.
 
 Creating an `AdverseSignal` is incident-trigger authority for enabled
 `AdverseSituation` responders in that namespace. A write-only reporter role

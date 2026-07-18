@@ -17,6 +17,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 
 	agentsv1alpha1 "github.com/hazyforge/anvil-agents/api/v1alpha1"
+	"github.com/hazyforge/anvil-agents/internal/runapi"
 )
 
 type fakeBackend struct {
@@ -26,7 +27,11 @@ type fakeBackend struct {
 	runs             []agentsv1alpha1.AgentRun
 	getRun           *agentsv1alpha1.AgentRun
 	getRunErr        error
+	getRunCalls      int
 	logBody          string
+	logErr           error
+	logErrors        []error
+	logCalls         int
 	logOptions       corev1.PodLogOptions
 	job              *batchv1.Job
 	jobErr           error
@@ -55,6 +60,7 @@ func (backend *fakeBackend) ListRuns(_ context.Context, _ string, _ bool) (*agen
 }
 
 func (backend *fakeBackend) GetRun(_ context.Context, _, _ string) (*agentsv1alpha1.AgentRun, error) {
+	backend.getRunCalls++
 	if backend.getRunErr != nil {
 		return nil, backend.getRunErr
 	}
@@ -62,7 +68,16 @@ func (backend *fakeBackend) GetRun(_ context.Context, _, _ string) (*agentsv1alp
 }
 
 func (backend *fakeBackend) OpenLogs(_ context.Context, _ *agentsv1alpha1.AgentRun, options corev1.PodLogOptions) (io.ReadCloser, error) {
+	backend.logCalls++
 	backend.logOptions = options
+	if len(backend.logErrors) > 0 {
+		err := backend.logErrors[0]
+		backend.logErrors = backend.logErrors[1:]
+		return nil, err
+	}
+	if backend.logErr != nil {
+		return nil, backend.logErr
+	}
 	return io.NopCloser(strings.NewReader(backend.logBody)), nil
 }
 
@@ -259,6 +274,110 @@ func TestRunLogsPassesBoundedVerifiedLogOptions(t *testing.T) {
 	}
 }
 
+func TestRunLogsFollowWaitsForPendingRunnerPod(t *testing.T) {
+	backend := &fakeBackend{
+		defaultNamespace: "agents",
+		getRun:           testRun(),
+		logBody:          "ready\n",
+		logErrors:        []error{runapi.ErrLogsPending},
+	}
+	var output strings.Builder
+	app := testApp(backend, &output)
+	app.PollInterval = time.Nanosecond
+	if err := app.Run(context.Background(), []string{"run", "logs", "run-1", "--follow", "--pod-timeout", "1s"}); err != nil {
+		t.Fatalf("logs returned error: %v", err)
+	}
+	if output.String() != "ready\n" || backend.logCalls != 2 || backend.getRunCalls != 2 {
+		t.Fatalf("output=%q logCalls=%d getRunCalls=%d", output.String(), backend.logCalls, backend.getRunCalls)
+	}
+}
+
+func TestRunLogsFollowWaitsForNotFoundRunnerPod(t *testing.T) {
+	backend := &fakeBackend{
+		defaultNamespace: "agents",
+		getRun:           testRun(),
+		logBody:          "ready\n",
+		logErrors: []error{fmt.Errorf("get runner Pod: %w", apierrors.NewNotFound(
+			schema.GroupResource{Resource: "pods"}, "run-1-pod",
+		))},
+	}
+	var output strings.Builder
+	app := testApp(backend, &output)
+	app.PollInterval = time.Nanosecond
+	if err := app.Run(context.Background(), []string{"run", "logs", "run-1", "--follow", "--pod-timeout", "1s"}); err != nil {
+		t.Fatalf("logs returned error: %v", err)
+	}
+	if output.String() != "ready\n" || backend.logCalls != 2 || backend.getRunCalls != 2 {
+		t.Fatalf("output=%q logCalls=%d getRunCalls=%d", output.String(), backend.logCalls, backend.getRunCalls)
+	}
+}
+
+func TestRunLogsFollowDoesNotRetryOwnershipFailure(t *testing.T) {
+	backend := &fakeBackend{defaultNamespace: "agents", getRun: testRun(), logErr: errors.New("runner Pod ownership mismatch")}
+	app := testApp(backend, io.Discard)
+	app.PollInterval = time.Nanosecond
+	err := app.Run(context.Background(), []string{"run", "logs", "run-1", "--follow", "--pod-timeout", "1s"})
+	if err == nil || !strings.Contains(err.Error(), "ownership mismatch") {
+		t.Fatalf("logs error = %v", err)
+	}
+	if backend.logCalls != 1 {
+		t.Fatalf("ownership error retried %d times", backend.logCalls)
+	}
+}
+
+func TestRunLogsFollowTimesOutWhileRunnerPodIsPending(t *testing.T) {
+	backend := &fakeBackend{defaultNamespace: "agents", getRun: testRun(), logErr: runapi.ErrLogsPending}
+	app := testApp(backend, io.Discard)
+	app.PollInterval = time.Second
+	err := app.Run(context.Background(), []string{"run", "logs", "run-1", "--follow", "--pod-timeout", "1ms"})
+	if err == nil || !strings.Contains(err.Error(), "did not become ready within 1ms") {
+		t.Fatalf("logs timeout error = %v", err)
+	}
+	if backend.logCalls != 1 {
+		t.Fatalf("pending log stream opened %d times before timeout", backend.logCalls)
+	}
+}
+
+func TestRunLogsFollowReturnsParentCancellation(t *testing.T) {
+	backend := &fakeBackend{defaultNamespace: "agents", getRun: testRun(), logErr: runapi.ErrLogsPending}
+	app := testApp(backend, io.Discard)
+	app.PollInterval = time.Second
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	err := app.Run(ctx, []string{"run", "logs", "run-1", "--follow", "--pod-timeout", "1m"})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("logs cancellation error = %v", err)
+	}
+	if strings.Contains(err.Error(), "did not become ready") {
+		t.Fatalf("parent cancellation reported as pod timeout: %v", err)
+	}
+	if backend.logCalls != 1 {
+		t.Fatalf("pending log stream opened %d times before cancellation", backend.logCalls)
+	}
+}
+
+func TestRunLogsRejectsPodTimeoutWithoutFollow(t *testing.T) {
+	backend := &fakeBackend{}
+	err := testApp(backend, io.Discard).Run(context.Background(), []string{"run", "logs", "run-1", "--pod-timeout", "1s"})
+	if err == nil || !strings.Contains(err.Error(), "--pod-timeout requires --follow") {
+		t.Fatalf("logs validation error = %v", err)
+	}
+	if backend.getRunCalls != 0 {
+		t.Fatal("invalid flags contacted Kubernetes")
+	}
+}
+
+func TestRunLogsKeepsRawBytes(t *testing.T) {
+	backend := &fakeBackend{defaultNamespace: "agents", getRun: testRun(), logBody: "\x1b[31mraw\x1b[0m\n"}
+	var output strings.Builder
+	if err := testApp(backend, &output).Run(context.Background(), []string{"run", "logs", "run-1"}); err != nil {
+		t.Fatalf("logs returned error: %v", err)
+	}
+	if output.String() != backend.logBody {
+		t.Fatalf("raw logs changed from %q to %q", backend.logBody, output.String())
+	}
+}
+
 func TestRunDebugVerifiesChildrenAndAggregatesEvents(t *testing.T) {
 	run := testRun()
 	controller := true
@@ -372,6 +491,33 @@ func TestLikelyCauseIgnoresUnassociatedModelErrorProse(t *testing.T) {
 	}
 }
 
+func TestTerminalSafeEscapesControlSequences(t *testing.T) {
+	input := "before\x1b]52;c;payload\x07after\nnext\t\u009b31m"
+	want := `before\u001b]52;c;payload\u0007after\nnext\t\u009b31m`
+	if got := terminalSafe(input); got != want {
+		t.Fatalf("terminalSafe() = %q, want %q", got, want)
+	}
+}
+
+func TestRunDebugSanitizesStructuredAgentText(t *testing.T) {
+	run := testRun()
+	run.Status.Output = "message \x1b[31mred\x1b[0m"
+	run.Status.Error = "failed\x07bell"
+	backend := &fakeBackend{defaultNamespace: "agents", getRun: run, jobErr: errors.New("not retained\x1b[2J")}
+	var output strings.Builder
+	if err := testApp(backend, &output).Run(context.Background(), []string{"run", "debug", "run-1"}); err != nil {
+		t.Fatalf("debug returned error: %v", err)
+	}
+	if strings.ContainsAny(output.String(), "\x1b\x07") {
+		t.Fatalf("structured debug retained terminal control bytes: %q", output.String())
+	}
+	for _, escaped := range []string{`\u001b[31m`, `\u0007bell`, `\u001b[2J`} {
+		if !strings.Contains(output.String(), escaped) {
+			t.Fatalf("debug output missing escaped %q: %s", escaped, output.String())
+		}
+	}
+}
+
 func testApp(backend Backend, output io.Writer) App {
 	return App{
 		In:  strings.NewReader(""),
@@ -380,6 +526,7 @@ func testApp(backend Backend, output io.Writer) App {
 		Factory: func(KubeOptions) (Backend, error) {
 			return backend, nil
 		},
+		PollInterval: time.Nanosecond,
 	}
 }
 
