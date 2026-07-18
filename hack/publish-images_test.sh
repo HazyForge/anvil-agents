@@ -37,6 +37,8 @@ if [[ "$1 $2 $3" == "buildx imagetools inspect" ]]; then
 		else
 			printf '%s\n' sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 		fi
+	elif [[ "${format}" == *Manifest.Manifests* ]]; then
+		printf '%s\n' sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
 	else
 		printf '%s\n' "${FAKE_BAD_REVISION:-${FAKE_REVISION}}"
 	fi

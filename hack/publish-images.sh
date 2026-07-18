@@ -126,19 +126,29 @@ inspect_digest() {
 	docker buildx imagetools inspect "$1" --format '{{.Manifest.Digest}}'
 }
 
-inspect_revision() {
-	local ref="$1" target_platform="$2"
+inspect_platform() {
+	local ref="$1" target_platform="$2" os architecture
+	os="${target_platform%%/*}"
+	architecture="${target_platform#*/}"
+	[[ "${os}" != "${architecture}" && "${architecture}" != */* ]] || { echo "unsupported platform format: ${target_platform}" >&2; exit 2; }
 	docker buildx imagetools inspect "${ref}" \
-		--format "{{index (index .Image \"${target_platform}\").Config.Labels \"org.opencontainers.image.revision\"}}"
+		--format "{{range .Manifest.Manifests}}{{if and (eq .Platform.OS \"${os}\") (eq .Platform.Architecture \"${architecture}\")}}{{.Digest}}{{end}}{{end}}"
+}
+
+inspect_revision() {
+	docker buildx imagetools inspect "$1" \
+		--format '{{index .Image.Config.Labels "org.opencontainers.image.revision"}}'
 }
 
 verify_immutable_ref() {
 	local component="$1" ref="$2" expected_revision="$3" target_platform="$4"
 	[[ "${ref}" == *@sha256:* ]] || { echo "${component} is not digest-pinned: ${ref}" >&2; exit 1; }
-	local expected_digest="${ref##*@}" actual_digest actual_revision
+	local expected_digest="${ref##*@}" actual_digest actual_revision platform_digest
 	actual_digest="$(inspect_digest "${ref}")"
 	[[ "${actual_digest}" == "${expected_digest}" ]] || { echo "${component} digest mismatch: ${actual_digest} != ${expected_digest}" >&2; exit 1; }
-	actual_revision="$(inspect_revision "${ref}" "${target_platform}")"
+	platform_digest="$(inspect_platform "${ref}" "${target_platform}")"
+	[[ "${platform_digest}" == sha256:* ]] || { echo "${component} does not contain platform ${target_platform}" >&2; exit 1; }
+	actual_revision="$(inspect_revision "${ref}")"
 	[[ "${actual_revision}" == "${expected_revision}" ]] || { echo "${component} revision mismatch: ${actual_revision} != ${expected_revision}" >&2; exit 1; }
 }
 
