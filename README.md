@@ -98,17 +98,25 @@ make kind-e2e
 ./hack/build-images.sh --component controller --tag test
 ./hack/build-images.sh \
   --prefix registry.example.com/team \
-  --tag v0.1.0 \
+  --tag v0.1.1 \
   --push
 
-./hack/package-chart.sh --version 0.1.0
+./hack/package-chart.sh --version 0.1.1
+
+# From a clean vX.Y.Z tag after docker login and helm registry login:
+./hack/publish-release.sh \
+  --prefix registry.example.com/team \
+  --version vX.Y.Z
 ```
 
 `make images` builds the controller plus all five built-in runner images into
 local Docker. The reusable script supports component selection, platforms,
 cache import/export, multiple tags, custom registries, and fork-aware OCI
 source metadata. Image pushes reject dirty worktrees unless explicitly
-overridden. GitHub workflows call the same repository-owned contract.
+overridden. `publish-release.sh` publishes all six versioned images, verifies
+their immutable digests and source revision, writes a digest lock, and pushes
+the version-coupled OCI chart. GitHub workflows call the same repository-owned
+contracts and are optional.
 The optional release workflow runs only for a `v*` tag push or a manual rerun
 of an existing tag. It runs the same verification and Kind upgrade/install
 tests before publishing versioned images and an OCI chart; it never publishes

@@ -14,7 +14,7 @@ Usage:
   ./hack/package-chart.sh --version VERSION [--output DIR] [--image-prefix PREFIX]
 
 Options:
-  --version VERSION  SemVer with or without a leading v, for example 0.1.0.
+  --version VERSION  SemVer with or without a leading v, for example 0.1.1.
   --output DIR       Package destination. Default: ./dist.
   --image-prefix     Registry/repository prefix for all six images.
                      Default: ghcr.io/hazyforge.

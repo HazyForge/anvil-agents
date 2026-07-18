@@ -67,6 +67,16 @@ terminal retention only after verifying archives. A terminal CR is pruned only
 after successful archival. Archive records can contain prompt and output data;
 protect and expire them accordingly.
 
+The controller process writes archive rows; AgentRun worker Pods do not. The
+database hostname, TLS policy, firewall or `pg_hba`, and network policy must
+therefore allow every node eligible to host a controller replica. If database
+access is topology- or source-IP-constrained, place the controller with
+`nodeSelector` or required affinity on an approved node pool. Runner placement
+remains independent and can still spread heavy Jobs across the rest of the
+cluster. Keep terminal retention disabled until an actual archive row is
+verified; an archive failure should leave the terminal custom resource present
+for retry and diagnosis.
+
 ## Uninstall
 
 A normal Helm uninstall removes the controller/API workloads and RBAC but
@@ -94,6 +104,13 @@ vX.Y.Z` builds and pushes all six images, verifies that the version and commit
 tags resolve to the same registry digest, verifies the OCI source revision, and
 atomically writes a deployment-ready digest lock under `dist/`. Recheck an
 existing lock with `--verify-lock FILE`; neither path requires GitHub Actions.
+
+`hack/publish-release.sh --prefix REGISTRY/PATH --version vX.Y.Z` is the
+complete reusable path. It calls the image publisher, packages the chart,
+pushes it to `oci://REGISTRY/PATH/charts` by default, and re-verifies the image
+lock after publication. Authenticate both Docker and Helm to the registry
+first. The tag must point at a clean checkout so OCI source labels and the lock
+refer to exactly the reviewed commit.
 
 ## Optional Release Workflow
 

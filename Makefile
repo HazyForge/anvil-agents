@@ -2,7 +2,7 @@ CONTROLLER_GEN ?= go run sigs.k8s.io/controller-tools/cmd/controller-gen@v0.19.0
 IMAGE_PREFIX ?=
 IMAGE_TAG ?= dev
 
-.PHONY: generate manifests test verify verify-runner-contract build docker-build images image-checks helm-lint chart-package kind-upgrade-e2e kind-e2e
+.PHONY: generate manifests test verify verify-runner-contract build docker-build images image-checks helm-lint chart-package release-publish kind-upgrade-e2e kind-e2e
 
 generate:
 	$(CONTROLLER_GEN) object paths=./api/...
@@ -39,7 +39,12 @@ helm-lint:
 	./hack/test-api-chart.sh
 
 chart-package:
-	./hack/package-chart.sh --version "$${VERSION:?set VERSION, for example VERSION=0.1.0}"
+	./hack/package-chart.sh --version "$${VERSION:?set VERSION, for example VERSION=0.1.1}"
+
+release-publish:
+	./hack/publish-release.sh \
+		--prefix "$${REGISTRY_PREFIX:?set REGISTRY_PREFIX, for example ghcr.io/hazyforge}" \
+		--version "$${VERSION:?set VERSION, for example v0.1.1}"
 
 kind-upgrade-e2e:
 	./hack/test-kind-upgrade.sh
@@ -52,6 +57,8 @@ verify-runner-contract:
 	@bash -n hack/build-images_test.sh
 	@bash -n hack/publish-images.sh
 	@bash -n hack/publish-images_test.sh
+	@bash -n hack/publish-release.sh
+	@bash -n hack/publish-release_test.sh
 	@bash -n hack/test-api-chart.sh
 	@bash -n hack/package-chart.sh
 	@bash -n hack/package-chart_test.sh
@@ -61,10 +68,12 @@ verify-runner-contract:
 	@hack/build-images.sh --help >/dev/null
 	@hack/build-images.sh --list >/dev/null
 	@hack/publish-images.sh --help >/dev/null
+	@hack/publish-release.sh --help >/dev/null
 	@hack/package-chart.sh --help >/dev/null
 	@hack/package-chart_test.sh
 	@hack/build-images_test.sh
 	@hack/publish-images_test.sh
+	@hack/publish-release_test.sh
 	@hack/stream-agent-run.sh --help >/dev/null
 	@if ANVIL_AGENTS_ACCESS_TOKEN=dummy hack/stream-agent-run.sh \
 		--endpoint https://agents.example.com@127.0.0.1 \

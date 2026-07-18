@@ -65,6 +65,22 @@ Local or `ReadWriteOnce` data volumes may constrain placement and parallel
 mounts. See [Distributed Workloads](distributed-workloads.md) before sharing a
 durable home across concurrent lanes.
 
+## Codex Sandbox On Kubernetes
+
+Codex `read-only` and `workspace-write` sandbox modes depend on unprivileged
+user namespaces and their OS sandbox helper. Hardened Kubernetes nodes often
+disable that kernel capability, which causes the CLI to fail before the model
+run starts. Test the selected mode on every worker pool used by the harness.
+
+When those nodes cannot support the inner Codex sandbox, the
+`danger-full-access` Codex mode can run inside a deliberately hardened Pod. In
+that configuration the name applies to the process inside its container; it
+does not grant Kubernetes or node authority by itself. The Pod boundary must
+carry the security policy: non-root user, dropped capabilities, seccomp,
+read-only root filesystem where supported, narrow ServiceAccount/RBAC, bounded
+mounts and Secrets, controlled egress, namespace isolation, and immutable
+images. Do not use this fallback as a substitute for those controls.
+
 ## Custom Harness
 
 A custom image should read the prompt and context files, perform one bounded

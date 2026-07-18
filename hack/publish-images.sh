@@ -20,7 +20,7 @@ Usage:
 
 Options:
   --prefix PREFIX      Registry repository prefix, for example ghcr.io/hazyforge.
-  --version VERSION    Git tag at HEAD and image version tag, for example v0.1.0.
+  --version VERSION    Git tag at HEAD and image version tag, for example v0.1.1.
   --platform PLATFORM  Image platform used for revision verification. Default: linux/amd64.
   --output FILE        Digest lock output. Default: dist/images-VERSION.lock.tsv.
   --verify-lock FILE   Verify an existing lock without building or pushing.
