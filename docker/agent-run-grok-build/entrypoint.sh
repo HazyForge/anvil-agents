@@ -17,6 +17,7 @@ repository_ref="${ANVIL_AGENT_RUN_REPOSITORY_REF:-}"
 grok_build_home="${GROK_BUILD_HOME:-${ANVIL_GROK_BUILD_HOME:-/opt/anvil/grok-build}}"
 
 source /opt/anvil-agent-run/lib/github-auth.sh
+source /opt/anvil-agent-run/lib/repository-checkout.sh
 
 mkdir -p "$(dirname "${status_file}")" "${grok_build_home}/.grok" "${workdir}"
 : > "${status_file}"
@@ -38,7 +39,7 @@ anvil_configure_github_auth
 cd "${workdir}"
 git config --global --add safe.directory "${workdir}" >/dev/null 2>&1 || true
 git config --global user.name "${ANVIL_AGENT_GIT_AUTHOR_NAME:-Anvil AgentRun}" >/dev/null 2>&1 || true
-git config --global user.email "${ANVIL_AGENT_GIT_AUTHOR_EMAIL:-anvil-agent-run@users.noreply.github.com}" >/dev/null 2>&1 || true
+git config --global user.email "${ANVIL_AGENT_GIT_AUTHOR_EMAIL:-agent-run@anvil-agents.invalid}" >/dev/null 2>&1 || true
 
 workspace_empty() {
 	[[ -z "$(find . -mindepth 1 -maxdepth 1 -print -quit)" ]]
@@ -101,14 +102,14 @@ if truthy "${ANVIL_AGENT_RUN_AUTO_CLONE_REPO:-true}" && [[ ! -d .git ]]; then
 	if [[ -n "${repository_url}" ]]; then
 		if workspace_empty; then
 			echo "ANVIL_AGENT_RUN_REPO_CLONE repository_url_configured=true"
-			git clone "${repository_url}" . >/dev/null 2>&1 || echo "ANVIL_AGENT_RUN_REPO_CLONE_FAILED repository_url_configured=true"
+			git clone "${repository_url}" . >/dev/null 2>&1 || { echo "ANVIL_AGENT_RUN_REPO_CLONE_FAILED repository_url_configured=true" >&2; exit 20; }
 		else
 			echo "ANVIL_AGENT_RUN_REPO_CLONE_SKIPPED reason=workspace-not-empty"
 		fi
 	elif [[ -n "${repository}" ]]; then
 		if workspace_empty; then
 			echo "ANVIL_AGENT_RUN_REPO_CLONE repository=${repository}"
-			gh repo clone "${repository}" . >/dev/null 2>&1 || echo "ANVIL_AGENT_RUN_REPO_CLONE_FAILED repository=${repository}"
+			gh repo clone "${repository}" . >/dev/null 2>&1 || { echo "ANVIL_AGENT_RUN_REPO_CLONE_FAILED repository=${repository}" >&2; exit 20; }
 		else
 			echo "ANVIL_AGENT_RUN_REPO_CLONE_SKIPPED reason=workspace-not-empty repository=${repository}"
 		fi
@@ -116,8 +117,7 @@ if truthy "${ANVIL_AGENT_RUN_AUTO_CLONE_REPO:-true}" && [[ ! -d .git ]]; then
 fi
 
 if [[ -d .git && -n "${repository_ref}" ]]; then
-	git fetch --all --prune >/dev/null 2>&1 || true
-	git checkout "${repository_ref}" >/dev/null 2>&1 || git checkout -B agentrun-work "origin/${repository_ref}" >/dev/null 2>&1 || true
+	anvil_checkout_repository_ref "${repository_ref}" || exit $?
 fi
 
 run_tool_setup

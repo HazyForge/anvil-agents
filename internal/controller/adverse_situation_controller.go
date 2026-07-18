@@ -3,13 +3,16 @@ package controller
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -26,6 +29,8 @@ const (
 	adverseSituationDefaultDedupeWindowSeconds    = 120
 	adverseSituationDefaultPullRequestHoldSeconds = 900
 	adverseSituationDefaultMaxEvents              = 80
+	adverseSituationHardMaxEvents                 = 200
+	adverseSituationMaxReportIDsPerEvent          = 64
 	adverseSituationPollInterval                  = 15 * time.Second
 
 	adverseSituationLabel      = "control.anvil.hazyforge.io/adverse-situation"
@@ -43,8 +48,9 @@ type AdverseSituationReconciler struct {
 
 type AdverseSituationTriggerReconciler struct {
 	client.Client
-	Scheme *runtime.Scheme
-	GVK    schema.GroupVersionKind
+	Scheme  *runtime.Scheme
+	GVK     schema.GroupVersionKind
+	Sources []AdverseSourceConfig
 }
 
 func (r *AdverseSituationReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -132,7 +138,7 @@ func (r *AdverseSituationReconciler) ensureAdverseSituationAgentRun(ctx context.
 	if status.Sequence <= 0 {
 		status.Sequence = 1
 	}
-	name := agentRunChildName("agrun", situation.Name, fmt.Sprintf("%d", status.Sequence))
+	name := agentRunChildName("agrun", situation.Name, fmt.Sprintf("%d", status.Sequence), shortHash(string(situation.UID)))
 	if status.ActiveResponderRef != nil && strings.TrimSpace(status.ActiveResponderRef.Name) != "" {
 		name = strings.TrimSpace(status.ActiveResponderRef.Name)
 	}
@@ -147,8 +153,27 @@ func (r *AdverseSituationReconciler) ensureAdverseSituationAgentRun(ctx context.
 			return nil, err
 		}
 	}
+	if !adverseSituationAgentRunMatches(run, situation) {
+		return nil, fmt.Errorf("AgentRun %s/%s collides with adverse responder identity for AdverseSituation UID %s", run.Namespace, run.Name, situation.UID)
+	}
 	status.ActiveResponderRef = &controlv1alpha1.NamespacedObjectReference{Name: run.Name, Namespace: run.Namespace}
 	return run, nil
+}
+
+func adverseSituationAgentRunMatches(run *controlv1alpha1.AgentRun, situation *controlv1alpha1.AdverseSituation) bool {
+	if run == nil || situation == nil {
+		return false
+	}
+	return run.Namespace == situation.Namespace &&
+		run.Spec.Purpose == controlv1alpha1.AgentRunPurposeAdverseSituation &&
+		run.Spec.SourceRef.APIVersion == controlv1alpha1.GroupVersion.String() &&
+		run.Spec.SourceRef.Kind == "AdverseSituation" &&
+		run.Spec.SourceRef.Namespace == situation.Namespace &&
+		run.Spec.SourceRef.Name == situation.Name &&
+		run.Spec.SourceUID == string(situation.UID) &&
+		run.Spec.SituationRef != nil &&
+		run.Spec.SituationRef.Name == situation.Name &&
+		firstNonEmpty(run.Spec.SituationRef.Namespace, run.Namespace) == situation.Namespace
 }
 
 func (r *AdverseSituationReconciler) detachAdverseSituationAgentRunOwners(ctx context.Context, situation *controlv1alpha1.AdverseSituation) error {
@@ -200,13 +225,30 @@ func (r *AdverseSituationTriggerReconciler) Reconcile(ctx context.Context, req c
 		return ctrl.Result{}, nil
 	}
 
-	trigger, ok := agentRunTriggerForSource(source)
-	if !ok {
-		return ctrl.Result{}, nil
+	recordedRoutes := map[string]struct{}{}
+	for _, integration := range r.Sources {
+		if !adverseSourceConfigMatches(integration, source) {
+			continue
+		}
+		trigger, ok := agentRunTriggerForSourceWithClassifier(source, integration.Classifier)
+		if !ok {
+			continue
+		}
+		namespace, name, _ := adverseSituationRouteForSource(source, integration)
+		routeKey := namespace + "/" + name + "/" + adverseSituationEventID(source, trigger)
+		if _, recorded := recordedRoutes[routeKey]; recorded {
+			continue
+		}
+		recordedRoutes[routeKey] = struct{}{}
+		if result, err := r.recordSource(ctx, source, integration, trigger); err != nil || result.Requeue || result.RequeueAfter > 0 {
+			return result, err
+		}
 	}
+	return ctrl.Result{}, nil
+}
 
-	namespace := firstNonEmpty(strings.TrimSpace(source.GetNamespace()), "default")
-	name := adverseSituationNameForSource(source)
+func (r *AdverseSituationTriggerReconciler) recordSource(ctx context.Context, source *unstructured.Unstructured, integration AdverseSourceConfig, trigger controlv1alpha1.AgentRunTriggerSnapshot) (ctrl.Result, error) {
+	namespace, name, groupKey := adverseSituationRouteForSource(source, integration)
 	situation := &controlv1alpha1.AdverseSituation{}
 	key := client.ObjectKey{Namespace: namespace, Name: name}
 	if err := r.Get(ctx, key, situation); err != nil {
@@ -214,6 +256,8 @@ func (r *AdverseSituationTriggerReconciler) Reconcile(ctx context.Context, req c
 			return ctrl.Result{}, err
 		}
 		situation = defaultAdverseSituation(namespace, name)
+		situation.Spec.GroupKey = groupKey
+		situation.Labels[adverseSituationGroupLabel] = sanitizeLabelValue(groupKey)
 		if err := r.Create(ctx, situation); err != nil && !apierrors.IsAlreadyExists(err) {
 			return ctrl.Result{}, err
 		}
@@ -224,7 +268,9 @@ func (r *AdverseSituationTriggerReconciler) Reconcile(ctx context.Context, req c
 
 	original := situation.DeepCopy()
 	status := situation.Status
-	adverseSituationRecordEvent(source, trigger, adverseSituationBuffer(situation), &status)
+	if !adverseSituationRecordEvent(source, trigger, adverseSituationBuffer(situation), &status) {
+		return ctrl.Result{RequeueAfter: adverseSituationPollInterval}, nil
+	}
 	status.ObservedGeneration = situation.Generation
 	situation.Status = status
 	if err := r.Status().Patch(ctx, situation, client.MergeFrom(original)); err != nil {
@@ -245,22 +291,89 @@ func (r *AdverseSituationTriggerReconciler) SetupWithManager(mgr ctrl.Manager) e
 		Complete(r)
 }
 
-func SetupAdverseSituationTriggerReconcilers(mgr ctrl.Manager, configured []string) error {
+func SetupAdverseSituationTriggerReconcilers(mgr ctrl.Manager, configured []string, integrations []AdverseSourceConfig) error {
+	byGVK := map[string][]AdverseSourceConfig{}
+	gvks := map[string]schema.GroupVersionKind{}
+	structuredGVKs := map[string]struct{}{}
+	for _, integration := range integrations {
+		gvk, err := adverseSourceGVK(integration)
+		if err != nil {
+			return err
+		}
+		key := gvk.String()
+		gvks[key] = gvk
+		byGVK[key] = append(byGVK[key], integration)
+		structuredGVKs[key] = struct{}{}
+	}
 	for _, value := range configured {
 		gvk, err := parseAdverseSourceGVK(value)
 		if err != nil {
 			return err
 		}
+		key := gvk.String()
+		if _, replaced := structuredGVKs[key]; replaced {
+			continue
+		}
+		gvks[key] = gvk
+		byGVK[key] = append(byGVK[key], AdverseSourceConfig{APIVersion: gvk.GroupVersion().String(), Kind: gvk.Kind})
+	}
+	keys := make([]string, 0, len(byGVK))
+	for key := range byGVK {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		gvk := gvks[key]
 		reconciler := &AdverseSituationTriggerReconciler{
-			Client: mgr.GetClient(),
-			Scheme: mgr.GetScheme(),
-			GVK:    gvk,
+			Client:  mgr.GetClient(),
+			Scheme:  mgr.GetScheme(),
+			GVK:     gvk,
+			Sources: byGVK[key],
 		}
 		if err := reconciler.SetupWithManager(mgr); err != nil {
 			return fmt.Errorf("setup AdverseSituation trigger for %s: %w", gvk.String(), err)
 		}
 	}
 	return nil
+}
+
+func adverseSourceConfigMatches(integration AdverseSourceConfig, source *unstructured.Unstructured) bool {
+	if source == nil {
+		return false
+	}
+	if len(integration.Namespaces) > 0 {
+		matched := false
+		for _, namespace := range integration.Namespaces {
+			if strings.TrimSpace(namespace) == source.GetNamespace() {
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			return false
+		}
+	}
+	if integration.ObjectSelector == nil {
+		return true
+	}
+	selector, err := metav1.LabelSelectorAsSelector(integration.ObjectSelector)
+	return err == nil && selector.Matches(labels.Set(source.GetLabels()))
+}
+
+func adverseSituationRouteForSource(source *unstructured.Unstructured, integration AdverseSourceConfig) (string, string, string) {
+	namespace := strings.TrimSpace(source.GetNamespace())
+	name := adverseSituationDefaultName
+	groupKey := adverseSituationDefaultGroupKey
+	if integration.SituationRef != nil {
+		namespace = firstNonEmpty(strings.TrimSpace(integration.SituationRef.Namespace), namespace)
+		name = firstNonEmpty(strings.TrimSpace(integration.SituationRef.Name), name)
+		groupKey = "situation/" + namespace + "/" + name
+	}
+	namespace = firstNonEmpty(namespace, "default")
+	if strings.TrimSpace(integration.GroupKey) != "" {
+		groupKey = strings.TrimSpace(integration.GroupKey)
+	}
+	return namespace, name, groupKey
 }
 
 func parseAdverseSourceGVK(value string) (schema.GroupVersionKind, error) {
@@ -371,21 +484,10 @@ func adverseSituationAgentRunFor(situation *controlv1alpha1.AdverseSituation, na
 	}
 }
 
-func adverseSituationRecordEvent(source *unstructured.Unstructured, trigger controlv1alpha1.AgentRunTriggerSnapshot, buffer controlv1alpha1.AdverseSituationBufferSpec, status *controlv1alpha1.AdverseSituationStatus) {
+func adverseSituationRecordEvent(source *unstructured.Unstructured, trigger controlv1alpha1.AgentRunTriggerSnapshot, buffer controlv1alpha1.AdverseSituationBufferSpec, status *controlv1alpha1.AdverseSituationStatus) bool {
 	now := metav1.Now()
-	if status.Sequence <= 0 || status.Phase == controlv1alpha1.AdverseSituationPhaseResolved {
-		status.Sequence++
-		if status.Sequence <= 0 {
-			status.Sequence = 1
-		}
-		status.Events = nil
-		status.EventCount = 0
-		status.DuplicateCount = 0
-		status.ActiveResponderRef = nil
-		status.PullRequestURL = ""
-		status.PullRequestObservedAt = nil
-		status.PullRequestQuietUntil = nil
-		status.ResolvedAt = nil
+	if !adverseSituationPrepareSequence(status) {
+		return false
 	}
 	eventID := adverseSituationEventID(source, trigger)
 	dedupeWindow := time.Duration(adverseSituationDedupeWindowSeconds(buffer)) * time.Second
@@ -399,17 +501,17 @@ func adverseSituationRecordEvent(source *unstructured.Unstructured, trigger cont
 		}
 		event.Count++
 		event.LastSeenAt = &now
-		event.Message = strings.TrimSpace(trigger.Message)
-		event.ResourceVersion = strings.TrimSpace(trigger.ResourceVersion)
+		event.Message = adverseSituationLimitString(trigger.Message, 8192)
+		event.ResourceVersion = adverseSituationLimitString(trigger.ResourceVersion, 256)
 		status.EventCount++
 		status.DuplicateCount++
 		status.LastEventAt = &now
 		status.QuietUntil = adverseSituationQuietUntil(now, buffer)
 		status.Phase = controlv1alpha1.AdverseSituationPhaseOpen
 		status.ResolvedAt = nil
-		return
+		return true
 	}
-	event := controlv1alpha1.AdverseSituationEvent{
+	return adverseSituationAppendEvent(adverseSituationNormalizeEvent(controlv1alpha1.AdverseSituationEvent{
 		ID: eventID,
 		SourceRef: controlv1alpha1.AgentRunSourceRef{
 			APIVersion: source.GroupVersionKind().GroupVersion().String(),
@@ -425,12 +527,110 @@ func adverseSituationRecordEvent(source *unstructured.Unstructured, trigger cont
 		Reason:           strings.TrimSpace(trigger.Reason),
 		Message:          strings.TrimSpace(trigger.Message),
 		ResourceVersion:  strings.TrimSpace(trigger.ResourceVersion),
-		FirstSeenAt:      &now,
-		LastSeenAt:       &now,
-		Count:            1,
+	}), now, buffer, status)
+}
+
+// adverseSituationRecordSignalEvent reports whether status changed and whether
+// the delivery is durably represented. A false delivered result applies
+// backpressure; callers must retry instead of accepting or dropping the signal.
+func adverseSituationRecordSignalEvent(event controlv1alpha1.AdverseSituationEvent, reportID string, buffer controlv1alpha1.AdverseSituationBufferSpec, status *controlv1alpha1.AdverseSituationStatus) (changed bool, delivered bool) {
+	if reportID == "" {
+		return false, false
 	}
-	status.Events = append(status.Events, event)
+	now := metav1.Now()
+	for i := range status.Events {
+		for _, recorded := range status.Events[i].ReportIDs {
+			if recorded == reportID {
+				return false, true
+			}
+		}
+	}
+	if !adverseSituationPrepareSequence(status) {
+		return false, false
+	}
+	dedupeWindow := time.Duration(adverseSituationDedupeWindowSeconds(buffer)) * time.Second
+	for i := range status.Events {
+		recorded := &status.Events[i]
+		if recorded.ID != event.ID {
+			continue
+		}
+		if recorded.LastSeenAt != nil && dedupeWindow > 0 && now.Sub(recorded.LastSeenAt.Time) > dedupeWindow {
+			continue
+		}
+		if len(recorded.ReportIDs) >= adverseSituationMaxReportIDsPerEvent {
+			return false, false
+		}
+		recorded.ReportIDs = append(recorded.ReportIDs, reportID)
+		recorded.Count++
+		recorded.LastSeenAt = &now
+		latest := adverseSituationNormalizeEvent(event)
+		recorded.SignalRef = latest.SignalRef
+		recorded.SourceRef = latest.SourceRef
+		recorded.SourceUID = latest.SourceUID
+		recorded.SourceURL = latest.SourceURL
+		recorded.SourceGeneration = latest.SourceGeneration
+		recorded.Phase = latest.Phase
+		recorded.ConditionType = latest.ConditionType
+		recorded.ConditionStatus = latest.ConditionStatus
+		recorded.Reason = latest.Reason
+		recorded.Message = latest.Message
+		recorded.ResourceVersion = latest.ResourceVersion
+		recorded.ObservedAt = latest.ObservedAt
+		status.EventCount++
+		status.DuplicateCount++
+		status.LastEventAt = &now
+		status.QuietUntil = adverseSituationQuietUntil(now, buffer)
+		status.Phase = controlv1alpha1.AdverseSituationPhaseOpen
+		status.ResolvedAt = nil
+		return true, true
+	}
+	event.ReportIDs = []string{reportID}
+	if event.ID == "" {
+		// A missing grouping key must never collapse unrelated reports.
+		event.ID = shortHash(reportID)
+	}
+	if !adverseSituationAppendEvent(adverseSituationNormalizeEvent(event), now, buffer, status) {
+		return false, false
+	}
+	return true, true
+}
+
+func adverseSituationPrepareSequence(status *controlv1alpha1.AdverseSituationStatus) bool {
+	if status.Sequence > 0 && status.Phase != controlv1alpha1.AdverseSituationPhaseResolved {
+		return true
+	}
+	for i := range status.Events {
+		if len(status.Events[i].ReportIDs) > 0 {
+			return false
+		}
+	}
+	status.Sequence++
+	if status.Sequence <= 0 {
+		status.Sequence = 1
+	}
+	status.Events = nil
+	status.EventCount = 0
+	status.DuplicateCount = 0
+	status.ActiveResponderRef = nil
+	status.PullRequestURL = ""
+	status.PullRequestObservedAt = nil
+	status.PullRequestQuietUntil = nil
+	status.ResolvedAt = nil
+	return true
+}
+
+func adverseSituationAppendEvent(event controlv1alpha1.AdverseSituationEvent, now metav1.Time, buffer controlv1alpha1.AdverseSituationBufferSpec, status *controlv1alpha1.AdverseSituationStatus) bool {
 	maxEvents := adverseSituationMaxEvents(buffer)
+	evictCount := len(status.Events) + 1 - maxEvents
+	for i := 0; i < evictCount; i++ {
+		if len(status.Events[i].ReportIDs) > 0 {
+			return false
+		}
+	}
+	event.FirstSeenAt = &now
+	event.LastSeenAt = &now
+	event.Count = 1
+	status.Events = append(status.Events, event)
 	if len(status.Events) > maxEvents {
 		status.Events = append([]controlv1alpha1.AdverseSituationEvent(nil), status.Events[len(status.Events)-maxEvents:]...)
 	}
@@ -439,6 +639,35 @@ func adverseSituationRecordEvent(source *unstructured.Unstructured, trigger cont
 	status.QuietUntil = adverseSituationQuietUntil(now, buffer)
 	status.Phase = controlv1alpha1.AdverseSituationPhaseOpen
 	status.ResolvedAt = nil
+	return true
+}
+
+func adverseSituationNormalizeEvent(event controlv1alpha1.AdverseSituationEvent) controlv1alpha1.AdverseSituationEvent {
+	event.ID = adverseSituationLimitString(event.ID, 64)
+	event.SourceRef.APIVersion = adverseSituationLimitString(event.SourceRef.APIVersion, 128)
+	event.SourceRef.Kind = adverseSituationLimitString(event.SourceRef.Kind, 256)
+	event.SourceRef.Namespace = adverseSituationLimitString(event.SourceRef.Namespace, 253)
+	event.SourceRef.Name = adverseSituationLimitString(event.SourceRef.Name, 253)
+	event.SourceUID = adverseSituationLimitString(event.SourceUID, 256)
+	event.SourceURL = adverseSituationLimitString(event.SourceURL, 2048)
+	event.Phase = adverseSituationLimitString(event.Phase, 128)
+	event.ConditionType = adverseSituationLimitString(event.ConditionType, 256)
+	event.Reason = adverseSituationLimitString(event.Reason, 256)
+	event.Message = adverseSituationLimitString(event.Message, 8192)
+	event.ResourceVersion = adverseSituationLimitString(event.ResourceVersion, 256)
+	return event
+}
+
+func adverseSituationLimitString(value string, maxBytes int) string {
+	value = strings.TrimSpace(value)
+	if maxBytes <= 0 || len(value) <= maxBytes {
+		return value
+	}
+	end := maxBytes
+	for end > 0 && !utf8.RuneStart(value[end]) {
+		end--
+	}
+	return strings.TrimSpace(value[:end])
 }
 
 func adverseSituationCanResolve(status controlv1alpha1.AdverseSituationStatus, run *controlv1alpha1.AgentRun, now time.Time) bool {
@@ -534,7 +763,7 @@ func adverseSituationPullRequestHoldSeconds(situation *controlv1alpha1.AdverseSi
 
 func adverseSituationMaxEvents(buffer controlv1alpha1.AdverseSituationBufferSpec) int {
 	if buffer.MaxEvents > 0 {
-		return buffer.MaxEvents
+		return min(buffer.MaxEvents, adverseSituationHardMaxEvents)
 	}
 	return adverseSituationDefaultMaxEvents
 }

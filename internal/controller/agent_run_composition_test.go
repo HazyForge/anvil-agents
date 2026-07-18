@@ -252,6 +252,9 @@ func TestAgentRunContextUsesEffectiveSpecWithoutRawProfileCopy(t *testing.T) {
 				}},
 			},
 		}},
+		Status: controlv1alpha1.AdverseSituationStatus{Events: []controlv1alpha1.AdverseSituationEvent{{
+			ID: "provider-timeout", ReportIDs: []string{"internal-delivery-receipt"}, Message: "provider timed out",
+		}}},
 	}
 
 	body, err := testCompositionReconciler(t, profile, schedule, situation).agentRunContextJSON(context.Background(), effective)
@@ -275,6 +278,9 @@ func TestAgentRunContextUsesEffectiveSpecWithoutRawProfileCopy(t *testing.T) {
 	}
 	if payload["agentSchedule"] == nil || payload["adverseSituation"] == nil {
 		t.Fatalf("context omitted sanitized source objects: %s", body)
+	}
+	if strings.Contains(string(body), "internal-delivery-receipt") || strings.Contains(string(body), "reportIDs") {
+		t.Fatalf("context leaked internal delivery receipts: %s", body)
 	}
 }
 

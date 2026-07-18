@@ -90,6 +90,7 @@ COPY docker/agent-run-codex/skills/ /opt/anvil-agent-run/skills/
 COPY docker/agent-run-codex/anvil-agent-status /usr/local/bin/anvil-agent-status
 COPY docker/agent-run-codex/anvil-observability /usr/local/bin/anvil-observability
 COPY docker/agent-run-common/github-auth.sh /opt/anvil-agent-run/lib/github-auth.sh
+COPY docker/agent-run-common/repository-checkout.sh /opt/anvil-agent-run/lib/repository-checkout.sh
 COPY docker/agent-run-grok-build/entrypoint.sh /usr/local/bin/anvil-agent-run-grok-build
 COPY --from=agent-feedback-builder /out/anvil-agent-feedback /usr/local/bin/anvil-agent-feedback
 
@@ -97,7 +98,7 @@ RUN chmod 0755 /usr/local/bin/anvil-agent-run-grok-build \
 	&& chmod 0755 /usr/local/bin/anvil-agent-status \
 	&& chmod 0755 /usr/local/bin/anvil-observability \
 	&& chmod 0755 /usr/local/bin/anvil-agent-feedback \
-	&& chmod 0644 /opt/anvil-agent-run/lib/github-auth.sh \
+	&& chmod 0644 /opt/anvil-agent-run/lib/github-auth.sh /opt/anvil-agent-run/lib/repository-checkout.sh \
 	&& chmod 0644 /opt/anvil-agent-run/AGENTS.md \
 	&& find /opt/anvil-agent-run/static-prompts /opt/anvil-agent-run/skills -type f -name '*.md' -exec chmod 0644 {} +
 

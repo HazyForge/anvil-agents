@@ -1,0 +1,19 @@
+apiVersion: control.anvil.hazyforge.io/v1alpha1
+kind: AdverseSignal
+metadata:
+  name: workload-health-provider-timeout-001
+  namespace: agents
+spec:
+  situationRef:
+    name: workload-health
+  sourceRef:
+    apiVersion: monitoring.example.io/v1
+    kind: Alert
+    namespace: storefront
+    name: provider-timeout-rate
+  sourceURL: https://monitoring.example.invalid/alerts/provider-timeout-rate
+  dedupeKey: storefront/provider-timeout
+  trigger:
+    phase: Firing
+    reason: ProviderTimeoutRateHigh
+    message: The upstream provider timeout rate exceeded its alert threshold.

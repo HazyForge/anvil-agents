@@ -63,8 +63,8 @@ spec:
             properties:
               applicationRef:
                 description: |-
-                  ApplicationRef identifies the cluster-scoped Application whose AgentRun
-                  launches are governed by this control.
+                  ApplicationRef identifies the opaque application scope key whose AgentRun
+                  launches are governed by this cluster-scoped control.
                 properties:
                   name:
                     minLength: 1

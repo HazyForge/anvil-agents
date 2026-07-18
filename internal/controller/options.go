@@ -52,6 +52,7 @@ type Options struct {
 	ApplicationMaxConcurrentRuns int
 	DefaultStorageClass          string
 	AdverseSourceGVKs            []string
+	AdverseSources               []AdverseSourceConfig
 	GitHubAPIAllowedHosts        []string
 	AllowInsecureGitHubAPI       bool
 	CodexRunnerImage             string

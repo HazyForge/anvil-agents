@@ -12,7 +12,7 @@ against two deployments that use different election IDs.
 
 ## Handoff
 
-1. Back up the nine agent CRDs and all agent custom resources.
+1. Back up the ten agent CRDs and all agent custom resources.
 2. Record the embedded controller replica count and confirm there are no
    unexpected terminating runs.
 3. Stage the standalone release with `crds.install=true` and zero replicas
@@ -20,7 +20,8 @@ against two deployments that use different election IDs.
    superset and the chart's Helm and Argo retention annotations without
    starting a second reconciler.
 4. Verify the seven existing CRD UIDs did not change, the two composition CRDs
-   exist, and all nine CRDs carry `helm.sh/resource-policy: keep` and
+   and `AdverseSignal` CRD exist, and all ten CRDs carry
+   `helm.sh/resource-policy: keep` and
    `argocd.argoproj.io/sync-options: Prune=false`.
 5. Deploy the Anvil Primaris version where the embedded agent registrations and
    legacy CRD templates are removed. Do not delete the CRDs first.
@@ -85,11 +86,16 @@ repository mutation, or delivery. Those operations remain behind the existing
 policy broker. See [live-agent-run-stream.md](live-agent-run-stream.md) for the
 full provider-neutral configuration and access-token contract.
 
-The optional Hazy Forge integration encodes the initial safe stage:
-`replicaCount: 0` and `crds.install: true`. The cutover commit must replace all
-six placeholder image tags with immutable digest references before scaling the
-controller. Other consumers should keep provider credentials and
-environment-specific storage in their own deployment layer.
+Keep the initial safe stage in the consumer deployment: `replicaCount: 0`,
+`crds.install: true`, and immutable references for the controller plus five
+runner images before scaling the controller. This repository retains Hazy
+Forge's optional consumer values and manifests under
+`.hazyforge/clusters/anvil-primaris/`. The Anvil Primaris repository owns the
+supporting remote ApplicationSet discovery under
+`manifests/bases/argocd-remote-apps` and its cluster instance configuration.
+Neither layer is a portable runtime prerequisite. Other consumers should keep identity,
+credentials, routes, storage, placement, image pins, and application policy in
+their own deployment layer.
 
 ## Storage compatibility
 

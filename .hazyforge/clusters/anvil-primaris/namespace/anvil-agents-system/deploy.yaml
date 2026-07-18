@@ -1,5 +1,7 @@
 helmChartPath: charts/anvil-agents
 
+# Optional Hazy Forge consumer deployment discovered by the Anvil Primaris
+# remote Helm ApplicationSet. Portable installations do not depend on it.
 # Run one leader-elected controller in the system namespace. Agent workloads
 # are distributed independently across eligible cluster nodes.
 replicaCount: 1
@@ -23,6 +25,9 @@ applicationMaxConcurrentRuns: 4
 defaultStorageClass: observability-local
 externalSecrets:
   enabled: true
+# Keep the legacy source list until this overlay pins a controller image that
+# supports structured adverseSources. The chart omits the new flag while the
+# structured list is empty, preserving compatibility with this pinned image.
 adverseSourceGVKs:
   - control.anvil.hazyforge.io/v1alpha1/ApplicationRelease
   - control.anvil.hazyforge.io/v1alpha1/ArtifactBuild

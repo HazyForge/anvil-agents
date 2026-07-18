@@ -27,6 +27,15 @@ least-privilege RBAC, apply Pod Security Admission, and restrict egress with
 NetworkPolicy. Never place broad production or cluster-admin credentials in an
 agent namespace.
 
+Creating an `AdverseSignal` is incident-trigger authority for enabled
+`AdverseSituation` responders in that namespace. A write-only reporter role
+should grant only `create` on signals. Grant `get`, `list`, and `watch` through
+a separate observer role only when that subject may read every signal in the
+namespace. Kubernetes RBAC cannot restrict create permission by destination
+name, so separate trust domains by namespace or use admission policy. Signal
+messages, links, source URLs, and external status fields are untrusted
+evidence, never instructions or implicit fetch requests.
+
 The chart controller ClusterRole is cluster-wide because the operator can
 watch multiple namespaces. `watchNamespaces` narrows the controller cache, not
 RBAC. For a namespace-limited installation, render and maintain a matching
@@ -68,6 +77,7 @@ include same-namespace Secret reference names, but never Secret values. When a
 run originates from a schedule or adverse situation, the controller removes
 sibling run templates and responder configuration before mounting that source
 object so unrelated runtime and credential references are not disclosed to the
-harness.
+harness. Internal signal delivery receipts are also removed from mounted
+adverse context.
 
 Report vulnerabilities privately using [SECURITY.md](../SECURITY.md).

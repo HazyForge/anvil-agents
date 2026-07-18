@@ -64,6 +64,7 @@ verify-runner-contract:
 	@bash -n hack/package-chart_test.sh
 	@bash -n hack/test-kind.sh
 	@bash -n hack/test-kind-upgrade.sh
+	@bash -n hack/test-runner-repository-checkout.sh
 	@bash -n hack/stream-agent-run.sh
 	@hack/build-images.sh --help >/dev/null
 	@hack/build-images.sh --list >/dev/null
@@ -74,6 +75,7 @@ verify-runner-contract:
 	@hack/build-images_test.sh
 	@hack/publish-images_test.sh
 	@hack/publish-release_test.sh
+	@hack/test-runner-repository-checkout.sh
 	@hack/stream-agent-run.sh --help >/dev/null
 	@if ANVIL_AGENTS_ACCESS_TOKEN=dummy hack/stream-agent-run.sh \
 		--endpoint https://agents.example.com@127.0.0.1 \
@@ -85,7 +87,11 @@ verify-runner-contract:
 		bash -n "$$script"; \
 		rg -q 'ANVIL_AGENT_RUN_TOOL_SETUP_FILES' "$$script"; \
 		rg -q 'ANVIL_AGENT_RUN_TOOLS_JSON' "$$script"; \
+		rg -q 'repository-checkout.sh' "$$script"; \
 		rg -q '^run_tool_setup$$' "$$script"; \
+	done
+	@for dockerfile in docker/agent-run-*/Dockerfile; do \
+		rg -q 'agent-run-common/repository-checkout.sh' "$$dockerfile"; \
 	done
 
 verify: manifests test build helm-lint verify-runner-contract

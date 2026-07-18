@@ -8,12 +8,12 @@ rewrites all six defaults to the selected `vVERSION` and registry prefix.
 Production values should replace every image with an immutable digest. Do not
 mix runner versions without testing their payload and status contracts.
 
-Back up all nine custom-resource kinds and relevant PVCs before an upgrade.
+Back up all ten custom-resource kinds and relevant PVCs before an upgrade.
 Run `helm template` and review CRD changes first. Only one controller may
 reconcile the branded API group during a migration or rollback.
 
 `make kind-upgrade-e2e` proves a portable seven-CRD, legacy-object baseline can
-be upgraded to the current nine-CRD chart while retaining profiles and runs. It
+be upgraded to the current ten-CRD chart while retaining profiles and runs. It
 uses and removes a dedicated disposable Kind cluster. Set
 `ANVIL_AGENTS_UPGRADE_FROM_REF` to a reachable historical chart ref when
 testing an exact released baseline; the default does not depend on an

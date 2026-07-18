@@ -44,8 +44,8 @@ done < <(find "${root_dir}/config/samples" "${root_dir}/examples" \
 
 helm --kube-context "${kube_context}" uninstall anvil-agents --namespace anvil-agents-system >/dev/null
 crd_count="$(kubectl --context "${kube_context}" get crd --output=name | rg -c 'control\.anvil\.hazyforge\.io')"
-[[ "${crd_count}" -eq 9 ]] || {
-	echo "Helm uninstall retained ${crd_count} agent CRDs, want 9" >&2
+[[ "${crd_count}" -eq 10 ]] || {
+	echo "Helm uninstall retained ${crd_count} agent CRDs, want 10" >&2
 	exit 1
 }
 for resource in \

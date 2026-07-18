@@ -19,6 +19,7 @@ openclaw_workspace="${OPENCLAW_WORKSPACE_DIR:-/opt/anvil/openclaw/workspace}"
 codex_home="${CODEX_HOME:-/codex-home}"
 
 source /opt/anvil-agent-run/lib/github-auth.sh
+source /opt/anvil-agent-run/lib/repository-checkout.sh
 
 mkdir -p "$(dirname "${status_file}")" "${openclaw_state}" "${openclaw_workspace}" "${codex_home}" "${workdir}"
 : > "${status_file}"
@@ -112,14 +113,14 @@ if truthy "${ANVIL_AGENT_RUN_AUTO_CLONE_REPO:-true}" && [[ ! -d .git ]]; then
 	if [[ -n "${repository_url}" ]]; then
 		if workspace_empty; then
 			echo "ANVIL_AGENT_RUN_REPO_CLONE repository_url_configured=true"
-			git clone "${repository_url}" . >/dev/null 2>&1 || echo "ANVIL_AGENT_RUN_REPO_CLONE_FAILED repository_url_configured=true"
+			git clone "${repository_url}" . >/dev/null 2>&1 || { echo "ANVIL_AGENT_RUN_REPO_CLONE_FAILED repository_url_configured=true" >&2; exit 20; }
 		else
 			echo "ANVIL_AGENT_RUN_REPO_CLONE_SKIPPED reason=workspace-not-empty"
 		fi
 	elif [[ -n "${repository}" ]]; then
 		if workspace_empty; then
 			echo "ANVIL_AGENT_RUN_REPO_CLONE repository=${repository}"
-			gh repo clone "${repository}" . >/dev/null 2>&1 || echo "ANVIL_AGENT_RUN_REPO_CLONE_FAILED repository=${repository}"
+			gh repo clone "${repository}" . >/dev/null 2>&1 || { echo "ANVIL_AGENT_RUN_REPO_CLONE_FAILED repository=${repository}" >&2; exit 20; }
 		else
 			echo "ANVIL_AGENT_RUN_REPO_CLONE_SKIPPED reason=workspace-not-empty repository=${repository}"
 		fi
@@ -127,8 +128,7 @@ if truthy "${ANVIL_AGENT_RUN_AUTO_CLONE_REPO:-true}" && [[ ! -d .git ]]; then
 fi
 
 if [[ -d .git && -n "${repository_ref}" ]]; then
-	git fetch --all --prune >/dev/null 2>&1 || true
-	git checkout "${repository_ref}" >/dev/null 2>&1 || git checkout -B agentrun-work "origin/${repository_ref}" >/dev/null 2>&1 || true
+	anvil_checkout_repository_ref "${repository_ref}" || exit $?
 fi
 
 run_tool_setup
@@ -152,8 +152,8 @@ if [[ ! -f "${openclaw_workspace}/TOOLS.md" ]]; then
 
 - Use `kubectl` for in-cluster Kubernetes inspection with the mounted service account.
 - Use `anvil-observability` before raw curl for Prometheus, Loki, Tempo, and Grafana checks.
-- Use `anvil-agent-feedback` to ask one narrow Discord-backed operator question when a human decision blocks safe progress.
-- Use `gh` for GitHub issue, branch, and pull request work when the adapter's runtime GitHub credential preflight succeeds.
+- Use `anvil-agent-feedback` to ask one narrow operator question when a configured feedback transport is available and a human decision blocks safe progress.
+- Use only the configured repository and issue adapters after their credential preflights succeed; do not assume GitHub or another delivery provider is present.
 - Report progress with `anvil-agent-status`; the controller owns AgentRun status updates.
 EOF
 fi

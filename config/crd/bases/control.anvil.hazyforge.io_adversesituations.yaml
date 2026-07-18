@@ -65,7 +65,8 @@ spec:
                   maxEvents:
                     description: |-
                       MaxEvents caps the status event ring buffer. Empty uses the controller
-                      default.
+                      default. The v1alpha1 controller limits effective values to 200 to bound
+                      status growth.
                     minimum: 0
                     type: integer
                   pullRequestQuietPeriodSeconds:
@@ -2808,12 +2809,32 @@ spec:
                       type: string
                     message:
                       type: string
+                    observedAt:
+                      format: date-time
+                      type: string
                     phase:
                       type: string
                     reason:
                       type: string
+                    reportIDs:
+                      items:
+                        type: string
+                      type: array
                     resourceVersion:
                       type: string
+                    signalRef:
+                      description: |-
+                        NamespacedObjectReference identifies a Kubernetes object without importing
+                        another API group. Namespace may be omitted where same-namespace resolution
+                        is part of the containing resource contract.
+                      properties:
+                        name:
+                          type: string
+                        namespace:
+                          type: string
+                      required:
+                      - name
+                      type: object
                     sourceGeneration:
                       format: int64
                       type: integer
@@ -2832,6 +2853,8 @@ spec:
                       - name
                       type: object
                     sourceUID:
+                      type: string
+                    sourceURL:
                       type: string
                   required:
                   - sourceRef

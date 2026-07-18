@@ -135,12 +135,16 @@ result and then launch a replacement.
 
 An `AdverseSituation` groups repeated events, deduplicates them, retains a
 bounded status buffer, and resolves after its quiet period. Agent responders
-are opt-in.
+are opt-in. Any application can submit immutable, same-namespace
+`AdverseSignal` evidence without importing its API into this repository.
 
-The controller watches no external resource kinds by default. Add repeated or
-comma-separated `--adverse-source-gvks=apiVersion/kind` values to opt in. Each
-external GVK needs explicit read RBAC supplied through `extraRBACRules`; the
-base chart deliberately avoids wildcard access.
+The controller watches no external resource kinds by default. New pull
+integrations use structured `adverseSources` values with exact GVK/resource,
+namespace and label filters, destination routing, and status classification;
+the chart derives exact read RBAC. The legacy
+`--adverse-source-gvks=apiVersion/kind` option remains compatible and requires
+manual `extraRBACRules`. See
+[Integrating Adverse Sources](integrating-adverse-sources.md).
 
 ## Credentials and identity
 
@@ -205,6 +209,7 @@ Useful operator flags:
 | `--platform-repository-url` | repository clone URL |
 | `--platform-docs` | standalone runtime implementation paths |
 | `--adverse-source-gvks` | none |
+| `--adverse-sources-json` | none |
 | `--archive-database-url` | disabled |
 | `--terminal-retention` | disabled |
 | `--runner-image-{codex,hermes-agent,openclaw,grok-build,pi-agent}` | local `:dev` image; packaged charts use matching `vVERSION` |

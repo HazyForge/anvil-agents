@@ -12,12 +12,19 @@ rules:
   - apiGroups: ["control.anvil.hazyforge.io"]
     resources:
       - adversesituations/status
+      - adversesignals/status
       - agentdatavolumes/status
       - agentruncontrols/status
       - agentruns/status
       - agentschedules/status
       - volumeprofiles/status
     verbs: ["get", "patch", "update"]
+  - apiGroups: ["control.anvil.hazyforge.io"]
+    resources: ["adversesignals"]
+    verbs: ["get", "list", "patch", "watch"]
+  - apiGroups: ["control.anvil.hazyforge.io"]
+    resources: ["adversesignals/finalizers"]
+    verbs: ["update"]
   - apiGroups: ["control.anvil.hazyforge.io"]
     resources:
       - adversesituations/finalizers

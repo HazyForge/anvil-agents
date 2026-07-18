@@ -65,9 +65,9 @@ spec:
                 type: string
               applicationRef:
                 description: |-
-                  ApplicationRef scopes this durable home to one Application. New
-                  application-manager-owned volumes must set it; legacy unscoped volumes
-                  remain readable during migration.
+                  ApplicationRef scopes this durable home to one opaque application key. New
+                  application-scoped volumes must set it; legacy unscoped volumes remain
+                  readable during migration.
                 properties:
                   name:
                     minLength: 1

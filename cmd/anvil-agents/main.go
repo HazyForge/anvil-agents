@@ -15,6 +15,7 @@ func main() {
 	options := controller.DefaultOptions()
 	var platformDocs string
 	var adverseSourceGVKs string
+	var adverseSourcesJSON string
 	var githubAPIAllowedHosts string
 	flag.StringVar(&options.MetricsBindAddress, "metrics-bind-address", options.MetricsBindAddress, "Metrics bind address.")
 	flag.StringVar(&options.HealthProbeBindAddress, "health-probe-bind-address", options.HealthProbeBindAddress, "Health probe bind address.")
@@ -29,6 +30,7 @@ func main() {
 	flag.IntVar(&options.ApplicationMaxConcurrentRuns, "application-max-concurrent-runs", options.ApplicationMaxConcurrentRuns, "Default maximum active direct runs sharing an opaque application scope.")
 	flag.StringVar(&options.DefaultStorageClass, "default-storage-class", options.DefaultStorageClass, "Optional default StorageClass for new AgentDataVolume claims; empty uses the cluster default.")
 	flag.StringVar(&adverseSourceGVKs, "adverse-source-gvks", "", "Optional comma-separated apiVersion/kind values watched as adverse sources.")
+	flag.StringVar(&adverseSourcesJSON, "adverse-sources-json", "", "Optional JSON array of administrator-owned adverse source integrations.")
 	flag.StringVar(&githubAPIAllowedHosts, "github-api-allowed-hosts", strings.Join(options.GitHubAPIAllowedHosts, ","), "Comma-separated GitHub API hosts allowed for remote skill sources.")
 	flag.BoolVar(&options.AllowInsecureGitHubAPI, "allow-insecure-github-api", options.AllowInsecureGitHubAPI, "Allow HTTP for allowlisted GitHub API hosts; intended only for local tests.")
 	flag.StringVar(&options.CodexRunnerImage, "runner-image-codex", options.CodexRunnerImage, "Default image for Codex AgentRuns that do not set spec.harness.backend.image.")
@@ -41,6 +43,12 @@ func main() {
 	flag.Parse()
 	options.PlatformDocs = splitCSV(platformDocs)
 	options.AdverseSourceGVKs = splitCSV(adverseSourceGVKs)
+	var err error
+	options.AdverseSources, err = controller.ParseAdverseSourcesJSON(adverseSourcesJSON)
+	if err != nil {
+		ctrl.Log.Error(err, "invalid adverse source configuration")
+		os.Exit(2)
+	}
 	options.GitHubAPIAllowedHosts = splitCSV(githubAPIAllowedHosts)
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&zapOptions)))
 	ctx := ctrl.SetupSignalHandler()

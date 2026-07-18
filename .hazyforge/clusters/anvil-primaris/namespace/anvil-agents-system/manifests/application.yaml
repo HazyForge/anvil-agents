@@ -2,6 +2,8 @@ apiVersion: infrastructure.anvil.hazyforge.io/v1alpha1
 kind: Repository
 metadata:
   name: hazyforge-anvil-agents
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
 spec:
   provider: github
   cloneURL: https://github.com/HazyForge/anvil-agents.git
@@ -22,14 +24,9 @@ metadata:
     app.kubernetes.io/part-of: anvilhub
 spec:
   displayName: Anvil Agents
-  description: Standalone agent execution operator and backend runner images.
+  description: Standalone open-source agent execution operator and backend runner images.
   repositoryRef:
     name: hazyforge-anvil-agents
-  repositories:
-    - name: primary
-      role: primary
-      repositoryRef:
-        name: hazyforge-anvil-agents
   components:
     - &component
       name: controller

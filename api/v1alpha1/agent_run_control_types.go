@@ -34,8 +34,8 @@ type AgentRunControlSourceSpec struct {
 
 // +kubebuilder:validation:XValidation:rule="self.launchPolicy != 'Paused' || (has(self.reason) && size(self.reason) > 0)",message="spec.reason is required when launchPolicy is Paused"
 type AgentRunControlSpec struct {
-	// ApplicationRef identifies the cluster-scoped Application whose AgentRun
-	// launches are governed by this control.
+	// ApplicationRef identifies the opaque application scope key whose AgentRun
+	// launches are governed by this cluster-scoped control.
 	ApplicationRef ApplicationReferenceSpec `json:"applicationRef"`
 	// LaunchPolicy controls whether new application-scoped AgentRun Jobs may
 	// launch. Paused never terminates an already-created Job.

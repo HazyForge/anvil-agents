@@ -4,6 +4,8 @@ import (
 	"testing"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 
 	controlv1alpha1 "github.com/hazyforge/anvil-agents/api/v1alpha1"
@@ -12,7 +14,7 @@ import (
 func TestDefaultAdverseSituationBuffersWithoutAgentRunResponder(t *testing.T) {
 	t.Parallel()
 
-	situation := defaultAdverseSituation("anvilhub", "adverse-default")
+	situation := defaultAdverseSituation("operations", "adverse-default")
 	if got, want := situation.Spec.GroupKey, adverseSituationDefaultGroupKey; got != want {
 		t.Fatalf("group key = %q, want %q", got, want)
 	}
@@ -55,16 +57,16 @@ func TestAdverseSituationAgentRunCopiesDocsAndIssueTracking(t *testing.T) {
 	now := metav1.Now()
 	situation := &controlv1alpha1.AdverseSituation{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:            "adverse-anvil",
-			Namespace:       "anvil",
-			UID:             types.UID("adverse-anvil-uid"),
+			Name:            "checkout-health",
+			Namespace:       "store",
+			UID:             types.UID("checkout-health-uid"),
 			ResourceVersion: "42",
 		},
 		Spec: controlv1alpha1.AdverseSituationSpec{
 			Responders: controlv1alpha1.AdverseSituationRespondersSpec{
 				AgentRun: &controlv1alpha1.AdverseSituationAgentRunResponderSpec{
 					ProfileRef: &controlv1alpha1.NamespacedObjectReference{
-						Name: "hazy-trade-release-gate-responder",
+						Name: "checkout-release-responder",
 					},
 					HarnessProfileRef: &controlv1alpha1.NamespacedObjectReference{Name: "codex-standard"},
 					SkillSets: &controlv1alpha1.AgentSkillCompositionSpec{
@@ -72,13 +74,13 @@ func TestAdverseSituationAgentRunCopiesDocsAndIssueTracking(t *testing.T) {
 					},
 					Prompt: "Diagnose the adverse stream and repair or propose a release-gate fix.",
 					Scope: controlv1alpha1.AgentRunScopeSpec{
-						Summary:    "Hazy Trade production",
-						Namespaces: []string{"hazy-trade"},
+						Summary:    "Checkout production",
+						Namespaces: []string{"store"},
 						ApplicationRef: &controlv1alpha1.ApplicationReferenceSpec{
-							Name: "hazy-trade",
+							Name: "checkout",
 						},
 						ApplicationTargetRef: &controlv1alpha1.ApplicationTargetReferenceSpec{
-							Name: "hazy-trade-prod",
+							Name: "checkout-prod",
 						},
 					},
 					Docs: &controlv1alpha1.AgentRunDocsSpec{
@@ -88,9 +90,9 @@ func TestAdverseSituationAgentRunCopiesDocsAndIssueTracking(t *testing.T) {
 					},
 					IssueTracking: &controlv1alpha1.AgentRunIssueTrackingSpec{
 						Provider:     controlv1alpha1.AgentRunIssueTrackingProviderGitHub,
-						Repository:   "HazyForge/anvil-primaris",
+						Repository:   "example/checkout",
 						UpdatePolicy: controlv1alpha1.AgentRunIssueUpdatePolicyComment,
-						SearchQuery:  `repo:HazyForge/anvil-primaris is:issue is:open "AdverseSituation"`,
+						SearchQuery:  `repo:example/checkout is:issue is:open "AdverseSituation"`,
 					},
 				},
 			},
@@ -107,9 +109,9 @@ func TestAdverseSituationAgentRunCopiesDocsAndIssueTracking(t *testing.T) {
 		},
 	}
 
-	run := adverseSituationAgentRunFor(situation, "agrun-adverse-anvil")
-	if run.Spec.ProfileRef == nil || run.Spec.ProfileRef.Name != "hazy-trade-release-gate-responder" {
-		t.Fatalf("profile ref = %#v, want hazy-trade-release-gate-responder", run.Spec.ProfileRef)
+	run := adverseSituationAgentRunFor(situation, "agrun-checkout-health")
+	if run.Spec.ProfileRef == nil || run.Spec.ProfileRef.Name != "checkout-release-responder" {
+		t.Fatalf("profile ref = %#v, want checkout-release-responder", run.Spec.ProfileRef)
 	}
 	if run.Spec.HarnessProfileRef == nil || run.Spec.HarnessProfileRef.Name != "codex-standard" {
 		t.Fatalf("harness profile ref = %#v, want codex-standard", run.Spec.HarnessProfileRef)
@@ -141,16 +143,81 @@ func TestAdverseSituationAgentRunCopiesDocsAndIssueTracking(t *testing.T) {
 	if got, want := run.Spec.IssueTracking.UpdatePolicy, controlv1alpha1.AgentRunIssueUpdatePolicyComment; got != want {
 		t.Fatalf("issue update policy = %q, want %q", got, want)
 	}
-	if got, want := run.Spec.IssueTracking.SearchQuery, `repo:HazyForge/anvil-primaris is:issue is:open "AdverseSituation"`; got != want {
+	if got, want := run.Spec.IssueTracking.SearchQuery, `repo:example/checkout is:issue is:open "AdverseSituation"`; got != want {
 		t.Fatalf("issue search query = %q, want %q", got, want)
 	}
-	if got, want := run.Spec.Scope.Summary, "Hazy Trade production"; got != want {
+	if got, want := run.Spec.Scope.Summary, "Checkout production"; got != want {
 		t.Fatalf("scope summary = %q, want %q", got, want)
 	}
-	if run.Spec.Scope.ApplicationRef == nil || run.Spec.Scope.ApplicationRef.Name != "hazy-trade" {
-		t.Fatalf("scope application ref = %#v, want hazy-trade", run.Spec.Scope.ApplicationRef)
+	if run.Spec.Scope.ApplicationRef == nil || run.Spec.Scope.ApplicationRef.Name != "checkout" {
+		t.Fatalf("scope application ref = %#v, want checkout", run.Spec.Scope.ApplicationRef)
 	}
-	if run.Spec.Scope.ApplicationTargetRef == nil || run.Spec.Scope.ApplicationTargetRef.Name != "hazy-trade-prod" {
-		t.Fatalf("scope target ref = %#v, want hazy-trade-prod", run.Spec.Scope.ApplicationTargetRef)
+	if run.Spec.Scope.ApplicationTargetRef == nil || run.Spec.Scope.ApplicationTargetRef.Name != "checkout-prod" {
+		t.Fatalf("scope target ref = %#v, want checkout-prod", run.Spec.Scope.ApplicationTargetRef)
+	}
+}
+
+func TestAdverseSituationAgentRunRejectsRetainedRunFromRecreatedSituation(t *testing.T) {
+	t.Parallel()
+
+	situation := &controlv1alpha1.AdverseSituation{ObjectMeta: metav1.ObjectMeta{
+		Name: "checkout-health", Namespace: "store", UID: types.UID("current-situation-uid"),
+	}}
+	retained := adverseSituationAgentRunFor(situation, "retained-run")
+	retained.Spec.SourceUID = "deleted-situation-uid"
+	if adverseSituationAgentRunMatches(retained, situation) {
+		t.Fatalf("run from deleted situation UID must not be adopted")
+	}
+}
+
+func TestAdverseSituationStatusBoundsEventsAndUTF8Text(t *testing.T) {
+	t.Parallel()
+
+	if got := adverseSituationMaxEvents(controlv1alpha1.AdverseSituationBufferSpec{MaxEvents: 10_000}); got != adverseSituationHardMaxEvents {
+		t.Fatalf("effective max events = %d, want %d", got, adverseSituationHardMaxEvents)
+	}
+	message := adverseSituationLimitString("abc🙂def", 6)
+	if message != "abc" {
+		t.Fatalf("bounded UTF-8 message = %q, want %q", message, "abc")
+	}
+}
+
+func TestPullEventCannotEvictUnacknowledgedSignalReceipt(t *testing.T) {
+	t.Parallel()
+
+	now := metav1.Now()
+	status := controlv1alpha1.AdverseSituationStatus{
+		Phase:      controlv1alpha1.AdverseSituationPhaseOpen,
+		Sequence:   1,
+		EventCount: 1,
+		Events: []controlv1alpha1.AdverseSituationEvent{{
+			ID:          "signal-event",
+			ReportIDs:   []string{"pending-signal-receipt"},
+			Count:       1,
+			FirstSeenAt: &now,
+			LastSeenAt:  &now,
+		}},
+	}
+	source := &unstructured.Unstructured{}
+	source.SetGroupVersionKind(schema.GroupVersionKind{Group: "delivery.example.io", Version: "v1", Kind: "Release"})
+	source.SetNamespace("store")
+	source.SetName("checkout")
+	source.SetUID(types.UID("release-uid"))
+	trigger := controlv1alpha1.AgentRunTriggerSnapshot{Phase: "Failed", Reason: "DeploymentFailed"}
+	buffer := controlv1alpha1.AdverseSituationBufferSpec{MaxEvents: 1}
+
+	if adverseSituationRecordEvent(source, trigger, buffer, &status) {
+		t.Fatalf("pull event should backpressure before evicting a signal receipt")
+	}
+	if len(status.Events) != 1 || status.Events[0].ID != "signal-event" || status.EventCount != 1 {
+		t.Fatalf("pull event evicted receipt-bearing event: %#v", status)
+	}
+
+	status.Events[0].ReportIDs = nil
+	if !adverseSituationRecordEvent(source, trigger, buffer, &status) {
+		t.Fatalf("pull event should record after signal receipt cleanup")
+	}
+	if len(status.Events) != 1 || status.Events[0].ID == "signal-event" || status.EventCount != 2 {
+		t.Fatalf("pull event was not recorded after cleanup: %#v", status)
 	}
 }

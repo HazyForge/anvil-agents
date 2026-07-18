@@ -54,7 +54,8 @@ if [[ -n "${baseline_ref}" ]]; then
 else
 	# The portable default does not depend on an intermediate commit surviving a
 	# squash merge. Install the current release without CRDs, then establish the
-	# seven pre-composition kinds using legacy-shaped fixtures.
+	# seven pre-composition and pre-AdverseSignal kinds using legacy-shaped
+	# fixtures.
 	helm --kube-context "${kube_context}" install anvil-agents "${root_dir}/charts/anvil-agents" \
 		--namespace anvil-agents-system \
 		--create-namespace \
@@ -63,7 +64,7 @@ else
 		--set image.pullPolicy=Never >/dev/null
 	for crd in "${root_dir}"/config/crd/bases/*.yaml; do
 		case "${crd}" in
-			*_agentharnessprofiles.yaml|*_agentskillsets.yaml) continue ;;
+			*_agentharnessprofiles.yaml|*_agentskillsets.yaml|*_adversesignals.yaml) continue ;;
 		esac
 		resource="$(kubectl --context "${kube_context}" apply --filename "${crd}" --output=name)"
 		kubectl --context "${kube_context}" label "${resource}" \
@@ -88,8 +89,8 @@ helm --kube-context "${kube_context}" upgrade anvil-agents "${root_dir}/charts/a
 	--set image.pullPolicy=Never >/dev/null
 
 upgraded_count="$(kubectl --context "${kube_context}" get crd --output=name | rg -c 'control\.anvil\.hazyforge\.io')"
-[[ "${upgraded_count}" -eq 9 ]] || {
-	echo "upgrade rendered ${upgraded_count} agent CRDs, want 9" >&2
+[[ "${upgraded_count}" -eq 10 ]] || {
+	echo "upgrade rendered ${upgraded_count} agent CRDs, want 10" >&2
 	exit 1
 }
 kubectl --context "${kube_context}" get agentrunprofile legacy-review --namespace agents-upgrade >/dev/null
@@ -98,8 +99,8 @@ kubectl --context "${kube_context}" apply --filename "${root_dir}/hack/fixtures/
 
 helm --kube-context "${kube_context}" uninstall anvil-agents --namespace anvil-agents-system >/dev/null
 retained_count="$(kubectl --context "${kube_context}" get crd --output=name | rg -c 'control\.anvil\.hazyforge\.io')"
-[[ "${retained_count}" -eq 9 ]] || {
-	echo "upgrade uninstall retained ${retained_count} agent CRDs, want 9" >&2
+[[ "${retained_count}" -eq 10 ]] || {
+	echo "upgrade uninstall retained ${retained_count} agent CRDs, want 10" >&2
 	exit 1
 }
 for resource in \
@@ -110,4 +111,4 @@ for resource in \
 	kubectl --context "${kube_context}" get "${resource}" --namespace agents-upgrade >/dev/null
 done
 
-printf 'Seven-to-nine CRD Helm upgrade contract passed\n'
+printf 'Seven-to-ten CRD Helm upgrade contract passed\n'

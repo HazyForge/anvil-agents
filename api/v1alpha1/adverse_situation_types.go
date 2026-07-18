@@ -31,7 +31,8 @@ type AdverseSituationBufferSpec struct {
 	// +optional
 	PullRequestQuietPeriodSeconds int `json:"pullRequestQuietPeriodSeconds,omitempty"`
 	// MaxEvents caps the status event ring buffer. Empty uses the controller
-	// default.
+	// default. The v1alpha1 controller limits effective values to 200 to bound
+	// status growth.
 	// +kubebuilder:validation:Minimum=0
 	// +optional
 	MaxEvents int `json:"maxEvents,omitempty"`
@@ -103,19 +104,23 @@ type AdverseSituationSpec struct {
 }
 
 type AdverseSituationEvent struct {
-	ID               string                 `json:"id,omitempty"`
-	SourceRef        AgentRunSourceRef      `json:"sourceRef"`
-	SourceUID        string                 `json:"sourceUID,omitempty"`
-	SourceGeneration int64                  `json:"sourceGeneration,omitempty"`
-	Phase            string                 `json:"phase,omitempty"`
-	ConditionType    string                 `json:"conditionType,omitempty"`
-	ConditionStatus  metav1.ConditionStatus `json:"conditionStatus,omitempty"`
-	Reason           string                 `json:"reason,omitempty"`
-	Message          string                 `json:"message,omitempty"`
-	ResourceVersion  string                 `json:"resourceVersion,omitempty"`
-	FirstSeenAt      *metav1.Time           `json:"firstSeenAt,omitempty"`
-	LastSeenAt       *metav1.Time           `json:"lastSeenAt,omitempty"`
-	Count            int32                  `json:"count,omitempty"`
+	ID               string                     `json:"id,omitempty"`
+	ReportIDs        []string                   `json:"reportIDs,omitempty"`
+	SignalRef        *NamespacedObjectReference `json:"signalRef,omitempty"`
+	SourceRef        AgentRunSourceRef          `json:"sourceRef"`
+	SourceUID        string                     `json:"sourceUID,omitempty"`
+	SourceURL        string                     `json:"sourceURL,omitempty"`
+	SourceGeneration int64                      `json:"sourceGeneration,omitempty"`
+	Phase            string                     `json:"phase,omitempty"`
+	ConditionType    string                     `json:"conditionType,omitempty"`
+	ConditionStatus  metav1.ConditionStatus     `json:"conditionStatus,omitempty"`
+	Reason           string                     `json:"reason,omitempty"`
+	Message          string                     `json:"message,omitempty"`
+	ResourceVersion  string                     `json:"resourceVersion,omitempty"`
+	ObservedAt       *metav1.Time               `json:"observedAt,omitempty"`
+	FirstSeenAt      *metav1.Time               `json:"firstSeenAt,omitempty"`
+	LastSeenAt       *metav1.Time               `json:"lastSeenAt,omitempty"`
+	Count            int32                      `json:"count,omitempty"`
 }
 
 type AdverseSituationStatus struct {

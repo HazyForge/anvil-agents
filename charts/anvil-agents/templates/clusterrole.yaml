@@ -10,10 +10,13 @@ rules:
     resources: ["agentharnessprofiles", "agentrunprofiles", "agentskillsets", "volumeprofiles"]
     verbs: ["get", "list", "watch"]
   - apiGroups: ["control.anvil.hazyforge.io"]
-    resources: ["adversesituations/status", "agentdatavolumes/status", "agentruncontrols/status", "agentruns/status", "agentschedules/status", "volumeprofiles/status"]
+    resources: ["adversesituations/status", "adversesignals/status", "agentdatavolumes/status", "agentruncontrols/status", "agentruns/status", "agentschedules/status", "volumeprofiles/status"]
     verbs: ["get", "patch", "update"]
   - apiGroups: ["control.anvil.hazyforge.io"]
-    resources: ["adversesituations/finalizers", "agentdatavolumes/finalizers", "agentruns/finalizers", "agentschedules/finalizers"]
+    resources: ["adversesignals"]
+    verbs: ["get", "list", "patch", "watch"]
+  - apiGroups: ["control.anvil.hazyforge.io"]
+    resources: ["adversesignals/finalizers", "adversesituations/finalizers", "agentdatavolumes/finalizers", "agentruns/finalizers", "agentschedules/finalizers"]
     verbs: ["update"]
   - apiGroups: ["batch"]
     resources: ["jobs"]
@@ -41,6 +44,11 @@ rules:
   - apiGroups: ["coordination.k8s.io"]
     resources: ["leases"]
     verbs: ["create", "delete", "get", "list", "patch", "update", "watch"]
+{{- range .Values.adverseSources }}
+  - apiGroups: [{{ if contains "/" .apiVersion }}{{ (splitList "/" .apiVersion | first) | quote }}{{ else }}""{{ end }}]
+    resources: [{{ required "adverseSources[].resource is required for exact RBAC" .resource | quote }}]
+    verbs: ["get", "list", "watch"]
+{{- end }}
 {{- with .Values.extraRBACRules }}
 {{ toYaml . | indent 2 }}
 {{- end }}
