@@ -15,22 +15,33 @@ controller.
 ## HTTP Knowledge Service
 
 `examples/knowledge-service/profile.yaml` defines a concrete, provider-neutral
-contract: `GET /v1/search?q=...` returns JSON, a bearer token is injected from a
-same-namespace Secret, and a setup script creates `knowledge-search`. The skill
-requires the agent to search before acting, cite returned note IDs or paths,
-and continue without inventing context when the service is unavailable.
+contract: `GET /v1/search?q=...` returns JSON and one `AgentSkillSet` teaches
+every built-in harness to install and call `knowledge-search`. A custom harness
+must implement the common tool-setup contract to consume it. Separate Codex and
+Pi `AgentHarnessProfile` objects inject the same read-only knowledge Secret
+alongside their own provider credentials. The run profile composes one runtime
+with the shared capability.
+
+`examples/knowledge-service/runs.yaml` shows both useful local changes: one run
+augments the shared search policy without editing the set, and another swaps
+the harness to Pi while keeping the same role and knowledge skill.
 
 Adapt the wrapper to the API you already deploy. Prefer an in-cluster TLS name
 or an externally verified HTTPS endpoint. Give the token only read operations;
 use a separate profile and explicit approval for writes.
 
+An external knowledge API gives independently scheduled Jobs node-neutral
+shared context without a multi-writer home volume. Size and rate-limit it for
+the expected concurrent run count. It is a shared service, not shared agent
+memory; each run still decides what to query and records its own outcome.
+
 ## Git-Backed Knowledge
 
-For a small instruction pack, `skillInjections.sourceRefs.github` can fetch one
-file from GitHub at run materialization. Pin `ref` to a commit SHA for
-repeatability. A private repository token is read from a same-namespace Secret.
-This is file injection, not search, and v0.1 supports only the GitHub Contents
-API for remote skill files.
+For a small instruction pack, an `AgentSkillSet` skill can use
+`sourceRefs.github` to fetch one file from GitHub at run materialization. Pin
+`ref` to a commit SHA for repeatability. A private repository token is read
+from a same-namespace Secret. This is file injection, not search, and v0.1
+supports only the GitHub Contents API for remote skill files.
 
 For a full Markdown vault, either mount an intentionally managed
 `AgentDataVolume` or use a custom image that clones a read-only repository and
@@ -50,6 +61,8 @@ than hiding incompatible protocols behind one loose field.
 - Pin tool versions and verify checksums or signatures.
 - Never curl an unversioned installer in a production profile.
 - Keep setup scripts reviewable and idempotent.
+- Treat write access to `AgentSkillSet` as code-execution authority because its
+  setup scripts execute in every consuming Job.
 - Bound output size and avoid logging tokens or sensitive note contents.
 - Use separate read and write credentials.
 - Treat an injected tool as capability, not authorization to use it outside

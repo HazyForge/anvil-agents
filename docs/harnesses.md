@@ -2,9 +2,11 @@
 
 One `AgentRun` creates one Job and selects one harness. Install-wide
 `runnerImages` values provide defaults; the source chart uses local `:dev`
-names and a packaged chart uses its matching `vVERSION`. A profile or run can
-override `spec.harness.backend.image`. Production installations should use
-image digests.
+names and a packaged chart uses its matching `vVERSION`. An
+`AgentHarnessProfile` selects the adapter, image, provider configuration,
+workload identity, credentials, storage, and resource envelope. A run can
+atomically select a different harness profile and can apply explicit inline
+runtime overrides. Production installations should use image digests.
 
 | Kind | Runtime | Provider fields | Durable home recommended |
 | --- | --- | --- | --- |
@@ -33,7 +35,35 @@ Every built-in runner receives:
 Setup scripts run after repository preparation and before the runtime starts.
 They execute as the container user in the configured workdir. Keep them
 idempotent, install only into writable paths, pin downloaded artifacts, and
-pass credentials through `envSecretRefs` rather than inline YAML.
+pass credentials through the selected harness profile's `envSecretRefs` rather
+than inline YAML. Tool contracts normally live in `AgentSkillSet`; selecting a
+skill set does not grant the credentials that its tool may need.
+
+Run profiles created before the composition API may still contain inline
+backend and execution settings. When a run selects a different
+`harnessProfileRef`, those profile-inline runtime fields are deliberately not
+carried into the replacement. Move all provider credentials and durable homes
+into `AgentHarnessProfile` before offering runtime swaps. See
+[Agent Composition](composition.md).
+
+## Workload Sizing And Placement
+
+Harness profiles are also reusable machine profiles for heavy work. Set CPU,
+memory, and ephemeral-storage requests so Kubernetes can place builds, test
+suites, indexing, and analysis on a node that can complete them. Use limits to
+bound one run, and use `nodeSelector`, affinity, and tolerations to route
+specialized harnesses to dedicated pools.
+
+Keep distinct profiles for materially different envelopes, such as a small
+review lane, a large Rust build lane, and a custom GPU analysis lane. They can
+all be selected by the same provider-neutral run profile and skill sets. This
+avoids hard-coding one machine class into the agent's role.
+
+Each harness Pod occupies one node. Run multiple independent AgentRuns to use
+multiple machines; a single run is not split across nodes by the controller.
+Local or `ReadWriteOnce` data volumes may constrain placement and parallel
+mounts. See [Distributed Workloads](distributed-workloads.md) before sharing a
+durable home across concurrent lanes.
 
 ## Custom Harness
 

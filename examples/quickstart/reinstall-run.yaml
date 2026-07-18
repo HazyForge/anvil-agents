@@ -1,0 +1,16 @@
+apiVersion: control.anvil.hazyforge.io/v1alpha1
+kind: AgentRun
+metadata:
+  name: demo-002
+  namespace: agents-quickstart
+spec:
+  purpose: manual
+  sourceRef:
+    kind: ReinstallCheck
+    name: quickstart
+  profileRef:
+    name: demo
+  prompt: Prove retained composition and storage execute after chart reinstall.
+  scope:
+    applicationRef:
+      name: quickstart

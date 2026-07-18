@@ -1,38 +1,63 @@
 apiVersion: control.anvil.hazyforge.io/v1alpha1
-kind: AgentRunProfile
+kind: AgentSkillSet
 metadata:
-  name: codex-review
+  name: evidence-review
   namespace: agents
 spec:
-  description: Codex implementation review lane.
-  harness:
-    intent: observe
-    backend:
-      kind: codex
-    execution:
-      serviceAccountName: agent-runner
-      envSecretRefs:
-        - name: codex-credentials
-      timeoutSeconds: 1800
+  description: Shared evidence-first review behavior for every runtime lane.
+  skills:
+    - name: evidence-review
+      content: Inspect current source and tests, cite concrete paths, and separate confirmed defects from risks.
+  tools:
+    - name: ripgrep
+      description: Fast repository text search.
+      verifyCommand: ["rg", "--version"]
+---
+apiVersion: control.anvil.hazyforge.io/v1alpha1
+kind: AgentHarnessProfile
+metadata:
+  name: codex-runtime
+  namespace: agents
+spec:
+  description: Codex execution envelope.
+  backend:
+    kind: codex
+  execution:
+    serviceAccountName: agent-runner
+    envSecretRefs:
+      - name: codex-credentials
+    timeoutSeconds: 1800
+---
+apiVersion: control.anvil.hazyforge.io/v1alpha1
+kind: AgentHarnessProfile
+metadata:
+  name: pi-runtime
+  namespace: agents
+spec:
+  description: Pi execution envelope.
+  backend:
+    kind: piAgent
+    modelProvider: xai
+    providerAuthMode: oauth
+  execution:
+    serviceAccountName: agent-runner
+    envSecretRefs:
+      - name: pi-credentials
+    timeoutSeconds: 1800
 ---
 apiVersion: control.anvil.hazyforge.io/v1alpha1
 kind: AgentRunProfile
 metadata:
-  name: pi-review
+  name: evidence-reviewer
   namespace: agents
 spec:
-  description: Independent Pi review lane.
+  description: Provider-neutral evidence review role.
+  skillSets:
+    refs:
+      - name: evidence-review
   harness:
     intent: observe
-    backend:
-      kind: piAgent
-      modelProvider: xai
-      providerAuthMode: oauth
-    execution:
-      serviceAccountName: agent-runner
-      envSecretRefs:
-        - name: pi-credentials
-      timeoutSeconds: 1800
+    systemPrompt: Review only; do not mutate the repository or external systems.
 ---
 apiVersion: control.anvil.hazyforge.io/v1alpha1
 kind: AgentSchedule
@@ -52,11 +77,15 @@ spec:
       template:
         purpose: scheduledHealthCheck
         profileRef:
-          name: codex-review
+          name: evidence-reviewer
+        harnessProfileRef:
+          name: codex-runtime
         prompt: Review current failures and record evidence-backed findings.
     - name: pi
       template:
         purpose: scheduledHealthCheck
         profileRef:
-          name: pi-review
+          name: evidence-reviewer
+        harnessProfileRef:
+          name: pi-runtime
         prompt: Independently review the newest evidence and challenge prior assumptions.

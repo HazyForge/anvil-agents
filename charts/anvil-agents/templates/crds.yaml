@@ -5,6 +5,7 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     helm.sh/resource-policy: keep
+    argocd.argoproj.io/sync-options: Prune=false
     controller-gen.kubebuilder.io/version: v0.19.0
   name: adversesituations.control.anvil.hazyforge.io
 spec:
@@ -2878,6 +2879,7 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     helm.sh/resource-policy: keep
+    argocd.argoproj.io/sync-options: Prune=false
     controller-gen.kubebuilder.io/version: v0.19.0
   name: agentdatavolumes.control.anvil.hazyforge.io
 spec:
@@ -3620,6 +3622,7 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     helm.sh/resource-policy: keep
+    argocd.argoproj.io/sync-options: Prune=false
     controller-gen.kubebuilder.io/version: v0.19.0
   name: agentharnessprofiles.control.anvil.hazyforge.io
 spec:
@@ -5718,6 +5721,7 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     helm.sh/resource-policy: keep
+    argocd.argoproj.io/sync-options: Prune=false
     controller-gen.kubebuilder.io/version: v0.19.0
   name: agentruncontrols.control.anvil.hazyforge.io
 spec:
@@ -5923,6 +5927,7 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     helm.sh/resource-policy: keep
+    argocd.argoproj.io/sync-options: Prune=false
     controller-gen.kubebuilder.io/version: v0.19.0
   name: agentrunprofiles.control.anvil.hazyforge.io
 spec:
@@ -5975,8 +5980,8 @@ spec:
             type: object
           spec:
             description: |-
-              AgentRunProfileSpec stores reusable prompt, scope, tool, and execution
-              defaults for AgentRuns in the same namespace.
+              AgentRunProfileSpec stores reusable role, scope, policy, prompt, and
+              composition defaults for AgentRuns in the same namespace.
             properties:
               description:
                 description: Description explains the profile's intended ownership
@@ -8554,6 +8559,7 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     helm.sh/resource-policy: keep
+    argocd.argoproj.io/sync-options: Prune=false
     controller-gen.kubebuilder.io/version: v0.19.0
   name: agentruns.control.anvil.hazyforge.io
 spec:
@@ -10980,9 +10986,9 @@ spec:
                 type: object
               profileRef:
                 description: |-
-                  ProfileRef points at a same-namespace AgentRunProfile whose scope,
-                  docs, issue tracking, harness, tools, subagents, prompts, and
-                  notifications are resolved as defaults before this AgentRun executes.
+                  ProfileRef points at a same-namespace AgentRunProfile whose role, scope,
+                  policy, composition, prompts, and notifications are resolved as defaults
+                  before this AgentRun executes.
                   Fields set directly on this AgentRun override profile defaults; list
                   fields append profile entries first and run-local entries second.
                 properties:
@@ -11567,6 +11573,7 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     helm.sh/resource-policy: keep
+    argocd.argoproj.io/sync-options: Prune=false
     controller-gen.kubebuilder.io/version: v0.19.0
   name: agentschedules.control.anvil.hazyforge.io
 spec:
@@ -11674,6 +11681,12 @@ spec:
                   Allow and the number of queued AgentRuns that may launch Jobs for Queue.
                   Empty defaults to 1 for Queue and unlimited for Allow. Forbid always
                   behaves as a one-at-a-time schedule.
+                minimum: 0
+                type: integer
+              maxRunsPerDay:
+                description: |-
+                  MaxRunsPerDay caps all child runs created by this schedule during a UTC
+                  calendar day, including manual run-now nudges. Empty disables the cap.
                 minimum: 0
                 type: integer
               runTemplate:
@@ -14068,9 +14081,9 @@ spec:
                     type: object
                   profileRef:
                     description: |-
-                      ProfileRef points at a same-namespace AgentRunProfile whose scope,
-                      docs, issue tracking, harness, tools, subagents, prompts, and
-                      notifications are resolved as defaults before this AgentRun executes.
+                      ProfileRef points at a same-namespace AgentRunProfile whose role, scope,
+                      policy, composition, prompts, and notifications are resolved as defaults
+                      before this AgentRun executes.
                       Fields set directly on this AgentRun override profile defaults; list
                       fields append profile entries first and run-local entries second.
                     properties:
@@ -16769,9 +16782,9 @@ spec:
                           type: object
                         profileRef:
                           description: |-
-                            ProfileRef points at a same-namespace AgentRunProfile whose scope,
-                            docs, issue tracking, harness, tools, subagents, prompts, and
-                            notifications are resolved as defaults before this AgentRun executes.
+                            ProfileRef points at a same-namespace AgentRunProfile whose role, scope,
+                            policy, composition, prompts, and notifications are resolved as defaults
+                            before this AgentRun executes.
                             Fields set directly on this AgentRun override profile defaults; list
                             fields append profile entries first and run-local entries second.
                           properties:
@@ -17175,6 +17188,7 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     helm.sh/resource-policy: keep
+    argocd.argoproj.io/sync-options: Prune=false
     controller-gen.kubebuilder.io/version: v0.19.0
   name: agentskillsets.control.anvil.hazyforge.io
 spec:
@@ -17392,6 +17406,7 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     helm.sh/resource-policy: keep
+    argocd.argoproj.io/sync-options: Prune=false
     controller-gen.kubebuilder.io/version: v0.19.0
   name: volumeprofiles.control.anvil.hazyforge.io
 spec:

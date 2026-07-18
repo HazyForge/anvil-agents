@@ -4,25 +4,16 @@ metadata:
   name: repository-review
   namespace: agents
 spec:
-  description: Read-only review using a custom harness image.
+  description: Read-only review with independently reusable runtime and skills.
   scope:
     summary: Review one repository without cluster-wide authority.
     namespaces:
       - agents
+  harnessProfileRef:
+    name: codex-standard
+  skillSets:
+    refs:
+      - name: repository-review
   harness:
     intent: observe
-    backend:
-      kind: custom
-      image: ghcr.io/example/agent-harness@sha256:replace-with-a-pinned-digest
-      imagePullPolicy: IfNotPresent
-    execution:
-      serviceAccountName: agent-runner
-      timeoutSeconds: 1800
-      resources:
-        requests:
-          cpu: 250m
-          memory: 512Mi
-        limits:
-          cpu: "1"
-          memory: 2Gi
     systemPrompt: Inspect current evidence and make no mutations.

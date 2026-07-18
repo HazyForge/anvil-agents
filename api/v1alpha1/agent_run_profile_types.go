@@ -2,8 +2,8 @@ package v1alpha1
 
 import metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-// AgentRunProfileSpec stores reusable prompt, scope, tool, and execution
-// defaults for AgentRuns in the same namespace.
+// AgentRunProfileSpec stores reusable role, scope, policy, prompt, and
+// composition defaults for AgentRuns in the same namespace.
 type AgentRunProfileSpec struct {
 	// Description explains the profile's intended ownership boundary and use.
 	// +optional

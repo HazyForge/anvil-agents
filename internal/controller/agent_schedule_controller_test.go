@@ -653,6 +653,63 @@ func TestAgentScheduleQueueStatusReportsQueueHeadWhileDraining(t *testing.T) {
 	}
 }
 
+func TestAgentScheduleDailyRunBudgetIncludesTerminalRunsAndManualNudges(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	scheme := runtime.NewScheme()
+	if err := controlv1alpha1.AddToScheme(scheme); err != nil {
+		t.Fatalf("add control scheme: %v", err)
+	}
+
+	now := time.Now().UTC()
+	due := metav1.NewTime(now.Add(-time.Minute))
+	schedule := testAgentScheduleWithPolicy(controlv1alpha1.AgentScheduleConcurrencyAllow)
+	schedule.Generation = 1
+	schedule.Spec.MaxRunsPerDay = 1
+	schedule.Annotations = map[string]string{controlv1alpha1.AgentScheduleRunNowAnnotation: "manual-over-budget"}
+	schedule.Status = controlv1alpha1.AgentScheduleStatus{ObservedGeneration: 1, NextRunAt: &due}
+	existing := testScheduledAgentRun("platform-health-today", now.Add(-time.Hour))
+	existing.Status.Phase = controlv1alpha1.AgentRunPhaseSucceeded
+
+	reconciler := &AgentScheduleReconciler{
+		Client: fake.NewClientBuilder().
+			WithScheme(scheme).
+			WithStatusSubresource(&controlv1alpha1.AgentSchedule{}).
+			WithObjects(schedule, existing).
+			Build(),
+		Scheme: scheme,
+	}
+
+	result, err := reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: client.ObjectKeyFromObject(schedule)})
+	if err != nil {
+		t.Fatalf("reconcile schedule: %v", err)
+	}
+	if result.RequeueAfter <= 0 || result.RequeueAfter > 24*time.Hour {
+		t.Fatalf("requeueAfter = %s, want next UTC budget reset", result.RequeueAfter)
+	}
+
+	list := &controlv1alpha1.AgentRunList{}
+	if err := reconciler.List(ctx, list, client.InNamespace(schedule.Namespace)); err != nil {
+		t.Fatalf("list runs: %v", err)
+	}
+	if got, want := len(list.Items), 1; got != want {
+		t.Fatalf("runs = %d, want %d while daily budget is exhausted", got, want)
+	}
+
+	stored := &controlv1alpha1.AgentSchedule{}
+	if err := reconciler.Get(ctx, client.ObjectKeyFromObject(schedule), stored); err != nil {
+		t.Fatalf("get schedule: %v", err)
+	}
+	ready := apimeta.FindStatusCondition(stored.Status.Conditions, agentScheduleReady)
+	if ready == nil || ready.Reason != "DailyRunBudgetReached" || !strings.Contains(ready.Message, "manual-over-budget") {
+		t.Fatalf("Ready condition = %#v, want deferred manual daily-budget condition", ready)
+	}
+	if stored.Status.LastManualRunToken != "" {
+		t.Fatalf("lastManualRunToken = %q, want pending token to remain unconsumed", stored.Status.LastManualRunToken)
+	}
+}
+
 func TestAgentScheduleForbidAdvancesMissedIntervalWhileActive(t *testing.T) {
 	t.Parallel()
 
@@ -1252,7 +1309,7 @@ func TestAgentScheduleRunsKeepsManualTemplateOutOfIntervalRotation(t *testing.T)
 			Build(),
 		Scheme: scheme,
 	}
-	_, last, lastIntervalTemplate, err := reconciler.agentScheduleRuns(ctx, schedule)
+	_, last, lastIntervalTemplate, _, err := reconciler.agentScheduleRuns(ctx, schedule, time.Date(2026, 7, 10, 7, 0, 0, 0, time.UTC))
 	if err != nil {
 		t.Fatalf("list schedule runs: %v", err)
 	}
@@ -1297,7 +1354,7 @@ func TestAgentScheduleRunsUsesSanitizedLabelAndExactScheduleIdentity(t *testing.
 		Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(schedule, matching, collision).Build(),
 		Scheme: scheme,
 	}
-	active, last, _, err := reconciler.agentScheduleRuns(ctx, schedule)
+	active, last, _, _, err := reconciler.agentScheduleRuns(ctx, schedule, time.Now())
 	if err != nil {
 		t.Fatalf("list schedule runs: %v", err)
 	}

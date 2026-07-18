@@ -11,6 +11,36 @@ metadata:
 automountServiceAccountToken: false
 ---
 apiVersion: control.anvil.hazyforge.io/v1alpha1
+kind: VolumeProfile
+metadata:
+  name: demo-state
+  namespace: agents-quickstart
+spec:
+  description: Small durable state fixture using the Kind default StorageClass.
+  volumes:
+    - name: state
+      purpose: quickstart-state
+      mountPath: /var/lib/anvil-agent
+      size:
+        request: 64Mi
+      accessModes:
+        - ReadWriteOnce
+---
+apiVersion: control.anvil.hazyforge.io/v1alpha1
+kind: AgentDataVolume
+metadata:
+  name: demo-state
+  namespace: agents-quickstart
+spec:
+  agentName: demo
+  backend: custom
+  profileRef:
+    name: demo-state
+  profileVolumeName: state
+  applicationRef:
+    name: quickstart
+---
+apiVersion: control.anvil.hazyforge.io/v1alpha1
 kind: AgentHarnessProfile
 metadata:
   name: demo-runtime
@@ -23,6 +53,8 @@ spec:
     imagePullPolicy: Never
   execution:
     serviceAccountName: agent-runner
+    dataVolumeRefs:
+      - name: demo-state
     timeoutSeconds: 120
     resources:
       requests:

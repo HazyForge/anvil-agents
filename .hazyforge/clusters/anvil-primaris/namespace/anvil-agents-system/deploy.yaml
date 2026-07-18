@@ -1,10 +1,10 @@
 helmChartPath: charts/anvil-agents
 
-# Bootstrap is intentionally inert. The coordinated cutover pins the published
-# digest, switches CRD ownership, scales this to one, and deploys the old
-# operator build with embedded agent reconcilers removed in the same window.
+# Bootstrap is intentionally inert. The coordinated cutover publishes and pins
+# immutable image digests before changing this replica count to one.
 replicaCount: 0
-fullnameOverride: anvil-agents
+serviceAccount:
+  name: anvil-agents
 image:
   reference: ghcr.io/hazyforge/anvil-agents:latest
   pullPolicy: IfNotPresent
@@ -17,7 +17,7 @@ runnerImages:
   grokBuild: ghcr.io/hazyforge/anvil-agent-run-grok-build:latest
   piAgent: ghcr.io/hazyforge/anvil-agent-run-pi:latest
 crds:
-  install: false
+  install: true
 leaderElection: true
 applicationMaxConcurrentRuns: 4
 defaultStorageClass: observability-local
@@ -38,11 +38,8 @@ archive:
     name: anvilhub-inventory-database
     key: database-url
   terminalRetention: 72h
-# The issuer and ZITADEL claim shapes are staged, but audience and authorization
-# bindings intentionally remain empty. Enabling the API must fail until a
-# reviewed change supplies a dedicated anvil-agents audience and namespace
-# grants; do not reuse the interactive client ID or a wildcard compatibility
-# binding in the production enablement.
+# OIDC claim shapes are staged, but the API stays disabled until a dedicated
+# audience and explicit namespace grants are configured.
 api:
   enabled: false
   config:

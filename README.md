@@ -1,25 +1,31 @@
 # Anvil Agents
 
 Anvil Agents is an open-source Hazy Forge project for durable, distributed
-agent loops on Kubernetes. Declarative runs, reusable profiles, schedules, and
-event streams become isolated Jobs, and each run can select Codex, Hermes
-Agent, OpenClaw, Grok Build, Pi, or a custom harness.
+agent loops on Kubernetes. It turns independent, heavyweight agent work into
+schedulable Jobs, so repository builds, test suites, security analysis,
+indexing, migrations, and long research loops can use the CPU and memory of a
+cluster instead of competing on one workstation. Declarative runs, composable
+profiles and skill sets, schedules, and event streams become isolated Jobs,
+and each run can select Codex, Hermes Agent, OpenClaw, Grok Build, Pi, or a
+custom harness.
 
 ```text
-AgentRun/Profile/Schedule       Kubernetes Job
-           |                         |
-           v                         v
-    anvil-agents controller -> selected harness -> tools and services
-           |                         |
-           +---- status/archive <----+
-           |
-           +---- optional OIDC read API and live SSE logs
+Run/Profile/Harness/Skills/Schedule      Kubernetes Job
+                 |                            |
+                 v                            v
+          anvil-agents controller -> selected harness -> tools and services
+                 |                            |
+                 +------- status/archive <----+
+                 |
+                 +------- optional OIDC read API and live SSE logs
 ```
 
 Kubernetes provides scheduling, isolation, and distribution. Explicit
 `AgentDataVolume` resources and external services provide durable memory.
-Profiles provide reusable policy and harness configuration. The operator does
-not require Anvil Primaris, Anvil Hub, or another Hazy Forge control plane.
+Run profiles provide reusable role and policy. Harness profiles and skill sets
+let operators change the runtime independently from backend-neutral
+capabilities. The operator does not require Anvil Primaris, Anvil Hub, or
+another Hazy Forge control plane.
 
 The branded API group `control.anvil.hazyforge.io/v1alpha1` is retained as a
 stable API identity and for migration compatibility. Application and target
@@ -28,7 +34,9 @@ references are opaque scope keys, not dependencies on other CRDs.
 ## What It Owns
 
 - `AgentRun`: one append-only execution record and one harness Job.
-- `AgentRunProfile`: reusable prompt, tool, backend, and execution defaults.
+- `AgentRunProfile`: reusable role, scope, policy, and composition defaults.
+- `AgentHarnessProfile`: reusable backend and Kubernetes execution envelope.
+- `AgentSkillSet`: reusable skills, tool contracts, and delegated personas.
 - `AgentSchedule`: interval and manual run creation across named templates.
 - `AgentRunControl`: cluster-wide pause and concurrency policy by scope key.
 - `AgentDataVolume` and `VolumeProfile`: explicit durable PVC-backed state.
@@ -40,11 +48,36 @@ tool-bootstrap, and status contract. Schedules can distribute independent runs
 across harnesses and nodes. It does not mean the controller creates an agent
 mesh or a shared live conversation; cross-run state must be explicit.
 
+## Use The Whole Cluster
+
+Heavy agent work is often more than model inference. Agents compile large
+repositories, run integration suites, scan dependency graphs, build images,
+query local indexes, and process large evidence sets. Anvil Agents lets an
+operator turn those independent workloads into a controlled cluster queue:
+
+- Harness profiles declare CPU, memory, and ephemeral-storage requests and
+  limits instead of inheriting the capacity of the machine that submitted the
+  run.
+- Node selectors, affinity, and tolerations place build, memory-heavy, custom
+  accelerator, or storage-local harnesses on the machines prepared for them;
+  accelerators also require a device plugin and extended-resource request.
+- Multiple `AgentRun` objects and `AgentSchedule` with `Allow` can execute
+  parallel lanes, bounded by schedule and application concurrency controls.
+- Kubernetes performs placement and isolation, while run status and the OIDC
+  stream let users observe work without SSH or `kubectl` access.
+
+One `AgentRun` is one Pod on one node; the operator scales heavy work
+horizontally by scheduling many independent runs across machines. A harness
+that needs to split one computation across several nodes must use an explicit
+distributed compute service. See
+[Distributed Workloads](docs/distributed-workloads.md) for placement,
+concurrency, storage, and capacity examples.
+
 ## Try It Locally
 
 The credential-free Kind quickstart builds the controller and a minimal custom
-harness, installs the chart, creates an `AgentRun`, and waits for structured
-success:
+harness, installs the chart, binds and mounts durable state, creates an
+`AgentRun`, and waits for structured success:
 
 ```bash
 ./examples/quickstart/run.sh
@@ -76,15 +109,20 @@ local Docker. The reusable script supports component selection, platforms,
 cache import/export, multiple tags, custom registries, and fork-aware OCI
 source metadata. Image pushes reject dirty worktrees unless explicitly
 overridden. GitHub workflows call the same repository-owned contract.
+The optional release workflow runs only for a `v*` tag push or a manual rerun
+of an existing tag. It runs the same verification and Kind upgrade/install
+tests before publishing versioned images and an OCI chart; it never publishes
+`latest` from `master`.
 
 ## Security Boundary
 
-An `AgentRun` author can choose executable code, a same-namespace ServiceAccount
-and Secrets, resource placement, and a custom command. Treat permission to
-create or edit runs and profiles as privileged workload execution. Use
-dedicated namespaces, narrowly scoped runner identities, admission policy, and
-secrets created only for agents. `watchNamespaces` narrows the controller cache;
-it does not narrow the chart's ClusterRole.
+Run, run-profile, harness-profile, and skill-set authors can cause executable
+code to run. Harness profiles can also choose a same-namespace ServiceAccount,
+Secrets, resource placement, storage, and a custom command. Treat permission to
+edit these resources as privileged workload execution. Use dedicated
+namespaces, narrowly scoped runner identities, admission policy, and Secrets
+created only for agents. `watchNamespaces` narrows the controller cache; it
+does not narrow the chart's ClusterRole.
 
 The OIDC API is a separate read-only workload and is disabled until an issuer,
 audience, and explicit namespace authorization bindings are configured. See
@@ -94,6 +132,8 @@ audience, and explicit namespace authorization bindings are configured. See
 ## Documentation
 
 - [Architecture and multi-harness semantics](docs/architecture.md)
+- [Distributed heavy workloads across machines](docs/distributed-workloads.md)
+- [Composable profiles, harnesses, skill sets, and overrides](docs/composition.md)
 - [Getting started](docs/getting-started.md)
 - [Harness contract and adapter matrix](docs/harnesses.md)
 - [Knowledge bases, tools, and external services](docs/integrating-knowledge-and-tools.md)
@@ -103,8 +143,10 @@ audience, and explicit namespace authorization bindings are configured. See
 - [Migration from Anvil Primaris](docs/migration-from-anvil-primaris.md)
 
 Hazy Forge uses this same open-source repository for its own agent system. Its
-deployment overlay remains under `.hazyforge/` as a real integration example,
-not as a prerequisite for other installations.
+`.hazyforge/` integration deploys into a dedicated namespace and remains an
+optional real-world example, not an installation prerequisite. Environment
+access is supplied through namespace-local ExternalSecrets; portable installs
+use the Helm values documented above.
 
 ## Project Status
 

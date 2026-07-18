@@ -12,21 +12,45 @@ against two deployments that use different election IDs.
 
 ## Handoff
 
-1. Back up the seven agent CRDs and all agent custom resources.
+1. Back up the nine agent CRDs and all agent custom resources.
 2. Record the embedded controller replica count and confirm there are no
    unexpected terminating runs.
-3. Stage the standalone release with `crds.install=false` and zero replicas
-   while the old chart still owns the CRDs.
-4. In one reviewed cutover, stop the embedded reconcilers, switch CRD ownership
-   to the standalone chart, and start the standalone deployment. Do not delete
-   the CRDs first.
-5. Scale the embedded controller version containing agent reconcilers to zero,
-   or deploy the Anvil Primaris version where those registrations are removed.
-6. Start `anvil-agents` with one replica and leader election enabled.
+3. Stage the standalone release with `crds.install=true` and zero replicas
+   while the old chart still renders the legacy CRDs. This applies the schema
+   superset and the chart's Helm and Argo retention annotations without
+   starting a second reconciler.
+4. Verify the seven existing CRD UIDs did not change, the two composition CRDs
+   exist, and all nine CRDs carry `helm.sh/resource-policy: keep` and
+   `argocd.argoproj.io/sync-options: Prune=false`.
+5. Deploy the Anvil Primaris version where the embedded agent registrations and
+   legacy CRD templates are removed. Do not delete the CRDs first.
+6. Confirm that rollout is complete, then start `anvil-agents` with one replica
+   and leader election enabled.
 7. Verify existing runs, schedules, controls, profiles, adverse streams, and
    data volumes reconcile without child duplication.
-8. Remove transitional CRD templates from the old chart only after the new
-   controller is healthy so GitOps pruning cannot race the initial install.
+8. Keep the standalone chart as the sole CRD delivery source after handoff.
+
+## Profile composition migration
+
+Existing inline `AgentRunProfile.spec.harness` fields remain valid in v1alpha1.
+Migrate incrementally rather than rewriting every run at cutover:
+
+1. Create an `AgentHarnessProfile` in each consuming namespace with the
+   profile's backend, image, ServiceAccount, credential refs, data volumes,
+   placement, and resource settings.
+2. Create one or more `AgentSkillSet` objects for reusable skills, tools, and
+   delegated personas. Keep role intent and standing policy in the run profile.
+3. Add `harnessProfileRef` and `skillSets.refs` to the existing run profile.
+4. Remove migrated inline runtime and capability fields after a canary run
+   reports the expected `status.resolvedComposition` refs and digests.
+5. Test a run-local harness swap. Verify the replacement Job contains only the
+   new harness profile's provider credentials, storage, and identity.
+
+Profile-inline runtime fields overlay the profile-selected harness for
+compatibility. They are skipped during a run-local harness swap to prevent old
+provider credentials from leaking into the replacement. Legacy inline skills,
+tools, and subagents remain a final overlay even with `skillSets.mode: Replace`;
+remove them when a clean capability replacement is required.
 
 ## Client and stream migration
 
@@ -61,9 +85,11 @@ repository mutation, or delivery. Those operations remain behind the existing
 policy broker. See [live-agent-run-stream.md](live-agent-run-stream.md) for the
 full provider-neutral configuration and access-token contract.
 
-The repository-owned Anvil Primaris deployment encodes the initial safe stage:
-`replicaCount: 0` and `crds.install: false`. The cutover change must also pin
-`image.reference` to a verified digest before scaling up.
+The optional Hazy Forge integration encodes the initial safe stage:
+`replicaCount: 0` and `crds.install: true`. The cutover commit must replace all
+six placeholder image tags with immutable digest references before scaling the
+controller. Other consumers should keep provider credentials and
+environment-specific storage in their own deployment layer.
 
 ## Storage compatibility
 

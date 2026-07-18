@@ -6,12 +6,20 @@ multi-tenant sandbox.
 
 ## Authority Model
 
-An `AgentRun` or `AgentRunProfile` author can select an image, custom command,
-ServiceAccount, same-namespace Secrets, pull credentials, security context,
-node placement, and tolerations. Granting write access to these resources is
-therefore equivalent to granting substantial code-execution authority in that
-namespace. An admission controller should enforce your allowed registries,
-ServiceAccounts, security contexts, resources, and placement rules.
+An `AgentRun`, `AgentRunProfile`, or `AgentHarnessProfile` author can select an
+image, custom command, ServiceAccount, same-namespace Secrets, pull
+credentials, security context, node placement, and tolerations. An
+`AgentSkillSet` author can supply setup scripts that execute in consuming Jobs.
+Granting write access to any of these resources is therefore equivalent to
+granting substantial code-execution authority in that namespace. An admission
+controller should enforce allowed registries, ServiceAccounts, Secret and PVC
+refs, security contexts, resources, and placement rules.
+
+Skill sets cannot directly select images, identities, Secrets, storage, or
+placement. Keep that boundary in admission policy too. A run-local harness
+swap replaces the profile-inline runtime envelope so provider credentials do
+not leak between harnesses; migrate runtime fields into dedicated harness
+profiles before relying on this behavior.
 
 Use a dedicated namespace per trust domain. Put only agent-consumable Secrets
 there. Disable unnecessary token mounting on runner ServiceAccounts, grant
@@ -40,8 +48,11 @@ top-level `roles`, `groups`, `scope`/`scp`, and
 project-role maps, must be explicitly configured.
 
 The API still has cluster-wide read access to AgentRuns, Jobs, Pods, and logs,
-so compromise can expose workload output. Terminate TLS at a trusted Gateway,
-apply rate limits and NetworkPolicy, and avoid logging secrets in agent output.
+so compromise can expose workload output. Its resolved-composition view
+contains object identities, opaque application/target names, and digests, not
+Secret values or skill contents.
+Terminate TLS at a trusted Gateway, apply rate limits and NetworkPolicy, and
+avoid logging secrets in agent output.
 
 ## Data Lifecycle
 
@@ -51,5 +62,12 @@ adopts only its own compatible PVC identity and sets a controller owner
 reference; deleting the custom resource can delete the PVC. The chart marks
 CRDs with `helm.sh/resource-policy: keep`, so uninstalling the release does not
 delete all custom resources or their volumes.
+
+The mounted `source.json` contains the effective run spec and therefore may
+include same-namespace Secret reference names, but never Secret values. When a
+run originates from a schedule or adverse situation, the controller removes
+sibling run templates and responder configuration before mounting that source
+object so unrelated runtime and credential references are not disclosed to the
+harness.
 
 Report vulnerabilities privately using [SECURITY.md](../SECURITY.md).

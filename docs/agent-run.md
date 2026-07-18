@@ -12,7 +12,9 @@ The operator owns these resources:
 | Resource | Scope | Purpose |
 | --- | --- | --- |
 | `AgentRun` | namespaced | Immutable request and controller-owned execution status |
-| `AgentRunProfile` | namespaced | Reusable scope and harness defaults |
+| `AgentRunProfile` | namespaced | Reusable role, scope, policy, and composition defaults |
+| `AgentHarnessProfile` | namespaced | Reusable backend and Kubernetes execution envelope |
+| `AgentSkillSet` | namespaced | Reusable backend-neutral capability pack |
 | `AgentSchedule` | namespaced | Interval and manual child-run creation |
 | `AgentRunControl` | cluster | Pause or allow launches for an opaque application key |
 | `AgentDataVolume` | namespaced | Durable PVC lifecycle and expansion-only resizing |
@@ -25,17 +27,19 @@ looks up another API group.
 
 ## Run lifecycle
 
-An `AgentRun` resolves its optional `AgentRunProfile`, validates credentials and
-durable volume references, writes a payload ConfigMap, and creates one Job. The
-Job and ConfigMap are owned by the run. Status is derived from the Job, pod
-state, logs, and the structured harness status contract.
+An `AgentRun` resolves its optional `AgentRunProfile`, selected
+`AgentHarnessProfile`, and ordered `AgentSkillSet` references, validates
+credentials and durable volume references, writes a payload ConfigMap, and
+creates one Job. The Job and ConfigMap are owned by the run. Status is derived
+from the Job, pod state, logs, and the structured harness status contract.
 
 Terminal phases are `Succeeded`, `Failed`, and `NeedsHuman`. Pending and
 running resources remain resumable. A controller restart observes the existing
 children rather than creating a replacement Job.
 
 The backend adapters are `codex`, `hermesAgent`, `openClaw`, `grokBuild`,
-`piAgent`, and `custom`. Backend images are selected by each profile or run.
+`piAgent`, and `custom`. Backend images are selected by each harness profile or
+run.
 The five built-in adapters share the repository checkout, injected tool setup,
 tool verification, and prompt-context contract. The operator image does not
 bundle another control-plane CLI.
@@ -47,9 +51,24 @@ harness, not controller-created child Jobs.
 
 ## Profiles and schedules
 
-Profiles contain durable defaults. Run-local scalar fields override profile
-values; selected list fields append run entries after profile entries. Profiles
-are namespace-local.
+Profiles contain durable role, scope, and policy defaults plus references to a
+runtime and capability packs. Run-local non-empty and non-zero compatibility
+fields override profile values; lists use field-specific append/deduplication
+rules. Use a harness-profile swap when inherited false/zero runtime values must
+be cleared. All profile, harness, and skill-set references are namespace-local.
+See
+[Agent Composition](composition.md) for precedence, atomic harness swaps, skill
+collision rules, and the four explicit override operations.
+
+At Job materialization, `status.resolvedComposition` records the exact object
+versions and digests used. `effectiveDigest` covers the complete resolved
+`AgentRun` spec and `payloadDigest` covers the mounted ConfigMap data, including
+fetched remote skill content. This evidence is also available through the
+sanitized read API; it does not copy Secret values or skill contents into
+status.
+The sanitized snapshot also records inherited opaque application and target
+names, allowing the read API to return profile-owned scope without returning
+the profile itself.
 
 Schedules create child runs from `runTemplate` or rotate through named
 `runTemplates`. Their concurrency policies are:
@@ -57,6 +76,16 @@ Schedules create child runs from `runTemplate` or rotate through named
 - `Forbid`: do not create a new run while a prior child is active.
 - `Allow`: create due runs, optionally capped by `maxConcurrentRuns`.
 - `Queue`: create due runs but launch only the oldest eligible pending runs.
+
+`maxRunsPerDay` adds a UTC daily child-run budget across interval runs and
+manual run-now nudges. Omit it or set zero to preserve unlimited legacy
+behavior.
+
+`Allow`, or `Queue` with a cap above one, exposes independent Job parallelism
+to the Kubernetes scheduler so heavy lanes can land on different machines.
+`Forbid`, a schedule cap of one, or an application control can deliberately
+serialize work even when the cluster has unused nodes. Adding workers does not
+bypass those policy and spend boundaries.
 
 Set `control.anvil.hazyforge.io/run-now` to a new token for a replay-safe manual
 nudge. When named templates are configured, set
@@ -79,17 +108,28 @@ the authority boundary.
 
 ## Durable storage
 
-`AgentDataVolume` owns or adopts a PVC and exposes its resolved claim, mount,
-placement, and environment defaults in status. A `VolumeProfile` can provide
-reusable values. Cross-namespace mounts are rejected.
+`AgentDataVolume` creates a PVC or accepts a compatible existing claim already
+controller-owned by the same `AgentDataVolume` identity. It exposes the
+resolved claim, mount, placement, and environment defaults in status. A
+`VolumeProfile` can provide reusable values. Cross-namespace mounts are
+rejected.
 
 Storage requests may grow but never shrink. Claim names and storage classes are
 immutable after creation. When no storage class is selected, new claims use the
-cluster default. Existing claims are adopted with their current storage class,
-which preserves volumes created by the former embedded controller.
+cluster default. Compatible claims from the former embedded controller retain
+their current storage class when the same resource identity takes over.
+For `WaitForFirstConsumer` storage classes, a current Pending claim with the
+controller-owned `ClaimPending` status is allowed into the Job so that Job can
+be the binding consumer. Other Pending claims continue to block launch.
 
 External object-store sync fields are declarative placeholders in v1alpha1;
 the operator reports them as stub-only and does not move data.
+
+When a harness requests `ttlSecondsAfterFinished`, the controller records the
+request on the Job but leaves Kubernetes TTL cleanup disabled until terminal
+`AgentRun` status is durable. A crash can therefore delay Job cleanup, but it
+cannot delete the only execution evidence before the controller records the
+result and then launch a replacement.
 
 ## Adverse streams
 

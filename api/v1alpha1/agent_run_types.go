@@ -723,9 +723,9 @@ type AgentRunSpec struct {
 	// context defines the work without an additional operator request.
 	// +optional
 	Prompt string `json:"prompt,omitempty"`
-	// ProfileRef points at a same-namespace AgentRunProfile whose scope,
-	// docs, issue tracking, harness, tools, subagents, prompts, and
-	// notifications are resolved as defaults before this AgentRun executes.
+	// ProfileRef points at a same-namespace AgentRunProfile whose role, scope,
+	// policy, composition, prompts, and notifications are resolved as defaults
+	// before this AgentRun executes.
 	// Fields set directly on this AgentRun override profile defaults; list
 	// fields append profile entries first and run-local entries second.
 	// +optional

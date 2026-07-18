@@ -55,8 +55,8 @@ spec:
             type: object
           spec:
             description: |-
-              AgentRunProfileSpec stores reusable prompt, scope, tool, and execution
-              defaults for AgentRuns in the same namespace.
+              AgentRunProfileSpec stores reusable role, scope, policy, prompt, and
+              composition defaults for AgentRuns in the same namespace.
             properties:
               description:
                 description: Description explains the profile's intended ownership

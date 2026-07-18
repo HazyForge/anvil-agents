@@ -1,0 +1,40 @@
+apiVersion: control.anvil.hazyforge.io/v1alpha1
+kind: AgentRun
+metadata:
+  name: payments-review-codex
+  namespace: agents
+spec:
+  purpose: manual
+  sourceRef:
+    kind: ManualRequest
+    name: payments-review-codex
+  profileRef:
+    name: knowledge-aware-reviewer
+  skillSets:
+    overrides:
+      - name: organization-knowledge
+        operation: Augment
+        content: Search only for payments and release runbooks for this review.
+  prompt: Review the current payments change against relevant runbooks.
+  scope:
+    applicationRef:
+      name: example-payments
+---
+apiVersion: control.anvil.hazyforge.io/v1alpha1
+kind: AgentRun
+metadata:
+  name: payments-review-pi
+  namespace: agents
+spec:
+  purpose: manual
+  sourceRef:
+    kind: ManualRequest
+    name: payments-review-pi
+  profileRef:
+    name: knowledge-aware-reviewer
+  harnessProfileRef:
+    name: knowledge-pi
+  prompt: Independently review the same change using the same knowledge skill.
+  scope:
+    applicationRef:
+      name: example-payments

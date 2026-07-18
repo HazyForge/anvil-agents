@@ -7,6 +7,11 @@ access tokens using generic OpenID Connect discovery, but it does not log users
 in, issue tokens, refresh tokens, or create and mutate AgentRuns. Opaque access
 tokens, JWE tokens, and RFC 7662 introspection are not supported.
 
+This gives operators and users one authenticated observation endpoint even
+when heavy runs are spread across many worker nodes. Status and per-run logs
+remain reachable without node access, SSH, or `kubectl`; the endpoint does not
+merge independent runs into a distributed trace or shared conversation.
+
 The API runs separately from the controller with its own ServiceAccount. Its
 ClusterRole has cluster-wide read access to AgentRuns, Pods, Jobs, and Pod logs;
 application-layer namespace authorization and controller-owner checks narrow
@@ -28,6 +33,12 @@ The API accepts access tokens only through `Authorization: Bearer`. Tokens in
 URLs are rejected. Browser clients must use authenticated `fetch()` and parse
 the response stream because the browser `EventSource` API cannot set an
 Authorization header.
+
+List, detail, snapshot, and status events include sanitized
+`resolvedComposition` evidence when available: selected object identities,
+opaque inherited application/target names in the sanitized view, the
+effective-spec digest, and the mounted-payload digest. They never include
+Secret values or complete skill contents.
 
 The stream resolves the Pod from the AgentRun status and verifies its Job and
 AgentRun ownership before reading the fixed `agent` container. A client cannot
