@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -114,6 +115,53 @@ func TestAdverseSignalWaitsForMissingSameNamespaceSituation(t *testing.T) {
 	}
 }
 
+func TestAdverseSignalBackpressuresWhenReceiptSetIsFull(t *testing.T) {
+	t.Parallel()
+
+	situation := &controlv1alpha1.AdverseSituation{
+		ObjectMeta: metav1.ObjectMeta{Name: "checkout-health", Namespace: "store", UID: types.UID("situation-uid")},
+	}
+	signal := testAdverseSignal("ProviderTimeout")
+	event, _ := adverseSignalEvent(signal, situation)
+	now := metav1.Now()
+	for i := 0; i < adverseSituationMaxReportIDsPerEvent; i++ {
+		event.ReportIDs = append(event.ReportIDs, shortHash(fmt.Sprintf("existing-receipt/%d", i)))
+	}
+	event.Count = int32(len(event.ReportIDs))
+	event.FirstSeenAt = &now
+	event.LastSeenAt = &now
+	situation.Status = controlv1alpha1.AdverseSituationStatus{
+		Phase:      controlv1alpha1.AdverseSituationPhaseOpen,
+		Sequence:   1,
+		EventCount: event.Count,
+		Events:     []controlv1alpha1.AdverseSituationEvent{event},
+	}
+
+	reconciler, c := testAdverseSignalReconciler(t, situation, signal)
+	request := ctrl.Request{NamespacedName: types.NamespacedName{Namespace: signal.Namespace, Name: signal.Name}}
+	result, err := reconciler.Reconcile(context.Background(), request)
+	if err != nil {
+		t.Fatalf("reconcile full receipt set: %v", err)
+	}
+	if result.RequeueAfter <= 0 {
+		t.Fatalf("requeueAfter = %s, want backpressure retry", result.RequeueAfter)
+	}
+	storedSignal := &controlv1alpha1.AdverseSignal{}
+	if err := c.Get(context.Background(), client.ObjectKeyFromObject(signal), storedSignal); err != nil {
+		t.Fatalf("get signal: %v", err)
+	}
+	if storedSignal.Status.Phase != controlv1alpha1.AdverseSignalPhasePending || storedSignal.Status.Conditions[0].Reason != "SituationBusy" {
+		t.Fatalf("backpressured signal status = %#v", storedSignal.Status)
+	}
+	storedSituation := &controlv1alpha1.AdverseSituation{}
+	if err := c.Get(context.Background(), client.ObjectKeyFromObject(situation), storedSituation); err != nil {
+		t.Fatalf("get situation: %v", err)
+	}
+	if storedSituation.Status.EventCount != event.Count || len(storedSituation.Status.Events[0].ReportIDs) != adverseSituationMaxReportIDsPerEvent {
+		t.Fatalf("backpressure mutated situation: %#v", storedSituation.Status)
+	}
+}
+
 func TestDistinctSignalsDedupeWithinWindowAndStartNewEventOutsideIt(t *testing.T) {
 	t.Parallel()
 
@@ -131,10 +179,10 @@ func TestDistinctSignalsDedupeWithinWindowAndStartNewEventOutsideIt(t *testing.T
 
 	firstEvent, firstReport := adverseSignalEvent(first, situation)
 	secondEvent, secondReport := adverseSignalEvent(second, situation)
-	if !adverseSituationRecordSignalEvent(firstEvent, firstReport, buffer, &status) {
+	if changed, delivered := adverseSituationRecordSignalEvent(firstEvent, firstReport, buffer, &status); !changed || !delivered {
 		t.Fatalf("first signal was not recorded")
 	}
-	if !adverseSituationRecordSignalEvent(secondEvent, secondReport, buffer, &status) {
+	if changed, delivered := adverseSituationRecordSignalEvent(secondEvent, secondReport, buffer, &status); !changed || !delivered {
 		t.Fatalf("second signal was not recorded")
 	}
 	if len(status.Events) != 1 || status.EventCount != 2 || status.DuplicateCount != 1 || status.Events[0].Count != 2 {
@@ -150,7 +198,7 @@ func TestDistinctSignalsDedupeWithinWindowAndStartNewEventOutsideIt(t *testing.T
 	third.Name = "signal-3"
 	third.UID = types.UID("signal-uid-3")
 	thirdEvent, thirdReport := adverseSignalEvent(third, situation)
-	if !adverseSituationRecordSignalEvent(thirdEvent, thirdReport, buffer, &status) {
+	if changed, delivered := adverseSituationRecordSignalEvent(thirdEvent, thirdReport, buffer, &status); !changed || !delivered {
 		t.Fatalf("third signal was not recorded")
 	}
 	if len(status.Events) != 2 || status.EventCount != 3 || status.DuplicateCount != 1 {
@@ -210,11 +258,89 @@ func TestLateSignalRetryDoesNotReopenResolvedSequence(t *testing.T) {
 		Phase: controlv1alpha1.AdverseSituationPhaseResolved, Sequence: 4, EventCount: 1,
 		Events: []controlv1alpha1.AdverseSituationEvent{event},
 	}
-	if adverseSituationRecordSignalEvent(event, reportID, controlv1alpha1.AdverseSituationBufferSpec{}, &status) {
+	changed, delivered := adverseSituationRecordSignalEvent(event, reportID, controlv1alpha1.AdverseSituationBufferSpec{}, &status)
+	if changed || !delivered {
 		t.Fatalf("late retry should be an idempotent no-op")
 	}
 	if status.Phase != controlv1alpha1.AdverseSituationPhaseResolved || status.Sequence != 4 || status.EventCount != 1 {
 		t.Fatalf("late retry reopened resolved status: %#v", status)
+	}
+}
+
+func TestSignalReceiptCapacityBackpressuresWithoutEviction(t *testing.T) {
+	t.Parallel()
+
+	situation := &controlv1alpha1.AdverseSituation{ObjectMeta: metav1.ObjectMeta{UID: types.UID("situation-uid")}}
+	signal := testAdverseSignal("ProviderTimeout")
+	event, reportID := adverseSignalEvent(signal, situation)
+	now := metav1.Now()
+	receipts := make([]string, adverseSituationMaxReportIDsPerEvent)
+	for i := range receipts {
+		receipts[i] = shortHash(fmt.Sprintf("existing-receipt/%d", i))
+	}
+	receiptCount := int32(len(receipts))
+	event.ReportIDs = receipts
+	event.Count = receiptCount
+	event.FirstSeenAt = &now
+	event.LastSeenAt = &now
+	status := controlv1alpha1.AdverseSituationStatus{
+		Phase:      controlv1alpha1.AdverseSituationPhaseOpen,
+		Sequence:   1,
+		EventCount: receiptCount,
+		Events:     []controlv1alpha1.AdverseSituationEvent{event},
+	}
+
+	changed, delivered := adverseSituationRecordSignalEvent(event, reportID, controlv1alpha1.AdverseSituationBufferSpec{}, &status)
+	if changed || delivered {
+		t.Fatalf("full receipt set result = changed %t delivered %t, want backpressure", changed, delivered)
+	}
+	if status.EventCount != receiptCount || status.Events[0].Count != receiptCount || len(status.Events[0].ReportIDs) != len(receipts) {
+		t.Fatalf("backpressure mutated counters or receipts: %#v", status)
+	}
+
+	status.Events[0].ReportIDs = status.Events[0].ReportIDs[1:]
+	changed, delivered = adverseSituationRecordSignalEvent(event, reportID, controlv1alpha1.AdverseSituationBufferSpec{}, &status)
+	if !changed || !delivered {
+		t.Fatalf("available receipt slot result = changed %t delivered %t, want recorded", changed, delivered)
+	}
+}
+
+func TestSignalEventRingBackpressuresBeforeEvictingReceipt(t *testing.T) {
+	t.Parallel()
+
+	situation := &controlv1alpha1.AdverseSituation{ObjectMeta: metav1.ObjectMeta{UID: types.UID("situation-uid")}}
+	oldSignal := testAdverseSignal("OldFailure")
+	oldSignal.Spec.DedupeKey = "old"
+	oldEvent, oldReportID := adverseSignalEvent(oldSignal, situation)
+	now := metav1.Now()
+	oldEvent.ReportIDs = []string{oldReportID}
+	oldEvent.Count = 1
+	oldEvent.FirstSeenAt = &now
+	oldEvent.LastSeenAt = &now
+	status := controlv1alpha1.AdverseSituationStatus{
+		Phase:      controlv1alpha1.AdverseSituationPhaseOpen,
+		Sequence:   1,
+		EventCount: 1,
+		Events:     []controlv1alpha1.AdverseSituationEvent{oldEvent},
+	}
+	newSignal := testAdverseSignal("NewFailure")
+	newSignal.UID = types.UID("new-signal-uid")
+	newSignal.Spec.DedupeKey = "new"
+	newEvent, newReportID := adverseSignalEvent(newSignal, situation)
+	buffer := controlv1alpha1.AdverseSituationBufferSpec{MaxEvents: 1}
+
+	changed, delivered := adverseSituationRecordSignalEvent(newEvent, newReportID, buffer, &status)
+	if changed || delivered {
+		t.Fatalf("receipt-bearing eviction result = changed %t delivered %t, want backpressure", changed, delivered)
+	}
+	if len(status.Events) != 1 || status.Events[0].ID != oldEvent.ID || status.EventCount != 1 {
+		t.Fatalf("backpressure evicted receipt-bearing event: %#v", status)
+	}
+
+	status.Events[0].ReportIDs = nil
+	changed, delivered = adverseSituationRecordSignalEvent(newEvent, newReportID, buffer, &status)
+	if !changed || !delivered || len(status.Events) != 1 || status.Events[0].ID != newEvent.ID {
+		t.Fatalf("cleared event ring did not admit new signal: changed=%t delivered=%t status=%#v", changed, delivered, status)
 	}
 }
 

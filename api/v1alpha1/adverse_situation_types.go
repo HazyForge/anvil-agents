@@ -31,7 +31,8 @@ type AdverseSituationBufferSpec struct {
 	// +optional
 	PullRequestQuietPeriodSeconds int `json:"pullRequestQuietPeriodSeconds,omitempty"`
 	// MaxEvents caps the status event ring buffer. Empty uses the controller
-	// default.
+	// default. The v1alpha1 controller limits effective values to 200 to bound
+	// status growth.
 	// +kubebuilder:validation:Minimum=0
 	// +optional
 	MaxEvents int `json:"maxEvents,omitempty"`

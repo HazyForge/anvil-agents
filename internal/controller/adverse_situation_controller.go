@@ -526,12 +526,18 @@ func adverseSituationRecordEvent(source *unstructured.Unstructured, trigger cont
 	}), now, buffer, status)
 }
 
-func adverseSituationRecordSignalEvent(event controlv1alpha1.AdverseSituationEvent, reportID string, buffer controlv1alpha1.AdverseSituationBufferSpec, status *controlv1alpha1.AdverseSituationStatus) bool {
+// adverseSituationRecordSignalEvent reports whether status changed and whether
+// the delivery is durably represented. A false delivered result applies
+// backpressure; callers must retry instead of accepting or dropping the signal.
+func adverseSituationRecordSignalEvent(event controlv1alpha1.AdverseSituationEvent, reportID string, buffer controlv1alpha1.AdverseSituationBufferSpec, status *controlv1alpha1.AdverseSituationStatus) (changed bool, delivered bool) {
+	if reportID == "" {
+		return false, false
+	}
 	now := metav1.Now()
 	for i := range status.Events {
 		for _, recorded := range status.Events[i].ReportIDs {
 			if recorded == reportID {
-				return false
+				return false, true
 			}
 		}
 	}
@@ -545,10 +551,10 @@ func adverseSituationRecordSignalEvent(event controlv1alpha1.AdverseSituationEve
 		if recorded.LastSeenAt != nil && dedupeWindow > 0 && now.Sub(recorded.LastSeenAt.Time) > dedupeWindow {
 			continue
 		}
-		recorded.ReportIDs = append(recorded.ReportIDs, reportID)
-		if len(recorded.ReportIDs) > adverseSituationMaxReportIDsPerEvent {
-			recorded.ReportIDs = append([]string(nil), recorded.ReportIDs[len(recorded.ReportIDs)-adverseSituationMaxReportIDsPerEvent:]...)
+		if len(recorded.ReportIDs) >= adverseSituationMaxReportIDsPerEvent {
+			return false, false
 		}
+		recorded.ReportIDs = append(recorded.ReportIDs, reportID)
 		recorded.Count++
 		recorded.LastSeenAt = &now
 		latest := adverseSituationNormalizeEvent(event)
@@ -570,20 +576,22 @@ func adverseSituationRecordSignalEvent(event controlv1alpha1.AdverseSituationEve
 		status.QuietUntil = adverseSituationQuietUntil(now, buffer)
 		status.Phase = controlv1alpha1.AdverseSituationPhaseOpen
 		status.ResolvedAt = nil
-		return true
+		return true, true
 	}
 	event.ReportIDs = []string{reportID}
 	if event.ID == "" {
 		// A missing grouping key must never collapse unrelated reports.
 		event.ID = shortHash(reportID)
 	}
-	if reportID == "" {
-		// The reconciler always supplies a stable delivery identity, but keep this
-		// helper fail-closed for direct unit use.
-		return false
+	maxEvents := adverseSituationMaxEvents(buffer)
+	evictCount := len(status.Events) + 1 - maxEvents
+	for i := 0; i < evictCount; i++ {
+		if len(status.Events[i].ReportIDs) > 0 {
+			return false, false
+		}
 	}
 	adverseSituationAppendEvent(adverseSituationNormalizeEvent(event), now, buffer, status)
-	return true
+	return true, true
 }
 
 func adverseSituationPrepareSequence(status *controlv1alpha1.AdverseSituationStatus) {

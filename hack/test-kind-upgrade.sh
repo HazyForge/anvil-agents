@@ -54,7 +54,8 @@ if [[ -n "${baseline_ref}" ]]; then
 else
 	# The portable default does not depend on an intermediate commit surviving a
 	# squash merge. Install the current release without CRDs, then establish the
-	# seven pre-composition kinds using legacy-shaped fixtures.
+	# seven pre-composition and pre-AdverseSignal kinds using legacy-shaped
+	# fixtures.
 	helm --kube-context "${kube_context}" install anvil-agents "${root_dir}/charts/anvil-agents" \
 		--namespace anvil-agents-system \
 		--create-namespace \
@@ -63,7 +64,7 @@ else
 		--set image.pullPolicy=Never >/dev/null
 	for crd in "${root_dir}"/config/crd/bases/*.yaml; do
 		case "${crd}" in
-			*_agentharnessprofiles.yaml|*_agentskillsets.yaml) continue ;;
+			*_agentharnessprofiles.yaml|*_agentskillsets.yaml|*_adversesignals.yaml) continue ;;
 		esac
 		resource="$(kubectl --context "${kube_context}" apply --filename "${crd}" --output=name)"
 		kubectl --context "${kube_context}" label "${resource}" \

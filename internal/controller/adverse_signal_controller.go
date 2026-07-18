@@ -88,7 +88,22 @@ func (r *AdverseSignalReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	event, reportID := adverseSignalEvent(signal, situation)
 	originalSituation := situation.DeepCopy()
 	situationStatus := situation.Status
-	changed := adverseSituationRecordSignalEvent(event, reportID, adverseSituationBuffer(situation), &situationStatus)
+	changed, delivered := adverseSituationRecordSignalEvent(event, reportID, adverseSituationBuffer(situation), &situationStatus)
+	if !delivered {
+		return r.patchAdverseSignalStatus(
+			ctx,
+			signal,
+			controlv1alpha1.AdverseSignalPhasePending,
+			metav1.ConditionFalse,
+			"SituationBusy",
+			fmt.Sprintf("Waiting for delivery capacity in AdverseSituation %s/%s.", situation.Namespace, situation.Name),
+			nil,
+			"",
+			0,
+			nil,
+			adverseSignalPendingRequeue,
+		)
+	}
 	situationStatus.ObservedGeneration = situation.Generation
 	if changed {
 		situation.Status = situationStatus

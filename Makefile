@@ -87,7 +87,11 @@ verify-runner-contract:
 		bash -n "$$script"; \
 		rg -q 'ANVIL_AGENT_RUN_TOOL_SETUP_FILES' "$$script"; \
 		rg -q 'ANVIL_AGENT_RUN_TOOLS_JSON' "$$script"; \
+		rg -q 'repository-checkout.sh' "$$script"; \
 		rg -q '^run_tool_setup$$' "$$script"; \
+	done
+	@for dockerfile in docker/agent-run-*/Dockerfile; do \
+		rg -q 'agent-run-common/repository-checkout.sh' "$$dockerfile"; \
 	done
 
 verify: manifests test build helm-lint verify-runner-contract
