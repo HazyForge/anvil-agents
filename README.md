@@ -1,9 +1,13 @@
 # Anvil Agents
 
 Anvil Agents is an open-source Hazy Forge project for durable, distributed
-agent loops on Kubernetes. Declarative runs, composable profiles and skill
-sets, schedules, and event streams become isolated Jobs, and each run can
-select Codex, Hermes Agent, OpenClaw, Grok Build, Pi, or a custom harness.
+agent loops on Kubernetes. It turns independent, heavyweight agent work into
+schedulable Jobs, so repository builds, test suites, security analysis,
+indexing, migrations, and long research loops can use the CPU and memory of a
+cluster instead of competing on one workstation. Declarative runs, composable
+profiles and skill sets, schedules, and event streams become isolated Jobs,
+and each run can select Codex, Hermes Agent, OpenClaw, Grok Build, Pi, or a
+custom harness.
 
 ```text
 Run/Profile/Harness/Skills/Schedule      Kubernetes Job
@@ -43,6 +47,31 @@ references are opaque scope keys, not dependencies on other CRDs.
 tool-bootstrap, and status contract. Schedules can distribute independent runs
 across harnesses and nodes. It does not mean the controller creates an agent
 mesh or a shared live conversation; cross-run state must be explicit.
+
+## Use The Whole Cluster
+
+Heavy agent work is often more than model inference. Agents compile large
+repositories, run integration suites, scan dependency graphs, build images,
+query local indexes, and process large evidence sets. Anvil Agents lets an
+operator turn those independent workloads into a controlled cluster queue:
+
+- Harness profiles declare CPU, memory, and ephemeral-storage requests and
+  limits instead of inheriting the capacity of the machine that submitted the
+  run.
+- Node selectors, affinity, and tolerations place build, memory-heavy, custom
+  accelerator, or storage-local harnesses on the machines prepared for them;
+  accelerators also require a device plugin and extended-resource request.
+- Multiple `AgentRun` objects and `AgentSchedule` with `Allow` can execute
+  parallel lanes, bounded by schedule and application concurrency controls.
+- Kubernetes performs placement and isolation, while run status and the OIDC
+  stream let users observe work without SSH or `kubectl` access.
+
+One `AgentRun` is one Pod on one node; the operator scales heavy work
+horizontally by scheduling many independent runs across machines. A harness
+that needs to split one computation across several nodes must use an explicit
+distributed compute service. See
+[Distributed Workloads](docs/distributed-workloads.md) for placement,
+concurrency, storage, and capacity examples.
 
 ## Try It Locally
 
@@ -103,6 +132,7 @@ audience, and explicit namespace authorization bindings are configured. See
 ## Documentation
 
 - [Architecture and multi-harness semantics](docs/architecture.md)
+- [Distributed heavy workloads across machines](docs/distributed-workloads.md)
 - [Composable profiles, harnesses, skill sets, and overrides](docs/composition.md)
 - [Getting started](docs/getting-started.md)
 - [Harness contract and adapter matrix](docs/harnesses.md)

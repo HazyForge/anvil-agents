@@ -42,6 +42,8 @@ prompt metadata. A future workflow resource should own fan-out, dependencies,
 routing, fallback, approval, and child-run status. That should not be hidden in
 an increasingly overloaded AgentRun.
 
-The current system distributes Jobs inside one Kubernetes cluster. Cross-cluster
-dispatch is not implemented and should use an explicit remote-executor or
-federation contract when added.
+Horizontal distribution of independent Jobs across worker nodes inside one
+Kubernetes cluster is already implemented and is a primary workload model.
+What is not implemented is cross-cluster dispatch or workflow-level fan-out
+and dependencies. Cross-cluster execution should use an explicit
+remote-executor or federation contract when added.

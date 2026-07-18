@@ -38,6 +38,28 @@ readiness, and Job outcomes. Inspect `.status.resolvedComposition` to identify
 the exact reusable inputs, inherited application scope, and payload digest.
 Treat a lost client connection as ambiguous and reattach to the same run.
 
+## Capacity And Parallelism
+
+Treat the cluster as a bounded agent worker fleet. Define realistic requests in
+each harness profile, separate small and heavy workload classes, and use
+placement rules for dedicated node pools. Schedule `maxConcurrentRuns` and
+application-level `AgentRunControl` both apply; namespace quota, available
+nodes, autoscaler limits, and PVC topology can impose tighter practical limits.
+
+The controller coordinates Jobs; runner Pods on worker nodes consume the heavy
+CPU, memory, storage, and accelerator capacity. Scaling controller replicas is
+an availability decision, not a way to add run compute. Add eligible workers
+or autoscaler capacity to increase compute after concurrency policy permits it.
+
+Watch Pending reasons, queue duration, node utilization, evictions, ephemeral
+storage, and volume attachment latency before raising concurrency. For Pending
+Pods, inspect scheduler events, allocatable node resources, ResourceQuota,
+taints, affinity, PVC topology, image architecture, and external provider/API
+limits. Track queued, Pending, and Running runs separately from node saturation.
+One AgentRun uses one node, so distribute work as independent runs or shards.
+See [Distributed Workloads](distributed-workloads.md) for examples and storage
+constraints.
+
 ## Archive And Retention
 
 Postgres archive storage is optional. Configure its URL from a Secret and set

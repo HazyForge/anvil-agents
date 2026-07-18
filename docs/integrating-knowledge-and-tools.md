@@ -30,6 +30,11 @@ Adapt the wrapper to the API you already deploy. Prefer an in-cluster TLS name
 or an externally verified HTTPS endpoint. Give the token only read operations;
 use a separate profile and explicit approval for writes.
 
+An external knowledge API gives independently scheduled Jobs node-neutral
+shared context without a multi-writer home volume. Size and rate-limit it for
+the expected concurrent run count. It is a shared service, not shared agent
+memory; each run still decides what to query and records its own outcome.
+
 ## Git-Backed Knowledge
 
 For a small instruction pack, an `AgentSkillSet` skill can use

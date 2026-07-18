@@ -112,6 +112,26 @@ The manifests under `examples/multi-harness` are an illustrative next step.
 Provider Secret key names and authentication semantics belong to the selected
 harness; review [Harnesses](harnesses.md) and its image documentation.
 
+## Scale Across Workers
+
+1. Make the selected runner images pullable by every eligible worker node.
+2. Give each harness profile realistic CPU, memory, and ephemeral-storage
+   requests plus placement compatible with its intended node pool.
+3. Create at least two independent runs, or use `AgentSchedule` with `Allow`
+   and an explicit concurrency cap above one.
+4. When runs share an application key, have a cluster administrator raise the
+   cluster-scoped `AgentRunControl` cap, or raise the Helm
+   `applicationMaxConcurrentRuns` fallback from its default of one. The lowest
+   positive value across matching controls wins.
+5. Confirm placement with `kubectl get pods -n <namespace> -o wide`, then add
+   worker capacity or configure cluster autoscaling as demand grows.
+
+Each run stays on one node, but many runs can consume different machines at the
+same time. Restrictive affinity, unavailable image architectures, namespace
+quota, and local or shared `ReadWriteOnce` volumes can leave Jobs Pending or
+serialize them. See [Distributed Workloads](distributed-workloads.md) before
+enabling high concurrency.
+
 ## Before Production
 
 Read [Security](security.md). Run, profile, harness-profile, and skill-set

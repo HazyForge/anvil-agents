@@ -46,6 +46,25 @@ carried into the replacement. Move all provider credentials and durable homes
 into `AgentHarnessProfile` before offering runtime swaps. See
 [Agent Composition](composition.md).
 
+## Workload Sizing And Placement
+
+Harness profiles are also reusable machine profiles for heavy work. Set CPU,
+memory, and ephemeral-storage requests so Kubernetes can place builds, test
+suites, indexing, and analysis on a node that can complete them. Use limits to
+bound one run, and use `nodeSelector`, affinity, and tolerations to route
+specialized harnesses to dedicated pools.
+
+Keep distinct profiles for materially different envelopes, such as a small
+review lane, a large Rust build lane, and a custom GPU analysis lane. They can
+all be selected by the same provider-neutral run profile and skill sets. This
+avoids hard-coding one machine class into the agent's role.
+
+Each harness Pod occupies one node. Run multiple independent AgentRuns to use
+multiple machines; a single run is not split across nodes by the controller.
+Local or `ReadWriteOnce` data volumes may constrain placement and parallel
+mounts. See [Distributed Workloads](distributed-workloads.md) before sharing a
+durable home across concurrent lanes.
+
 ## Custom Harness
 
 A custom image should read the prompt and context files, perform one bounded

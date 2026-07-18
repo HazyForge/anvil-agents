@@ -77,6 +77,12 @@ Schedules create child runs from `runTemplate` or rotate through named
 - `Allow`: create due runs, optionally capped by `maxConcurrentRuns`.
 - `Queue`: create due runs but launch only the oldest eligible pending runs.
 
+`Allow`, or `Queue` with a cap above one, exposes independent Job parallelism
+to the Kubernetes scheduler so heavy lanes can land on different machines.
+`Forbid`, a schedule cap of one, or an application control can deliberately
+serialize work even when the cluster has unused nodes. Adding workers does not
+bypass those policy and spend boundaries.
+
 Set `control.anvil.hazyforge.io/run-now` to a new token for a replay-safe manual
 nudge. When named templates are configured, set
 `control.anvil.hazyforge.io/run-template` on the same update to choose one.

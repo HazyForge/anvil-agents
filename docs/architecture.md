@@ -39,6 +39,25 @@ rotate independent work through different profiles and harnesses. `Allow` and
 `Queue` can make multiple runs active, subject to schedule and application-scope
 limits.
 
+This is a horizontal workload model. Large builds, test suites, security
+passes, indexing, and other expensive tools can be expressed as independent
+runs and placed across the cluster instead of sharing one workstation.
+`AgentHarnessProfile` resource requests give the scheduler the information it
+needs, while node selectors, affinity, and tolerations route workload classes
+to CPU, memory, accelerator, or storage-local node pools. The same role and
+skill sets can select a different execution envelope without copying policy.
+The normal Kubernetes scheduler can bin-pack or spread those independent Jobs
+across eligible workers.
+
+One run still creates one Pod on one node. Scaling across machines means
+creating concurrent independent runs; it does not make a single harness
+process distributed. Schedule concurrency, application-level
+`AgentRunControl`, namespace quota, cluster capacity, and volume access modes
+all bound the effective parallelism. Provider quotas, API rate limits, and
+external-service capacity can impose additional ceilings even when worker
+machines remain available. See
+[Distributed Workloads](distributed-workloads.md) for an operational model.
+
 These runs do not share process memory or a live conversation. `subagents`
 describes personas or delegated passes to the selected harness; it does not
 cause the controller to create child Jobs. Durable coordination requires an
