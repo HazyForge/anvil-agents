@@ -27,8 +27,8 @@ Install Kind, then run:
 ./examples/quickstart/run.sh
 ```
 
-The source chart deliberately names local `:dev` images rather than
-unpublished public artifacts. The script creates or reuses a cluster named
+The source chart deliberately names local `:dev` images so the quickstart tests
+the checkout being inspected. The script creates or reuses a cluster named
 `anvil-agents`, builds
 `anvil-agents:dev` and `anvil-agents-demo:dev`, loads both images, installs the
 local chart, applies the example, and waits for `AgentRun/demo-001` to report
@@ -55,13 +55,32 @@ kind delete cluster --name anvil-agents
 
 ## Existing Cluster
 
+The public `v0.1.1` chart and six Linux amd64 images are available from GHCR:
+
+```bash
+helm upgrade --install anvil-agents \
+  oci://ghcr.io/hazyforge/charts/anvil-agents \
+  --version 0.1.1 \
+  --namespace anvil-agents-system \
+  --create-namespace \
+  --wait
+```
+
+The matching immutable references are recorded in the
+[`v0.1.1` image lock](https://github.com/HazyForge/anvil-agents/releases/download/v0.1.1/images-v0.1.1.lock.tsv).
+Copy those digest references into production values before enabling real
+harnesses. The [release page](https://github.com/HazyForge/anvil-agents/releases/tag/v0.1.1)
+also carries the packaged chart for offline transfer.
+
+### Build Or Mirror From Source
+
 For a source checkout, build and push all images to a registry reachable by
 the cluster:
 
 ```bash
 ./hack/build-images.sh \
   --prefix registry.example.com/platform \
-  --tag v0.1.0 \
+  --tag v0.1.1 \
   --push
 ```
 
@@ -69,7 +88,7 @@ Package the version-coupled chart locally when distributing a release bundle:
 
 ```bash
 ./hack/package-chart.sh \
-  --version 0.1.0 \
+  --version 0.1.1 \
   --output dist \
   --image-prefix registry.example.com/platform
 ```
@@ -85,15 +104,23 @@ helm upgrade --install anvil-agents charts/anvil-agents \
   --wait
 ```
 
-Until the first public GHCR/chart release exists, a checkout and locally built
-images are the supported installation path. Repository visibility and artifact
-publication are release-owner actions, not runtime configuration.
+To publish a complete release or mirror without GitHub Actions, log Docker and
+Helm into the registry, check out a clean `vX.Y.Z` tag, and run:
 
-The optional GitHub release workflow accepts a `v*` tag push or a manual rerun
-of an existing `v*` tag. It gates all six versioned images and the OCI chart on
-`make verify` and `make kind-e2e`; pushes to `master` do not publish artifacts
-or move a `latest` tag. These are distribution conveniences, not prerequisites
-for the local scripts above.
+```bash
+./hack/publish-release.sh \
+  --prefix registry.example.com/platform \
+  --version vX.Y.Z
+```
+
+The script first runs `make verify` and the disposable Kind upgrade/install
+suite, then publishes and verifies all six images, writes
+`dist/images-vX.Y.Z.lock.tsv`, packages the chart, and pushes it to
+`oci://registry.example.com/platform/charts`. Use `--chart-registry` to select
+another OCI chart namespace. `--skip-verification` is an explicit escape hatch
+only when equivalent checks already ran for that exact tag. The optional GitHub
+workflow uses the same repository-owned contracts; it is a convenience, not a
+release prerequisite.
 
 ## Add A Real Harness
 

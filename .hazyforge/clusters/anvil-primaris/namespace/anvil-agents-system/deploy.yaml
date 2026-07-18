@@ -38,20 +38,38 @@ archive:
     name: anvilhub-inventory-database
     key: database-url
   terminalRetention: 72h
-# OIDC claim shapes are staged, but the API stays disabled until a dedicated
-# audience and explicit namespace grants are configured.
+# The read-only API uses the existing Anvil Primaris resource audience and an
+# explicit compatibility binding. Replace this administrative role with the
+# narrower anvil_agents_viewer role when that role is provisioned in ZITADEL.
 api:
-  enabled: false
+  enabled: true
   config:
     oidc:
       issuer: https://hazyforge1-azsbgb.us1.zitadel.cloud
+      audiences:
+        - "376124473528572432"
     authorization:
-      roleClaims:
-        - roles
+      roleClaims: []
       roleObjectClaims:
-        - urn:zitadel:iam:org:project:roles
-        - urn:zitadel:iam:org:projects:roles
         - urn:zitadel:iam:org:project:376124473528572432:roles
+      bindings:
+        - name: anvil-primaris-admin-compatibility
+          roles:
+            - anvil_primaris_admin
+          permissions:
+            - anvil-agents:runs:read
+            - anvil-agents:runs:stream
+          namespaces:
+            - anvilhub
+            - hazy-trade
+  httpRoute:
+    enabled: true
+    parentRefs:
+      - name: gateway
+        namespace: gateway
+        sectionName: https-agents-anvil-hazyforge-io
+    hostnames:
+      - agents.anvil.hazyforge.io
 extraVolumes:
   - name: anvilhub-inventory-database
     secret:
