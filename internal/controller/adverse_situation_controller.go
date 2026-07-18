@@ -268,7 +268,9 @@ func (r *AdverseSituationTriggerReconciler) recordSource(ctx context.Context, so
 
 	original := situation.DeepCopy()
 	status := situation.Status
-	adverseSituationRecordEvent(source, trigger, adverseSituationBuffer(situation), &status)
+	if !adverseSituationRecordEvent(source, trigger, adverseSituationBuffer(situation), &status) {
+		return ctrl.Result{RequeueAfter: adverseSituationPollInterval}, nil
+	}
 	status.ObservedGeneration = situation.Generation
 	situation.Status = status
 	if err := r.Status().Patch(ctx, situation, client.MergeFrom(original)); err != nil {
@@ -482,9 +484,11 @@ func adverseSituationAgentRunFor(situation *controlv1alpha1.AdverseSituation, na
 	}
 }
 
-func adverseSituationRecordEvent(source *unstructured.Unstructured, trigger controlv1alpha1.AgentRunTriggerSnapshot, buffer controlv1alpha1.AdverseSituationBufferSpec, status *controlv1alpha1.AdverseSituationStatus) {
+func adverseSituationRecordEvent(source *unstructured.Unstructured, trigger controlv1alpha1.AgentRunTriggerSnapshot, buffer controlv1alpha1.AdverseSituationBufferSpec, status *controlv1alpha1.AdverseSituationStatus) bool {
 	now := metav1.Now()
-	adverseSituationPrepareSequence(status)
+	if !adverseSituationPrepareSequence(status) {
+		return false
+	}
 	eventID := adverseSituationEventID(source, trigger)
 	dedupeWindow := time.Duration(adverseSituationDedupeWindowSeconds(buffer)) * time.Second
 	for i := range status.Events {
@@ -505,9 +509,9 @@ func adverseSituationRecordEvent(source *unstructured.Unstructured, trigger cont
 		status.QuietUntil = adverseSituationQuietUntil(now, buffer)
 		status.Phase = controlv1alpha1.AdverseSituationPhaseOpen
 		status.ResolvedAt = nil
-		return
+		return true
 	}
-	adverseSituationAppendEvent(adverseSituationNormalizeEvent(controlv1alpha1.AdverseSituationEvent{
+	return adverseSituationAppendEvent(adverseSituationNormalizeEvent(controlv1alpha1.AdverseSituationEvent{
 		ID: eventID,
 		SourceRef: controlv1alpha1.AgentRunSourceRef{
 			APIVersion: source.GroupVersionKind().GroupVersion().String(),
@@ -541,7 +545,9 @@ func adverseSituationRecordSignalEvent(event controlv1alpha1.AdverseSituationEve
 			}
 		}
 	}
-	adverseSituationPrepareSequence(status)
+	if !adverseSituationPrepareSequence(status) {
+		return false, false
+	}
 	dedupeWindow := time.Duration(adverseSituationDedupeWindowSeconds(buffer)) * time.Second
 	for i := range status.Events {
 		recorded := &status.Events[i]
@@ -583,20 +589,20 @@ func adverseSituationRecordSignalEvent(event controlv1alpha1.AdverseSituationEve
 		// A missing grouping key must never collapse unrelated reports.
 		event.ID = shortHash(reportID)
 	}
-	maxEvents := adverseSituationMaxEvents(buffer)
-	evictCount := len(status.Events) + 1 - maxEvents
-	for i := 0; i < evictCount; i++ {
-		if len(status.Events[i].ReportIDs) > 0 {
-			return false, false
-		}
+	if !adverseSituationAppendEvent(adverseSituationNormalizeEvent(event), now, buffer, status) {
+		return false, false
 	}
-	adverseSituationAppendEvent(adverseSituationNormalizeEvent(event), now, buffer, status)
 	return true, true
 }
 
-func adverseSituationPrepareSequence(status *controlv1alpha1.AdverseSituationStatus) {
+func adverseSituationPrepareSequence(status *controlv1alpha1.AdverseSituationStatus) bool {
 	if status.Sequence > 0 && status.Phase != controlv1alpha1.AdverseSituationPhaseResolved {
-		return
+		return true
+	}
+	for i := range status.Events {
+		if len(status.Events[i].ReportIDs) > 0 {
+			return false
+		}
 	}
 	status.Sequence++
 	if status.Sequence <= 0 {
@@ -610,14 +616,21 @@ func adverseSituationPrepareSequence(status *controlv1alpha1.AdverseSituationSta
 	status.PullRequestObservedAt = nil
 	status.PullRequestQuietUntil = nil
 	status.ResolvedAt = nil
+	return true
 }
 
-func adverseSituationAppendEvent(event controlv1alpha1.AdverseSituationEvent, now metav1.Time, buffer controlv1alpha1.AdverseSituationBufferSpec, status *controlv1alpha1.AdverseSituationStatus) {
+func adverseSituationAppendEvent(event controlv1alpha1.AdverseSituationEvent, now metav1.Time, buffer controlv1alpha1.AdverseSituationBufferSpec, status *controlv1alpha1.AdverseSituationStatus) bool {
+	maxEvents := adverseSituationMaxEvents(buffer)
+	evictCount := len(status.Events) + 1 - maxEvents
+	for i := 0; i < evictCount; i++ {
+		if len(status.Events[i].ReportIDs) > 0 {
+			return false
+		}
+	}
 	event.FirstSeenAt = &now
 	event.LastSeenAt = &now
 	event.Count = 1
 	status.Events = append(status.Events, event)
-	maxEvents := adverseSituationMaxEvents(buffer)
 	if len(status.Events) > maxEvents {
 		status.Events = append([]controlv1alpha1.AdverseSituationEvent(nil), status.Events[len(status.Events)-maxEvents:]...)
 	}
@@ -626,6 +639,7 @@ func adverseSituationAppendEvent(event controlv1alpha1.AdverseSituationEvent, no
 	status.QuietUntil = adverseSituationQuietUntil(now, buffer)
 	status.Phase = controlv1alpha1.AdverseSituationPhaseOpen
 	status.ResolvedAt = nil
+	return true
 }
 
 func adverseSituationNormalizeEvent(event controlv1alpha1.AdverseSituationEvent) controlv1alpha1.AdverseSituationEvent {

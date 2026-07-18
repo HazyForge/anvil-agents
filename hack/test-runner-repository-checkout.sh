@@ -13,7 +13,10 @@ git init --quiet --initial-branch=main "${worktree}"
 git -C "${worktree}" config user.name "Runner Contract"
 git -C "${worktree}" config user.email "runner-contract@example.invalid"
 touch "${worktree}/tracked"
-git -C "${worktree}" add tracked
+printf 'tracked collision\n' > "${worktree}/missing-ref"
+mkdir -p "${worktree}/missing-dir"
+printf 'tracked directory collision\n' > "${worktree}/missing-dir/file"
+git -C "${worktree}" add tracked missing-ref missing-dir/file
 git -C "${worktree}" commit --quiet -m initial
 git -C "${worktree}" branch local-ready
 git -C "${worktree}" remote add origin "file://${test_dir}/unreachable.git"
@@ -42,6 +45,19 @@ if [[ "${missing_status}" -ne 21 ]]; then
 fi
 if [[ "${missing_output}" != *ANVIL_AGENT_RUN_REPO_FETCH_FAILED* ]]; then
 	echo "missing ref with unreachable remote did not report fetch failure" >&2
+	exit 1
+fi
+if [[ "$(git branch --show-current)" != "agentrun-work" || "$(cat missing-ref)" != "tracked collision" ]]; then
+	echo "tracked path collision changed the current revision or file" >&2
+	exit 1
+fi
+
+set +e
+directory_output="$(anvil_checkout_repository_ref missing-dir 2>&1)"
+directory_status=$?
+set -e
+if [[ "${directory_status}" -ne 21 || "${directory_output}" != *ANVIL_AGENT_RUN_REPO_FETCH_FAILED* ]]; then
+	echo "tracked directory collision was mistaken for a ref" >&2
 	exit 1
 fi
 

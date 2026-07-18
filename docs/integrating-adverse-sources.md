@@ -69,10 +69,12 @@ A signal is a trusted assertion that the observation is adverse. Its phase and
 condition fields are evidence; the controller does not reclassify them.
 Missing destinations remain `Pending` and retry. Invalid legacy objects become
 terminal `Rejected`. The controller never auto-creates a signal destination.
-If one deduplicated event already has 64 unacknowledged signal deliveries, new
-signals remain `Pending` with reason `SituationBusy` until receipt cleanup frees
-capacity; the controller never evicts an in-flight receipt or double-counts its
-retry.
+If one deduplicated event already has 64 unacknowledged signal deliveries, or a
+new event would evict an unacknowledged receipt from the bounded event ring,
+new signals remain `Pending` with reason `SituationBusy` until receipt cleanup
+frees capacity. Pull ingress and new sequence creation apply the same
+backpressure; the controller never evicts an in-flight receipt or double-counts
+its retry.
 
 The minimal reporter role is in
 [`examples/adverse-signals/reporter-rbac.yaml`](../examples/adverse-signals/reporter-rbac.yaml).

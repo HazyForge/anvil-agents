@@ -243,6 +243,44 @@ func TestSignalAfterResolutionStartsOneNewSequence(t *testing.T) {
 	}
 }
 
+func TestResolvedSituationBackpressuresNewSequenceUntilReceiptCleanup(t *testing.T) {
+	t.Parallel()
+
+	situation := &controlv1alpha1.AdverseSituation{ObjectMeta: metav1.ObjectMeta{UID: types.UID("situation-uid")}}
+	oldSignal := testAdverseSignal("OldFailure")
+	oldSignal.Spec.DedupeKey = "old"
+	oldEvent, oldReportID := adverseSignalEvent(oldSignal, situation)
+	now := metav1.Now()
+	oldEvent.ReportIDs = []string{oldReportID}
+	oldEvent.Count = 1
+	oldEvent.FirstSeenAt = &now
+	oldEvent.LastSeenAt = &now
+	status := controlv1alpha1.AdverseSituationStatus{
+		Phase:      controlv1alpha1.AdverseSituationPhaseResolved,
+		Sequence:   4,
+		EventCount: 1,
+		Events:     []controlv1alpha1.AdverseSituationEvent{oldEvent},
+	}
+	newSignal := testAdverseSignal("NewFailure")
+	newSignal.UID = types.UID("new-signal-uid")
+	newSignal.Spec.DedupeKey = "new"
+	newEvent, newReportID := adverseSignalEvent(newSignal, situation)
+
+	changed, delivered := adverseSituationRecordSignalEvent(newEvent, newReportID, controlv1alpha1.AdverseSituationBufferSpec{}, &status)
+	if changed || delivered {
+		t.Fatalf("resolved receipt result = changed %t delivered %t, want backpressure", changed, delivered)
+	}
+	if status.Phase != controlv1alpha1.AdverseSituationPhaseResolved || status.Sequence != 4 || len(status.Events) != 1 {
+		t.Fatalf("backpressure reset resolved sequence: %#v", status)
+	}
+
+	status.Events[0].ReportIDs = nil
+	changed, delivered = adverseSituationRecordSignalEvent(newEvent, newReportID, controlv1alpha1.AdverseSituationBufferSpec{}, &status)
+	if !changed || !delivered || status.Sequence != 5 || len(status.Events) != 1 || status.Events[0].ID != newEvent.ID {
+		t.Fatalf("receipt cleanup did not admit new sequence: changed=%t delivered=%t status=%#v", changed, delivered, status)
+	}
+}
+
 func TestLateSignalRetryDoesNotReopenResolvedSequence(t *testing.T) {
 	t.Parallel()
 

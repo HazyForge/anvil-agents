@@ -4,6 +4,8 @@ import (
 	"testing"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 
 	controlv1alpha1 "github.com/hazyforge/anvil-agents/api/v1alpha1"
@@ -177,5 +179,45 @@ func TestAdverseSituationStatusBoundsEventsAndUTF8Text(t *testing.T) {
 	message := adverseSituationLimitString("abc🙂def", 6)
 	if message != "abc" {
 		t.Fatalf("bounded UTF-8 message = %q, want %q", message, "abc")
+	}
+}
+
+func TestPullEventCannotEvictUnacknowledgedSignalReceipt(t *testing.T) {
+	t.Parallel()
+
+	now := metav1.Now()
+	status := controlv1alpha1.AdverseSituationStatus{
+		Phase:      controlv1alpha1.AdverseSituationPhaseOpen,
+		Sequence:   1,
+		EventCount: 1,
+		Events: []controlv1alpha1.AdverseSituationEvent{{
+			ID:          "signal-event",
+			ReportIDs:   []string{"pending-signal-receipt"},
+			Count:       1,
+			FirstSeenAt: &now,
+			LastSeenAt:  &now,
+		}},
+	}
+	source := &unstructured.Unstructured{}
+	source.SetGroupVersionKind(schema.GroupVersionKind{Group: "delivery.example.io", Version: "v1", Kind: "Release"})
+	source.SetNamespace("store")
+	source.SetName("checkout")
+	source.SetUID(types.UID("release-uid"))
+	trigger := controlv1alpha1.AgentRunTriggerSnapshot{Phase: "Failed", Reason: "DeploymentFailed"}
+	buffer := controlv1alpha1.AdverseSituationBufferSpec{MaxEvents: 1}
+
+	if adverseSituationRecordEvent(source, trigger, buffer, &status) {
+		t.Fatalf("pull event should backpressure before evicting a signal receipt")
+	}
+	if len(status.Events) != 1 || status.Events[0].ID != "signal-event" || status.EventCount != 1 {
+		t.Fatalf("pull event evicted receipt-bearing event: %#v", status)
+	}
+
+	status.Events[0].ReportIDs = nil
+	if !adverseSituationRecordEvent(source, trigger, buffer, &status) {
+		t.Fatalf("pull event should record after signal receipt cleanup")
+	}
+	if len(status.Events) != 1 || status.Events[0].ID == "signal-event" || status.EventCount != 2 {
+		t.Fatalf("pull event was not recorded after cleanup: %#v", status)
 	}
 }
