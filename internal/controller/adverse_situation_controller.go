@@ -306,31 +306,26 @@ func adverseSituationAgentRunFor(situation *controlv1alpha1.AdverseSituation, na
 	responder := situation.Spec.Responders.AgentRun
 	harness := controlv1alpha1.AgentRunHarnessSpec{
 		Intent: controlv1alpha1.AgentRunIntentObserve,
-		Backend: controlv1alpha1.AgentRunHarnessBackendSpec{
-			Kind: controlv1alpha1.AgentRunHarnessBackendCodex,
-		},
 	}
 	var notifications *controlv1alpha1.AgentRunNotificationSpec
 	var docs *controlv1alpha1.AgentRunDocsSpec
 	var issueTracking *controlv1alpha1.AgentRunIssueTrackingSpec
 	var profileRef *controlv1alpha1.NamespacedObjectReference
+	var harnessProfileRef *controlv1alpha1.NamespacedObjectReference
+	var skillSets *controlv1alpha1.AgentSkillCompositionSpec
 	prompt := ""
 	scope := controlv1alpha1.AgentRunScopeSpec{}
 	if responder != nil {
-		if strings.TrimSpace(string(responder.Harness.Intent)) != "" ||
-			strings.TrimSpace(string(responder.Harness.Backend.Kind)) != "" ||
-			strings.TrimSpace(responder.Harness.Backend.Image) != "" ||
-			responder.Harness.Backend.Codex != nil ||
-			responder.Harness.Backend.Custom != nil ||
-			len(responder.Harness.Execution.EnvSecretRefs) > 0 ||
-			len(responder.Harness.Execution.ExtraEnv) > 0 ||
-			strings.TrimSpace(responder.Harness.SystemPrompt) != "" {
-			harness = responder.Harness
+		harness = *responder.Harness.DeepCopy()
+		if strings.TrimSpace(string(harness.Intent)) == "" {
+			harness.Intent = controlv1alpha1.AgentRunIntentObserve
 		}
 		docs = responder.Docs
 		issueTracking = responder.IssueTracking
 		notifications = responder.Notifications
 		profileRef = responder.ProfileRef
+		harnessProfileRef = responder.HarnessProfileRef
+		skillSets = responder.SkillSets
 		prompt = responder.Prompt
 		scope = responder.Scope
 	}
@@ -362,14 +357,16 @@ func adverseSituationAgentRunFor(situation *controlv1alpha1.AdverseSituation, na
 				ResourceVersion:    situation.ResourceVersion,
 				DetectedAt:         lastEvent.LastSeenAt,
 			},
-			ProfileRef:    profileRef,
-			Prompt:        prompt,
-			Scope:         scope,
-			Docs:          docs,
-			IssueTracking: issueTracking,
-			SituationRef:  &controlv1alpha1.NamespacedObjectReference{Name: situation.Name, Namespace: situation.Namespace},
-			Harness:       harness,
-			Notifications: notifications,
+			ProfileRef:        profileRef,
+			HarnessProfileRef: harnessProfileRef,
+			SkillSets:         skillSets,
+			Prompt:            prompt,
+			Scope:             scope,
+			Docs:              docs,
+			IssueTracking:     issueTracking,
+			SituationRef:      &controlv1alpha1.NamespacedObjectReference{Name: situation.Name, Namespace: situation.Namespace},
+			Harness:           harness,
+			Notifications:     notifications,
 		},
 	}
 }

@@ -66,6 +66,10 @@ func TestAdverseSituationAgentRunCopiesDocsAndIssueTracking(t *testing.T) {
 					ProfileRef: &controlv1alpha1.NamespacedObjectReference{
 						Name: "hazy-trade-release-gate-responder",
 					},
+					HarnessProfileRef: &controlv1alpha1.NamespacedObjectReference{Name: "codex-standard"},
+					SkillSets: &controlv1alpha1.AgentSkillCompositionSpec{
+						Refs: []controlv1alpha1.NamespacedObjectReference{{Name: "release-response"}},
+					},
 					Prompt: "Diagnose the adverse stream and repair or propose a release-gate fix.",
 					Scope: controlv1alpha1.AgentRunScopeSpec{
 						Summary:    "Hazy Trade production",
@@ -106,6 +110,15 @@ func TestAdverseSituationAgentRunCopiesDocsAndIssueTracking(t *testing.T) {
 	run := adverseSituationAgentRunFor(situation, "agrun-adverse-anvil")
 	if run.Spec.ProfileRef == nil || run.Spec.ProfileRef.Name != "hazy-trade-release-gate-responder" {
 		t.Fatalf("profile ref = %#v, want hazy-trade-release-gate-responder", run.Spec.ProfileRef)
+	}
+	if run.Spec.HarnessProfileRef == nil || run.Spec.HarnessProfileRef.Name != "codex-standard" {
+		t.Fatalf("harness profile ref = %#v, want codex-standard", run.Spec.HarnessProfileRef)
+	}
+	if run.Spec.Harness.Backend.Kind != "" {
+		t.Fatalf("inline backend kind = %q, want selected harness profile to remain authoritative", run.Spec.Harness.Backend.Kind)
+	}
+	if run.Spec.SkillSets == nil || len(run.Spec.SkillSets.Refs) != 1 || run.Spec.SkillSets.Refs[0].Name != "release-response" {
+		t.Fatalf("skill sets = %#v, want release-response", run.Spec.SkillSets)
 	}
 	if got, want := run.Spec.Prompt, "Diagnose the adverse stream and repair or propose a release-gate fix."; got != want {
 		t.Fatalf("prompt = %q, want %q", got, want)

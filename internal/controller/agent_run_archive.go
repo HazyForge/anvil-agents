@@ -66,6 +66,12 @@ func (r *AgentRunReconciler) reconcileTerminalAgentRun(ctx context.Context, run 
 	if run == nil {
 		return ctrl.Result{}, nil
 	}
+	// Activate Job garbage collection only after the terminal run result is
+	// durable. A controller crash can then leak a Job temporarily, but cannot
+	// lose the only execution record and launch a duplicate.
+	if err := r.ensureTerminalAgentRunJobTTL(ctx, run); err != nil {
+		return ctrl.Result{}, err
+	}
 	if r.AgentRunArchive != nil && !agentRunArchived(run) {
 		return r.archiveTerminalAgentRun(ctx, run)
 	}
