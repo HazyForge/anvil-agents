@@ -47,9 +47,10 @@ Codex-backed `AgentRun` explicitly selecting the verified GPT-5.6 model ID,
 producing useful output, and reaching structured terminal status.”
 
 Judges can test the released operator for free without rebuilding or supplying
-credentials by running `./hack/test-judge-kind.sh` on Linux amd64. It installs
-the public digest-pinned chart, executes two immutable Jobs, and proves payload
-composition, structured status, and PVC persistence.
+credentials on Linux amd64. A non-root prerequisite script installs the pinned,
+checksum-verified Kind, kubectl, and Helm binaries; the judge script then
+installs the public digest-pinned chart, executes two immutable Jobs, and proves
+payload composition, structured status, and PVC persistence.
 
 ## Final links
 

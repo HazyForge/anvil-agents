@@ -39,7 +39,7 @@ work.
 | Public v0.1.1 release | `726c619`, merge `db5f5f3` | Published the first version-coupled chart and six-image linux/amd64 digest lock. |
 | Production cutover and post-release hardening | `e0f87a6`, `e7e9f60` through `cc4bad0` | Added production cutover constraints, exact v0.1.1 deployment pins, archive placement, local release gates, and API/release documentation. These commits are later than the v0.1.1 tag. |
 | Provider-neutral adverse evidence | `060af9f` through merge `94d031e` | Replaced provider coupling with immutable adverse signals, narrow read-only discovery, deduplication receipts, and upgrade-safe behavior. |
-| Submission compliance and no-build Kind proof | This focused submission branch | Adds the prior/new disclosure, Codex/GPT-5.6 collaboration account, judge guide, public-artifact test, video script, and checklist. |
+| Submission compliance and no-build Kind proof | This focused submission branch | Adds the prior/new disclosure, Codex/GPT-5.6 collaboration account, judge guide, checksum-pinned non-root prerequisite installer, public-artifact test, video script, and checklist. |
 
 Generated CRDs and copied files are not counted as independent innovation. Draft
 tool-set, standalone CLI, and PostgreSQL branches are excluded unless they are

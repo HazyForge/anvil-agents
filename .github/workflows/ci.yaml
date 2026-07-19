@@ -71,15 +71,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      - uses: actions/setup-go@v6
-        with:
-          go-version: 1.25.5
-          cache: false
-      - uses: azure/setup-helm@v4
-      - uses: azure/setup-kubectl@v4
-      - name: Install Kind
+      - name: Install pinned judge prerequisites
         run: |
-          go install sigs.k8s.io/kind@v0.27.0
-          echo "$(go env GOPATH)/bin" >> "${GITHUB_PATH}"
+          ./hack/install-judge-prerequisites.sh --install \
+            --bin-dir "${RUNNER_TEMP}/anvil-agents-bin"
+          echo "${RUNNER_TEMP}/anvil-agents-bin" >> "${GITHUB_PATH}"
       - name: Test the public release without rebuilding Anvil Agents
         run: make judge-kind-e2e

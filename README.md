@@ -72,17 +72,26 @@ non-repository gate visible.
 
 ## Test It Without Rebuilding
 
-On Linux amd64 with Docker, Kind, kubectl, and Helm 3 installed:
+On Linux amd64 with Docker Engine running, install the pinned user-space tools
+and run the test:
 
 ```bash
+./hack/install-judge-prerequisites.sh --install \
+  --bin-dir "${HOME}/.local/bin"
+export PATH="${HOME}/.local/bin:${PATH}"
+./hack/install-judge-prerequisites.sh --check
 ./hack/test-judge-kind.sh
 ```
 
-The script builds nothing and needs no API key. It creates a dedicated Kind
-cluster, installs the public v0.1.1 OCI chart with the controller pinned to its
-published digest, and proves two append-only `AgentRun` Jobs share durable PVC
-state while producing structured terminal status. See [Judging](JUDGING.md)
-for expected output, inspection, troubleshooting, and cleanup.
+The prerequisite installer downloads the certified Kind, kubectl, and Helm
+versions from their official release hosts, verifies pinned SHA-256 checksums,
+and never uses `sudo`. It checks Docker but does not install or reconfigure the
+privileged host service. The judge script builds nothing and needs no API key.
+It creates a dedicated Kind cluster, installs the public v0.1.1 OCI chart with
+the controller pinned to its published digest, and proves two append-only
+`AgentRun` Jobs share durable PVC state while producing structured terminal
+status. See [Judging](JUDGING.md) for check-only mode, custom installation
+directories, expected output, inspection, troubleshooting, and cleanup.
 
 The validated release platform is Linux amd64, Kubernetes 1.30 or newer, and
 Helm 3.14 or newer. Arm64 images and older Kubernetes releases are not part of

@@ -5,6 +5,8 @@ root_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cluster_name="${ANVIL_AGENTS_JUDGE_CLUSTER:-anvil-agents-judge}"
 kube_context="kind-${cluster_name}"
 namespace=anvil-agents-judge
+kind_node_image=kindest/node:v1.32.2@sha256:f226345927d7e348497136874b6d207e0b32cc52154ad8323129352923a3142f
+export KIND_EXPERIMENTAL_PROVIDER=docker
 [[ "${cluster_name}" =~ ^[a-z0-9][a-z0-9.-]*$ ]] || {
 	echo "ANVIL_AGENTS_JUDGE_CLUSTER must contain only lowercase letters, digits, dots, and hyphens" >&2
 	exit 2
@@ -99,25 +101,27 @@ case "${1:-}" in
 		;;
 esac
 
-for command in docker kind kubectl helm grep mktemp; do
-	command -v "${command}" >/dev/null 2>&1 || {
-		echo "${command} is required" >&2
-		exit 1
-	}
-done
-docker info >/dev/null 2>&1 || {
-	echo "Docker is installed but its daemon is unavailable" >&2
-	exit 1
-}
+"${root_dir}/hack/install-judge-prerequisites.sh" --check
 
 if kind get clusters | grep -Fxq "${cluster_name}"; then
 	echo "Kind cluster ${cluster_name} already exists; choose a fresh name with ANVIL_AGENTS_JUDGE_CLUSTER" >&2
 	exit 1
 fi
 
-kind create cluster --name "${cluster_name}" --kubeconfig "${judge_kubeconfig}" --wait 120s
+kind create cluster --name "${cluster_name}" --kubeconfig "${judge_kubeconfig}" \
+	--image "${kind_node_image}" --wait 120s
 cluster_created=true
 printf '%s\n' anvil-agents-public-judge-v1 >"${ownership_marker}"
+actual_node_image="$(docker inspect --format '{{.Config.Image}}' "${cluster_name}-control-plane")"
+[[ "${actual_node_image}" == "${kind_node_image}" ]] || {
+	echo "Kind node image is ${actual_node_image}, want ${kind_node_image}" >&2
+	exit 1
+}
+kubelet_version="$(kubectl --context "${kube_context}" get nodes --output=jsonpath='{.items[0].status.nodeInfo.kubeletVersion}')"
+[[ "${kubelet_version}" == v1.32.2 ]] || {
+	echo "Kind kubelet is ${kubelet_version}, want v1.32.2" >&2
+	exit 1
+}
 kubectl --context "${kube_context}" create namespace "${namespace}" --save-config >/dev/null
 kubectl --context "${kube_context}" label namespace "${namespace}" \
 	control.anvil.hazyforge.io/judge-fixture=true --overwrite >/dev/null
@@ -248,6 +252,7 @@ printf '  chart: %s:%s (%s)\n' "${chart_ref}" "${chart_version}" "${chart_digest
 printf '  controller: %s\n' "${controller_image}"
 printf '  runs: judge-write-001 -> judge-read-002\n'
 printf '  proof: phase=%s backend=%s storage=retained\n' "${phase}" "${backend}"
+printf '  kubernetes: %s (%s)\n' "${kubelet_version}" "${actual_node_image}"
 printf '  kubeconfig: %s\n' "${judge_kubeconfig}"
 printf '  inspect: KUBECONFIG=%s kubectl --context %s --namespace %s get agentruns,jobs,pods,pvc\n' "${judge_kubeconfig}" "${kube_context}" "${namespace}"
 printf '  cleanup: ANVIL_AGENTS_JUDGE_CLUSTER=%s %s/hack/test-judge-kind.sh --cleanup\n' "${cluster_name}" "${root_dir}"

@@ -8,8 +8,11 @@ captured before the final video and submission.
 ## Supported test host
 
 - Linux amd64
+- Bash 4 or newer
 - Docker with at least 2 CPUs and 3 GiB available
-- Kind, kubectl, and Helm 3.14 or newer
+- Kind 0.27 or newer
+- kubectl 1.31 through 1.33
+- Helm 3.14 or newer, but earlier than Helm 4
 - Outbound HTTPS access to Docker Hub and GHCR
 - Approximately five minutes on a typical broadband connection
 
@@ -18,7 +21,30 @@ Kubernetes versions are not certified for this entry.
 
 ## Free no-build test
 
-Check out the immutable submission revision listed on Devpost, then run:
+Check out the immutable submission revision listed on Devpost. The repository
+ships a non-root installer for the exact user-space binaries certified in CI:
+
+```bash
+./hack/install-judge-prerequisites.sh --install \
+  --bin-dir "${HOME}/.local/bin"
+export PATH="${HOME}/.local/bin:${PATH}"
+./hack/install-judge-prerequisites.sh --check
+```
+
+It installs Kind `v0.27.0`, kubectl `v1.32.2`, and Helm `v3.21.2` from their
+official release hosts after validating repository-pinned SHA-256 checksums.
+Helm's archive and extracted executable are both checked. Install and no-op
+reinstall decisions use file hashes, not self-reported version strings;
+read-only `--check` intentionally accepts only the documented compatible
+version ranges.
+It is idempotent and never invokes `sudo`. Docker Engine is checked but not
+installed because daemon and service setup is privileged and host-specific.
+Installation requires an explicit `--bin-dir /absolute/path` or
+`ANVIL_AGENTS_JUDGE_BIN_DIR`; add that directory to `PATH` before check or
+execution. Existing mismatched binaries are preserved unless `--force` is
+also explicit. With no arguments or `--check`, the script is read-only.
+
+Then run:
 
 ```bash
 ./hack/test-judge-kind.sh
@@ -96,6 +122,9 @@ not need the entrant's OpenAI credential to run the free operator test.
 
 - `Docker ... daemon is unavailable`: start Docker and rerun with a fresh
   cluster name.
+- A prerequisite check failure: run the explicit `--install --bin-dir` command
+  above and add that directory to `PATH`. Install Docker Engine separately from
+  its official host-specific instructions if it is absent.
 - GHCR or Docker Hub pull errors: verify outbound HTTPS access and retry; the
   test does not need registry authentication.
 - An existing cluster-name error: set `ANVIL_AGENTS_JUDGE_CLUSTER` to a unique

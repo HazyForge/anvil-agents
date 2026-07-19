@@ -9,14 +9,20 @@ then creates two immutable `AgentRun` records. The first writes a marker to an
 From the repository root:
 
 ```bash
+./hack/install-judge-prerequisites.sh --install \
+  --bin-dir "${HOME}/.local/bin"
+export PATH="${HOME}/.local/bin:${PATH}"
+./hack/install-judge-prerequisites.sh --check
 ./hack/test-judge-kind.sh
 ```
 
-Prerequisites are Docker, Kind, kubectl, Helm 3, and a Linux amd64 Docker
-environment. The script creates `anvil-agents-judge` by default, leaves it
-available for inspection, and uses the isolated kubeconfig path printed at the
-end instead of changing the caller's kubectl configuration. Override the name
-with `ANVIL_AGENTS_JUDGE_CLUSTER`.
+Prerequisites are a running Docker Engine and a Linux amd64 environment. The
+non-root installer supplies checksum-pinned Kind, kubectl, and Helm binaries;
+use its `--check` mode to validate an existing installation without changing
+anything. The test creates `anvil-agents-judge` by default, leaves it available
+for inspection, and uses the isolated kubeconfig path printed at the end
+instead of changing the caller's kubectl configuration. Override the name with
+`ANVIL_AGENTS_JUDGE_CLUSTER`.
 
 Inspect the result:
 

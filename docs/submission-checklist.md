@@ -32,6 +32,9 @@ any required item below remains open.
 - [ ] Run `/feedback` in the original core Codex thread and use the returned
   Session ID; do not assume the candidate ID is the `/feedback` result.
 - [ ] Run `make verify` on the exact final revision.
+- [ ] Run `./hack/install-judge-prerequisites.sh --install --bin-dir DIR` into
+  a fresh temporary directory, verify `--check` through that directory, and
+  save the non-secret version/checksum result.
 - [ ] Run `./hack/test-judge-kind.sh` from a clean cluster on the exact final
   revision and save the non-secret result.
 - [ ] Create an immutable submission tag and keep the repository public with

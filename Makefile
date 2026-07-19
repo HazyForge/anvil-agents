@@ -2,7 +2,7 @@ CONTROLLER_GEN ?= go run sigs.k8s.io/controller-tools/cmd/controller-gen@v0.19.0
 IMAGE_PREFIX ?=
 IMAGE_TAG ?= dev
 
-.PHONY: generate manifests test verify verify-runner-contract build docker-build images image-checks helm-lint archive-postgres-integration chart-package release-publish judge-kind-e2e kind-upgrade-e2e kind-e2e
+.PHONY: generate manifests test verify verify-runner-contract build docker-build images image-checks helm-lint archive-postgres-integration chart-package release-publish judge-prerequisites judge-kind-e2e kind-upgrade-e2e kind-e2e
 
 generate:
 	$(CONTROLLER_GEN) object paths=./api/...
@@ -50,6 +50,9 @@ release-publish:
 		--prefix "$${REGISTRY_PREFIX:?set REGISTRY_PREFIX, for example ghcr.io/hazyforge}" \
 		--version "$${VERSION:?set VERSION, for example v0.1.1}"
 
+judge-prerequisites:
+	./hack/install-judge-prerequisites.sh
+
 judge-kind-e2e:
 	./hack/test-judge-kind.sh
 
@@ -72,6 +75,8 @@ verify-runner-contract:
 	@bash -n hack/package-chart.sh
 	@bash -n hack/package-chart_test.sh
 	@bash -n hack/test-kind.sh
+	@bash -n hack/install-judge-prerequisites.sh
+	@bash -n hack/install-judge-prerequisites_test.sh
 	@bash -n hack/test-judge-kind.sh
 	@bash -n hack/test-kind-upgrade.sh
 	@bash -n hack/test-runner-repository-checkout.sh
@@ -83,7 +88,15 @@ verify-runner-contract:
 	@hack/publish-release.sh --help >/dev/null
 	@hack/package-chart.sh --help >/dev/null
 	@hack/package-chart_test.sh
+	@hack/install-judge-prerequisites.sh --help >/dev/null
+	@hack/install-judge-prerequisites_test.sh
 	@hack/test-judge-kind.sh --help >/dev/null
+	@rg -q 'kind_sha256=a6875aaea358acf0ac07786b1a6755d08fd640f4c79b7a2e46681cc13f49a04b' hack/install-judge-prerequisites.sh
+	@rg -q 'kubectl_sha256=4f6a959dcc5b702135f8354cc7109b542a2933c46b808b248a214c1f69f817ea' hack/install-judge-prerequisites.sh
+	@rg -q 'helm_sha256=0a745198de24545d0055cd8414bc8d2ba10363ef5f5d38369ea1b399671cc083' hack/install-judge-prerequisites.sh
+	@rg -q 'helm_binary_sha256=d9ae10babb2d90558f411daf4ecae818c32adef9d33b12f67e81e8a489947003' hack/install-judge-prerequisites.sh
+	@rg -q 'kindest/node:v1.32.2@sha256:f226345927d7e348497136874b6d207e0b32cc52154ad8323129352923a3142f' hack/test-judge-kind.sh
+	@rg -q 'KIND_EXPERIMENTAL_PROVIDER=docker' hack/test-judge-kind.sh
 	@rg -q 'oci://ghcr.io/hazyforge/charts/anvil-agents' hack/test-judge-kind.sh
 	@rg -q 'sha256:16a867c09b21287029797e43ba42cb633277ed1d3eb8d764dc3516f00a4c970c' hack/test-judge-kind.sh
 	@rg -q 'github.com/google/go-licenses/v2@' Dockerfile
