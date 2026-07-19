@@ -11,13 +11,17 @@ runtime overrides. Production installations should use image digests.
 | Kind | Runtime | Provider fields | Durable home recommended |
 | --- | --- | --- | --- |
 | `codex` | OpenAI Codex CLI | Codex model, reasoning, approval settings | yes |
+| `openCode` | OpenCode CLI | provider-qualified model, agent, variant, auto/pure mode | yes |
 | `hermesAgent` | Hermes Agent | provider, auth mode, model | yes |
 | `openClaw` | OpenClaw | provider, agent ID, model, thinking | yes |
 | `grokBuild` | Grok Build | xAI model, profile, service tier | yes |
 | `piAgent` | Pi coding agent | provider, model, thinking, mode | yes |
 | `custom` | operator-supplied image | command and args | image-defined |
 
-The model-provider enum currently covers OpenAI/Codex and xAI integrations.
+The shared model-provider enum currently covers OpenAI/Codex and xAI
+integrations. OpenCode keeps its broader provider catalog native by accepting
+a provider-qualified `openCode.model` value and provider credential environment
+variables rather than narrowing it to that enum.
 Remote issue context and remote skill files are currently GitHub adapters. They
 are optional integration surfaces, not requirements for custom harnesses.
 
@@ -45,6 +49,27 @@ backend and execution settings. When a run selects a different
 carried into the replacement. Move all provider credentials and durable homes
 into `AgentHarnessProfile` before offering runtime swaps. See
 [Agent Composition](composition.md).
+
+## OpenCode On Kubernetes
+
+The built-in OpenCode image pins the upstream standalone binary and verifies
+its release checksum at build time. It uses the supported non-interactive
+`opencode run` command, pipes the combined AgentRun prompt on stdin, defaults
+to JSON event logs, disables auto-updates, and uses `--pure` unless the backend
+explicitly opts out. See the
+[OpenCode CLI documentation](https://opencode.ai/docs/cli/) and the image
+[README](../docker/agent-run-opencode/README.md).
+
+Select a provider-qualified model such as `openai/gpt-5.4`. Supply provider API
+keys through `envSecretRefs`, or seed an existing credential store with
+`OPENCODE_AUTH_JSON`. OpenCode's standard auth file lives below the runner's
+XDG data directory and is included in the `/opt/anvil/opencode` durable-home
+layout. Do not start interactive login inside an AgentRun Job.
+
+`openCode.auto: true` enables OpenCode's explicit auto-approval mode for
+permission requests not denied by configuration. It is intentionally false by
+default. OpenCode's own permission rules and the Pod's ServiceAccount, Secret,
+mount, egress, and security boundaries must agree with the run intent.
 
 ## Workload Sizing And Placement
 

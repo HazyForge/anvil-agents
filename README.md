@@ -6,8 +6,8 @@ schedulable Jobs, so repository builds, test suites, security analysis,
 indexing, migrations, and long research loops can use the CPU and memory of a
 cluster instead of competing on one workstation. Declarative runs, composable
 profiles and skill sets, schedules, and event streams become isolated Jobs,
-and each run can select Codex, Hermes Agent, OpenClaw, Grok Build, Pi, or a
-custom harness.
+and each run can select Codex, OpenCode, Hermes Agent, OpenClaw, Grok Build,
+Pi, or a custom harness.
 
 ```text
 Run/Profile/Harness/Skills/Schedule      Kubernetes Job
@@ -117,12 +117,12 @@ make kind-e2e
   --version vX.Y.Z
 ```
 
-`make images` builds the controller plus all five built-in runner images into
+`make images` builds the controller plus all six built-in runner images into
 local Docker. The reusable script supports component selection, platforms,
 cache import/export, multiple tags, custom registries, and fork-aware OCI
 source metadata. Image pushes reject dirty worktrees unless explicitly
 overridden. `publish-release.sh` runs `make verify` and `make kind-e2e`,
-publishes all six versioned images, verifies their immutable digests and source
+publishes all seven versioned images, verifies their immutable digests and source
 revision, writes a digest lock, and pushes the version-coupled OCI chart.
 GitHub workflows use the same repository-owned build and test contracts and are
 optional.

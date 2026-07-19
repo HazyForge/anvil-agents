@@ -13,6 +13,7 @@ spec:
   componentRefs:
     - controller
     - codex-runner
+    - opencode-runner
     - grok-build-runner
     - hermes-runner
     - openclaw-runner
@@ -63,6 +64,27 @@ spec:
               sourceRefs: [primary]
             buildkit:
               address: tcp://acer-buildkit.anvil-builders.svc.cluster.local:1234
+            platform: linux/amd64
+      - name: build-opencode-runner
+        phase: BuildArtifact
+        producesComponents: [opencode-runner]
+        sourceRefs: [primary]
+        invocation:
+          actionRef: *build-action
+          executorSelector:
+            agentRef:
+              id: z400-artifact-worker
+          credentialRefs: *registry-credential
+          inputs:
+            workdir: /workspace/anvil-agents
+            context: .
+            dockerfile: docker/agent-run-opencode/Dockerfile
+            component:
+              name: opencode-runner
+              location: ghcr.io/hazyforge/anvil-agent-run-opencode
+              sourceRefs: [primary]
+            buildkit:
+              address: tcp://z400-buildkit.anvil-builders.svc.cluster.local:1234
             platform: linux/amd64
       - name: build-grok-build-runner
         phase: BuildArtifact

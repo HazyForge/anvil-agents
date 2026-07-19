@@ -29,8 +29,8 @@ Terminal runs are append-only execution records; a new attempt requires a new
 
 ## Distributed And Multi-Harness
 
-Each `AgentRun` selects one of `codex`, `hermesAgent`, `openClaw`, `grokBuild`,
-`piAgent`, or `custom`. The built-in adapters share the same mounted payload,
+Each `AgentRun` selects one of `codex`, `openCode`, `hermesAgent`, `openClaw`,
+`grokBuild`, `piAgent`, or `custom`. The built-in adapters share the same mounted payload,
 tool setup, tool verification, environment, and structured-status contract.
 Provider-native model and authentication fields remain adapter-specific.
 
@@ -72,7 +72,7 @@ image, workload identity, credentials, storage, placement, and limits. An
 packs, setup/verification tools, and optional delegated personas.
 
 The split allows the same knowledge or review capability to run through Codex,
-Pi, or a custom harness without copying it. A skill set cannot select a Secret,
+OpenCode, Pi, or a custom harness without copying it. A skill set cannot select a Secret,
 ServiceAccount, image, or volume, so choosing a capability never silently
 grants runtime authority. See [Agent Composition](composition.md) for the exact
 merge and override rules.

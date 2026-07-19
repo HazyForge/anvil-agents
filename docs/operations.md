@@ -2,9 +2,9 @@
 
 ## Versioning
 
-The packaged chart, controller, and five official runner tags form one release
+The packaged chart, controller, and six official runner tags form one release
 set. The source chart defaults to locally built `:dev` images; packaging
-rewrites all six defaults to the selected `vVERSION` and registry prefix.
+rewrites all seven defaults to the selected `vVERSION` and registry prefix.
 Production values should replace every image with an immutable digest. Do not
 mix runner versions without testing their payload and status contracts.
 
@@ -106,11 +106,11 @@ Export resources and back up data before deliberate permanent removal.
 Set `image.reference` for the controller/API and every `runnerImages` value for
 a mirror. A harness-profile or run-level backend image overrides the install
 default. Use `hack/build-images.sh --prefix ... --tag ... --push` to publish the
-same six components without GitHub Actions; the script refuses dirty pushes by
+same seven components without GitHub Actions; the script refuses dirty pushes by
 default.
 
 For a tagged release, `hack/publish-images.sh --prefix REGISTRY/PATH --version
-vX.Y.Z` builds and pushes all six images, verifies that the version and commit
+vX.Y.Z` builds and pushes all seven images, verifies that the version and commit
 tags resolve to the same registry digest, verifies the OCI source revision, and
 atomically writes a deployment-ready digest lock under `dist/`. Recheck an
 existing lock with `--verify-lock FILE`; neither path requires GitHub Actions.
@@ -128,7 +128,7 @@ the lock refer to exactly the reviewed commit.
 
 `.github/workflows/publish.yaml` is a release convenience built on the same
 scripts. It runs only for a `v*` tag push or a manual rerun of an existing tag,
-gates publication on `make verify` and `make kind-e2e`, publishes all six images
+gates publication on `make verify` and `make kind-e2e`, publishes all seven images
 with version and commit tags, and pushes the version-coupled chart to the
 repository owner's GHCR `charts` namespace. It does not run for `master` and
 does not publish `latest`, so an intermediate merge cannot become the default

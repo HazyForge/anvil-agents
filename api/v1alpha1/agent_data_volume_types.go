@@ -27,7 +27,7 @@ type AgentDataVolumeSpec struct {
 	// Backend documents the intended AgentRun backend for this durable home.
 	// The controller does not require an exact match so data can be migrated,
 	// but AgentRun prompts and operator UIs should show it.
-	// +kubebuilder:validation:Enum=codex;hermesAgent;openClaw;grokBuild;piAgent;custom
+	// +kubebuilder:validation:Enum=codex;openCode;hermesAgent;openClaw;grokBuild;piAgent;custom
 	// +optional
 	Backend AgentRunHarnessBackendKind `json:"backend,omitempty"`
 	// ProfileRef references a namespace-local VolumeProfile that provides

@@ -42,10 +42,11 @@ local_command="$(tail -n 1 "${FAKE_DOCKER_LOG}")"
 
 : > "${FAKE_DOCKER_LOG}"
 "${repo_root}/hack/build-images.sh" --check >/dev/null
-[[ "$(grep -c '^build --check ' "${FAKE_DOCKER_LOG}")" == "6" ]] || fail "all-image check did not inspect six Dockerfiles"
+[[ "$(grep -c '^build --check ' "${FAKE_DOCKER_LOG}")" == "7" ]] || fail "all-image check did not inspect seven Dockerfiles"
 for dockerfile in \
 	Dockerfile \
 	docker/agent-run-codex/Dockerfile \
+	docker/agent-run-opencode/Dockerfile \
 	docker/agent-run-grok-build/Dockerfile \
 	docker/agent-run-hermes/Dockerfile \
 	docker/agent-run-openclaw/Dockerfile \

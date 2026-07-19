@@ -24,6 +24,7 @@ const (
 	githubAPIAllowedHostsEnv        = "ANVIL_AGENTS_GITHUB_API_ALLOWED_HOSTS"
 	allowInsecureGitHubAPIEnv       = "ANVIL_AGENTS_ALLOW_INSECURE_GITHUB_API"
 	codexRunnerImageEnv             = "ANVIL_AGENTS_RUNNER_IMAGE_CODEX"
+	openCodeRunnerImageEnv          = "ANVIL_AGENTS_RUNNER_IMAGE_OPENCODE"
 	hermesAgentRunnerImageEnv       = "ANVIL_AGENTS_RUNNER_IMAGE_HERMES_AGENT"
 	openClawRunnerImageEnv          = "ANVIL_AGENTS_RUNNER_IMAGE_OPENCLAW"
 	grokBuildRunnerImageEnv         = "ANVIL_AGENTS_RUNNER_IMAGE_GROK_BUILD"
@@ -56,6 +57,7 @@ type Options struct {
 	GitHubAPIAllowedHosts        []string
 	AllowInsecureGitHubAPI       bool
 	CodexRunnerImage             string
+	OpenCodeRunnerImage          string
 	HermesAgentRunnerImage       string
 	OpenClawRunnerImage          string
 	GrokBuildRunnerImage         string
@@ -77,6 +79,7 @@ func DefaultOptions() *Options {
 		GitHubAPIAllowedHosts:        csvOrDefault(os.Getenv(githubAPIAllowedHostsEnv), defaultGitHubAPIAllowedHosts),
 		AllowInsecureGitHubAPI:       boolEnv(allowInsecureGitHubAPIEnv),
 		CodexRunnerImage:             firstNonEmpty(strings.TrimSpace(os.Getenv(codexRunnerImageEnv)), agentRunDefaultCodexImage),
+		OpenCodeRunnerImage:          firstNonEmpty(strings.TrimSpace(os.Getenv(openCodeRunnerImageEnv)), agentRunDefaultOpenCodeImage),
 		HermesAgentRunnerImage:       firstNonEmpty(strings.TrimSpace(os.Getenv(hermesAgentRunnerImageEnv)), agentRunDefaultHermesAgentImage),
 		OpenClawRunnerImage:          firstNonEmpty(strings.TrimSpace(os.Getenv(openClawRunnerImageEnv)), agentRunDefaultOpenClawImage),
 		GrokBuildRunnerImage:         firstNonEmpty(strings.TrimSpace(os.Getenv(grokBuildRunnerImageEnv)), agentRunDefaultGrokBuildImage),

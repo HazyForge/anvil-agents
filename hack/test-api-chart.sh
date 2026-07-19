@@ -99,9 +99,12 @@ fi
 helm template "${release}" "${chart}" --set externalSecrets.enabled=true \
   --show-only templates/clusterrole.yaml >"${tmp_dir}/controller-rbac-external-secrets.yaml"
 grep -q 'external-secrets.io' "${tmp_dir}/controller-rbac-external-secrets.yaml" || fail "ExternalSecrets RBAC was not enabled"
-helm template "${release}" "${chart}" --set-string runnerImages.codex=registry.example/codex@sha256:abc \
+helm template "${release}" "${chart}" \
+  --set-string runnerImages.codex=registry.example/codex@sha256:abc \
+  --set-string runnerImages.openCode=registry.example/opencode@sha256:def \
   --show-only templates/deployment.yaml >"${tmp_dir}/controller-runner-images.yaml"
 grep -Fq -- '--runner-image-codex=registry.example/codex@sha256:abc' "${tmp_dir}/controller-runner-images.yaml" || fail "configured runner image was not rendered"
+grep -Fq -- '--runner-image-opencode=registry.example/opencode@sha256:def' "${tmp_dir}/controller-runner-images.yaml" || fail "configured OpenCode runner image was not rendered"
 
 helm template "${release}" "${chart}" "${api_args[@]}" >"${tmp_dir}/enabled.yaml"
 helm template "${release}" "${chart}" \

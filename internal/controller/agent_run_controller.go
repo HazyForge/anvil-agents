@@ -39,6 +39,7 @@ const (
 	agentRunExternalSecretRefreshTimeout            = 2 * time.Minute
 	agentRunReady                                   = "Ready"
 	agentRunDefaultCodexImage                       = "anvil-agent-run-codex:dev"
+	agentRunDefaultOpenCodeImage                    = "anvil-agent-run-opencode:dev"
 	agentRunDefaultHermesAgentImage                 = "anvil-agent-run-hermes:dev"
 	agentRunDefaultOpenClawImage                    = "anvil-agent-run-openclaw:dev"
 	agentRunDefaultGrokBuildImage                   = "anvil-agent-run-grok-build:dev"
@@ -1095,6 +1096,25 @@ func (r *AgentRunReconciler) agentRunEnv(obj *controlv1alpha1.AgentRun, dataVolu
 			}
 		}
 	}
+	if agentRunBackendKind(obj) == controlv1alpha1.AgentRunHarnessBackendOpenCode {
+		openCode := obj.Spec.Harness.Backend.OpenCode
+		if openCode == nil {
+			openCode = &controlv1alpha1.AgentRunOpenCodeBackendSpec{}
+		}
+		env = append(env,
+			corev1.EnvVar{Name: "ANVIL_OPENCODE_MODEL", Value: strings.TrimSpace(openCode.Model)},
+			corev1.EnvVar{Name: "ANVIL_OPENCODE_AGENT", Value: strings.TrimSpace(openCode.Agent)},
+			corev1.EnvVar{Name: "ANVIL_OPENCODE_VARIANT", Value: strings.TrimSpace(openCode.Variant)},
+			corev1.EnvVar{Name: "ANVIL_OPENCODE_FORMAT", Value: strings.TrimSpace(openCode.Format)},
+			corev1.EnvVar{Name: "ANVIL_OPENCODE_AUTO", Value: strconv.FormatBool(agentRunOpenCodeAuto(openCode))},
+			corev1.EnvVar{Name: "ANVIL_OPENCODE_PURE", Value: strconv.FormatBool(agentRunOpenCodePure(openCode))},
+		)
+		if len(openCode.AdditionalArgs) > 0 {
+			if raw, err := json.Marshal(openCode.AdditionalArgs); err == nil {
+				env = append(env, corev1.EnvVar{Name: "ANVIL_OPENCODE_ADDITIONAL_ARGS_JSON", Value: string(raw)})
+			}
+		}
+	}
 	if agentRunBackendKind(obj) == controlv1alpha1.AgentRunHarnessBackendHermesAgent {
 		hermes := obj.Spec.Harness.Backend.HermesAgent
 		if hermes == nil {
@@ -1869,11 +1889,47 @@ func agentRunMergeBackend(profile, run controlv1alpha1.AgentRunHarnessBackendSpe
 		out.ImagePullPolicy = run.ImagePullPolicy
 	}
 	out.Codex = agentRunMergeCodexBackend(profile.Codex, run.Codex)
+	out.OpenCode = agentRunMergeOpenCodeBackend(profile.OpenCode, run.OpenCode)
 	out.HermesAgent = agentRunMergeHermesBackend(profile.HermesAgent, run.HermesAgent)
 	out.OpenClaw = agentRunMergeOpenClawBackend(profile.OpenClaw, run.OpenClaw)
 	out.GrokBuild = agentRunMergeGrokBuildBackend(profile.GrokBuild, run.GrokBuild)
 	out.PiAgent = agentRunMergePiBackend(profile.PiAgent, run.PiAgent)
 	out.Custom = agentRunMergeCustomBackend(profile.Custom, run.Custom)
+	return out
+}
+
+func agentRunMergeOpenCodeBackend(profile, run *controlv1alpha1.AgentRunOpenCodeBackendSpec) *controlv1alpha1.AgentRunOpenCodeBackendSpec {
+	if profile == nil && run == nil {
+		return nil
+	}
+	out := &controlv1alpha1.AgentRunOpenCodeBackendSpec{}
+	if profile != nil {
+		out = profile.DeepCopy()
+	}
+	if run == nil {
+		return out
+	}
+	if strings.TrimSpace(run.Model) != "" {
+		out.Model = run.Model
+	}
+	if strings.TrimSpace(run.Agent) != "" {
+		out.Agent = run.Agent
+	}
+	if strings.TrimSpace(run.Variant) != "" {
+		out.Variant = run.Variant
+	}
+	if strings.TrimSpace(run.Format) != "" {
+		out.Format = run.Format
+	}
+	if run.Auto != nil {
+		auto := *run.Auto
+		out.Auto = &auto
+	}
+	if run.Pure != nil {
+		pure := *run.Pure
+		out.Pure = &pure
+	}
+	out.AdditionalArgs = append(out.AdditionalArgs, run.AdditionalArgs...)
 	return out
 }
 
@@ -2595,6 +2651,11 @@ func (r *AgentRunReconciler) agentRunBlockingValidation(obj *controlv1alpha1.Age
 			return controlv1alpha1.AgentRunPhaseNeedsHuman, "CodexImageNotConfigured", "A Codex agent run container image is required."
 		}
 		return "", "", ""
+	case controlv1alpha1.AgentRunHarnessBackendOpenCode:
+		if strings.TrimSpace(r.agentRunImage(obj)) == "" {
+			return controlv1alpha1.AgentRunPhaseNeedsHuman, "OpenCodeImageNotConfigured", "An OpenCode AgentRun container image is required."
+		}
+		return "", "", ""
 	case controlv1alpha1.AgentRunHarnessBackendHermesAgent:
 		if strings.TrimSpace(r.agentRunImage(obj)) == "" {
 			return controlv1alpha1.AgentRunPhaseNeedsHuman, "HermesAgentImageNotConfigured", "A Hermes AgentRun container image is required."
@@ -2705,6 +2766,8 @@ func agentRunImageWithOptions(obj *controlv1alpha1.AgentRun, options *Options) s
 	switch agentRunBackendKind(obj) {
 	case controlv1alpha1.AgentRunHarnessBackendCodex:
 		return strings.TrimSpace(options.CodexRunnerImage)
+	case controlv1alpha1.AgentRunHarnessBackendOpenCode:
+		return strings.TrimSpace(options.OpenCodeRunnerImage)
 	case controlv1alpha1.AgentRunHarnessBackendHermesAgent:
 		return strings.TrimSpace(options.HermesAgentRunnerImage)
 	case controlv1alpha1.AgentRunHarnessBackendOpenClaw:
@@ -2716,6 +2779,14 @@ func agentRunImageWithOptions(obj *controlv1alpha1.AgentRun, options *Options) s
 	default:
 		return ""
 	}
+}
+
+func agentRunOpenCodePure(openCode *controlv1alpha1.AgentRunOpenCodeBackendSpec) bool {
+	return openCode == nil || openCode.Pure == nil || *openCode.Pure
+}
+
+func agentRunOpenCodeAuto(openCode *controlv1alpha1.AgentRunOpenCodeBackendSpec) bool {
+	return openCode != nil && openCode.Auto != nil && *openCode.Auto
 }
 
 func agentRunImagePullPolicy(obj *controlv1alpha1.AgentRun) corev1.PullPolicy {

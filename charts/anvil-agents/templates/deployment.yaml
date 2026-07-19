@@ -48,6 +48,7 @@ spec:
             - --github-api-allowed-hosts={{ join "," .Values.githubAPI.allowedHosts }}
             - --allow-insecure-github-api={{ .Values.githubAPI.allowInsecure }}
             - --runner-image-codex={{ .Values.runnerImages.codex }}
+            - --runner-image-opencode={{ .Values.runnerImages.openCode }}
             - --runner-image-hermes-agent={{ .Values.runnerImages.hermesAgent }}
             - --runner-image-openclaw={{ .Values.runnerImages.openClaw }}
             - --runner-image-grok-build={{ .Values.runnerImages.grokBuild }}

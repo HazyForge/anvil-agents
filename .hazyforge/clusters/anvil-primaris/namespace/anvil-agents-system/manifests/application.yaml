@@ -42,6 +42,10 @@ spec:
       source: {repository: primary, path: docker/agent-run-codex}
       artifactNamespace: ghcr.io/hazyforge/anvil-agent-run-codex
     - <<: *component
+      name: opencode-runner
+      source: {repository: primary, path: docker/agent-run-opencode}
+      artifactNamespace: ghcr.io/hazyforge/anvil-agent-run-opencode
+    - <<: *component
       name: grok-build-runner
       source: {repository: primary, path: docker/agent-run-grok-build}
       artifactNamespace: ghcr.io/hazyforge/anvil-agent-run-grok-build

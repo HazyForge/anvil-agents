@@ -32,6 +32,7 @@ helm show values "${chart}" >"${tmp_dir}/values.yaml"
 for image in \
 	anvil-agents \
 	anvil-agent-run-codex \
+	anvil-agent-run-opencode \
 	anvil-agent-run-hermes \
 	anvil-agent-run-openclaw \
 	anvil-agent-run-grok-build \

@@ -16,7 +16,7 @@ Usage:
 Options:
   --version VERSION  SemVer with or without a leading v, for example 0.1.1.
   --output DIR       Package destination. Default: ./dist.
-  --image-prefix     Registry/repository prefix for all six images.
+  --image-prefix     Registry/repository prefix for all seven images.
                      Default: ghcr.io/hazyforge.
   -h, --help         Show this help.
 
@@ -84,6 +84,7 @@ sed -i \
 	-e "s#repository: anvil-agents#repository: ${image_prefix}/anvil-agents#" \
 	-e "s#tag: dev#tag: v${version}#" \
 	-e "s#codex: anvil-agent-run-codex:dev#codex: ${image_prefix}/anvil-agent-run-codex:v${version}#" \
+	-e "s#openCode: anvil-agent-run-opencode:dev#openCode: ${image_prefix}/anvil-agent-run-opencode:v${version}#" \
 	-e "s#hermesAgent: anvil-agent-run-hermes:dev#hermesAgent: ${image_prefix}/anvil-agent-run-hermes:v${version}#" \
 	-e "s#openClaw: anvil-agent-run-openclaw:dev#openClaw: ${image_prefix}/anvil-agent-run-openclaw:v${version}#" \
 	-e "s#grokBuild: anvil-agent-run-grok-build:dev#grokBuild: ${image_prefix}/anvil-agent-run-grok-build:v${version}#" \

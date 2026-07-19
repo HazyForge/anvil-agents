@@ -71,6 +71,7 @@ verify-runner-contract:
 	@bash -n hack/test-kind.sh
 	@bash -n hack/test-kind-upgrade.sh
 	@bash -n hack/test-runner-repository-checkout.sh
+	@bash -n hack/test-opencode-runner.sh
 	@bash -n hack/stream-agent-run.sh
 	@hack/build-images.sh --help >/dev/null
 	@hack/build-images.sh --list >/dev/null
@@ -82,6 +83,7 @@ verify-runner-contract:
 	@hack/publish-images_test.sh
 	@hack/publish-release_test.sh
 	@hack/test-runner-repository-checkout.sh
+	@hack/test-opencode-runner.sh
 	@hack/stream-agent-run.sh --help >/dev/null
 	@if ANVIL_AGENTS_ACCESS_TOKEN=dummy hack/stream-agent-run.sh \
 		--endpoint https://agents.example.com@127.0.0.1 \

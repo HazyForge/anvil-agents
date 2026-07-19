@@ -87,7 +87,7 @@ policy broker. See [live-agent-run-stream.md](live-agent-run-stream.md) for the
 full provider-neutral configuration and access-token contract.
 
 Keep the initial safe stage in the consumer deployment: `replicaCount: 0`,
-`crds.install: true`, and immutable references for the controller plus five
+`crds.install: true`, and immutable references for the controller plus six
 runner images before scaling the controller. This repository retains Hazy
 Forge's optional consumer values and manifests under
 `.hazyforge/clusters/anvil-primaris/`. The Anvil Primaris repository owns the

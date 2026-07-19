@@ -36,6 +36,7 @@ jobs:
       matrix:
         include:
           - component: codex
+          - component: opencode
           - component: grok-build
           - component: hermes
           - component: openclaw

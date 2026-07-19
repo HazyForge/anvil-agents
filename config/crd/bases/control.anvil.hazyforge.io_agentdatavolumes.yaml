@@ -82,6 +82,7 @@ spec:
                   but AgentRun prompts and operator UIs should show it.
                 enum:
                 - codex
+                - openCode
                 - hermesAgent
                 - openClaw
                 - grokBuild
