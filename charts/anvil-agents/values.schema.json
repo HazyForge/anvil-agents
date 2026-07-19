@@ -1,0 +1,131 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "additionalProperties": true,
+  "properties": {
+    "archive": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": ["", "disabled", "external", "standalone", "cloudnativepg"]
+        },
+        "restartToken": { "type": "string" },
+        "terminalRetention": { "type": "string" },
+        "databaseURLSecret": { "$ref": "#/definitions/databaseURLSecret" },
+        "external": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "databaseURLSecret": { "$ref": "#/definitions/databaseURLSecret" }
+          }
+        },
+        "standalone": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "image": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "reference": { "type": "string" },
+                "repository": { "type": "string", "minLength": 1 },
+                "tag": { "type": "string", "minLength": 1 },
+                "pullPolicy": {
+                  "type": "string",
+                  "enum": ["Always", "IfNotPresent", "Never"]
+                }
+              }
+            },
+            "database": { "type": "string", "minLength": 1, "maxLength": 63 },
+            "username": { "type": "string", "minLength": 1, "maxLength": 63 },
+            "port": { "type": "integer", "minimum": 1, "maximum": 65535 },
+            "auth": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "existingSecret": {
+                  "type": "string",
+                  "maxLength": 253,
+                  "pattern": "^$|^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$"
+                },
+                "generate": { "type": "boolean" },
+                "passwordKey": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 253,
+                  "pattern": "^[-._A-Za-z0-9]+$"
+                },
+                "databaseURLKey": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 253,
+                  "pattern": "^[-._A-Za-z0-9]+$"
+                }
+              }
+            },
+            "storage": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "size": { "type": "string", "minLength": 1 },
+                "storageClass": { "type": "string" },
+                "accessModes": {
+                  "type": "array",
+                  "minItems": 1,
+                  "items": { "type": "string", "minLength": 1 }
+                }
+              }
+            },
+            "resources": { "type": "object" },
+            "podSecurityContext": { "type": "object" },
+            "securityContext": { "type": "object" },
+            "nodeSelector": { "type": "object" },
+            "tolerations": { "type": "array" },
+            "affinity": { "type": "object" }
+          }
+        },
+        "cloudnativePG": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "clusterName": { "type": "string" },
+            "instances": { "type": "integer", "minimum": 1 },
+            "database": { "type": "string", "minLength": 1, "maxLength": 63 },
+            "owner": { "type": "string", "minLength": 1, "maxLength": 63 },
+            "dataChecksums": { "type": "boolean" },
+            "storage": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "size": { "type": "string", "minLength": 1 },
+                "storageClass": { "type": "string" }
+              }
+            },
+            "resources": { "type": "object" }
+          }
+        }
+      }
+    }
+  },
+  "definitions": {
+    "databaseURLSecret": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "maxLength": 253,
+          "pattern": "^$|^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$"
+        },
+        "key": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 253,
+          "pattern": "^[-._A-Za-z0-9]+$"
+        }
+      }
+    }
+  }
+}

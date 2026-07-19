@@ -67,6 +67,13 @@ terminal retention only after verifying archives. A terminal CR is pruned only
 after successful archival. Archive records can contain prompt and output data;
 protect and expire them accordingly.
 
+The chart can consume an external Postgres Secret, run a small standalone
+StatefulSet, or create a Cluster through an already-installed CloudNativePG
+operator. Data-bearing Secrets, PVCs, and chart-created CNPG Clusters are
+retained across normal uninstall/prune paths. That protects data; it does not
+provide backups, restores, HA, PostgreSQL upgrades, or SQL row expiry. See
+[PostgreSQL Archive](archive.md) before selecting a mode or enabling retention.
+
 The controller process writes archive rows; AgentRun worker Pods do not. The
 database hostname, TLS policy, firewall or `pg_hba`, and network policy must
 therefore allow every node eligible to host a controller replica. If database
@@ -80,7 +87,10 @@ for retry and diagnosis.
 ## Uninstall
 
 A normal Helm uninstall removes the controller/API workloads and RBAC but
-retains CRDs because each CRD has `helm.sh/resource-policy: keep`.
+retains CRDs because each CRD has `helm.sh/resource-policy: keep`. Standalone
+archive credentials and PVCs, and chart-created CloudNativePG Clusters, are
+also retained. Remove them only after separately backing up and intentionally
+decommissioning the archive database.
 
 ```bash
 helm uninstall anvil-agents -n anvil-agents-system

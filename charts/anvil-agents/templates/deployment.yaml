@@ -1,3 +1,5 @@
+{{- include "anvil-agents.validateArchive" . }}
+{{- $archiveMode := include "anvil-agents.archiveMode" . -}}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -15,6 +17,10 @@ spec:
       labels:
         app.kubernetes.io/name: {{ include "anvil-agents.name" . }}
         app.kubernetes.io/instance: {{ .Release.Name }}
+      {{- with .Values.archive.restartToken }}
+      annotations:
+        control.anvil.hazyforge.io/archive-restart: {{ . | quote }}
+      {{- end }}
     spec:
       serviceAccountName: {{ include "anvil-agents.serviceAccountName" . }}
       securityContext:
@@ -64,14 +70,14 @@ spec:
               port: health
           securityContext:
 {{ toYaml .Values.securityContext | indent 12 }}
-          {{- if or .Values.archive.databaseURLSecret.name .Values.extraEnv }}
+          {{- if or (ne $archiveMode "disabled") .Values.extraEnv }}
           env:
-            {{- with .Values.archive.databaseURLSecret.name }}
+            {{- if ne $archiveMode "disabled" }}
             - name: ANVIL_AGENTS_ARCHIVE_DATABASE_URL
               valueFrom:
                 secretKeyRef:
-                  name: {{ . }}
-                  key: {{ $.Values.archive.databaseURLSecret.key }}
+                  name: {{ include "anvil-agents.archiveSecretName" . | quote }}
+                  key: {{ include "anvil-agents.archiveSecretKey" . | quote }}
             {{- end }}
             {{- with .Values.extraEnv }}
 {{ toYaml . | indent 12 }}

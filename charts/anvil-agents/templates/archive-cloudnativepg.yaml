@@ -1,0 +1,33 @@
+{{- if eq (include "anvil-agents.archiveMode" .) "cloudnativepg" }}
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: {{ include "anvil-agents.archiveCloudNativePGName" . | quote }}
+  labels:
+    app.kubernetes.io/name: {{ include "anvil-agents.name" . }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: archive-postgres
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+  annotations:
+    helm.sh/resource-policy: keep
+    argocd.argoproj.io/sync-options: Prune=false,Delete=false
+    meta.helm.sh/release-name: {{ .Release.Name | quote }}
+    meta.helm.sh/release-namespace: {{ .Release.Namespace | quote }}
+spec:
+  instances: {{ .Values.archive.cloudnativePG.instances }}
+  enableSuperuserAccess: false
+  bootstrap:
+    initdb:
+      database: {{ .Values.archive.cloudnativePG.database | quote }}
+      owner: {{ .Values.archive.cloudnativePG.owner | quote }}
+      dataChecksums: {{ .Values.archive.cloudnativePG.dataChecksums }}
+  storage:
+    size: {{ .Values.archive.cloudnativePG.storage.size }}
+    {{- with .Values.archive.cloudnativePG.storage.storageClass }}
+    storageClass: {{ . | quote }}
+    {{- end }}
+  {{- with .Values.archive.cloudnativePG.resources }}
+  resources:
+{{ toYaml . | indent 4 }}
+  {{- end }}
+{{- end }}

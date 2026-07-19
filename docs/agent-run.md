@@ -170,9 +170,12 @@ An optional Postgres archive is enabled with `--archive-database-url` or
 after terminal status has been archived successfully. The historical table
 name is retained so deployments can adopt existing archive records.
 
-The Helm chart reads the database URL from
-`archive.databaseURLSecret.name`/`key`; it is never required in chart values as
-plain text. Set `archive.terminalRetention` only when archival is enabled.
+The Helm chart supports an external database, a small standalone PostgreSQL
+StatefulSet, or a CloudNativePG `Cluster`; every mode still supplies the same
+Secret-backed URI. The legacy `archive.databaseURLSecret` input remains a
+deprecated external-mode alias. Set `archive.terminalRetention` only after a
+real archive row is verified. See [PostgreSQL Archive](archive.md) for the mode,
+credential, upgrade, backup, and uninstall contracts.
 
 ## Installation
 

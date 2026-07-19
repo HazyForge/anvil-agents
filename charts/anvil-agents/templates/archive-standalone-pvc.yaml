@@ -1,0 +1,25 @@
+{{- if eq (include "anvil-agents.archiveMode" .) "standalone" }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "anvil-agents.archiveStandaloneName" . | quote }}
+  labels:
+    app.kubernetes.io/name: {{ include "anvil-agents.name" . }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: archive-postgres
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+  annotations:
+    helm.sh/resource-policy: keep
+    argocd.argoproj.io/sync-options: Prune=false,Delete=false
+    meta.helm.sh/release-name: {{ .Release.Name | quote }}
+    meta.helm.sh/release-namespace: {{ .Release.Namespace | quote }}
+spec:
+  accessModes:
+{{ toYaml .Values.archive.standalone.storage.accessModes | indent 4 }}
+  {{- with .Values.archive.standalone.storage.storageClass }}
+  storageClassName: {{ . | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.archive.standalone.storage.size }}
+{{- end }}

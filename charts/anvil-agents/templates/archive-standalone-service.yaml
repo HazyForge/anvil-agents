@@ -1,0 +1,20 @@
+{{- if eq (include "anvil-agents.archiveMode" .) "standalone" }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "anvil-agents.archiveStandaloneName" . }}
+  labels:
+    app.kubernetes.io/name: {{ include "anvil-agents.name" . }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: archive-postgres
+spec:
+  clusterIP: None
+  selector:
+    app.kubernetes.io/name: {{ include "anvil-agents.name" . }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: archive-postgres
+  ports:
+    - name: postgres
+      port: {{ .Values.archive.standalone.port }}
+      targetPort: postgres
+{{- end }}
