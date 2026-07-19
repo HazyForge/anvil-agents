@@ -53,6 +53,12 @@ for dockerfile in \
 	docker/agent-run-pi/Dockerfile; do
 	rg -q --fixed-strings -- "--file ${repo_root}/${dockerfile}" "${FAKE_DOCKER_LOG}" || fail "missing check for ${dockerfile}"
 done
+rg -q 'OPENCODE_LICENSE_SHA256=625f0f619133f89bbbb2abe37369613dfa1885eba1e50d02170deb62bb42cb6b' \
+	"${repo_root}/docker/agent-run-opencode/Dockerfile" || fail "OpenCode license checksum pin is missing"
+rg -q '/usr/share/doc/opencode/LICENSE' \
+	"${repo_root}/docker/agent-run-opencode/Dockerfile" || fail "OpenCode image does not install its upstream license"
+rg -q '^\| OpenCode \| `1\.18\.3`' \
+	"${repo_root}/THIRD_PARTY_NOTICES.md" || fail "OpenCode third-party notice is missing"
 
 if "${repo_root}/hack/build-images.sh" --component controller --push >"${tmp_dir}/push-error" 2>&1; then
 	fail "push without a repository prefix succeeded"

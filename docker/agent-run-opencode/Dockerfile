@@ -23,6 +23,7 @@ ARG AGENT_GID=10001
 ARG OPENCODE_VERSION=1.18.3
 ARG OPENCODE_AMD64_SHA256=949e2ab72af9fd2d2037957e590c78f5d657cf87683a0f7cf3156358af0a8ebc
 ARG OPENCODE_ARM64_SHA256=da0a631174eba380b2a1d51f9d364fa3812da433e72743c72471d4b5da59c69d
+ARG OPENCODE_LICENSE_SHA256=625f0f619133f89bbbb2abe37369613dfa1885eba1e50d02170deb62bb42cb6b
 ARG KUBECTL_VERSION=v1.34.0
 
 RUN apt-get update \
@@ -54,6 +55,9 @@ RUN apt-get update \
 	&& printf '%s  %s\n' "${opencode_sha}" /tmp/opencode.tar.gz | sha256sum -c - \
 	&& tar -xzf /tmp/opencode.tar.gz -C /usr/local/bin opencode \
 	&& chmod 0755 /usr/local/bin/opencode \
+	&& mkdir -p /usr/share/doc/opencode \
+	&& curl -fsSLo /usr/share/doc/opencode/LICENSE "https://raw.githubusercontent.com/anomalyco/opencode/v${OPENCODE_VERSION}/LICENSE" \
+	&& printf '%s  %s\n' "${OPENCODE_LICENSE_SHA256}" /usr/share/doc/opencode/LICENSE | sha256sum -c - \
 	&& rm -f /tmp/opencode.tar.gz \
 	&& case "${arch}" in amd64|arm64) ;; *) echo "unsupported kubectl architecture ${arch}" >&2; exit 1 ;; esac \
 	&& curl -fsSLo /usr/local/bin/kubectl "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/${arch}/kubectl" \

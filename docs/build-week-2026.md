@@ -13,8 +13,8 @@ that imported code was new.
   `HazyForge/anvil-primaris@0f5849ae5ada9ac507e50535d0ab2b4485cd5207`
 - Standalone repository first commit:
   `0944cbbadfb4da40543064da2eff4592ca356fce`
-- Final submission tag and SHA: **must be added after this focused branch is
-  merged and before Devpost submission**
+- Final submission tag and SHA: **must be added after the final scope is
+  selected and before Devpost submission**
 
 The binding requirements are the [official rules](https://openai.devpost.com/rules),
 not this checklist.
@@ -39,11 +39,17 @@ work.
 | Public v0.1.1 release | `726c619`, merge `db5f5f3` | Published the first version-coupled chart and six-image linux/amd64 digest lock. |
 | Production cutover and post-release hardening | `e0f87a6`, `e7e9f60` through `cc4bad0` | Added production cutover constraints, exact v0.1.1 deployment pins, archive placement, local release gates, and API/release documentation. These commits are later than the v0.1.1 tag. |
 | Provider-neutral adverse evidence | `060af9f` through merge `94d031e` | Replaced provider coupling with immutable adverse signals, narrow read-only discovery, deduplication receipts, and upgrade-safe behavior. |
-| Submission compliance and no-build Kind proof | This focused submission branch | Adds the prior/new disclosure, Codex/GPT-5.6 collaboration account, judge guide, checksum-pinned non-root prerequisite installer, public-artifact test, video script, and checklist. |
+| Composable external tools and self-development fleet | merge `948226d` (PR #11) | Added `AgentToolSet`, deterministic tool composition, controller and chart wiring, and a repository-local self-development fleet whose schedule remains suspended pending external policy prerequisites. |
+| Standalone Kubernetes AgentRun CLI | merge `7741792` (PR #12) | Added Kubernetes-authenticated append-only run creation, ownership-checked status/log diagnosis, tests, and operator documentation without importing Anvil Primaris APIs. |
+| PostgreSQL archive chart modes | merge `312c8ce` (PR #13) | Added external, standalone, and CloudNativePG archive modes with retained data-bearing resources, strict archive schema validation, chart tests, and migration/upsert integration coverage. |
+| First-class OpenCode harness | merge `a14b0f5` (PR #16) | Added the `openCode` backend, controller/chart/release wiring, a checksum-pinned non-root OpenCode 1.18.3 image, provider-native model selection, contract tests, and a real read-only repository-inspection smoke run. |
+| Submission compliance and no-build Kind proof | merge `e71728e` (PR #15) | Added the prior/new disclosure, Codex/GPT-5.6 collaboration account, judge guide, checksum-pinned non-root prerequisite installer, public-artifact test, video script, and checklist. |
 
 Generated CRDs and copied files are not counted as independent innovation. Draft
-tool-set, standalone CLI, and PostgreSQL branches are excluded unless they are
-merged into the immutable submission tag and the ledger is updated.
+or unmerged branches remain excluded unless they are merged into the immutable
+submission tag and this ledger is updated. The additions listed above are now
+on `master`, but they are not part of release `v0.1.1`; claims about runnable
+post-v0.1.1 behavior require a matching final tag and published artifacts.
 
 ## Codex and GPT-5.6 collaboration
 
@@ -91,7 +97,8 @@ The entrant, not Codex, made and approved these material decisions:
 - The standalone repository creation date is not presented as the age of every
   line of code.
 - The no-credential Kind test does not exercise or prove GPT-5.6.
-- Draft branches and unreleased features are not part of the submission.
+- Unmerged branches and features absent from the selected immutable tag are not
+  part of the submission.
 - Linux arm64, older Kubernetes versions, hostile multi-tenant execution, and
   one-run multi-node compute are not certified capabilities.
 - The read-only OIDC API cannot create or mutate AgentRuns.

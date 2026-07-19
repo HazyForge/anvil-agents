@@ -212,7 +212,8 @@ Pod logs, so durable replay requires a separate log store such as Loki. The
 terminal AgentRun status/archive is not a complete log archive.
 
 The API binary is included in the existing `anvil-agents` controller image;
-there is no seventh image. `make docker-build` or
+it does not have a separate image. The complete release has seven images: the
+controller/API image plus six runner images. `make docker-build` or
 `hack/build-images.sh --component controller` rebuilds both binaries together.
 
 ## Operational boundary
