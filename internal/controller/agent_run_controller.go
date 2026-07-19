@@ -69,6 +69,8 @@ const (
 	agentRunPlatformRepositoryURL      = defaultPlatformRepositoryURL
 	agentRunLabel                      = "control.anvil.hazyforge.io/agent-run"
 	agentRunJobLabel                   = "control.anvil.hazyforge.io/agent-run-job"
+	agentRunLabelBackend               = "control.anvil.hazyforge.io/agent-run-backend"
+	agentRunLabelIntent                = "control.anvil.hazyforge.io/agent-run-intent"
 	agentRunLabelSourceKind            = "control.anvil.hazyforge.io/agent-run-source-kind"
 	agentRunLabelSourceName            = "control.anvil.hazyforge.io/agent-run-source-name"
 	agentRunLabelSpiffeWorkloadAPI     = "control.anvil.hazyforge.io/spiffe-workload-api"
@@ -750,7 +752,7 @@ func validateAgentRunJob(job, desired *batchv1.Job, run *controlv1alpha1.AgentRu
 	if !agentRunControllerOwnerMatches(job, run) {
 		return fmt.Errorf("AgentRun Job %s/%s is not controlled by AgentRun %s/%s with the current UID", job.Namespace, job.Name, run.Namespace, run.Name)
 	}
-	if !apiequality.Semantic.DeepEqual(job.Labels, desired.Labels) {
+	if !apiequality.Semantic.DeepEqual(agentRunLabelsWithoutTelemetry(job.Labels), agentRunLabelsWithoutTelemetry(desired.Labels)) {
 		return fmt.Errorf("AgentRun Job %s/%s has invalid labels", job.Namespace, job.Name)
 	}
 	if !apiequality.Semantic.DeepEqual(job.Annotations, desired.Annotations) {
@@ -785,7 +787,7 @@ func agentRunJobSnapshotDigest(job *batchv1.Job) (string, error) {
 		return "", err
 	}
 	digest := digestJSON(agentRunJobSnapshot{
-		Labels:      job.Labels,
+		Labels:      agentRunLabelsWithoutTelemetry(job.Labels),
 		Annotations: job.Annotations,
 		Spec:        normalized,
 	})
@@ -968,6 +970,12 @@ func normalizeAgentRunJobSpec(spec batchv1.JobSpec, job *batchv1.Job) (batchv1.J
 		}
 	}
 	if normalized.Template.Labels != nil {
+		// Collector-only labels are intentionally excluded from execution identity.
+		// This lets an operator rollout add or refine bounded observability
+		// dimensions without invalidating an already-recorded launch receipt or an
+		// in-flight Job created by the previous controller version.
+		delete(normalized.Template.Labels, agentRunLabelBackend)
+		delete(normalized.Template.Labels, agentRunLabelIntent)
 		expectedControllerLabels := map[string]string{
 			"batch.kubernetes.io/controller-uid": string(job.UID),
 			"batch.kubernetes.io/job-name":       job.Name,
@@ -987,6 +995,16 @@ func normalizeAgentRunJobSpec(spec batchv1.JobSpec, job *batchv1.Job) (batchv1.J
 		}
 	}
 	return normalized, nil
+}
+
+func agentRunLabelsWithoutTelemetry(labels map[string]string) map[string]string {
+	normalized := cloneStringMap(labels)
+	delete(normalized, agentRunLabelBackend)
+	delete(normalized, agentRunLabelIntent)
+	if len(normalized) == 0 {
+		return nil
+	}
+	return normalized
 }
 
 func agentRunControllerOwnerMatches(obj metav1.Object, run *controlv1alpha1.AgentRun) bool {
@@ -1271,7 +1289,7 @@ func (r *AgentRunReconciler) agentRunJob(obj *controlv1alpha1.AgentRun, jobName,
 		ObjectMeta: metav1.ObjectMeta{
 			Name:        jobName,
 			Namespace:   obj.Namespace,
-			Labels:      agentRunLabels(obj, jobName),
+			Labels:      agentRunWorkloadLabels(obj, jobName),
 			Annotations: agentRunJobAnnotations(obj),
 		},
 		Spec: batchv1.JobSpec{
@@ -1279,7 +1297,7 @@ func (r *AgentRunReconciler) agentRunJob(obj *controlv1alpha1.AgentRun, jobName,
 			ActiveDeadlineSeconds: activeDeadlineSeconds,
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
-					Labels: agentRunLabels(obj, jobName),
+					Labels: agentRunWorkloadLabels(obj, jobName),
 				},
 				Spec: corev1.PodSpec{
 					ServiceAccountName: firstNonEmpty(strings.TrimSpace(obj.Spec.Harness.Execution.ServiceAccountName), "default"),
@@ -3859,6 +3877,13 @@ func agentRunLabels(obj *controlv1alpha1.AgentRun, jobName string) map[string]st
 			labels[agentRunLabelServiceAccount] = sanitizeLabelValue(serviceAccountName)
 		}
 	}
+	return labels
+}
+
+func agentRunWorkloadLabels(obj *controlv1alpha1.AgentRun, jobName string) map[string]string {
+	labels := agentRunLabels(obj, jobName)
+	labels[agentRunLabelBackend] = sanitizeLabelValue(string(agentRunBackendKind(obj)))
+	labels[agentRunLabelIntent] = sanitizeLabelValue(string(agentRunIntent(obj)))
 	return labels
 }
 
