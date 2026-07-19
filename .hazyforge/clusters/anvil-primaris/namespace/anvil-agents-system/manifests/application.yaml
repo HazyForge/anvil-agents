@@ -39,27 +39,27 @@ spec:
         definitionDigest: sha256:431a6a1a6747e75caebbb9e2707bfd5d5063c699d16299ca01ae4110b1a0e080
     - <<: *component
       name: codex-runner
-      source: {repository: primary, path: docker/agent-run-codex}
+      source: {repository: primary, path: .}
       artifactNamespace: ghcr.io/hazyforge/anvil-agent-run-codex
     - <<: *component
       name: opencode-runner
-      source: {repository: primary, path: docker/agent-run-opencode}
+      source: {repository: primary, path: .}
       artifactNamespace: ghcr.io/hazyforge/anvil-agent-run-opencode
     - <<: *component
       name: grok-build-runner
-      source: {repository: primary, path: docker/agent-run-grok-build}
+      source: {repository: primary, path: .}
       artifactNamespace: ghcr.io/hazyforge/anvil-agent-run-grok-build
     - <<: *component
       name: hermes-runner
-      source: {repository: primary, path: docker/agent-run-hermes}
+      source: {repository: primary, path: .}
       artifactNamespace: ghcr.io/hazyforge/anvil-agent-run-hermes
     - <<: *component
       name: openclaw-runner
-      source: {repository: primary, path: docker/agent-run-openclaw}
+      source: {repository: primary, path: .}
       artifactNamespace: ghcr.io/hazyforge/anvil-agent-run-openclaw
     - <<: *component
       name: pi-runner
-      source: {repository: primary, path: docker/agent-run-pi}
+      source: {repository: primary, path: .}
       artifactNamespace: ghcr.io/hazyforge/anvil-agent-run-pi
   actionDefinitionRefs:
     - *build-action
