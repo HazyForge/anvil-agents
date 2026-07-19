@@ -43,7 +43,9 @@ kubectl --context "${kube_context}" create namespace anvilhub --dry-run=client -
 while IFS= read -r manifest; do
 	kubectl --context "${kube_context}" apply --dry-run=server --filename "${manifest}" >/dev/null
 done < <(find "${root_dir}/config/samples" "${root_dir}/examples" \
-	-type f -name '*.yaml' ! -name '*-values.yaml' ! -name 'zitadel-values.yaml' | sort)
+	-type f -name '*.yaml' \
+	! -path "${root_dir}/examples/judge-kind/*" \
+	! -name '*-values.yaml' ! -name 'zitadel-values.yaml' | sort)
 kubectl --context "${kube_context}" apply --dry-run=server \
 	--kustomize "${root_dir}/.hazyforge/agents" >/dev/null
 
