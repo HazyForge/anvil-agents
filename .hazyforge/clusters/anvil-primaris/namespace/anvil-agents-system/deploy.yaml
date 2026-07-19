@@ -8,7 +8,7 @@ replicaCount: 1
 serviceAccount:
   name: anvil-agents
 image:
-  reference: ghcr.io/hazyforge/anvil-agents@sha256:21747d1e1f32d4d2e19b0e939fce1f297ee80ba1c4712c3f4c0d78cfee58daf7
+  reference: ghcr.io/hazyforge/anvil-agents@sha256:6a168905ff3178bef3c9838dd15d9d2a01d731b5780fe9ab6d10538b7c906711
   pullPolicy: IfNotPresent
 imagePullSecrets:
   - name: ghcr-creds
