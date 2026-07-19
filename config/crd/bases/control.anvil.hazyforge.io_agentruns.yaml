@@ -2575,7 +2575,7 @@ spec:
                 type: object
               skillSets:
                 description: |-
-                  SkillSets selects reusable backend-neutral capability packs and named
+                  SkillSets selects reusable backend-neutral instruction packs and named
                   overrides. Run-local refs append to profile refs unless mode is Replace.
                 properties:
                   mode:
@@ -2727,6 +2727,39 @@ spec:
                 type: object
               sourceUID:
                 type: string
+              toolSets:
+                description: |-
+                  ToolSets selects reusable external tool contracts. Run-local refs append
+                  to profile refs unless mode is Replace.
+                properties:
+                  mode:
+                    description: |-
+                      Mode controls how this layer combines refs with inherited profile refs.
+                      Empty defaults to Append.
+                    enum:
+                    - Append
+                    - Replace
+                    type: string
+                  refs:
+                    description: |-
+                      Refs selects AgentToolSets in declaration order. References must resolve
+                      in the consuming AgentRun namespace.
+                    items:
+                      description: |-
+                        NamespacedObjectReference identifies a Kubernetes object without importing
+                        another API group. Namespace may be omitted where same-namespace resolution
+                        is part of the containing resource contract.
+                      properties:
+                        name:
+                          type: string
+                        namespace:
+                          type: string
+                      required:
+                      - name
+                      type: object
+                    maxItems: 16
+                    type: array
+                type: object
               trigger:
                 properties:
                   conditionStatus:
@@ -3009,6 +3042,30 @@ spec:
                         type: string
                     type: object
                   skillSetRefs:
+                    items:
+                      description: |-
+                        AgentRunResolvedObjectReferenceStatus records the exact object version used
+                        to materialize a run without copying object content or Secret references into
+                        status.
+                      properties:
+                        digest:
+                          type: string
+                        generation:
+                          format: int64
+                          type: integer
+                        name:
+                          type: string
+                        namespace:
+                          type: string
+                        resourceVersion:
+                          type: string
+                        uid:
+                          type: string
+                      required:
+                      - name
+                      type: object
+                    type: array
+                  toolSetRefs:
                     items:
                       description: |-
                         AgentRunResolvedObjectReferenceStatus records the exact object version used

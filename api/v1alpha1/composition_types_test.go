@@ -16,6 +16,7 @@ func TestCompositionResourcesAreRegistered(t *testing.T) {
 	for _, object := range []runtime.Object{
 		&AgentHarnessProfile{}, &AgentHarnessProfileList{},
 		&AgentSkillSet{}, &AgentSkillSetList{},
+		&AgentToolSet{}, &AgentToolSetList{},
 		&AdverseSignal{}, &AdverseSignalList{},
 	} {
 		gvks, _, err := scheme.ObjectKinds(object)
@@ -42,12 +43,16 @@ func TestCompositionDeepCopyDoesNotAliasOverrides(t *testing.T) {
 				SourceRefs: []AgentRunSkillSourceRef{{GitHub: &AgentRunGitHubSkillSourceSpec{Repository: "example/skills", Path: "review.md"}}},
 			}},
 		},
+		ToolSets: &AgentToolCompositionSpec{
+			Refs: []NamespacedObjectReference{{Name: "knowledge-tools"}},
+		},
 	}}
 	copy := run.DeepCopy()
 	copy.Spec.HarnessProfileRef.Name = "pi-standard"
 	copy.Spec.SkillSets.Refs[0].Name = "incident-review"
 	copy.Spec.SkillSets.Overrides[0].Paths[0] = "docs/security.md"
 	copy.Spec.SkillSets.Overrides[0].SourceRefs[0].GitHub.Path = "security.md"
+	copy.Spec.ToolSets.Refs[0].Name = "issue-tools"
 
 	if got := run.Spec.HarnessProfileRef.Name; got != "codex-standard" {
 		t.Fatalf("source harness ref mutated to %q", got)
@@ -60,5 +65,8 @@ func TestCompositionDeepCopyDoesNotAliasOverrides(t *testing.T) {
 	}
 	if got := run.Spec.SkillSets.Overrides[0].SourceRefs[0].GitHub.Path; got != "review.md" {
 		t.Fatalf("source override ref mutated to %q", got)
+	}
+	if got := run.Spec.ToolSets.Refs[0].Name; got != "knowledge-tools" {
+		t.Fatalf("source tool set ref mutated to %q", got)
 	}
 }

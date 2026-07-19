@@ -1,0 +1,40 @@
+apiVersion: control.anvil.hazyforge.io/v1alpha1
+kind: AgentSchedule
+metadata:
+  name: anvil-agents-grok45-observers
+spec:
+  applicationRef:
+    name: anvil-agents
+  # Deliberately suspended until the post-checkout-fix Grok runner, xAI
+  # credential, least-authority ServiceAccount, knowledge egress policy, and
+  # repository protection prerequisites in README.md are verified live.
+  suspend: true
+  intervalSeconds: 86400
+  initialDelaySeconds: 3600
+  concurrencyPolicy: Forbid
+  maxConcurrentRuns: 1
+  maxRunsPerDay: 2
+  templateSelectionPolicy: Sequential
+  runTemplates:
+    - name: maintainer-scout
+      template:
+        purpose: scheduledHealthCheck
+        profileRef:
+          name: anvil-agents-grok45-maintainer-scout
+        harness:
+          execution:
+            extraEnv:
+              - name: ANVIL_AGENT_RUN_REPOSITORY_REF
+                value: master
+        prompt: Query relevant knowledge, inspect current master, and propose one bounded improvement without making changes.
+    - name: independent-reviewer
+      template:
+        purpose: scheduledHealthCheck
+        profileRef:
+          name: anvil-agents-grok45-independent-reviewer
+        harness:
+          execution:
+            extraEnv:
+              - name: ANVIL_AGENT_RUN_REPOSITORY_REF
+                value: master
+        prompt: Query relevant knowledge, run focused repository checks on current master, and report correctness or test gaps without making changes.

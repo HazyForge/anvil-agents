@@ -21,18 +21,23 @@ type AgentRunProfileSpec struct {
 	// Harness supplies default backend, prompt, skills, subagents, tools,
 	// service account, credentials, data volumes, and execution settings.
 	// New profiles should select reusable runtime mechanics through
-	// harnessProfileRef and reusable capabilities through skillSets; this field
-	// remains an inline compatibility and override layer in v1alpha1.
+	// harnessProfileRef, instructions through skillSets, and external clients
+	// through toolSets; this field remains an inline compatibility and override
+	// layer in v1alpha1.
 	// +optional
 	Harness AgentRunHarnessSpec `json:"harness,omitempty"`
 	// HarnessProfileRef selects a reusable same-namespace backend and execution
 	// envelope. Inline harness runtime fields remain compatibility overrides.
 	// +optional
 	HarnessProfileRef *NamespacedObjectReference `json:"harnessProfileRef,omitempty"`
-	// SkillSets composes ordered backend-neutral capability packs and
+	// SkillSets composes ordered backend-neutral instruction packs and
 	// profile-local named skill overrides.
 	// +optional
 	SkillSets *AgentSkillCompositionSpec `json:"skillSets,omitempty"`
+	// ToolSets composes ordered external tool contracts independently of the
+	// skills that teach agents when and how to use them.
+	// +optional
+	ToolSets *AgentToolCompositionSpec `json:"toolSets,omitempty"`
 	// Notifications supplies default operator notification routing.
 	// +optional
 	Notifications *AgentRunNotificationSpec `json:"notifications,omitempty"`

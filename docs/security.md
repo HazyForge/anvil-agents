@@ -9,14 +9,15 @@ multi-tenant sandbox.
 An `AgentRun`, `AgentRunProfile`, or `AgentHarnessProfile` author can select an
 image, custom command, ServiceAccount, same-namespace Secrets, pull
 credentials, security context, node placement, and tolerations. An
-`AgentSkillSet` author can supply setup scripts that execute in consuming Jobs.
+`AgentToolSet` author, or an author using the legacy `AgentSkillSet.spec.tools`
+field, can supply setup scripts that execute in consuming Jobs.
 Granting write access to any of these resources is therefore equivalent to
 granting substantial code-execution authority in that namespace. An admission
 controller should enforce allowed registries, ServiceAccounts, Secret and PVC
 refs, security contexts, resources, and placement rules.
 
-Skill sets cannot directly select images, identities, Secrets, storage, or
-placement. Keep that boundary in admission policy too. A run-local harness
+Skill and tool sets cannot directly select images, identities, Secrets,
+storage, or placement. Keep that boundary in admission policy too. A run-local harness
 swap replaces the profile-inline runtime envelope so provider credentials do
 not leak between harnesses; migrate runtime fields into dedicated harness
 profiles before relying on this behavior.

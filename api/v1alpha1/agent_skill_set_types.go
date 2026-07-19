@@ -2,10 +2,10 @@ package v1alpha1
 
 import metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-// AgentSkillSetSpec is a reusable, backend-neutral capability pack. Skills,
-// their setup tools, and optional delegated personas stay together, while
-// images, workload identities, credentials, and placement remain owned by a
-// harness profile or run profile.
+// AgentSkillSetSpec is a reusable, backend-neutral instruction pack. Skills
+// and optional delegated personas stay together, while independently owned
+// tools should use AgentToolSet. Images, workload identities, credentials, and
+// placement remain owned by a harness profile or run profile.
 type AgentSkillSetSpec struct {
 	// Description explains when this capability pack should be selected.
 	// +optional
@@ -14,7 +14,8 @@ type AgentSkillSetSpec struct {
 	// +kubebuilder:validation:MaxItems=64
 	// +optional
 	Skills []AgentRunSkillInjectionSpec `json:"skills,omitempty"`
-	// Tools are setup and verification contracts required by this skill set.
+	// Tools are legacy setup and verification contracts required by this skill
+	// set. Prefer AgentToolSet when a tool has an independent lifecycle.
 	// +kubebuilder:validation:MaxItems=32
 	// +optional
 	Tools []AgentRunToolSpec `json:"tools,omitempty"`

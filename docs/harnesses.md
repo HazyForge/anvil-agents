@@ -40,8 +40,9 @@ Setup scripts run after repository preparation and before the runtime starts.
 They execute as the container user in the configured workdir. Keep them
 idempotent, install only into writable paths, pin downloaded artifacts, and
 pass credentials through the selected harness profile's `envSecretRefs` rather
-than inline YAML. Tool contracts normally live in `AgentSkillSet`; selecting a
-skill set does not grant the credentials that its tool may need.
+than inline YAML. Tool contracts normally live in `AgentToolSet`; the skill
+that teaches an agent when to use them remains in `AgentSkillSet`. Selecting a
+tool set does not grant the credentials that its tool may need.
 
 Run profiles created before the composition API may still contain inline
 backend and execution settings. When a run selects a different

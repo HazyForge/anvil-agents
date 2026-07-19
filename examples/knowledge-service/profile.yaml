@@ -5,10 +5,28 @@ metadata:
   namespace: agents
 spec:
   description: Provider-neutral read-only organizational knowledge search.
+  skills:
+    - name: organization-knowledge
+      description: Use current organizational context without inventing it.
+      content: |
+        Before proposing a change, run `.anvil-tools/knowledge-search` with a
+        narrow query. Cite returned note IDs or paths in the report. Treat the
+        service as read-only. If it is unavailable or has no relevant result,
+        say so and continue from repository evidence; never invent guidance.
+---
+apiVersion: control.anvil.hazyforge.io/v1alpha1
+kind: AgentToolSet
+metadata:
+  name: organization-knowledge-http
+  namespace: agents
+spec:
+  description: Read-only search wrapper for an external operation-envelope API.
   tools:
     - name: knowledge-search
-      description: Search the organization's read-only knowledge service.
+      description: Search the separately deployed knowledge service.
       setupScript: |
+        command -v curl >/dev/null
+        command -v jq >/dev/null
         mkdir -p .anvil-tools
         cat > .anvil-tools/knowledge-search <<'SCRIPT'
         #!/usr/bin/env sh
@@ -18,24 +36,22 @@ spec:
           exit 0
         fi
         test -n "${KNOWLEDGE_BASE_URL:-}"
-        test -n "${KNOWLEDGE_BASE_TOKEN:-}"
-        curl --fail --silent --show-error \
-          --get \
-          --header "Authorization: Bearer ${KNOWLEDGE_BASE_TOKEN}" \
-          --header "Accept: application/json" \
-          --data-urlencode "q=$*" \
-          "${KNOWLEDGE_BASE_URL%/}/v1/search"
+        command -v curl >/dev/null
+        command -v jq >/dev/null
+        payload="$(jq -nc --arg query "$*" \
+          '{operation:"search-index",params:{query:$query,limit:10}}')"
+        set -- --fail --silent --show-error \
+          --request POST \
+          --header "Content-Type: application/json" \
+          --header "Accept: application/json"
+        if [ -n "${KNOWLEDGE_BASE_TOKEN:-}" ]; then
+          set -- "$@" --header "Authorization: Bearer ${KNOWLEDGE_BASE_TOKEN}"
+        fi
+        curl "$@" --data "$payload" \
+          "${KNOWLEDGE_BASE_URL%/}/v1/operations"
         SCRIPT
         chmod 0700 .anvil-tools/knowledge-search
       verifyCommand: [".anvil-tools/knowledge-search", "--help"]
-  skills:
-    - name: organization-knowledge
-      description: Use current organizational context without inventing it.
-      content: |
-        Before proposing a change, run `.anvil-tools/knowledge-search` with a
-        narrow query. Cite returned note IDs or paths in the report. Treat the
-        service as read-only. If it is unavailable or has no relevant result,
-        say so and continue from repository evidence; never invent guidance.
 ---
 apiVersion: control.anvil.hazyforge.io/v1alpha1
 kind: AgentHarnessProfile
@@ -93,6 +109,9 @@ spec:
   skillSets:
     refs:
       - name: organization-knowledge
+  toolSets:
+    refs:
+      - name: organization-knowledge-http
   harness:
     intent: observe
     systemPrompt: Do not send secrets or unrelated source content to the knowledge service.

@@ -40,10 +40,30 @@ func (r *AgentRunReconciler) resolveAgentRunComposition(ctx context.Context, obj
 		effective.Spec.Harness = agentRunHarnessWithProfile(profile, obj, harnessProfile)
 	}
 
-	resolvedSkillSets, phase, reason, message, err := r.resolveAgentSkillComposition(ctx, reader, obj, profile, effective)
+	capabilities := newAgentRunCapabilities()
+	resolvedSkillSets, phase, reason, message, err := r.resolveAgentSkillComposition(ctx, reader, obj, profile, effective, capabilities)
 	if err != nil || phase != "" {
 		return effective, nil, phase, reason, message, err
 	}
+	resolvedToolSets, phase, reason, message, err := r.resolveAgentToolComposition(ctx, reader, obj, profile, effective, capabilities)
+	if err != nil || phase != "" {
+		return effective, nil, phase, reason, message, err
+	}
+
+	// Inline v1alpha1 entries remain the final compatibility overlay. Later
+	// entries with the same name intentionally replace set-provided entries.
+	for _, skill := range effective.Spec.Harness.SkillInjections {
+		capabilities.upsertSkill(skill)
+	}
+	for _, tool := range effective.Spec.Harness.Tools {
+		capabilities.upsertTool(tool)
+	}
+	for _, subagent := range effective.Spec.Harness.Subagents {
+		capabilities.upsertSubagent(subagent)
+	}
+	effective.Spec.Harness.SkillInjections = capabilities.skills
+	effective.Spec.Harness.Tools = capabilities.tools
+	effective.Spec.Harness.Subagents = capabilities.subagents
 
 	status := &controlv1alpha1.AgentRunResolvedCompositionStatus{}
 	if profile != nil {
@@ -54,6 +74,9 @@ func (r *AgentRunReconciler) resolveAgentRunComposition(ctx context.Context, obj
 	}
 	for _, skillSet := range resolvedSkillSets {
 		status.SkillSetRefs = append(status.SkillSetRefs, *resolvedObjectReferenceStatus(skillSet, digestJSON(skillSet.Spec)))
+	}
+	for _, toolSet := range resolvedToolSets {
+		status.ToolSetRefs = append(status.ToolSetRefs, *resolvedObjectReferenceStatus(toolSet, digestJSON(toolSet.Spec)))
 	}
 	status.Scope = agentRunResolvedScopeStatus(effective.Spec.Scope)
 	status.EffectiveDigest = digestJSON(effective.Spec)
@@ -169,7 +192,27 @@ func agentRunMergeSkillComposition(profile, run *controlv1alpha1.AgentSkillCompo
 	return out
 }
 
-func (r *AgentRunReconciler) resolveAgentSkillComposition(ctx context.Context, reader client.Reader, obj *controlv1alpha1.AgentRun, profile *controlv1alpha1.AgentRunProfile, effective *controlv1alpha1.AgentRun) ([]*controlv1alpha1.AgentSkillSet, controlv1alpha1.AgentRunPhase, string, string, error) {
+func agentRunMergeToolComposition(profile, run *controlv1alpha1.AgentToolCompositionSpec) *controlv1alpha1.AgentToolCompositionSpec {
+	if profile == nil && run == nil {
+		return nil
+	}
+	if run != nil && run.Mode == controlv1alpha1.AgentToolCompositionReplace {
+		return run.DeepCopy()
+	}
+	out := &controlv1alpha1.AgentToolCompositionSpec{}
+	if profile != nil {
+		out = profile.DeepCopy()
+	}
+	if run != nil {
+		out.Refs = append(out.Refs, run.Refs...)
+		if run.Mode != "" {
+			out.Mode = run.Mode
+		}
+	}
+	return out
+}
+
+func (r *AgentRunReconciler) resolveAgentSkillComposition(ctx context.Context, reader client.Reader, obj *controlv1alpha1.AgentRun, profile *controlv1alpha1.AgentRunProfile, effective *controlv1alpha1.AgentRun, capabilities *agentRunCapabilities) ([]*controlv1alpha1.AgentSkillSet, controlv1alpha1.AgentRunPhase, string, string, error) {
 	var profileComposition *controlv1alpha1.AgentSkillCompositionSpec
 	if profile != nil {
 		profileComposition = profile.Spec.SkillSets
@@ -180,7 +223,6 @@ func (r *AgentRunReconciler) resolveAgentSkillComposition(ctx context.Context, r
 		return nil, "", "", "", nil
 	}
 
-	capabilities := newAgentRunCapabilities()
 	resolved := []*controlv1alpha1.AgentSkillSet{}
 	seenRefs := map[string]struct{}{}
 	applyComposition := func(composition *controlv1alpha1.AgentSkillCompositionSpec) (controlv1alpha1.AgentRunPhase, string, string, error) {
@@ -228,20 +270,63 @@ func (r *AgentRunReconciler) resolveAgentSkillComposition(ctx context.Context, r
 		return nil, phase, reason, message, err
 	}
 
-	// Inline v1alpha1 entries remain a compatibility overlay. Later entries with
-	// the same name intentionally replace set-provided entries.
-	for _, skill := range effective.Spec.Harness.SkillInjections {
-		capabilities.upsertSkill(skill)
+	return resolved, "", "", "", nil
+}
+
+func (r *AgentRunReconciler) resolveAgentToolComposition(ctx context.Context, reader client.Reader, obj *controlv1alpha1.AgentRun, profile *controlv1alpha1.AgentRunProfile, effective *controlv1alpha1.AgentRun, capabilities *agentRunCapabilities) ([]*controlv1alpha1.AgentToolSet, controlv1alpha1.AgentRunPhase, string, string, error) {
+	var profileComposition *controlv1alpha1.AgentToolCompositionSpec
+	if profile != nil {
+		profileComposition = profile.Spec.ToolSets
 	}
-	for _, tool := range effective.Spec.Harness.Tools {
-		capabilities.upsertTool(tool)
+	runComposition := obj.Spec.ToolSets
+	effective.Spec.ToolSets = agentRunMergeToolComposition(profileComposition, runComposition)
+	if profileComposition == nil && runComposition == nil {
+		return nil, "", "", "", nil
 	}
-	for _, subagent := range effective.Spec.Harness.Subagents {
-		capabilities.upsertSubagent(subagent)
+
+	resolved := []*controlv1alpha1.AgentToolSet{}
+	seenRefs := map[string]struct{}{}
+	applyComposition := func(composition *controlv1alpha1.AgentToolCompositionSpec) (controlv1alpha1.AgentRunPhase, string, string, error) {
+		if composition == nil {
+			return "", "", "", nil
+		}
+		for _, ref := range composition.Refs {
+			name := strings.TrimSpace(ref.Name)
+			if name == "" {
+				return controlv1alpha1.AgentRunPhaseFailed, "InvalidToolSetRef", "toolSets.refs[].name must be set.", nil
+			}
+			namespace := firstNonEmpty(strings.TrimSpace(ref.Namespace), obj.Namespace)
+			if namespace != obj.Namespace {
+				return controlv1alpha1.AgentRunPhaseFailed, "CrossNamespaceToolSetRef", "AgentToolSet refs must stay in the AgentRun namespace.", nil
+			}
+			key := namespace + "/" + name
+			if _, exists := seenRefs[key]; exists {
+				return controlv1alpha1.AgentRunPhaseFailed, "DuplicateToolSetRef", fmt.Sprintf("AgentToolSet %s is selected more than once.", key), nil
+			}
+			seenRefs[key] = struct{}{}
+			toolSet := &controlv1alpha1.AgentToolSet{}
+			if err := reader.Get(ctx, client.ObjectKey{Namespace: namespace, Name: name}, toolSet); err != nil {
+				if apierrors.IsNotFound(err) {
+					return controlv1alpha1.AgentRunPhaseNeedsHuman, "ToolSetNotFound", fmt.Sprintf("AgentToolSet %s was not found.", key), nil
+				}
+				return "", "", "", err
+			}
+			if reason, message := capabilities.applyToolSet(toolSet); reason != "" {
+				return controlv1alpha1.AgentRunPhaseFailed, reason, message, nil
+			}
+			resolved = append(resolved, toolSet)
+		}
+		return "", "", "", nil
 	}
-	effective.Spec.Harness.SkillInjections = capabilities.skills
-	effective.Spec.Harness.Tools = capabilities.tools
-	effective.Spec.Harness.Subagents = capabilities.subagents
+
+	if runComposition == nil || runComposition.Mode != controlv1alpha1.AgentToolCompositionReplace {
+		if phase, reason, message, err := applyComposition(profileComposition); err != nil || phase != "" {
+			return nil, phase, reason, message, err
+		}
+	}
+	if phase, reason, message, err := applyComposition(runComposition); err != nil || phase != "" {
+		return nil, phase, reason, message, err
+	}
 	return resolved, "", "", "", nil
 }
 
@@ -304,6 +389,25 @@ func (c *agentRunCapabilities) applySkillSet(skillSet *controlv1alpha1.AgentSkil
 			return "ConflictingSubagentName", fmt.Sprintf("Selected AgentSkillSets define conflicting subagent %q personas.", name)
 		}
 		c.upsertSubagent(subagent)
+	}
+	return "", ""
+}
+
+func (c *agentRunCapabilities) applyToolSet(toolSet *controlv1alpha1.AgentToolSet) (string, string) {
+	seenTools := map[string]struct{}{}
+	for _, tool := range toolSet.Spec.Tools {
+		name := strings.TrimSpace(tool.Name)
+		if name == "" {
+			return "InvalidToolName", fmt.Sprintf("AgentToolSet %s/%s contains an empty tool name.", toolSet.Namespace, toolSet.Name)
+		}
+		if _, exists := seenTools[name]; exists {
+			return "DuplicateToolName", fmt.Sprintf("AgentToolSet %s/%s contains duplicate tool %q.", toolSet.Namespace, toolSet.Name, name)
+		}
+		seenTools[name] = struct{}{}
+		if index, exists := c.toolIndexes[name]; exists && !reflect.DeepEqual(c.tools[index], tool) {
+			return "ConflictingToolName", fmt.Sprintf("Selected AgentSkillSets and AgentToolSets define conflicting tool %q contracts.", name)
+		}
+		c.upsertTool(tool)
 	}
 	return "", ""
 }

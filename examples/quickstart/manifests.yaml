@@ -76,6 +76,17 @@ spec:
       content: Read the mounted prompt and context before reporting success.
 ---
 apiVersion: control.anvil.hazyforge.io/v1alpha1
+kind: AgentToolSet
+metadata:
+  name: demo-tools
+  namespace: agents-quickstart
+spec:
+  description: Tool contract included in the resolved quickstart snapshot.
+  tools:
+    - name: inspect-context
+      verifyCommand: ["/bin/sh", "-c", "test -s \"${ANVIL_AGENT_RUN_CONTEXT_FILE}\""]
+---
+apiVersion: control.anvil.hazyforge.io/v1alpha1
 kind: AgentRunProfile
 metadata:
   name: demo
@@ -89,6 +100,9 @@ spec:
   skillSets:
     refs:
       - name: demo-contract
+  toolSets:
+    refs:
+      - name: demo-tools
   harness:
     intent: observe
     systemPrompt: Read the mounted payload and emit one structured decision.

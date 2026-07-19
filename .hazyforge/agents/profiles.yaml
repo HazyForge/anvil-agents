@@ -1,0 +1,111 @@
+apiVersion: control.anvil.hazyforge.io/v1alpha1
+kind: AgentRunProfile
+metadata:
+  name: anvil-agents-grok45-maintainer-scout
+spec:
+  description: Read-only scout that proposes one evidence-backed maintenance opportunity.
+  scope:
+    summary: Inspect anvil-agents source, tests, docs, and current repository health.
+    applicationRef:
+      name: anvil-agents
+  harnessProfileRef:
+    name: anvil-agents-grok45-reader
+  skillSets:
+    refs:
+      - name: anvil-agents-self-development
+  toolSets:
+    refs:
+      - name: anvil-agents-cluster-knowledge
+  docs:
+    policy: Review
+    paths: [README.md, docs]
+    runtimePaths: [api, internal, docker, charts, config, hack]
+  issueTracking:
+    provider: github
+    repository: HazyForge/anvil-agents
+    updatePolicy: ReadOnly
+  harness:
+    intent: observe
+    backend:
+      grokBuild:
+        reasoningEffort: low
+    execution:
+      extraEnv:
+        - name: ANVIL_GROK_BUILD_CHECK
+          value: "false"
+    systemPrompt: |
+      Produce one bounded improvement proposal with concrete repository paths,
+      test evidence, and cited knowledge-note paths. Do not make changes.
+---
+apiVersion: control.anvil.hazyforge.io/v1alpha1
+kind: AgentRunProfile
+metadata:
+  name: anvil-agents-grok45-implementer
+spec:
+  description: Manual-only implementer for one approved issue and exact base revision.
+  scope:
+    summary: Implement one explicitly approved anvil-agents issue as a focused pull request.
+    applicationRef:
+      name: anvil-agents
+  harnessProfileRef:
+    name: anvil-agents-grok45-pr-writer
+  skillSets:
+    refs:
+      - name: anvil-agents-self-development
+  toolSets:
+    refs:
+      - name: anvil-agents-cluster-knowledge
+  docs:
+    policy: Required
+    paths: [README.md, docs]
+    runtimePaths: [api, internal, docker, charts, config, hack]
+  issueTracking:
+    provider: github
+    repository: HazyForge/anvil-agents
+    updatePolicy: Comment
+  harness:
+    intent: proposeChange
+    backend:
+      grokBuild:
+        reasoningEffort: medium
+    systemPrompt: |
+      Refuse to act unless the one-off AgentRun identifies one approved issue
+      and sets ANVIL_AGENT_RUN_REPOSITORY_REF to a full 40-character base SHA.
+      Create one branch and draft pull request; never merge or release.
+---
+apiVersion: control.anvil.hazyforge.io/v1alpha1
+kind: AgentRunProfile
+metadata:
+  name: anvil-agents-grok45-independent-reviewer
+spec:
+  description: Read-only independent review of a specified revision or pull request.
+  scope:
+    summary: Validate anvil-agents changes independently from their implementer.
+    applicationRef:
+      name: anvil-agents
+  harnessProfileRef:
+    name: anvil-agents-grok45-reader
+  skillSets:
+    refs:
+      - name: anvil-agents-self-development
+  toolSets:
+    refs:
+      - name: anvil-agents-cluster-knowledge
+  docs:
+    policy: Review
+    paths: [README.md, docs]
+    runtimePaths: [api, internal, docker, charts, config, hack]
+  issueTracking:
+    provider: github
+    repository: HazyForge/anvil-agents
+    updatePolicy: ReadOnly
+  harness:
+    intent: observe
+    backend:
+      grokBuild:
+        reasoningEffort: medium
+    systemPrompt: |
+      For a manual run, review only the exact revision or pull-request head it
+      names. For a scheduled health check, report the resolved commit from
+      `git rev-parse HEAD` before reviewing that checkout. Run focused tests,
+      report findings by severity, and do not approve, merge, or modify anything.

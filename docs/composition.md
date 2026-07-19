@@ -1,17 +1,18 @@
 # Agent Composition
 
-Anvil Agents uses three namespaced resources for reusable configuration. This
-is intentionally the full high-level split for v1alpha1:
+Anvil Agents uses four namespaced resources for reusable configuration:
 
 | Resource | Owns | Must not own |
 | --- | --- | --- |
 | `AgentRunProfile` | role, scope, policy, standing prompt, intent, notifications, and composition choices | shared capability definitions |
 | `AgentHarnessProfile` | one backend adapter, image, Kubernetes execution identity, credentials, storage, placement, and limits | task instructions or skills |
-| `AgentSkillSet` | backend-neutral skills, their setup/verification tools, and optional delegated personas | images, ServiceAccounts, Secrets, storage, or placement |
+| `AgentSkillSet` | backend-neutral skills and optional delegated personas | images, ServiceAccounts, Secrets, storage, or placement |
+| `AgentToolSet` | reusable setup and verification contracts for external tools | the external service, credentials, ServiceAccounts, networking, storage, or placement |
 
-There are no separate `ToolSet`, `PromptSet`, or persona CRDs. Those concepts
-stay with the capability pack that needs them until independent lifecycle or
-ownership is proven necessary.
+`AgentToolSet` exists because external tools commonly have an independent
+owner and lifecycle from the instructions that use them. It never installs the
+external service. Prompt sets and personas remain part of role or skill
+composition until they demonstrate the same independent lifecycle.
 
 All references must resolve in the `AgentRun` namespace. This keeps Kubernetes
 RBAC and Secret ownership understandable. A platform can distribute identical
@@ -32,14 +33,18 @@ spec:
     refs:
       - name: repository-review
       - name: organization-knowledge
+  toolSets:
+    refs:
+      - name: organization-knowledge-http
   harness:
     intent: observe
     systemPrompt: Review current evidence and make no mutations.
 ```
 
 Changing `harnessProfileRef` changes how the work executes without copying or
-editing either skill set. Changing a skill-set ref changes capabilities without
-changing the provider runtime.
+editing either set. Changing a skill-set ref changes instructions without
+changing the provider runtime. Changing a tool-set ref changes the executable
+integration without copying either the role or its knowledge-use policy.
 
 ## Skill Resolution
 
@@ -53,16 +58,29 @@ The controller resolves skills in this order:
 5. Legacy inline `harness.skillInjections`, `tools`, and `subagents` as a final
    v1alpha1 compatibility overlay.
 
+Tool-set resolution happens after selected skill sets and before that inline
+overlay:
+
+1. Profile tool-set refs in declaration order, unless the run mode is
+   `Replace`.
+2. Run tool-set refs in declaration order.
+3. Legacy inline `harness.tools` as the final compatibility overlay.
+
+`toolSets.mode: Replace` replaces inherited tool-set refs only. It does not
+discard tools still embedded in a legacy `AgentSkillSet`, and it does not
+remove inline profile tools. Move those tools into `AgentToolSet` before
+relying on an atomic tool integration swap.
+
 `mode: Replace` on a run discards the profile's skill-set refs and overrides
 before resolving the run layer. It does not discard legacy inline profile
 capabilities; remove those while migrating if a completely clean swap is
 required.
 
 Skills have stable names. A later selected set replaces an earlier skill with
-the same name while retaining its position. Identical tools and subagent
-personas are deduplicated by name. Conflicting definitions of the same tool or
-persona fail the run instead of choosing one silently. Duplicate refs and
-duplicate override names in one layer also fail.
+the same name while retaining its position. Identical tools across skill and
+tool sets and identical subagent personas are deduplicated by name. Conflicting
+definitions of the same tool or persona fail the run instead of choosing one
+silently. Duplicate refs and duplicate override names in one layer also fail.
 
 ## Skill Overrides
 
@@ -122,6 +140,7 @@ profile-inline backend/execution overlays.
 
 At Job materialization, `status.resolvedComposition` records each selected
 object's name, namespace, UID, generation, resource version, and spec digest.
+This includes separate `skillSetRefs` and `toolSetRefs` evidence.
 `effectiveDigest` covers the complete resolved `AgentRun` spec.
 `payloadDigest` covers the exact mounted ConfigMap data, including resolved
 remote skill bytes. The read-only OIDC API exposes this sanitized evidence with

@@ -64,7 +64,7 @@ else
 		--set image.pullPolicy=Never >/dev/null
 	for crd in "${root_dir}"/config/crd/bases/*.yaml; do
 		case "${crd}" in
-			*_agentharnessprofiles.yaml|*_agentskillsets.yaml|*_adversesignals.yaml) continue ;;
+			*_agentharnessprofiles.yaml|*_agentskillsets.yaml|*_agenttoolsets.yaml|*_adversesignals.yaml) continue ;;
 		esac
 		resource="$(kubectl --context "${kube_context}" apply --filename "${crd}" --output=name)"
 		kubectl --context "${kube_context}" label "${resource}" \
@@ -89,8 +89,8 @@ helm --kube-context "${kube_context}" upgrade anvil-agents "${root_dir}/charts/a
 	--set image.pullPolicy=Never >/dev/null
 
 upgraded_count="$(kubectl --context "${kube_context}" get crd --output=name | rg -c 'control\.anvil\.hazyforge\.io')"
-[[ "${upgraded_count}" -eq 10 ]] || {
-	echo "upgrade rendered ${upgraded_count} agent CRDs, want 10" >&2
+[[ "${upgraded_count}" -eq 11 ]] || {
+	echo "upgrade rendered ${upgraded_count} agent CRDs, want 11" >&2
 	exit 1
 }
 kubectl --context "${kube_context}" get agentrunprofile legacy-review --namespace agents-upgrade >/dev/null
@@ -99,16 +99,17 @@ kubectl --context "${kube_context}" apply --filename "${root_dir}/hack/fixtures/
 
 helm --kube-context "${kube_context}" uninstall anvil-agents --namespace anvil-agents-system >/dev/null
 retained_count="$(kubectl --context "${kube_context}" get crd --output=name | rg -c 'control\.anvil\.hazyforge\.io')"
-[[ "${retained_count}" -eq 10 ]] || {
-	echo "upgrade uninstall retained ${retained_count} agent CRDs, want 10" >&2
+[[ "${retained_count}" -eq 11 ]] || {
+	echo "upgrade uninstall retained ${retained_count} agent CRDs, want 11" >&2
 	exit 1
 }
 for resource in \
 	agentrunprofile/legacy-review \
 	agentrun/legacy-run \
 	agentharnessprofile/custom-runtime \
-	agentskillset/repository-review; do
+	agentskillset/repository-review \
+	agenttoolset/repository-tools; do
 	kubectl --context "${kube_context}" get "${resource}" --namespace agents-upgrade >/dev/null
 done
 
-printf 'Seven-to-ten CRD Helm upgrade contract passed\n'
+printf 'Seven-to-eleven CRD Helm upgrade contract passed\n'

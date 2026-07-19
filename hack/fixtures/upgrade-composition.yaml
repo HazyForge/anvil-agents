@@ -19,3 +19,13 @@ spec:
   skills:
     - name: evidence-first
       content: Inspect current evidence before drawing conclusions.
+---
+apiVersion: control.anvil.hazyforge.io/v1alpha1
+kind: AgentToolSet
+metadata:
+  name: repository-tools
+  namespace: agents-upgrade
+spec:
+  tools:
+    - name: repository-status
+      verifyCommand: ["git", "status", "--short"]

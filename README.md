@@ -5,9 +5,9 @@ agent loops on Kubernetes. It turns independent, heavyweight agent work into
 schedulable Jobs, so repository builds, test suites, security analysis,
 indexing, migrations, and long research loops can use the CPU and memory of a
 cluster instead of competing on one workstation. Declarative runs, composable
-profiles and skill sets, schedules, and event streams become isolated Jobs,
-and each run can select Codex, OpenCode, Hermes Agent, OpenClaw, Grok Build,
-Pi, or a custom harness.
+profiles, skill sets, tool sets, schedules, and event streams become isolated
+Jobs, and each run can select Codex, OpenCode, Hermes Agent, OpenClaw, Grok
+Build, Pi, or a custom harness.
 
 ```text
 Run/Profile/Harness/Skills/Schedule      Kubernetes Job
@@ -22,10 +22,10 @@ Run/Profile/Harness/Skills/Schedule      Kubernetes Job
 
 Kubernetes provides scheduling, isolation, and distribution. Explicit
 `AgentDataVolume` resources and external services provide durable memory.
-Run profiles provide reusable role and policy. Harness profiles and skill sets
-let operators change the runtime independently from backend-neutral
-capabilities. The operator does not require Anvil Primaris, Anvil Hub, or
-another Hazy Forge control plane.
+Run profiles provide reusable role and policy. Harness, skill, and tool sets
+let operators change the runtime, instructions, and external integrations on
+independent lifecycles. The operator does not require Anvil Primaris, Anvil
+Hub, or another Hazy Forge control plane.
 
 The branded API group `control.anvil.hazyforge.io/v1alpha1` is retained as a
 stable API identity and for migration compatibility. Application and target
@@ -36,7 +36,8 @@ references are opaque scope keys, not dependencies on other CRDs.
 - `AgentRun`: one append-only execution record and one harness Job.
 - `AgentRunProfile`: reusable role, scope, policy, and composition defaults.
 - `AgentHarnessProfile`: reusable backend and Kubernetes execution envelope.
-- `AgentSkillSet`: reusable skills, tool contracts, and delegated personas.
+- `AgentSkillSet`: reusable skills and delegated personas.
+- `AgentToolSet`: reusable external tool setup and verification contracts.
 - `AgentSchedule`: interval and manual run creation across named templates.
 - `AgentRunControl`: cluster-wide pause and concurrency policy by scope key.
 - `AgentDataVolume` and `VolumeProfile`: explicit durable PVC-backed state.
@@ -150,7 +151,7 @@ audience, and explicit namespace authorization bindings are configured. See
 
 - [Architecture and multi-harness semantics](docs/architecture.md)
 - [Distributed heavy workloads across machines](docs/distributed-workloads.md)
-- [Composable profiles, harnesses, skill sets, and overrides](docs/composition.md)
+- [Composable profiles, harnesses, skill sets, tool sets, and overrides](docs/composition.md)
 - [Getting started](docs/getting-started.md)
 - [Harness contract and adapter matrix](docs/harnesses.md)
 - [Knowledge bases, tools, and external services](docs/integrating-knowledge-and-tools.md)

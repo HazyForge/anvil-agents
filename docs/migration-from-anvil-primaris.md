@@ -12,15 +12,15 @@ against two deployments that use different election IDs.
 
 ## Handoff
 
-1. Back up the ten agent CRDs and all agent custom resources.
+1. Back up the eleven agent CRDs and all agent custom resources.
 2. Record the embedded controller replica count and confirm there are no
    unexpected terminating runs.
 3. Stage the standalone release with `crds.install=true` and zero replicas
    while the old chart still renders the legacy CRDs. This applies the schema
    superset and the chart's Helm and Argo retention annotations without
    starting a second reconciler.
-4. Verify the seven existing CRD UIDs did not change, the two composition CRDs
-   and `AdverseSignal` CRD exist, and all ten CRDs carry
+4. Verify the seven existing CRD UIDs did not change, the three composition
+   CRDs and `AdverseSignal` CRD exist, and all eleven CRDs carry
    `helm.sh/resource-policy: keep` and
    `argocd.argoproj.io/sync-options: Prune=false`.
 5. Deploy the Anvil Primaris version where the embedded agent registrations and
@@ -39,9 +39,11 @@ Migrate incrementally rather than rewriting every run at cutover:
 1. Create an `AgentHarnessProfile` in each consuming namespace with the
    profile's backend, image, ServiceAccount, credential refs, data volumes,
    placement, and resource settings.
-2. Create one or more `AgentSkillSet` objects for reusable skills, tools, and
-   delegated personas. Keep role intent and standing policy in the run profile.
-3. Add `harnessProfileRef` and `skillSets.refs` to the existing run profile.
+2. Create one or more `AgentSkillSet` objects for reusable skills and delegated
+   personas. Create `AgentToolSet` objects for independently owned tools. Keep
+   role intent and standing policy in the run profile.
+3. Add `harnessProfileRef`, `skillSets.refs`, and `toolSets.refs` to the
+   existing run profile.
 4. Remove migrated inline runtime and capability fields after a canary run
    reports the expected `status.resolvedComposition` refs and digests.
 5. Test a run-local harness swap. Verify the replacement Job contains only the
@@ -50,8 +52,8 @@ Migrate incrementally rather than rewriting every run at cutover:
 Profile-inline runtime fields overlay the profile-selected harness for
 compatibility. They are skipped during a run-local harness swap to prevent old
 provider credentials from leaking into the replacement. Legacy inline skills,
-tools, and subagents remain a final overlay even with `skillSets.mode: Replace`;
-remove them when a clean capability replacement is required.
+tools, and subagents remain a final overlay even with `skillSets.mode: Replace`
+or `toolSets.mode: Replace`; remove them when a clean replacement is required.
 
 ## Client and stream migration
 
