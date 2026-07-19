@@ -26,6 +26,7 @@ suites:
       components:
         - controller
         - codex-runner
+        - opencode-runner
         - grok-build-runner
         - hermes-runner
         - openclaw-runner

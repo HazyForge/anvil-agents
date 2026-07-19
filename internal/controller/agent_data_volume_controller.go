@@ -465,6 +465,8 @@ func agentDataVolumeMountPath(obj *controlv1alpha1.AgentDataVolume) string {
 		switch obj.Spec.Backend {
 		case controlv1alpha1.AgentRunHarnessBackendCodex:
 			return "/codex-home"
+		case controlv1alpha1.AgentRunHarnessBackendOpenCode:
+			return "/opt/anvil/opencode"
 		case controlv1alpha1.AgentRunHarnessBackendHermesAgent:
 			return "/opt/anvil/hermes"
 		case controlv1alpha1.AgentRunHarnessBackendOpenClaw:

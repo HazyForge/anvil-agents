@@ -23,6 +23,7 @@ defaultStorageClass: ""
 # Production installs should pin immutable digests or use a private mirror.
 runnerImages:
   codex: anvil-agent-run-codex:dev
+  openCode: anvil-agent-run-opencode:dev
   hermesAgent: anvil-agent-run-hermes:dev
   openClaw: anvil-agent-run-openclaw:dev
   grokBuild: anvil-agent-run-grok-build:dev

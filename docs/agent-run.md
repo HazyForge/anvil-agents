@@ -37,10 +37,10 @@ Terminal phases are `Succeeded`, `Failed`, and `NeedsHuman`. Pending and
 running resources remain resumable. A controller restart observes the existing
 children rather than creating a replacement Job.
 
-The backend adapters are `codex`, `hermesAgent`, `openClaw`, `grokBuild`,
-`piAgent`, and `custom`. Backend images are selected by each harness profile or
-run.
-The five built-in adapters share the repository checkout, injected tool setup,
+The backend adapters are `codex`, `openCode`, `hermesAgent`, `openClaw`,
+`grokBuild`, `piAgent`, and `custom`. Backend images are selected by each
+harness profile or run.
+The six built-in adapters share the repository checkout, injected tool setup,
 tool verification, and prompt-context contract. The operator image does not
 bundle another control-plane CLI.
 
@@ -215,7 +215,7 @@ Useful operator flags:
 | `--adverse-sources-json` | none |
 | `--archive-database-url` | disabled |
 | `--terminal-retention` | disabled |
-| `--runner-image-{codex,hermes-agent,openclaw,grok-build,pi-agent}` | local `:dev` image; packaged charts use matching `vVERSION` |
+| `--runner-image-{codex,opencode,hermes-agent,openclaw,grok-build,pi-agent}` | local `:dev` image; packaged charts use matching `vVERSION` |
 
 ## Local verification
 
@@ -227,7 +227,7 @@ make images
 `make verify` regenerates deep copies and CRDs, copies CRDs into the chart,
 runs all Go tests, compiles both binaries, and lints/renders the Helm chart.
 `make images` calls `hack/build-images.sh`, which builds the controller and all
-five built-in runner images into local Docker by default. It can select
+six built-in runner images into local Docker by default. It can select
 individual components or push the same image set to any authenticated registry,
 so GitHub Actions is optional.
 

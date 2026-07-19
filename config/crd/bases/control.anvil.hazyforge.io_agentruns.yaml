@@ -246,6 +246,7 @@ spec:
                         description: Kind selects the harness backend adapter.
                         enum:
                         - codex
+                        - openCode
                         - hermesAgent
                         - openClaw
                         - grokBuild
@@ -259,7 +260,9 @@ spec:
                           persistent backend identity; use kind=grokBuild and AgentDataVolume
                           backend=grokBuild for Grok Build's own durable backend. Select concrete
                           models through backend-specific model fields such as hermesAgent.model,
-                          openClaw.model, grokBuild.model, piAgent.model, or codex.model.
+                          openClaw.model, grokBuild.model, piAgent.model, or codex.model. OpenCode
+                          does not use this shared selector; set openCode.model to its native
+                          provider/model value and inject provider-native authentication instead.
                         enum:
                         - openai-codex
                         - openai
@@ -297,6 +300,52 @@ spec:
                           thinking:
                             description: Thinking selects the OpenClaw thinking/reasoning
                               setting when supported.
+                            type: string
+                        type: object
+                      openCode:
+                        description: OpenCode configures the provider-native OpenCode
+                          CLI adapter.
+                        properties:
+                          additionalArgs:
+                            description: |-
+                              AdditionalArgs appends runner-allowlisted presentation and logging
+                              arguments to opencode run. Execution, permission, workspace, session,
+                              prompt, provider, and model flags are rejected by the runner.
+                            items:
+                              type: string
+                            type: array
+                          agent:
+                            description: |-
+                              Agent selects a configured primary OpenCode agent. Empty uses the default
+                              build agent.
+                            type: string
+                          auto:
+                            description: |-
+                              Auto approves permission requests that are not explicitly denied by
+                              OpenCode configuration. Leave false unless the selected Pod identity,
+                              credentials, mounts, and egress are intentionally scoped for mutation.
+                            type: boolean
+                          format:
+                            description: |-
+                              Format controls OpenCode run output. Empty defaults to json so Job logs
+                              retain machine-readable events.
+                            enum:
+                            - default
+                            - json
+                            type: string
+                          model:
+                            description: |-
+                              Model selects a provider-qualified OpenCode model, for example
+                              opencode/big-pickle or openai/gpt-5.4. Empty uses OpenCode configuration.
+                            type: string
+                          pure:
+                            description: |-
+                              Pure controls whether OpenCode disables external plugins. Empty defaults
+                              to true in the built-in runner for deterministic execution.
+                            type: boolean
+                          variant:
+                            description: Variant selects a provider-specific model
+                              variant or reasoning effort.
                             type: string
                         type: object
                       piAgent:
@@ -344,7 +393,8 @@ spec:
                           providerAuthMode=oauth maps Hermes Agent, OpenClaw, Grok Build, or Pi to
                           subscription-backed OAuth homes while keeping the concrete model selectable
                           through backend-specific model fields such as hermesAgent.model,
-                          openClaw.model, grokBuild.model, or piAgent.model.
+                          openClaw.model, grokBuild.model, or piAgent.model. OpenCode uses its native
+                          provider/model selector and provider-native environment variables instead.
                         enum:
                         - apiKey
                         - oauth

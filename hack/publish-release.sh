@@ -27,7 +27,7 @@ Options:
   -h, --help               Show this help.
 
 Log in to the image registry with Docker and Helm before running this script.
-The script publishes and verifies all six images, writes an immutable digest
+The script publishes and verifies all seven images, writes an immutable digest
 lock, packages the version-coupled chart, and pushes the chart to OCI.
 EOF
 }

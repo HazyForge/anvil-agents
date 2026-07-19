@@ -8,11 +8,11 @@ platform="linux/amd64"
 output=""
 verify_lock=""
 
-components=(controller codex grok-build hermes openclaw pi)
+components=(controller codex opencode grok-build hermes openclaw pi)
 
 usage() {
 	cat <<'EOF'
-Publish and verify one immutable six-image Anvil Agents release.
+Publish and verify one immutable seven-image Anvil Agents release.
 
 Usage:
   ./hack/publish-images.sh --prefix REGISTRY/PATH --version vX.Y.Z [options]
@@ -42,6 +42,7 @@ image_name() {
 	case "$1" in
 		controller) printf '%s\n' anvil-agents ;;
 		codex) printf '%s\n' anvil-agent-run-codex ;;
+		opencode) printf '%s\n' anvil-agent-run-opencode ;;
 		grok-build) printf '%s\n' anvil-agent-run-grok-build ;;
 		hermes) printf '%s\n' anvil-agent-run-hermes ;;
 		openclaw) printf '%s\n' anvil-agent-run-openclaw ;;
@@ -108,7 +109,7 @@ read_lock() {
 				;;
 			source-revision) lock_revision="${value}" ;;
 			platform) lock_platform="${value}" ;;
-			controller|codex|grok-build|hermes|openclaw|pi)
+			controller|codex|opencode|grok-build|hermes|openclaw|pi)
 				[[ -z "${locked_refs[${key}]:-}" ]] || { echo "duplicate image lock component: ${key}" >&2; exit 2; }
 				locked_refs["${key}"]="${value}"
 				;;
@@ -158,7 +159,7 @@ if [[ -n "${verify_lock}" ]]; then
 	for component in "${components[@]}"; do
 		verify_immutable_ref "${component}" "${locked_refs[${component}]}" "${lock_revision}" "${lock_platform}"
 	done
-	printf 'Verified six-image lock %s at revision %s\n' "${verify_lock}" "${lock_revision}"
+	printf 'Verified seven-image lock %s at revision %s\n' "${verify_lock}" "${lock_revision}"
 	exit 0
 fi
 
@@ -199,4 +200,4 @@ trap 'rm -f "${tmp_lock:-}"' EXIT
 } > "${tmp_lock}"
 mv "${tmp_lock}" "${output}"
 trap - EXIT
-printf 'Published and verified six-image lock %s\n' "${output}"
+printf 'Published and verified seven-image lock %s\n' "${output}"

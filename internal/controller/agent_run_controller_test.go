@@ -1059,6 +1059,71 @@ func TestAgentRunJobInjectsStatusToolEnv(t *testing.T) {
 func TestAgentRunBackendProviderAndGrokBuildEnv(t *testing.T) {
 	t.Parallel()
 
+	t.Run("opencode backend", func(t *testing.T) {
+		t.Parallel()
+
+		pure := false
+		auto := true
+		run := &controlv1alpha1.AgentRun{
+			ObjectMeta: metav1.ObjectMeta{Name: "opencode-review", Namespace: "agents"},
+			Spec: controlv1alpha1.AgentRunSpec{
+				SourceRef: controlv1alpha1.AgentRunSourceRef{Kind: "AgentSchedule", Name: "opencode-hourly"},
+				Harness: controlv1alpha1.AgentRunHarnessSpec{
+					Backend: controlv1alpha1.AgentRunHarnessBackendSpec{
+						Kind: controlv1alpha1.AgentRunHarnessBackendOpenCode,
+						OpenCode: &controlv1alpha1.AgentRunOpenCodeBackendSpec{
+							Model:          "openai/gpt-5.4",
+							Agent:          "build",
+							Variant:        "high",
+							Format:         "json",
+							Auto:           &auto,
+							Pure:           &pure,
+							AdditionalArgs: []string{"--title=scheduled review"},
+						},
+					},
+				},
+			},
+		}
+
+		if got, want := agentRunImage(run), agentRunDefaultOpenCodeImage; got != want {
+			t.Fatalf("OpenCode image = %q, want %q", got, want)
+		}
+		job := agentRunJob(run, "opencode-harness", "opencode-context", nil)
+		env := map[string]string{}
+		for _, item := range job.Spec.Template.Spec.Containers[0].Env {
+			env[item.Name] = item.Value
+		}
+		expected := map[string]string{
+			"ANVIL_OPENCODE_MODEL":                "openai/gpt-5.4",
+			"ANVIL_OPENCODE_AGENT":                "build",
+			"ANVIL_OPENCODE_VARIANT":              "high",
+			"ANVIL_OPENCODE_FORMAT":               "json",
+			"ANVIL_OPENCODE_AUTO":                 "true",
+			"ANVIL_OPENCODE_PURE":                 "false",
+			"ANVIL_OPENCODE_ADDITIONAL_ARGS_JSON": `["--title=scheduled review"]`,
+		}
+		for key, want := range expected {
+			if got := env[key]; got != want {
+				t.Fatalf("env[%s] = %q, want %q", key, got, want)
+			}
+		}
+
+		defaultRun := run.DeepCopy()
+		defaultRun.Name = "opencode-defaults"
+		defaultRun.Spec.Harness.Backend.OpenCode = nil
+		defaultJob := agentRunJob(defaultRun, "opencode-default-harness", "opencode-default-context", nil)
+		defaultEnv := map[string]string{}
+		for _, item := range defaultJob.Spec.Template.Spec.Containers[0].Env {
+			defaultEnv[item.Name] = item.Value
+		}
+		if got, want := defaultEnv["ANVIL_OPENCODE_AUTO"], "false"; got != want {
+			t.Fatalf("default OpenCode auto = %q, want %q", got, want)
+		}
+		if got, want := defaultEnv["ANVIL_OPENCODE_PURE"], "true"; got != want {
+			t.Fatalf("default OpenCode pure = %q, want %q", got, want)
+		}
+	})
+
 	t.Run("hermes xai oauth provider", func(t *testing.T) {
 		t.Parallel()
 
@@ -1348,6 +1413,57 @@ func TestAgentRunMergeBackendMergesModelProviderAndGrokBuild(t *testing.T) {
 	}
 }
 
+func TestAgentRunMergeBackendMergesOpenCode(t *testing.T) {
+	t.Parallel()
+
+	profilePure := true
+	runPure := false
+	profileAuto := true
+	runAuto := false
+	profile := controlv1alpha1.AgentRunHarnessBackendSpec{
+		Kind: controlv1alpha1.AgentRunHarnessBackendOpenCode,
+		OpenCode: &controlv1alpha1.AgentRunOpenCodeBackendSpec{
+			Model:          "openai/gpt-5.4",
+			Format:         "json",
+			Auto:           &profileAuto,
+			Pure:           &profilePure,
+			AdditionalArgs: []string{"--thinking"},
+		},
+	}
+	run := controlv1alpha1.AgentRunHarnessBackendSpec{
+		OpenCode: &controlv1alpha1.AgentRunOpenCodeBackendSpec{
+			Agent:          "review",
+			Variant:        "high",
+			Auto:           &runAuto,
+			Pure:           &runPure,
+			AdditionalArgs: []string{"--title=review"},
+		},
+	}
+
+	merged := agentRunMergeBackend(profile, run)
+	if merged.OpenCode == nil {
+		t.Fatal("OpenCode backend was not merged")
+	}
+	if got, want := merged.OpenCode.Model, "openai/gpt-5.4"; got != want {
+		t.Fatalf("OpenCode model = %q, want %q", got, want)
+	}
+	if got, want := merged.OpenCode.Agent, "review"; got != want {
+		t.Fatalf("OpenCode agent = %q, want %q", got, want)
+	}
+	if got, want := merged.OpenCode.Variant, "high"; got != want {
+		t.Fatalf("OpenCode variant = %q, want %q", got, want)
+	}
+	if merged.OpenCode.Auto == nil || *merged.OpenCode.Auto {
+		t.Fatalf("OpenCode auto = %#v, want false", merged.OpenCode.Auto)
+	}
+	if merged.OpenCode.Pure == nil || *merged.OpenCode.Pure {
+		t.Fatalf("OpenCode pure = %#v, want false", merged.OpenCode.Pure)
+	}
+	if got, want := strings.Join(merged.OpenCode.AdditionalArgs, ","), "--thinking,--title=review"; got != want {
+		t.Fatalf("OpenCode additional args = %q, want %q", got, want)
+	}
+}
+
 func TestAgentRunMergeBackendMergesPiAgent(t *testing.T) {
 	t.Parallel()
 
@@ -1408,6 +1524,7 @@ func TestAgentDataVolumeMountPathDefaultsForAgentBackends(t *testing.T) {
 		want    string
 	}{
 		{name: "grok build", backend: controlv1alpha1.AgentRunHarnessBackendGrokBuild, want: "/opt/anvil/grok-build"},
+		{name: "opencode", backend: controlv1alpha1.AgentRunHarnessBackendOpenCode, want: "/opt/anvil/opencode"},
 		{name: "pi agent", backend: controlv1alpha1.AgentRunHarnessBackendPiAgent, want: "/opt/anvil/pi"},
 	}
 	for _, tc := range cases {

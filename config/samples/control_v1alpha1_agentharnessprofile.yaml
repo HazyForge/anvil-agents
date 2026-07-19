@@ -19,3 +19,29 @@ spec:
       limits:
         cpu: "2"
         memory: 2Gi
+---
+apiVersion: control.anvil.hazyforge.io/v1alpha1
+kind: AgentHarnessProfile
+metadata:
+  name: opencode-standard
+  namespace: agents
+spec:
+  description: Reusable OpenCode runtime with provider-native model selection.
+  backend:
+    kind: openCode
+    openCode:
+      model: openai/gpt-5.4
+      format: json
+      auto: false
+  execution:
+    serviceAccountName: agent-runner
+    envSecretRefs:
+      - name: opencode-credentials
+    timeoutSeconds: 1800
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: "2"
+        memory: 2Gi

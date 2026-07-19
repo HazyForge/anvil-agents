@@ -93,7 +93,7 @@ Package the version-coupled chart locally when distributing a release bundle:
   --image-prefix registry.example.com/platform
 ```
 
-Create a values file that sets `image.reference` and all five `runnerImages`.
+Create a values file that sets `image.reference` and all six `runnerImages`.
 Prefer digest references. Install the chart:
 
 ```bash
@@ -114,7 +114,7 @@ Helm into the registry, check out a clean `vX.Y.Z` tag, and run:
 ```
 
 The script first runs `make verify` and the disposable Kind upgrade/install
-suite, then publishes and verifies all six images, writes
+suite, then publishes and verifies all seven images, writes
 `dist/images-vX.Y.Z.lock.tsv`, packages the chart, and pushes it to
 `oci://registry.example.com/platform/charts`. Use `--chart-registry` to select
 another OCI chart namespace. `--skip-verification` is an explicit escape hatch

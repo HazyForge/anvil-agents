@@ -57,7 +57,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        component: [controller, codex, grok-build, hermes, openclaw, pi]
+        component: [controller, codex, opencode, grok-build, hermes, openclaw, pi]
     steps:
       - uses: actions/checkout@v6
         with:

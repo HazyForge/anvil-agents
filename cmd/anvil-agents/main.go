@@ -34,6 +34,7 @@ func main() {
 	flag.StringVar(&githubAPIAllowedHosts, "github-api-allowed-hosts", strings.Join(options.GitHubAPIAllowedHosts, ","), "Comma-separated GitHub API hosts allowed for remote skill sources.")
 	flag.BoolVar(&options.AllowInsecureGitHubAPI, "allow-insecure-github-api", options.AllowInsecureGitHubAPI, "Allow HTTP for allowlisted GitHub API hosts; intended only for local tests.")
 	flag.StringVar(&options.CodexRunnerImage, "runner-image-codex", options.CodexRunnerImage, "Default image for Codex AgentRuns that do not set spec.harness.backend.image.")
+	flag.StringVar(&options.OpenCodeRunnerImage, "runner-image-opencode", options.OpenCodeRunnerImage, "Default image for OpenCode AgentRuns that do not set spec.harness.backend.image.")
 	flag.StringVar(&options.HermesAgentRunnerImage, "runner-image-hermes-agent", options.HermesAgentRunnerImage, "Default image for Hermes Agent AgentRuns that do not set spec.harness.backend.image.")
 	flag.StringVar(&options.OpenClawRunnerImage, "runner-image-openclaw", options.OpenClawRunnerImage, "Default image for OpenClaw AgentRuns that do not set spec.harness.backend.image.")
 	flag.StringVar(&options.GrokBuildRunnerImage, "runner-image-grok-build", options.GrokBuildRunnerImage, "Default image for Grok Build AgentRuns that do not set spec.harness.backend.image.")
