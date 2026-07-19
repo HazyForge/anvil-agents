@@ -149,6 +149,7 @@ audience, and explicit namespace authorization bindings are configured. See
 - [Knowledge bases, tools, and external services](docs/integrating-knowledge-and-tools.md)
 - [Connect any application or Kubernetes API to adverse streams](docs/integrating-adverse-sources.md)
 - [Operations, upgrades, and uninstall](docs/operations.md)
+- [PostgreSQL archive modes and retention](docs/archive.md)
 - [Design roadmap and known alpha boundaries](docs/design-roadmap.md)
 - [AgentRun API reference](docs/agent-run.md)
 - [Migration from Anvil Primaris](docs/migration-from-anvil-primaris.md)

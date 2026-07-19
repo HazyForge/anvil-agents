@@ -1,0 +1,117 @@
+{{- if eq (include "anvil-agents.archiveMode" .) "standalone" }}
+{{- $name := include "anvil-agents.archiveStandaloneName" . -}}
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ $name }}
+  labels:
+    app.kubernetes.io/name: {{ include "anvil-agents.name" . }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: archive-postgres
+spec:
+  serviceName: {{ $name }}
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "anvil-agents.name" . }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      app.kubernetes.io/component: archive-postgres
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ include "anvil-agents.name" . }}
+        app.kubernetes.io/instance: {{ .Release.Name }}
+        app.kubernetes.io/component: archive-postgres
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+{{ toYaml . | indent 8 }}
+      {{- end }}
+      {{- with .Values.archive.standalone.podSecurityContext }}
+      securityContext:
+{{ toYaml . | indent 8 }}
+      {{- end }}
+      containers:
+        - name: postgres
+          image: {{ default (printf "%s:%s" .Values.archive.standalone.image.repository .Values.archive.standalone.image.tag) .Values.archive.standalone.image.reference | quote }}
+          imagePullPolicy: {{ .Values.archive.standalone.image.pullPolicy }}
+          args:
+            - -p
+            - {{ .Values.archive.standalone.port | quote }}
+          env:
+            - name: POSTGRES_DB
+              value: {{ .Values.archive.standalone.database | quote }}
+            - name: POSTGRES_USER
+              value: {{ .Values.archive.standalone.username | quote }}
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ default $name .Values.archive.standalone.auth.existingSecret | quote }}
+                  key: {{ .Values.archive.standalone.auth.passwordKey | quote }}
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          ports:
+            - name: postgres
+              containerPort: {{ .Values.archive.standalone.port }}
+          startupProbe:
+            exec:
+              command:
+                - pg_isready
+                - -U
+                - {{ .Values.archive.standalone.username | quote }}
+                - -d
+                - {{ .Values.archive.standalone.database | quote }}
+                - -p
+                - {{ .Values.archive.standalone.port | quote }}
+            periodSeconds: 5
+            failureThreshold: 60
+          readinessProbe:
+            exec:
+              command:
+                - pg_isready
+                - -U
+                - {{ .Values.archive.standalone.username | quote }}
+                - -d
+                - {{ .Values.archive.standalone.database | quote }}
+                - -p
+                - {{ .Values.archive.standalone.port | quote }}
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          livenessProbe:
+            exec:
+              command:
+                - pg_isready
+                - -U
+                - {{ .Values.archive.standalone.username | quote }}
+                - -d
+                - {{ .Values.archive.standalone.database | quote }}
+                - -p
+                - {{ .Values.archive.standalone.port | quote }}
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          {{- with .Values.archive.standalone.securityContext }}
+          securityContext:
+{{ toYaml . | indent 12 }}
+          {{- end }}
+          resources:
+{{ toYaml .Values.archive.standalone.resources | indent 12 }}
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+      {{- with .Values.archive.standalone.nodeSelector }}
+      nodeSelector:
+{{ toYaml . | indent 8 }}
+      {{- end }}
+      {{- with .Values.archive.standalone.affinity }}
+      affinity:
+{{ toYaml . | indent 8 }}
+      {{- end }}
+      {{- with .Values.archive.standalone.tolerations }}
+      tolerations:
+{{ toYaml . | indent 8 }}
+      {{- end }}
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ $name | quote }}
+{{- end }}

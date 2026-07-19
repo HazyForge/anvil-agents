@@ -59,10 +59,83 @@ crds:
   install: true
 
 archive:
+  # disabled | external | standalone | cloudnativepg
+  # Empty preserves legacy databaseURLSecret auto-detection and otherwise
+  # resolves to disabled. New installations should set a mode explicitly.
+  mode: ""
+  # Change after rotating an externally managed database Secret to restart the
+  # controller and recreate its cached PostgreSQL connection pool.
+  restartToken: ""
+  terminalRetention: ""
+
+  # Deprecated compatibility alias. A non-empty name selects external mode
+  # when mode is left at its default. Prefer external.databaseURLSecret.
   databaseURLSecret:
     name: ""
     key: url
-  terminalRetention: ""
+
+  external:
+    databaseURLSecret:
+      name: ""
+      key: url
+
+  # A single PostgreSQL StatefulSet for development and small installations.
+  # For GitOps/Argo CD, set auth.existingSecret because Helm's generated
+  # credential is intentionally not deterministic during offline rendering.
+  standalone:
+    image:
+      reference: ""
+      repository: postgres
+      tag: 17-alpine
+      pullPolicy: IfNotPresent
+    database: anvil_agents
+    username: anvil_agents
+    port: 5432
+    auth:
+      # When set, this Secret must contain both passwordKey and databaseURLKey.
+      existingSecret: ""
+      # Explicit opt-in for live Helm installs only. Keep false for GitOps.
+      generate: false
+      passwordKey: password
+      databaseURLKey: url
+    storage:
+      size: 10Gi
+      storageClass: ""
+      accessModes:
+        - ReadWriteOnce
+    resources: {}
+    # These IDs match the default postgres:alpine image. Adjust them together
+    # when overriding the image with one that uses a different postgres UID.
+    podSecurityContext:
+      runAsNonRoot: true
+      runAsUser: 70
+      runAsGroup: 70
+      fsGroup: 70
+      fsGroupChangePolicy: OnRootMismatch
+      seccompProfile:
+        type: RuntimeDefault
+    securityContext:
+      allowPrivilegeEscalation: false
+      capabilities:
+        drop:
+          - ALL
+    nodeSelector: {}
+    tolerations: []
+    affinity: {}
+
+  # Creates a Cluster only when the CloudNativePG operator and Cluster CRD are
+  # already installed. The operator must generate an app Secret with key uri
+  # (documented by CloudNativePG 1.19+). The chart never installs CNPG itself.
+  cloudnativePG:
+    clusterName: ""
+    instances: 1
+    database: anvil_agents
+    owner: anvil_agents
+    dataChecksums: true
+    storage:
+      size: 10Gi
+      storageClass: ""
+    resources: {}
 
 service:
   metricsPort: 8080

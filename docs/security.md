@@ -80,4 +80,13 @@ object so unrelated runtime and credential references are not disclosed to the
 harness. Internal signal delivery receipts are also removed from mounted
 adverse context.
 
+PostgreSQL archive credentials stay in Secret references, but archived rows
+can contain prompts, source context, decisions, reports, and bounded output.
+Restrict database and Secret access, use encrypted transport and storage where
+appropriate, and define backup and row-retention policy. The standalone chart
+mode is a single-instance convenience database without TLS or backups; use an
+externally managed PostgreSQL design for stronger production controls. Retained
+standalone credentials/PVCs and CloudNativePG Clusters must be decommissioned
+as explicit data-destruction operations after backup verification.
+
 Report vulnerabilities privately using [SECURITY.md](../SECURITY.md).
