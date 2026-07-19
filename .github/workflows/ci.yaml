@@ -65,3 +65,16 @@ jobs:
           echo "$(go env GOPATH)/bin" >> "${GITHUB_PATH}"
       - name: Verify upgrade, execution, storage, and uninstall
         run: make kind-e2e
+
+  public-release-judge-e2e:
+    needs: verify
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install pinned judge prerequisites
+        run: |
+          ./hack/install-judge-prerequisites.sh --install \
+            --bin-dir "${RUNNER_TEMP}/anvil-agents-bin"
+          echo "${RUNNER_TEMP}/anvil-agents-bin" >> "${GITHUB_PATH}"
+      - name: Test the public release without rebuilding Anvil Agents
+        run: make judge-kind-e2e

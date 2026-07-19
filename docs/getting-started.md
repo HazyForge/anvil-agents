@@ -19,6 +19,20 @@ introduced.
 The current release gate does not yet certify older Kubernetes versions or
 published arm64 images.
 
+These are the broader source-build requirements. Judges using the public
+no-build path can install only its certified user-space tools without `sudo`:
+
+```bash
+./hack/install-judge-prerequisites.sh --install \
+  --bin-dir "${HOME}/.local/bin"
+export PATH="${HOME}/.local/bin:${PATH}"
+./hack/install-judge-prerequisites.sh --check
+```
+
+That script installs checksum-pinned Kind, kubectl, and Helm binaries. It checks
+but never installs or reconfigures the host's Docker Engine. Continue with the
+[public judge instructions](../JUDGING.md) for the digest-pinned release test.
+
 ## Credential-Free Kind Run
 
 Install Kind, then run:

@@ -1,0 +1,16 @@
+apiVersion: control.anvil.hazyforge.io/v1alpha1
+kind: AgentRun
+metadata:
+  name: judge-read-002
+  namespace: anvil-agents-judge
+spec:
+  purpose: manual
+  sourceRef:
+    kind: BuildWeekJudgeTest
+    name: public-release
+  profileRef:
+    name: judge
+  prompt: Create a new append-only run and prove it reads state written by the first run.
+  scope:
+    applicationRef:
+      name: build-week-judge

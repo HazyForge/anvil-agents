@@ -20,6 +20,10 @@ FROM debian:bookworm-slim
 
 ARG AGENT_UID=10001
 ARG AGENT_GID=10001
+ARG GROK_VERSION=0.2.103
+ARG GROK_SHA256_AMD64=9a597598dd798333f75d2b577960eaa80a479dea6ae891045fe2b03e10b179b2
+ARG GROK_SHA256_ARM64=3e5e6f7f90cb8c3f3338bb2abbf638838af0e42620f0f88d3b36a38e09189aba
+ARG GROK_NOTICES_REV=7cfcb20d2b50b0d18801a6c0af2e401c0e060894
 ARG HELM_VERSION=v3.21.2
 ARG KUBECTL_VERSION=v1.34.0
 
@@ -47,16 +51,28 @@ RUN apt-get update \
 	&& echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" > /etc/apt/sources.list.d/github-cli.list \
 	&& apt-get update \
 	&& apt-get install -y --no-install-recommends gh \
-	&& curl -fsSLo /tmp/grok-install.sh https://x.ai/cli/install.sh \
-	&& install_home="$(mktemp -d)" \
-	&& HOME="${install_home}" GROK_BIN_DIR="${install_home}/.grok/bin" bash /tmp/grok-install.sh \
-	&& grok_path="$(readlink -f "${install_home}/.grok/bin/grok")" \
-	&& test -x "${grok_path}" \
-	&& install -m 0755 "${grok_path}" /usr/local/bin/grok \
-	&& install -m 0755 "${grok_path}" /usr/local/bin/agent \
-	&& rm -rf "${install_home}" /tmp/grok-install.sh \
 	&& arch="$(dpkg --print-architecture)" \
-	&& case "${arch}" in amd64|arm64) ;; *) echo "unsupported kubectl architecture ${arch}" >&2; exit 1 ;; esac \
+	&& case "${arch}" in \
+		amd64) grok_arch=x86_64; grok_sha256="${GROK_SHA256_AMD64}" ;; \
+		arm64) grok_arch=aarch64; grok_sha256="${GROK_SHA256_ARM64}" ;; \
+		*) echo "unsupported Grok/kubectl architecture ${arch}" >&2; exit 1 ;; \
+	esac \
+	&& curl -fsSLo /usr/local/bin/grok "https://x.ai/cli/grok-${GROK_VERSION}-linux-${grok_arch}" \
+	&& printf '%s  %s\n' "${grok_sha256}" /usr/local/bin/grok | sha256sum --check --strict - \
+	&& chmod 0755 /usr/local/bin/grok \
+	&& ln -s /usr/local/bin/grok /usr/local/bin/agent \
+	&& mkdir -p /usr/share/doc/grok-build \
+	&& notice_base="https://raw.githubusercontent.com/xai-org/grok-build/${GROK_NOTICES_REV}" \
+	&& curl -fsSLo /usr/share/doc/grok-build/LICENSE "${notice_base}/LICENSE" \
+	&& curl -fsSLo /usr/share/doc/grok-build/THIRD-PARTY-NOTICES "${notice_base}/THIRD-PARTY-NOTICES" \
+	&& curl -fsSLo /usr/share/doc/grok-build/TOOLS-THIRD-PARTY-NOTICES.md "${notice_base}/crates/codegen/xai-grok-tools/THIRD_PARTY_NOTICES.md" \
+	&& curl -fsSLo /usr/share/doc/grok-build/VENDORED-NOTICE "${notice_base}/third_party/NOTICE" \
+	&& printf '%s  %s\n' \
+		116f7778b9802e569b7fa3a532b17bd80eb13c67837def01eed093d4ea472f28 /usr/share/doc/grok-build/LICENSE \
+		7b7c315403c596f9b7a13bb562553ee4fd4c05da8672f95bcaa02a125eea2947 /usr/share/doc/grok-build/THIRD-PARTY-NOTICES \
+		e8785a6098a7ee780cd2db35745b8e53061cfb1b6da19147a308579466ea4e50 /usr/share/doc/grok-build/TOOLS-THIRD-PARTY-NOTICES.md \
+		4122c27e9ad4b8e67e6f8a7869d11f389600a5d5f773fdec9d0b2ac9d7f21101 /usr/share/doc/grok-build/VENDORED-NOTICE \
+		| sha256sum --check --strict - \
 	&& curl -fsSLo /usr/local/bin/kubectl "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/${arch}/kubectl" \
 	&& chmod 0755 /usr/local/bin/kubectl \
 	&& curl -fsSLo /tmp/helm.tar.gz "https://get.helm.sh/helm-${HELM_VERSION}-linux-${arch}.tar.gz" \
