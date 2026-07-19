@@ -13,7 +13,7 @@ Run `helm template` and review CRD changes first. Only one controller may
 reconcile the branded API group during a migration or rollback.
 
 `make kind-upgrade-e2e` proves a portable seven-CRD, legacy-object baseline can
-be upgraded to the current ten-CRD chart while retaining profiles and runs. It
+be upgraded to the current eleven-CRD chart while retaining profiles and runs. It
 uses and removes a dedicated disposable Kind cluster. Set
 `ANVIL_AGENTS_UPGRADE_FROM_REF` to a reachable historical chart ref when
 testing an exact released baseline; the default does not depend on an

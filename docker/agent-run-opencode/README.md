@@ -53,3 +53,14 @@ exited 0, emitted `OPENCODE_HARNESS_SMOKE_OK`, and produced both
 credential-free model is useful for a plumbing smoke test while OpenCode offers
 it, but provider-backed production profiles should select and authenticate an
 explicit provider/model.
+
+A second run on merged `master` commit
+`e71728ebab55002228a0878c62c81c14bcb46b5d` mounted that exact checkout at
+`/workspace` with Docker's read-only bind option, supplied a valid `AgentRun`
+context with `observe` intent, and kept OpenCode auto approval disabled. The
+model used OpenCode's file-read tool on `README.md` and `Makefile`, correctly
+reported the Anvil Agents project name, identified `make verify` as the
+required validation target, confirmed OpenCode is a built-in harness, emitted
+both lifecycle markers, and exited 0. The read-only filesystem mount enforced
+the mutation boundary for this smoke; `observe` intent and disabled auto
+approval are policy inputs, not a sandbox on their own.
