@@ -112,6 +112,8 @@ the certified submission contract.
 - `anvil-agents-api`: optional OIDC-protected summaries and live SSE logs.
 - `anvil-agentctl`: Kubernetes-authenticated creation and diagnosis of runs
   without writing raw manifests.
+- Collector-neutral Job and Pod labels for external log and telemetry
+  pipelines.
 
 "Multi-harness" means every run uses one adapter behind a common payload,
 tool-bootstrap, and status contract. Schedules can distribute independent runs
@@ -222,6 +224,7 @@ audience, and explicit namespace authorization bindings are configured. See
 - [Getting started](docs/getting-started.md)
 - [Harness contract and adapter matrix](docs/harnesses.md)
 - [Knowledge bases, tools, and external services](docs/integrating-knowledge-and-tools.md)
+- [AgentRun stdout, Alloy, and OpenTelemetry integration](docs/observability.md)
 - [Connect any application or Kubernetes API to adverse streams](docs/integrating-adverse-sources.md)
 - [Operations, upgrades, and uninstall](docs/operations.md)
 - [PostgreSQL archive modes and retention](docs/archive.md)

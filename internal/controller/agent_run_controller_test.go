@@ -1121,6 +1121,52 @@ func TestAgentRunJobValidationAcceptsKubernetesDefaults(t *testing.T) {
 	}
 }
 
+func TestAgentRunJobValidationAndReceiptIgnoreTelemetryOnlyLabelRollout(t *testing.T) {
+	t.Parallel()
+
+	run := &controlv1alpha1.AgentRun{
+		ObjectMeta: metav1.ObjectMeta{Name: "legacy-run", Namespace: "agents", UID: "run-uid"},
+		Spec: controlv1alpha1.AgentRunSpec{
+			SourceRef: controlv1alpha1.AgentRunSourceRef{Kind: "Manual", Name: "operator"},
+			Harness: controlv1alpha1.AgentRunHarnessSpec{
+				Intent:  controlv1alpha1.AgentRunIntentProposeChange,
+				Backend: controlv1alpha1.AgentRunHarnessBackendSpec{Kind: controlv1alpha1.AgentRunHarnessBackendOpenCode},
+			},
+		},
+	}
+	controller := true
+	owner := metav1.OwnerReference{APIVersion: controlv1alpha1.GroupVersion.String(), Kind: "AgentRun", Name: run.Name, UID: run.UID, Controller: &controller}
+	desired := agentRunJob(run, "legacy-run-harness", "legacy-run-context", nil)
+	desired.OwnerReferences = []metav1.OwnerReference{owner}
+
+	legacy := desired.DeepCopy()
+	delete(legacy.Labels, agentRunLabelBackend)
+	delete(legacy.Labels, agentRunLabelIntent)
+	delete(legacy.Spec.Template.Labels, agentRunLabelBackend)
+	delete(legacy.Spec.Template.Labels, agentRunLabelIntent)
+	if err := validateAgentRunJob(legacy, desired, run); err != nil {
+		t.Fatalf("pre-telemetry Job rejected during rollout: %v", err)
+	}
+
+	desiredDigest, err := agentRunJobSnapshotDigest(desired)
+	if err != nil {
+		t.Fatalf("digest telemetry-labeled Job: %v", err)
+	}
+	legacyDigest, err := agentRunJobSnapshotDigest(legacy)
+	if err != nil {
+		t.Fatalf("digest pre-telemetry Job: %v", err)
+	}
+	if legacyDigest != desiredDigest {
+		t.Fatalf("pre-telemetry Job digest = %q, want %q", legacyDigest, desiredDigest)
+	}
+
+	tampered := legacy.DeepCopy()
+	tampered.Labels[agentRunLabelSourceName] = "different-source"
+	if err := validateAgentRunJob(tampered, desired, run); err == nil {
+		t.Fatal("non-telemetry Job label mutation was accepted")
+	}
+}
+
 func TestAgentRunConfigMapMigrationMakesExactLegacyPayloadImmutable(t *testing.T) {
 	t.Parallel()
 
@@ -1314,6 +1360,61 @@ func TestAgentRunJobInjectsStatusToolEnv(t *testing.T) {
 	}
 	if containerSecurityContext.Capabilities == nil || len(containerSecurityContext.Capabilities.Drop) != 1 || containerSecurityContext.Capabilities.Drop[0] != "ALL" {
 		t.Fatalf("container dropped capabilities = %#v, want ALL", containerSecurityContext.Capabilities)
+	}
+}
+
+func TestAgentRunJobLabelsExposeCollectorNeutralTelemetryDimensions(t *testing.T) {
+	t.Parallel()
+
+	run := &controlv1alpha1.AgentRun{
+		ObjectMeta: metav1.ObjectMeta{Name: "repository-review", Namespace: "agents"},
+		Spec: controlv1alpha1.AgentRunSpec{
+			SourceRef: controlv1alpha1.AgentRunSourceRef{Kind: "AgentSchedule", Name: "repository-review-hourly"},
+			Harness: controlv1alpha1.AgentRunHarnessSpec{
+				Intent: controlv1alpha1.AgentRunIntentProposeChange,
+				Backend: controlv1alpha1.AgentRunHarnessBackendSpec{
+					Kind: controlv1alpha1.AgentRunHarnessBackendOpenCode,
+				},
+			},
+		},
+	}
+
+	job := agentRunJob(run, "repository-review-harness", "repository-review-context", nil)
+	for name, want := range map[string]string{
+		agentRunLabel:           "repository-review",
+		agentRunJobLabel:        "repository-review-harness",
+		agentRunLabelBackend:    "opencode",
+		agentRunLabelIntent:     "proposechange",
+		agentRunLabelSourceKind: "agentschedule",
+		agentRunLabelSourceName: "repository-review-hourly",
+	} {
+		if got := job.Spec.Template.Labels[name]; got != want {
+			t.Fatalf("pod label %s = %q, want %q", name, got, want)
+		}
+		if got := job.Labels[name]; got != want {
+			t.Fatalf("job label %s = %q, want %q", name, got, want)
+		}
+	}
+	for _, name := range []string{agentRunLabelBackend, agentRunLabelIntent} {
+		if _, exists := agentRunLabels(run, "")[name]; exists {
+			t.Fatalf("payload label set unexpectedly contains workload telemetry label %s", name)
+		}
+	}
+
+	defaultJob := agentRunJob(&controlv1alpha1.AgentRun{
+		ObjectMeta: metav1.ObjectMeta{Name: "default-run", Namespace: "agents"},
+		Spec:       controlv1alpha1.AgentRunSpec{SourceRef: controlv1alpha1.AgentRunSourceRef{Kind: "Manual", Name: "operator"}},
+	}, "default-run-harness", "default-run-context", nil)
+	for name, want := range map[string]string{
+		agentRunLabelBackend: "codex",
+		agentRunLabelIntent:  "observe",
+	} {
+		if got := defaultJob.Spec.Template.Labels[name]; got != want {
+			t.Fatalf("default pod label %s = %q, want %q", name, got, want)
+		}
+		if got := defaultJob.Labels[name]; got != want {
+			t.Fatalf("default job label %s = %q, want %q", name, got, want)
+		}
 	}
 }
 
