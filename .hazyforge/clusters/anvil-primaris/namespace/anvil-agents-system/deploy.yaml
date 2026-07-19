@@ -8,12 +8,13 @@ replicaCount: 1
 serviceAccount:
   name: anvil-agents
 image:
-  reference: ghcr.io/hazyforge/anvil-agents@sha256:387b37dfa3c1940b858dc02dbd93ffd29b497cfeb24dcf35d9b9bb8421ddaffa
+  reference: ghcr.io/hazyforge/anvil-agents@sha256:21747d1e1f32d4d2e19b0e939fce1f297ee80ba1c4712c3f4c0d78cfee58daf7
   pullPolicy: IfNotPresent
 imagePullSecrets:
   - name: ghcr-creds
 runnerImages:
   codex: ghcr.io/hazyforge/anvil-agent-run-codex@sha256:d89acf145d0db4a386c69214b1764c3199c7b1656487b619ffd3a86f7c9f0e47
+  openCode: ghcr.io/hazyforge/anvil-agent-run-opencode@sha256:d58104d55ac734ce89d0e1894ee737dfef5d69913668aaecf184d426e4235810
   hermesAgent: ghcr.io/hazyforge/anvil-agent-run-hermes@sha256:afd4f3d4858062835ac27bac52f529a429b949ee632a79f6c13546374782328f
   openClaw: ghcr.io/hazyforge/anvil-agent-run-openclaw@sha256:58d70d53acc2a1267eed0d62e867d8cc804bd6e467f6dc908170c0a2225ff2ee
   grokBuild: ghcr.io/hazyforge/anvil-agent-run-grok-build@sha256:a67289b5e3021ec4303185fca3c6f11d18b656be999c24279885ed74855a7194
