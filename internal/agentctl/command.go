@@ -737,6 +737,9 @@ func verifyJob(run *agentsv1alpha1.AgentRun, job *batchv1.Job) error {
 	if owner == nil || owner.APIVersion != agentsv1alpha1.GroupVersion.String() || owner.Kind != "AgentRun" || owner.Name != run.Name || owner.UID != run.UID {
 		return fmt.Errorf("Job is not controller-owned by AgentRun %s/%s", run.Namespace, run.Name)
 	}
+	if run.Status.JobUID != "" && string(job.UID) != run.Status.JobUID {
+		return fmt.Errorf("Job UID does not match the AgentRun status receipt")
+	}
 	return nil
 }
 
@@ -750,6 +753,9 @@ func verifyPod(run *agentsv1alpha1.AgentRun, job *batchv1.Job, pod *corev1.Pod) 
 	owner := metav1.GetControllerOf(pod)
 	if owner == nil || owner.APIVersion != batchv1.SchemeGroupVersion.String() || owner.Kind != "Job" || owner.Name != job.Name || owner.UID != job.UID {
 		return fmt.Errorf("Pod is not controller-owned by Job %s/%s", job.Namespace, job.Name)
+	}
+	if run.Status.RunnerPodUID != "" && string(pod.UID) != run.Status.RunnerPodUID {
+		return fmt.Errorf("Pod UID does not match the AgentRun status receipt")
 	}
 	for _, container := range pod.Spec.Containers {
 		if container.Name == agentContainer {

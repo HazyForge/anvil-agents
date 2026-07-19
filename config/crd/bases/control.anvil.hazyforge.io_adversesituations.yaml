@@ -2170,6 +2170,42 @@ spec:
                                   ServiceAccountName selects the Kubernetes service account for the
                                   agent pod. Use this to grant internal API and Kubernetes read access.
                                 type: string
+                              skillSourceCredentials:
+                                description: |-
+                                  SkillSourceCredentials authorizes private remote skill reads by exact API
+                                  host. Credential selection belongs to the harness execution envelope, not
+                                  reusable AgentSkillSet content.
+                                items:
+                                  description: |-
+                                    AgentRunGitHubSkillCredential binds a GitHub API host to a token selected by
+                                    the trusted harness execution envelope. AgentSkillSet authors cannot select
+                                    credentials through remote content references.
+                                  properties:
+                                    apiHost:
+                                      description: |-
+                                        APIHost is the exact GitHub or GitHub Enterprise API host, including an
+                                        optional port and without a URL scheme or path.
+                                      minLength: 1
+                                      type: string
+                                    tokenSecretRef:
+                                      description: TokenSecretRef selects a same-namespace
+                                        Secret key containing the token.
+                                      properties:
+                                        key:
+                                          type: string
+                                        name:
+                                          type: string
+                                        namespace:
+                                          type: string
+                                      required:
+                                      - key
+                                      - name
+                                      type: object
+                                  required:
+                                  - apiHost
+                                  - tokenSecretRef
+                                  type: object
+                                type: array
                               spiffeWorkloadAPI:
                                 description: |-
                                   SpiffeWorkloadAPI opts this run into the SPIFFE CSI Workload API mount.
@@ -2313,9 +2349,10 @@ spec:
                                             minLength: 1
                                             type: string
                                           ref:
-                                            description: |-
-                                              Ref is a branch, tag, or commit SHA. Empty uses the repository default
-                                              branch at the time the controller resolves the source.
+                                            description: Ref is the full immutable
+                                              Git commit object ID used to resolve
+                                              the source.
+                                            pattern: ^([0-9a-fA-F]{40}|[0-9a-fA-F]{64})$
                                             type: string
                                           repository:
                                             description: |-
@@ -2323,24 +2360,9 @@ spec:
                                               example/agent-skills.
                                             minLength: 1
                                             type: string
-                                          tokenSecretRef:
-                                            description: |-
-                                              TokenSecretRef optionally references a same-namespace Kubernetes Secret
-                                              key containing a GitHub token for private repositories or protected
-                                              contents.
-                                            properties:
-                                              key:
-                                                type: string
-                                              name:
-                                                type: string
-                                              namespace:
-                                                type: string
-                                            required:
-                                            - key
-                                            - name
-                                            type: object
                                         required:
                                         - path
+                                        - ref
                                         - repository
                                         type: object
                                     type: object
@@ -2701,9 +2723,10 @@ spec:
                                             minLength: 1
                                             type: string
                                           ref:
-                                            description: |-
-                                              Ref is a branch, tag, or commit SHA. Empty uses the repository default
-                                              branch at the time the controller resolves the source.
+                                            description: Ref is the full immutable
+                                              Git commit object ID used to resolve
+                                              the source.
+                                            pattern: ^([0-9a-fA-F]{40}|[0-9a-fA-F]{64})$
                                             type: string
                                           repository:
                                             description: |-
@@ -2711,24 +2734,9 @@ spec:
                                               example/agent-skills.
                                             minLength: 1
                                             type: string
-                                          tokenSecretRef:
-                                            description: |-
-                                              TokenSecretRef optionally references a same-namespace Kubernetes Secret
-                                              key containing a GitHub token for private repositories or protected
-                                              contents.
-                                            properties:
-                                              key:
-                                                type: string
-                                              name:
-                                                type: string
-                                              namespace:
-                                                type: string
-                                            required:
-                                            - key
-                                            - name
-                                            type: object
                                         required:
                                         - path
+                                        - ref
                                         - repository
                                         type: object
                                     type: object
@@ -2797,6 +2805,8 @@ spec:
             type: object
           status:
             properties:
+              activeResponderDigest:
+                type: string
               activeResponderRef:
                 description: |-
                   NamespacedObjectReference identifies a Kubernetes object without importing
@@ -2810,6 +2820,8 @@ spec:
                 required:
                 - name
                 type: object
+              activeResponderUID:
+                type: string
               conditions:
                 items:
                   description: Condition contains details for one aspect of the current

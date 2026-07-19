@@ -15,6 +15,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	controlv1alpha1 "github.com/hazyforge/anvil-agents/api/v1alpha1"
 )
@@ -277,14 +278,16 @@ func TestPausedControlDoesNotInterruptAlreadyCreatedJob(t *testing.T) {
 	ctx := context.Background()
 	scheme := newAgentControlTestScheme(t)
 	run := testPendingApplicationRun("health-run", "health")
+	run.UID = types.UID("health-run-uid")
 	run.Status = controlv1alpha1.AgentRunStatus{
 		ObservedGeneration: 1,
 		Phase:              controlv1alpha1.AgentRunPhaseRunning,
 		PromptHash:         "existing",
 		JobRef:             &controlv1alpha1.NamespacedObjectReference{Name: "health-run-harness-existing", Namespace: run.Namespace},
 	}
+	controller := true
 	job := &batchv1.Job{
-		ObjectMeta: metav1.ObjectMeta{Name: run.Status.JobRef.Name, Namespace: run.Namespace, Labels: map[string]string{agentRunJobLabel: run.Status.JobRef.Name}},
+		ObjectMeta: metav1.ObjectMeta{Name: run.Status.JobRef.Name, Namespace: run.Namespace, Labels: map[string]string{agentRunJobLabel: run.Status.JobRef.Name}, OwnerReferences: []metav1.OwnerReference{{APIVersion: controlv1alpha1.GroupVersion.String(), Kind: "AgentRun", Name: run.Name, UID: run.UID, Controller: &controller}}},
 		Status:     batchv1.JobStatus{Active: 1},
 	}
 	control := pausedAgentRunControl("hazy-trade-control", "hazy-trade", nil)
@@ -302,20 +305,20 @@ func TestPausedControlDoesNotInterruptAlreadyCreatedJob(t *testing.T) {
 	}
 }
 
-func TestPausedControlAdoptsJobCreatedBeforeStatusPersistence(t *testing.T) {
+func TestPausedControlRejectsInjectedJobCreatedBeforeStatusPersistence(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
 	scheme := newAgentControlTestScheme(t)
 	run := testPendingApplicationRun("crash-gap-run", "health")
 	run.UID = types.UID("crash-gap-run-uid")
-	run.Spec.ProfileRef = &controlv1alpha1.NamespacedObjectReference{Name: "profile-deleted-after-job-create"}
 	controller := true
+	jobName := agentRunChildName(run.Name, "harness", shortHash(buildAgentRunPrompt(run)))
 	job := &batchv1.Job{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "crash-gap-run-harness-existing",
+			Name:      jobName,
 			Namespace: run.Namespace,
-			Labels:    map[string]string{agentRunLabel: run.Name, agentRunJobLabel: "crash-gap-run-harness-existing"},
+			Labels:    agentRunLabels(run, jobName),
 			OwnerReferences: []metav1.OwnerReference{{
 				APIVersion: controlv1alpha1.GroupVersion.String(),
 				Kind:       "AgentRun",
@@ -340,22 +343,16 @@ func TestPausedControlAdoptsJobCreatedBeforeStatusPersistence(t *testing.T) {
 	control := pausedAgentRunControl("hazy-trade-control", "hazy-trade", nil)
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(run, job, control).WithStatusSubresource(run).Build()
 	reconciler := &AgentRunReconciler{Client: c, Scheme: scheme}
-	if _, err := reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: client.ObjectKey{Namespace: run.Namespace, Name: run.Name}}); err != nil {
-		t.Fatalf("reconcile crash-gap run: %v", err)
+	if _, err := reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: client.ObjectKey{Namespace: run.Namespace, Name: run.Name}}); err == nil || !strings.Contains(err.Error(), "AgentRun Job") {
+		t.Fatalf("reconcile injected crash-gap Job error = %v, want exact-spec rejection", err)
 	}
 
 	updated := &controlv1alpha1.AgentRun{}
 	if err := c.Get(ctx, client.ObjectKey{Namespace: run.Namespace, Name: run.Name}, updated); err != nil {
 		t.Fatalf("get adopted run: %v", err)
 	}
-	if updated.Status.JobRef == nil || updated.Status.JobRef.Name != job.Name {
-		t.Fatalf("jobRef = %#v, want adopted Job %q", updated.Status.JobRef, job.Name)
-	}
-	if updated.Status.Backend != "codex" || updated.Status.Intent != "observe" || updated.Status.Image != "ghcr.io/hazyforge/anvil-agent-run-codex:test" {
-		t.Fatalf("adopted execution identity = backend %q intent %q image %q", updated.Status.Backend, updated.Status.Intent, updated.Status.Image)
-	}
-	if updated.Status.Decision == nil || updated.Status.Decision.Action != "observe" {
-		t.Fatalf("adopted fallback decision = %#v, want action observe from Job snapshot", updated.Status.Decision)
+	if updated.Status.JobRef != nil {
+		t.Fatalf("jobRef = %#v, want injected Job to remain untrusted", updated.Status.JobRef)
 	}
 	jobs := &batchv1.JobList{}
 	if err := c.List(ctx, jobs); err != nil {
@@ -364,6 +361,337 @@ func TestPausedControlAdoptsJobCreatedBeforeStatusPersistence(t *testing.T) {
 	if len(jobs.Items) != 1 || jobs.Items[0].Name != job.Name {
 		t.Fatalf("Jobs = %#v, want only adopted Job %q", jobs.Items, job.Name)
 	}
+}
+
+func TestPausedControlRecoversExactJobCreatedBeforeStatusPersistence(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	scheme := newAgentControlTestScheme(t)
+	run := testPendingApplicationRun("exact-crash-gap-run", "health")
+	run.UID = types.UID("exact-crash-gap-run-uid")
+	seed := &AgentRunReconciler{Client: fake.NewClientBuilder().WithScheme(scheme).Build(), Scheme: scheme}
+	effective, composition, phase, reason, message, err := seed.resolveAgentRunComposition(ctx, run)
+	if err != nil || phase != "" {
+		t.Fatalf("resolve composition = phase %q reason %q message %q err %v", phase, reason, message, err)
+	}
+	prompt := buildAgentRunPrompt(effective)
+	promptHash := shortHash(prompt)
+	effective.Status.ResolvedComposition = composition.DeepCopy()
+	contextBody, err := seed.agentRunContextJSON(ctx, effective)
+	if err != nil {
+		t.Fatalf("render context: %v", err)
+	}
+	data, err := seed.agentRunConfigMapData(ctx, effective, prompt, string(contextBody))
+	if err != nil {
+		t.Fatalf("render payload: %v", err)
+	}
+	controller := true
+	owner := metav1.OwnerReference{APIVersion: controlv1alpha1.GroupVersion.String(), Kind: "AgentRun", Name: run.Name, UID: run.UID, Controller: &controller}
+	configMap := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{
+		Name: agentRunChildName(run.Name, "context", promptHash), Namespace: run.Namespace,
+		Labels: agentRunLabels(effective, ""), OwnerReferences: []metav1.OwnerReference{owner},
+	}, Data: data, Immutable: boolPtr(true)}
+	composition.PayloadDigest = digestJSON(data)
+	effective.Status.ResolvedComposition = composition.DeepCopy()
+	jobName := agentRunChildName(run.Name, "harness", promptHash)
+	job := seed.agentRunJob(effective, jobName, configMap.Name, nil)
+	job.UID = "exact-job-uid"
+	job.OwnerReferences = []metav1.OwnerReference{owner}
+	job.Status.Conditions = []batchv1.JobCondition{{Type: batchv1.JobComplete, Status: corev1.ConditionTrue}}
+
+	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(run, configMap, job).WithStatusSubresource(run).Build()
+	reconciler := &AgentRunReconciler{Client: c, Scheme: scheme}
+	if _, err := reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: client.ObjectKeyFromObject(run)}); err != nil {
+		t.Fatalf("reconcile exact crash-gap Job: %v", err)
+	}
+	updated := &controlv1alpha1.AgentRun{}
+	if err := c.Get(ctx, client.ObjectKeyFromObject(run), updated); err != nil {
+		t.Fatalf("get recovered run: %v", err)
+	}
+	if updated.Status.JobRef == nil || updated.Status.JobRef.Name != job.Name || updated.Status.Phase != controlv1alpha1.AgentRunPhaseSucceeded {
+		t.Fatalf("recovered status = %#v, want exact Job succeeded", updated.Status)
+	}
+	if updated.Status.JobUID != string(job.UID) {
+		t.Fatalf("recovered Job UID = %q, want %q", updated.Status.JobUID, job.UID)
+	}
+	if updated.Status.ResolvedComposition == nil || updated.Status.ResolvedComposition.ResolvedAt == nil {
+		t.Fatalf("recovered composition = %#v, want status-only resolvedAt", updated.Status.ResolvedComposition)
+	}
+	if strings.Contains(job.Annotations[agentRunAnnotationComposition], "resolvedAt") {
+		t.Fatal("Job composition annotation contains retry-unstable resolvedAt")
+	}
+}
+
+func TestAgentRunPersistsLaunchReceiptBeforeCreatingJob(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	scheme := newAgentControlTestScheme(t)
+	run := testPendingApplicationRun("planned-launch", "health")
+	run.UID = types.UID("planned-launch-uid")
+	run.Spec.Harness.Backend = controlv1alpha1.AgentRunHarnessBackendSpec{
+		Kind:   controlv1alpha1.AgentRunHarnessBackendCustom,
+		Image:  "busybox:1.37.0",
+		Custom: &controlv1alpha1.AgentRunCustomBackendSpec{Command: []string{"/bin/true"}},
+	}
+	c := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(run).
+		WithStatusSubresource(run).
+		WithInterceptorFuncs(interceptor.Funcs{Create: func(ctx context.Context, c client.WithWatch, obj client.Object, opts ...client.CreateOption) error {
+			if obj.GetUID() == "" {
+				obj.SetUID(types.UID("fake-" + obj.GetName() + "-uid"))
+			}
+			return c.Create(ctx, obj, opts...)
+		}}).
+		Build()
+	reconciler := &AgentRunReconciler{Client: c, Scheme: scheme}
+	request := ctrl.Request{NamespacedName: client.ObjectKeyFromObject(run)}
+
+	if _, err := reconciler.Reconcile(ctx, request); err != nil {
+		t.Fatalf("plan AgentRun launch: %v", err)
+	}
+	jobs := &batchv1.JobList{}
+	if err := c.List(ctx, jobs); err != nil {
+		t.Fatalf("list Jobs after launch planning: %v", err)
+	}
+	if len(jobs.Items) != 0 {
+		t.Fatalf("Jobs after launch planning = %#v, want none before receipt persistence", jobs.Items)
+	}
+	planned := &controlv1alpha1.AgentRun{}
+	if err := c.Get(ctx, client.ObjectKeyFromObject(run), planned); err != nil {
+		t.Fatalf("get planned AgentRun: %v", err)
+	}
+	if !agentRunLaunchReceiptComplete(&planned.Status) || planned.Status.JobUID != "" {
+		t.Fatalf("planned launch receipt = %#v", planned.Status)
+	}
+	if planned.Status.JobRef != nil || planned.Status.PlannedJobRef == nil {
+		t.Fatalf("planned/created Job references = %#v/%#v, want plan only", planned.Status.PlannedJobRef, planned.Status.JobRef)
+	}
+	if planned.Status.PayloadUID == "" {
+		t.Fatal("planned launch receipt omitted payload UID")
+	}
+
+	if _, err := reconciler.Reconcile(ctx, request); err != nil {
+		t.Fatalf("create AgentRun Job from launch receipt: %v", err)
+	}
+	if err := c.List(ctx, jobs); err != nil {
+		t.Fatalf("list Jobs after launch: %v", err)
+	}
+	if len(jobs.Items) != 1 || jobs.Items[0].Name != planned.Status.PlannedJobRef.Name {
+		t.Fatalf("Jobs after launch = %#v, want planned Job %q", jobs.Items, planned.Status.PlannedJobRef.Name)
+	}
+	launched := &controlv1alpha1.AgentRun{}
+	if err := c.Get(ctx, client.ObjectKeyFromObject(run), launched); err != nil {
+		t.Fatalf("get launched AgentRun: %v", err)
+	}
+	if launched.Status.JobCreateAttemptedAt == nil || launched.Status.JobRef == nil || launched.Status.JobUID == "" {
+		t.Fatalf("launched execution receipt = %#v", launched.Status)
+	}
+}
+
+func TestAgentRunCrashGapRecoveryUsesRecordedSnapshotAfterProfileDeletion(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	scheme := newAgentControlTestScheme(t)
+	run, payload, job := plannedProfileAgentRunExecution(t, ctx, scheme)
+	job.Status.Conditions = []batchv1.JobCondition{{Type: batchv1.JobComplete, Status: corev1.ConditionTrue}}
+	c := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(run, payload, job).
+		WithStatusSubresource(run).
+		Build()
+	reconciler := &AgentRunReconciler{Client: c, Scheme: scheme}
+
+	if _, err := reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: client.ObjectKeyFromObject(run)}); err != nil {
+		t.Fatalf("recover exact Job after profile deletion: %v", err)
+	}
+	updated := &controlv1alpha1.AgentRun{}
+	if err := c.Get(ctx, client.ObjectKeyFromObject(run), updated); err != nil {
+		t.Fatalf("get recovered AgentRun: %v", err)
+	}
+	if updated.Status.JobUID != string(job.UID) || updated.Status.Phase != controlv1alpha1.AgentRunPhaseSucceeded {
+		t.Fatalf("recovered status = %#v, want recorded Job succeeded", updated.Status)
+	}
+	if updated.Status.ResolvedComposition == nil || updated.Status.ResolvedComposition.ProfileRef == nil || updated.Status.ResolvedComposition.ProfileRef.Name != "launch-profile" {
+		t.Fatalf("recovered composition = %#v, want launch-time profile receipt", updated.Status.ResolvedComposition)
+	}
+}
+
+func TestAgentRunRejectsPlannedJobWithoutCreateAttemptReceipt(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	scheme := newAgentControlTestScheme(t)
+	run, payload, job := plannedProfileAgentRunExecution(t, ctx, scheme)
+	run.Status.JobCreateAttemptedAt = nil
+	c := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(run, payload, job).
+		WithStatusSubresource(run).
+		Build()
+	reconciler := &AgentRunReconciler{Client: c, Scheme: scheme}
+
+	_, err := reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: client.ObjectKeyFromObject(run)})
+	if err == nil || !strings.Contains(err.Error(), "without the required create-attempt receipt") {
+		t.Fatalf("unattempted planned Job error = %v, want create-attempt rejection", err)
+	}
+}
+
+func TestAgentRunCrashGapRecoveryRejectsJobTampering(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	scheme := newAgentControlTestScheme(t)
+	run, payload, job := plannedProfileAgentRunExecution(t, ctx, scheme)
+	job.Spec.Template.Spec.Containers[0].Image = "example.invalid/injected:latest"
+	c := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(run, payload, job).
+		WithStatusSubresource(run).
+		Build()
+	reconciler := &AgentRunReconciler{Client: c, Scheme: scheme}
+
+	_, err := reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: client.ObjectKeyFromObject(run)})
+	if err == nil || !strings.Contains(err.Error(), "recorded execution snapshot") {
+		t.Fatalf("tampered recovery error = %v, want execution snapshot rejection", err)
+	}
+	updated := &controlv1alpha1.AgentRun{}
+	if err := c.Get(ctx, client.ObjectKeyFromObject(run), updated); err != nil {
+		t.Fatalf("get rejected AgentRun: %v", err)
+	}
+	if updated.Status.JobUID != "" {
+		t.Fatalf("rejected Job UID = %q, want untrusted Job to remain unpinned", updated.Status.JobUID)
+	}
+}
+
+func TestAgentRunCrashGapRecoveryRejectsPayloadReplacementUID(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	scheme := newAgentControlTestScheme(t)
+	run, payload, job := plannedProfileAgentRunExecution(t, ctx, scheme)
+	payload.UID = types.UID("replacement-payload-uid")
+	c := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(run, payload, job).
+		WithStatusSubresource(run).
+		Build()
+	reconciler := &AgentRunReconciler{Client: c, Scheme: scheme}
+
+	_, err := reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: client.ObjectKeyFromObject(run)})
+	if err == nil || !strings.Contains(err.Error(), "does not match recorded UID") {
+		t.Fatalf("replacement payload error = %v, want UID rejection", err)
+	}
+	updated := &controlv1alpha1.AgentRun{}
+	if err := c.Get(ctx, client.ObjectKeyFromObject(run), updated); err != nil {
+		t.Fatalf("get rejected AgentRun: %v", err)
+	}
+	if updated.Status.JobUID != "" {
+		t.Fatalf("rejected Job UID = %q, want Job to remain unpinned", updated.Status.JobUID)
+	}
+}
+
+func TestAgentRunDoesNotRecreateMissingJobAfterCreateAttempt(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	scheme := newAgentControlTestScheme(t)
+	run, payload, _ := plannedProfileAgentRunExecution(t, ctx, scheme)
+	run.Generation++
+	run.Status.ObservedGeneration = run.Generation - 1
+	c := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(run, payload).
+		WithStatusSubresource(run).
+		Build()
+	reconciler := &AgentRunReconciler{Client: c, Scheme: scheme}
+
+	if _, err := reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: client.ObjectKeyFromObject(run)}); err != nil {
+		t.Fatalf("reconcile missing post-attempt Job: %v", err)
+	}
+	jobs := &batchv1.JobList{}
+	if err := c.List(ctx, jobs); err != nil {
+		t.Fatalf("list Jobs: %v", err)
+	}
+	if len(jobs.Items) != 0 {
+		t.Fatalf("recreated %d Jobs after an ambiguous create attempt", len(jobs.Items))
+	}
+	updated := &controlv1alpha1.AgentRun{}
+	if err := c.Get(ctx, client.ObjectKeyFromObject(run), updated); err != nil {
+		t.Fatalf("get failed AgentRun: %v", err)
+	}
+	ready := apimeta.FindStatusCondition(updated.Status.Conditions, agentRunReady)
+	if updated.Status.Phase != controlv1alpha1.AgentRunPhaseFailed || ready == nil || ready.Reason != "HarnessJobMissing" {
+		t.Fatalf("ambiguous create status = %#v, want Failed/HarnessJobMissing", updated.Status)
+	}
+	if updated.Status.ObservedGeneration != run.Generation || !agentRunLaunchReceiptComplete(&updated.Status) || updated.Status.JobCreateAttemptedAt == nil {
+		t.Fatalf("generation change did not preserve the complete launch receipt: %#v", updated.Status)
+	}
+}
+
+func plannedProfileAgentRunExecution(t *testing.T, ctx context.Context, scheme *runtime.Scheme) (*controlv1alpha1.AgentRun, *corev1.ConfigMap, *batchv1.Job) {
+	t.Helper()
+
+	run := testPendingApplicationRun("profile-crash-gap", "health")
+	run.UID = types.UID("profile-crash-gap-uid")
+	run.Spec.ProfileRef = &controlv1alpha1.NamespacedObjectReference{Name: "launch-profile", Namespace: run.Namespace}
+	run.Spec.Harness.Backend = controlv1alpha1.AgentRunHarnessBackendSpec{
+		Kind:   controlv1alpha1.AgentRunHarnessBackendCustom,
+		Image:  "busybox:1.37.0",
+		Custom: &controlv1alpha1.AgentRunCustomBackendSpec{Command: []string{"/bin/true"}},
+	}
+	profile := &controlv1alpha1.AgentRunProfile{
+		ObjectMeta: metav1.ObjectMeta{Name: "launch-profile", Namespace: run.Namespace, UID: types.UID("launch-profile-uid"), Generation: 1, ResourceVersion: "7"},
+		Spec:       controlv1alpha1.AgentRunProfileSpec{Harness: controlv1alpha1.AgentRunHarnessSpec{SystemPrompt: "launch-time profile instructions"}},
+	}
+	seed := &AgentRunReconciler{Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(profile).Build(), Scheme: scheme}
+	effective, composition, phase, reason, message, err := seed.resolveAgentRunComposition(ctx, run)
+	if err != nil || phase != "" {
+		t.Fatalf("resolve launch composition = phase %q reason %q message %q err %v", phase, reason, message, err)
+	}
+	prompt := buildAgentRunPrompt(effective)
+	promptHash := shortHash(prompt)
+	effective.Status.ResolvedComposition = composition.DeepCopy()
+	contextBody, err := seed.agentRunContextJSON(ctx, effective)
+	if err != nil {
+		t.Fatalf("render launch context: %v", err)
+	}
+	data, err := seed.agentRunConfigMapData(ctx, effective, prompt, string(contextBody))
+	if err != nil {
+		t.Fatalf("render launch payload: %v", err)
+	}
+	controller := true
+	owner := metav1.OwnerReference{APIVersion: controlv1alpha1.GroupVersion.String(), Kind: "AgentRun", Name: run.Name, UID: run.UID, Controller: &controller}
+	payload := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{
+		Name: agentRunChildName(run.Name, "context", promptHash), Namespace: run.Namespace, UID: types.UID("payload-uid"),
+		Labels: agentRunLabels(effective, ""), OwnerReferences: []metav1.OwnerReference{owner},
+	}, Data: data, Immutable: boolPtr(true)}
+	composition.PayloadDigest = digestJSON(data)
+	effective.Status.ResolvedComposition = composition.DeepCopy()
+	jobName := agentRunChildName(run.Name, "harness", promptHash)
+	job := seed.agentRunJob(effective, jobName, payload.Name, nil)
+	job.UID = types.UID("job-uid")
+	job.OwnerReferences = []metav1.OwnerReference{owner}
+	jobDigest, err := agentRunJobSnapshotDigest(job)
+	if err != nil {
+		t.Fatalf("digest launch Job: %v", err)
+	}
+	attemptedAt := metav1.Now()
+	run.Status = controlv1alpha1.AgentRunStatus{
+		ObservedGeneration:   run.Generation,
+		Phase:                controlv1alpha1.AgentRunPhasePending,
+		PromptHash:           promptHash,
+		PlannedJobRef:        &controlv1alpha1.NamespacedObjectReference{Name: job.Name, Namespace: job.Namespace},
+		JobCreateAttemptedAt: &attemptedAt,
+		JobSpecDigest:        jobDigest,
+		PayloadRef:           &controlv1alpha1.NamespacedObjectReference{Name: payload.Name, Namespace: payload.Namespace},
+		PayloadUID:           string(payload.UID),
+		ResolvedComposition:  composition.DeepCopy(),
+	}
+	return run, payload, job
 }
 
 func TestReferencedAgentRunJobRejectsSameNameWithDifferentOwner(t *testing.T) {
@@ -388,12 +716,44 @@ func TestReferencedAgentRunJobRejectsSameNameWithDifferentOwner(t *testing.T) {
 	}}
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(job).Build()
 	reconciler := &AgentRunReconciler{Client: c, Scheme: scheme}
-	resolved, message, err := reconciler.existingAgentRunJob(ctx, run, ref)
+	resolved, message, err := reconciler.existingAgentRunJob(ctx, run, ref, "", false)
 	if err != nil {
 		t.Fatalf("resolve referenced Job: %v", err)
 	}
-	if resolved != nil || !strings.Contains(message, "not AgentRun") {
+	if resolved != nil || !strings.Contains(message, "not controller-owned") {
 		t.Fatalf("resolved/message = %#v/%q, want ownership rejection", resolved, message)
+	}
+}
+
+func TestReferencedAgentRunJobRejectsReplacementUID(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	scheme := newAgentControlTestScheme(t)
+	run := testPendingApplicationRun("owned-run", "health")
+	run.UID = types.UID("owned-run-uid")
+	ref := &controlv1alpha1.NamespacedObjectReference{Name: "owned-run-harness", Namespace: run.Namespace}
+	controller := true
+	job := &batchv1.Job{ObjectMeta: metav1.ObjectMeta{
+		Name:      ref.Name,
+		Namespace: ref.Namespace,
+		UID:       types.UID("replacement-job-uid"),
+		OwnerReferences: []metav1.OwnerReference{{
+			APIVersion: controlv1alpha1.GroupVersion.String(),
+			Kind:       "AgentRun",
+			Name:       run.Name,
+			UID:        run.UID,
+			Controller: &controller,
+		}},
+	}}
+	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(job).Build()
+	reconciler := &AgentRunReconciler{Client: c, Scheme: scheme}
+	resolved, message, err := reconciler.existingAgentRunJob(ctx, run, ref, "original-job-uid", false)
+	if err != nil {
+		t.Fatalf("resolve referenced Job: %v", err)
+	}
+	if resolved != nil || !strings.Contains(message, "does not match recorded UID") {
+		t.Fatalf("resolved/message = %#v/%q, want UID rejection", resolved, message)
 	}
 }
 
@@ -539,10 +899,16 @@ func TestAgentRunControlStatusCountsResolvedSubjects(t *testing.T) {
 		Spec:       controlv1alpha1.AgentScheduleSpec{ApplicationRef: &controlv1alpha1.ApplicationReferenceSpec{Name: "hazy-trade"}},
 	}
 	pending := testPendingApplicationRun("pending", "health")
+	prepared := testPendingApplicationRun("prepared", "health")
+	prepared.Status.PlannedJobRef = &controlv1alpha1.NamespacedObjectReference{Name: "prepared-job", Namespace: prepared.Namespace}
 	active := testPendingApplicationRun("active", "health")
 	active.Status.JobRef = &controlv1alpha1.NamespacedObjectReference{Name: "active-job", Namespace: active.Namespace}
 	active.Status.Phase = controlv1alpha1.AgentRunPhaseRunning
-	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(control, schedule, pending, active).WithStatusSubresource(control).Build()
+	attempted := testPendingApplicationRun("attempted", "health")
+	attempted.Status.PlannedJobRef = &controlv1alpha1.NamespacedObjectReference{Name: "attempted-job", Namespace: attempted.Namespace}
+	attemptedAt := metav1.Now()
+	attempted.Status.JobCreateAttemptedAt = &attemptedAt
+	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(control, schedule, pending, prepared, active, attempted).WithStatusSubresource(control).Build()
 	reconciler := &AgentRunControlReconciler{Client: c, Scheme: scheme}
 	if _, err := reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: client.ObjectKey{Name: control.Name}}); err != nil {
 		t.Fatalf("reconcile AgentRunControl: %v", err)
@@ -551,7 +917,7 @@ func TestAgentRunControlStatusCountsResolvedSubjects(t *testing.T) {
 	if err := c.Get(ctx, client.ObjectKey{Name: control.Name}, updated); err != nil {
 		t.Fatalf("get AgentRunControl: %v", err)
 	}
-	if updated.Status.Phase != controlv1alpha1.AgentRunControlPhasePaused || updated.Status.AffectedScheduleCount != 1 || updated.Status.PendingRunCount != 1 || updated.Status.ActiveRunCount != 1 {
+	if updated.Status.Phase != controlv1alpha1.AgentRunControlPhasePaused || updated.Status.AffectedScheduleCount != 1 || updated.Status.PendingRunCount != 2 || updated.Status.ActiveRunCount != 2 {
 		t.Fatalf("unexpected status: %#v", updated.Status)
 	}
 }

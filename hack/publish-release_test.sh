@@ -24,7 +24,14 @@ while [[ $# -gt 0 ]]; do
 	esac
 done
 mkdir -p "$(dirname "${output}")"
-printf 'schema\tanvil-agents-image-lock/v1\n' > "${output}"
+{
+	printf 'schema\tanvil-agents-image-lock/v1\n'
+	printf 'source-revision\t0123456789abcdef0123456789abcdef01234567\n'
+	printf 'platform\tlinux/amd64\n'
+	for component in controller codex grok-build hermes openclaw pi; do
+		printf '%s\tregistry.example.com/team/%s@sha256:%064d\n' "${component}" "${component}" 1
+	done
+} > "${output}"
 EOF
 
 cat > "${repo_root}/hack/package-chart.sh" <<'EOF'
@@ -53,7 +60,13 @@ cat > "${tmp_dir}/bin/make" <<'EOF'
 set -euo pipefail
 printf 'make %s\n' "$*" >> "${FAKE_LOG}"
 EOF
-chmod 0755 "${repo_root}/hack/"*.sh "${tmp_dir}/bin/helm" "${tmp_dir}/bin/make"
+cat > "${tmp_dir}/bin/git" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+[[ "$*" == *"rev-parse HEAD"* ]]
+printf '%s\n' 0123456789abcdef0123456789abcdef01234567
+EOF
+chmod 0755 "${repo_root}/hack/"*.sh "${tmp_dir}/bin/helm" "${tmp_dir}/bin/make" "${tmp_dir}/bin/git"
 export PATH="${tmp_dir}/bin:${PATH}"
 
 fail() {
@@ -72,7 +85,7 @@ rg -q "^publish-images --prefix registry.example.com/team --version v0.2.3 --pla
 	fail "image publication arguments were not forwarded"
 rg -q "^make -C ${repo_root} verify$" "${FAKE_LOG}" || fail "source verification did not run"
 rg -q "^make -C ${repo_root} kind-e2e$" "${FAKE_LOG}" || fail "Kind verification did not run"
-rg -q "^package-chart --version v0.2.3 --output ${output} --image-prefix registry.example.com/team$" "${FAKE_LOG}" ||
+rg -q "^package-chart --version v0.2.3 --output ${output} --image-prefix registry.example.com/team --image-lock ${output}/images-v0.2.3.lock.tsv --source-revision 0123456789abcdef0123456789abcdef01234567$" "${FAKE_LOG}" ||
 	fail "chart packaging arguments were not forwarded"
 rg -q "^helm push ${output}/anvil-agents-0.2.3.tgz oci://registry.example.com/team/charts$" "${FAKE_LOG}" ||
 	fail "chart was not pushed to the default OCI destination"

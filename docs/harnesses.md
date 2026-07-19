@@ -130,3 +130,16 @@ preparation into a custom image. Do not assume that `applicationRef` clones a
 repository; it is only scope metadata. When a built-in image is asked to clone
 or check out a repository, clone, fetch, and ref-resolution failures terminate
 the Job instead of silently running against an empty or wrong workspace.
+
+Use credential helpers or provider-specific token Secrets where possible. If
+an HTTP(S) repository URL contains userinfo, a query, or a fragment, the runner
+uses it only for transport and persists a sanitized origin URL. Credential-
+bearing URLs using other URI schemes are rejected; use a normal SSH username
+or credential helper instead. This prevents a durable workspace from retaining
+the inline credential, but it does not make inline URL credentials the
+preferred authentication mechanism.
+
+Remote skill content is a separate controller-side fetch. Its source must name
+a full immutable commit. Private-source tokens are mapped by exact API host in
+the trusted harness execution envelope; they cannot be selected by an
+`AgentSkillSet` or skill override.

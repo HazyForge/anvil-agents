@@ -123,9 +123,24 @@ done
 helm template "${release}" "${chart}" "${api_args[@]}" \
   --show-only templates/api-clusterrole.yaml >"${tmp_dir}/rbac.yaml"
 grep -q 'resources: \["pods/log"\]' "${tmp_dir}/rbac.yaml" || fail "API RBAC cannot read pod logs"
-if grep -Eq '(^|[[:space:]])(secrets|watch|create|update|patch|delete)([[:space:]]|$)' "${tmp_dir}/rbac.yaml"; then
-  fail "API RBAC contains a secret, watch, or mutation grant"
-fi
+awk '/^rules:/{capture=1} capture' "${tmp_dir}/rbac.yaml" >"${tmp_dir}/rbac-rules.yaml"
+cat >"${tmp_dir}/expected-rbac-rules.yaml" <<'EOF'
+rules:
+  - apiGroups: ["control.anvil.hazyforge.io"]
+    resources: ["agentruns"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get"]
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["get"]
+EOF
+diff -u "${tmp_dir}/expected-rbac-rules.yaml" "${tmp_dir}/rbac-rules.yaml" >/dev/null ||
+  fail "API RBAC differs from the exact read-only rule contract"
 
 expect_template_failure service-port-mismatch --set api.service.port=9090
 expect_template_failure route-wildcard \
@@ -139,6 +154,9 @@ expect_template_failure route-listener-unspecified \
   --set-string 'api.httpRoute.hostnames[0]=agents.example.com'
 expect_template_failure private-ca-incomplete \
   --set-string api.oidcCA.configMapName=issuer-ca
+expect_template_failure shared-service-account \
+  --set-string serviceAccount.name=shared-agents \
+  --set-string api.serviceAccount.name=shared-agents
 
 helm template "${release}" "${chart}" "${api_args[@]}" \
   --set-string api.oidcCA.configMapName=issuer-ca \

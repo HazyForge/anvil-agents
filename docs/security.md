@@ -17,10 +17,12 @@ controller should enforce allowed registries, ServiceAccounts, Secret and PVC
 refs, security contexts, resources, and placement rules.
 
 Skill and tool sets cannot directly select images, identities, Secrets,
-storage, or placement. Keep that boundary in admission policy too. A run-local harness
-swap replaces the profile-inline runtime envelope so provider credentials do
-not leak between harnesses; migrate runtime fields into dedicated harness
-profiles before relying on this behavior.
+storage, or placement. Remote skill sources must identify a full immutable Git
+commit, and private-source tokens are selected by exact API host only from the
+trusted harness execution envelope. Keep those boundaries in admission policy too. A
+run-local harness swap replaces the profile-inline runtime envelope so
+provider credentials do not leak between harnesses; migrate runtime fields
+into dedicated harness profiles before relying on this behavior.
 
 Use a dedicated namespace per trust domain. Put only agent-consumable Secrets
 there. Disable unnecessary token mounting on runner ServiceAccounts, grant
@@ -32,13 +34,13 @@ agent namespace.
 embedded service identity or authorization bypass. `run create` requires the
 caller to have `create` access to AgentRuns and never updates an existing run.
 The log command reads only the fixed `agent` container after verifying the
-controller-owned AgentRun-to-Job-to-Pod chain. The debug command marks child
-evidence as verified only after the same namespace and owner identities match.
-Kubernetes fetches Pod logs by name without a UID precondition, so an actor
-able to replace a verified controller-owned Pod can race the subsequent log
-request and inject output. Treat Pod replacement authority as log-injection
-authority. Structured CLI views escape terminal control characters; the
-explicit `run logs` stream remains raw.
+controller-owned AgentRun-to-Job-to-Pod chain and the Job and Pod UID receipts
+recorded in run status. It confirms the Pod UID again after opening the stream.
+The debug command applies the same namespace, owner, and recorded-UID checks
+before marking child evidence as verified. Legacy status without UID receipts
+is backfilled by the controller; new executions record both immediately.
+Structured CLI views escape terminal control characters; the explicit
+`run logs` stream remains raw.
 
 Creating an `AdverseSignal` is incident-trigger authority for enabled
 `AdverseSituation` responders in that namespace. A write-only reporter role
@@ -49,6 +51,15 @@ name, so separate trust domains by namespace or use admission policy. Signal
 messages, links, source URLs, and external status fields are untrusted
 evidence, never instructions or implicit fetch requests.
 
+An established adverse responder is pinned in `AdverseSituation` status by its
+AgentRun UID and immutable spec digest. Later parent status or responder-policy
+changes do not rewrite that append-only run. Before a responder is established,
+the deterministic child must still match the complete current creation snapshot;
+same-name precreation is not accepted on provenance labels alone. A legacy
+ref-only responder is upgraded to the UID/digest receipt only when its complete
+spec still exactly matches the current creation snapshot; otherwise migration
+fails closed for operator review.
+
 The chart controller ClusterRole is cluster-wide because the operator can
 watch multiple namespaces. `watchNamespaces` narrows the controller cache, not
 RBAC. For a namespace-limited installation, render and maintain a matching
@@ -58,7 +69,27 @@ changes authorization.
 `externalSecrets.enabled` is false by default. Enable it only when runs use
 `externalSecretRefreshRefs`; it grants the controller mutation access to those
 ExternalSecret objects. The normal Secret read grant remains necessary for
-private skill tokens and run credential preflight.
+private skill-source tokens selected by harness profiles and run credential
+preflight.
+
+`AgentDataVolume` and `VolumeProfile` path environment entries accept only
+absolute home, state, cache, config, or data directory variables under the
+declared mount. They cannot select Secrets or inject general process
+configuration. Supply credentials through the harness execution envelope.
+
+Built-in repository checkout removes HTTP(S) URL userinfo, query strings, and
+fragments from the persisted Git remote. Credential-bearing URLs for other URI
+schemes are rejected because Git has no provider-neutral mechanism to separate
+their authentication material from the persisted origin. Normal SSH usernames
+remain supported through `ssh://git@host/path` and SCP-style `git@host:path`
+forms. Prefer a credential helper or token Secret over inline URL credentials
+anyway, because the transport still has to receive the credential for the
+clone. HTTP(S) inline credentials are passed through process-local Git
+environment configuration while the clone argument and persisted origin use
+only the sanitized URL. The local image builder also sanitizes OCI source
+labels and excludes common local credential files from its Docker context.
+Review custom Dockerfiles and any explicit cache export before using a shared
+or remote builder.
 
 ## Public Read API
 
@@ -76,14 +107,18 @@ Secret values or skill contents.
 Terminate TLS at a trusted Gateway, apply rate limits and NetworkPolicy, and
 avoid logging secrets in agent output.
 
+List responses are paginated internally and fail closed when a namespace
+exceeds the configured object cap. Streaming limits are separate from that cap.
+
 ## Data Lifecycle
 
 Prompts, source context, tool metadata, logs, status, and archives may contain
-sensitive material. Set retention deliberately. `AgentDataVolume` creates or
-adopts only its own compatible PVC identity and sets a controller owner
-reference; deleting the custom resource can delete the PVC. The chart marks
-CRDs with `helm.sh/resource-policy: keep`, so uninstalling the release does not
-delete all custom resources or their volumes.
+sensitive material. Set retention deliberately. `AgentDataVolume` accepts only
+a current-UID-owned compatible PVC, records the claim UID, and every new run
+rechecks both owner and UID before mounting it. A bound claim cannot be adopted
+through a status-persistence gap. Deleting the custom resource can delete its
+PVC. The chart marks CRDs with `helm.sh/resource-policy: keep`, so uninstalling
+the release does not delete all custom resources or their volumes.
 
 The mounted `source.json` contains the effective run spec and therefore may
 include same-namespace Secret reference names, but never Secret values. When a

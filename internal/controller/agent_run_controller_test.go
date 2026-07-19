@@ -22,6 +22,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	controlv1alpha1 "github.com/hazyforge/anvil-agents/api/v1alpha1"
@@ -689,7 +690,7 @@ func TestAgentRunGitHubSkillSourceBecomesMountedFile(t *testing.T) {
 			http.Error(w, "bad path", http.StatusBadRequest)
 			return
 		}
-		if got, want := r.URL.Query().Get("ref"), "master"; got != want {
+		if got, want := r.URL.Query().Get("ref"), strings.Repeat("a", 40); got != want {
 			t.Errorf("github request ref = %q, want %q", got, want)
 			http.Error(w, "bad ref", http.StatusBadRequest)
 			return
@@ -732,19 +733,19 @@ func TestAgentRunGitHubSkillSourceBecomesMountedFile(t *testing.T) {
 				Name: "platform-health-hourly",
 			},
 			Harness: controlv1alpha1.AgentRunHarnessSpec{
+				Execution: controlv1alpha1.AgentRunHarnessExecutionSpec{SkillSourceCredentials: []controlv1alpha1.AgentRunGitHubSkillCredential{{
+					APIHost:        strings.TrimPrefix(server.URL, "http://"),
+					TokenSecretRef: controlv1alpha1.SecretKeyReference{Name: "anvil-application-github", Key: "GITHUB_TOKEN"},
+				}}},
 				SkillInjections: []controlv1alpha1.AgentRunSkillInjectionSpec{{
 					Name:        "knowledge-base",
 					Description: "Shared knowledge-base operations.",
 					SourceRefs: []controlv1alpha1.AgentRunSkillSourceRef{{
 						GitHub: &controlv1alpha1.AgentRunGitHubSkillSourceSpec{
 							Repository: "HazyForge/knowledge-based",
-							Ref:        "master",
+							Ref:        strings.Repeat("a", 40),
 							Path:       "skills/knowledge-base/SKILL.md",
 							APIBaseURL: server.URL,
-							TokenSecretRef: &controlv1alpha1.SecretKeyReference{
-								Name: "anvil-application-github",
-								Key:  "GITHUB_TOKEN",
-							},
 						},
 					}},
 				}},
@@ -768,7 +769,7 @@ func TestAgentRunGitHubSkillSourceBecomesMountedFile(t *testing.T) {
 	for _, want := range []string{
 		"# Skill: knowledge-base",
 		"## Downloaded Source Content",
-		"GitHub HazyForge/knowledge-based:skills/knowledge-base/SKILL.md @ master",
+		"GitHub HazyForge/knowledge-based:skills/knowledge-base/SKILL.md @ " + strings.Repeat("a", 40),
 		"Use the remote service before writing shared notes.",
 	} {
 		if !strings.Contains(skill, want) {
@@ -828,7 +829,7 @@ func TestAgentRunAuthenticatedSkillSourceDoesNotFollowRedirects(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Name: "github-token", Namespace: "agents"},
 		Data:       map[string][]byte{"token": []byte("sensitive")},
 	}
-	run := &controlv1alpha1.AgentRun{ObjectMeta: metav1.ObjectMeta{Name: "remote-skill", Namespace: "agents"}}
+	run := &controlv1alpha1.AgentRun{ObjectMeta: metav1.ObjectMeta{Name: "remote-skill", Namespace: "agents"}, Spec: controlv1alpha1.AgentRunSpec{Harness: controlv1alpha1.AgentRunHarnessSpec{Execution: controlv1alpha1.AgentRunHarnessExecutionSpec{SkillSourceCredentials: []controlv1alpha1.AgentRunGitHubSkillCredential{{APIHost: strings.TrimPrefix(server.URL, "http://"), TokenSecretRef: controlv1alpha1.SecretKeyReference{Name: "github-token", Key: "token"}}}}}}}
 	reconciler := &AgentRunReconciler{
 		Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(secret).Build(),
 		Scheme: scheme,
@@ -839,18 +840,41 @@ func TestAgentRunAuthenticatedSkillSourceDoesNotFollowRedirects(t *testing.T) {
 	}
 	_, err := reconciler.resolveAgentRunGitHubSkillSource(context.Background(), run, controlv1alpha1.AgentRunGitHubSkillSourceSpec{
 		Repository: "HazyForge/skills",
+		Ref:        strings.Repeat("b", 40),
 		Path:       "SKILL.md",
 		APIBaseURL: server.URL,
-		TokenSecretRef: &controlv1alpha1.SecretKeyReference{
-			Name: "github-token",
-			Key:  "token",
-		},
 	})
 	if err == nil || !strings.Contains(err.Error(), "HTTP 302") {
 		t.Fatalf("resolve error = %v, want HTTP 302 without redirect", err)
 	}
 	if redirectTargetCalled {
 		t.Fatal("authenticated skill request followed a redirect")
+	}
+}
+
+func TestAgentRunSkillSourceDoesNotReflectUpstreamErrorBody(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusBadGateway)
+		_, _ = w.Write([]byte("provider-debug-secret"))
+	}))
+	defer server.Close()
+	reconciler := &AgentRunReconciler{CommonReconcilerOptions: CommonReconcilerOptions{Options: &Options{
+		GitHubAPIAllowedHosts:  []string{mustURLHostname(t, server.URL)},
+		AllowInsecureGitHubAPI: true,
+	}}}
+	_, err := reconciler.resolveAgentRunGitHubSkillSource(context.Background(), &controlv1alpha1.AgentRun{}, controlv1alpha1.AgentRunGitHubSkillSourceSpec{
+		Repository: "example/skills",
+		Ref:        strings.Repeat("a", 40),
+		Path:       "SKILL.md",
+		APIBaseURL: server.URL,
+	})
+	if err == nil || !strings.Contains(err.Error(), "HTTP 502") {
+		t.Fatalf("resolve error = %v, want HTTP status", err)
+	}
+	if strings.Contains(err.Error(), "provider-debug-secret") {
+		t.Fatalf("resolve error reflected upstream response body: %v", err)
 	}
 }
 
@@ -908,18 +932,17 @@ func TestAgentRunSkillSourceRejectsCrossNamespaceTokenSecret(t *testing.T) {
 				Name: "platform-health-hourly",
 			},
 			Harness: controlv1alpha1.AgentRunHarnessSpec{
+				Execution: controlv1alpha1.AgentRunHarnessExecutionSpec{SkillSourceCredentials: []controlv1alpha1.AgentRunGitHubSkillCredential{{
+					APIHost:        "api.github.com",
+					TokenSecretRef: controlv1alpha1.SecretKeyReference{Name: "github-token", Namespace: "other", Key: "GITHUB_TOKEN"},
+				}}},
 				SkillInjections: []controlv1alpha1.AgentRunSkillInjectionSpec{{
 					Name: "knowledge-base",
 					SourceRefs: []controlv1alpha1.AgentRunSkillSourceRef{{
 						GitHub: &controlv1alpha1.AgentRunGitHubSkillSourceSpec{
 							Repository: "HazyForge/knowledge-based",
-							Ref:        "master",
+							Ref:        strings.Repeat("c", 40),
 							Path:       "skills/knowledge-base/SKILL.md",
-							TokenSecretRef: &controlv1alpha1.SecretKeyReference{
-								Name:      "github-token",
-								Namespace: "other",
-								Key:       "GITHUB_TOKEN",
-							},
 						},
 					}},
 				}},
@@ -933,6 +956,244 @@ func TestAgentRunSkillSourceRejectsCrossNamespaceTokenSecret(t *testing.T) {
 	}
 	if got, want := reason, "CrossNamespaceSkillSourceToken"; got != want {
 		t.Fatalf("reason = %q, want %q", got, want)
+	}
+}
+
+func TestAgentRunSkillSourceRequiresImmutableCommit(t *testing.T) {
+	t.Parallel()
+
+	run := &controlv1alpha1.AgentRun{ObjectMeta: metav1.ObjectMeta{Name: "run", Namespace: "agents"}, Spec: controlv1alpha1.AgentRunSpec{SourceRef: controlv1alpha1.AgentRunSourceRef{Kind: "Manual", Name: "operator"}}}
+	source := controlv1alpha1.AgentRunGitHubSkillSourceSpec{Repository: "example/skills", Ref: "main", Path: "review/SKILL.md"}
+	run.Spec.Harness.SkillInjections = []controlv1alpha1.AgentRunSkillInjectionSpec{{Name: "review", SourceRefs: []controlv1alpha1.AgentRunSkillSourceRef{{GitHub: &source}}}}
+	phase, reason, _ := agentRunBlockingValidation(run)
+	if phase != controlv1alpha1.AgentRunPhaseFailed || reason != "MutableSkillSourceRef" {
+		t.Fatalf("validation = (%q, %q), want Failed/MutableSkillSourceRef", phase, reason)
+	}
+	source.Ref = strings.Repeat("a", 40)
+	run.Spec.Harness.SkillInjections[0].SourceRefs[0].GitHub = &source
+	phase, reason, _ = agentRunBlockingValidation(run)
+	if phase != "" || reason != "" {
+		t.Fatalf("immutable commit validation = (%q, %q), want success", phase, reason)
+	}
+}
+
+func TestAgentRunRejectsCrossNamespaceContextReferences(t *testing.T) {
+	t.Parallel()
+
+	for _, test := range []struct {
+		name string
+		set  func(*controlv1alpha1.AgentRun)
+		want string
+	}{
+		{name: "situation", set: func(run *controlv1alpha1.AgentRun) {
+			run.Spec.SituationRef = &controlv1alpha1.NamespacedObjectReference{Name: "incident", Namespace: "other"}
+		}, want: "CrossNamespaceSituationRef"},
+		{name: "schedule", set: func(run *controlv1alpha1.AgentRun) {
+			run.Spec.ScheduleRef = &controlv1alpha1.NamespacedObjectReference{Name: "hourly", Namespace: "other"}
+		}, want: "CrossNamespaceScheduleRef"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			run := &controlv1alpha1.AgentRun{ObjectMeta: metav1.ObjectMeta{Name: "run", Namespace: "agents"}, Spec: controlv1alpha1.AgentRunSpec{SourceRef: controlv1alpha1.AgentRunSourceRef{Kind: "Manual", Name: "operator"}}}
+			test.set(run)
+			phase, reason, _ := agentRunBlockingValidation(run)
+			if phase != controlv1alpha1.AgentRunPhaseFailed || reason != test.want {
+				t.Fatalf("validation = (%q, %q), want Failed/%s", phase, reason, test.want)
+			}
+		})
+	}
+}
+
+func TestAgentRunChildValidationRejectsInjectedPayloadAndJob(t *testing.T) {
+	t.Parallel()
+
+	run := &controlv1alpha1.AgentRun{ObjectMeta: metav1.ObjectMeta{Name: "run", Namespace: "agents", UID: "run-uid"}, Spec: controlv1alpha1.AgentRunSpec{SourceRef: controlv1alpha1.AgentRunSourceRef{Kind: "Manual", Name: "operator"}}}
+	controller := true
+	owner := metav1.OwnerReference{APIVersion: controlv1alpha1.GroupVersion.String(), Kind: "AgentRun", Name: run.Name, UID: run.UID, Controller: &controller}
+	data := map[string]string{agentRunPromptFile: "trusted"}
+	configMap := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: "payload", Namespace: run.Namespace, Labels: agentRunLabels(run, ""), OwnerReferences: []metav1.OwnerReference{owner}}, Data: data, Immutable: boolPtr(true)}
+	if err := validateAgentRunConfigMap(configMap, run, data); err != nil {
+		t.Fatalf("valid ConfigMap rejected: %v", err)
+	}
+	configMap.Data[agentRunPromptFile] = "injected"
+	if err := validateAgentRunConfigMap(configMap, run, map[string]string{agentRunPromptFile: "trusted"}); err == nil {
+		t.Fatal("injected ConfigMap payload was accepted")
+	}
+
+	desired := agentRunJob(run, "run-harness", "payload", nil)
+	desired.OwnerReferences = []metav1.OwnerReference{owner}
+	actual := desired.DeepCopy()
+	if err := validateAgentRunJob(actual, desired, run); err != nil {
+		t.Fatalf("valid Job rejected: %v", err)
+	}
+	actual.Spec.Template.Spec.Containers[0].Image = "attacker.invalid/runner:latest"
+	if err := validateAgentRunJob(actual, desired, run); err == nil {
+		t.Fatal("injected Job image was accepted")
+	}
+	for _, test := range []struct {
+		name   string
+		mutate func(*batchv1.Job)
+	}{
+		{name: "environment", mutate: func(job *batchv1.Job) {
+			job.Spec.Template.Spec.Containers[0].Env = append(job.Spec.Template.Spec.Containers[0].Env, corev1.EnvVar{Name: "INJECTED", Value: "true"})
+		}},
+		{name: "secret environment", mutate: func(job *batchv1.Job) {
+			job.Spec.Template.Spec.Containers[0].EnvFrom = append(job.Spec.Template.Spec.Containers[0].EnvFrom, corev1.EnvFromSource{SecretRef: &corev1.SecretEnvSource{LocalObjectReference: corev1.LocalObjectReference{Name: "foreign-secret"}}})
+		}},
+		{name: "secret volume", mutate: func(job *batchv1.Job) {
+			job.Spec.Template.Spec.Volumes = append(job.Spec.Template.Spec.Volumes, corev1.Volume{Name: "foreign", VolumeSource: corev1.VolumeSource{Secret: &corev1.SecretVolumeSource{SecretName: "foreign-secret"}}})
+		}},
+		{name: "added capability", mutate: func(job *batchv1.Job) {
+			job.Spec.Template.Spec.Containers[0].SecurityContext.Capabilities.Add = []corev1.Capability{"SYS_ADMIN"}
+		}},
+		{name: "service account", mutate: func(job *batchv1.Job) {
+			job.Spec.Template.Spec.ServiceAccountName = "foreign-service-account"
+		}},
+		{name: "annotation", mutate: func(job *batchv1.Job) {
+			job.Annotations = cloneStringMap(job.Annotations)
+			if job.Annotations == nil {
+				job.Annotations = map[string]string{}
+			}
+			job.Annotations["admission.example/inject"] = "true"
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			injected := desired.DeepCopy()
+			test.mutate(injected)
+			if err := validateAgentRunJob(injected, desired, run); err == nil {
+				t.Fatalf("injected Job %s was accepted", test.name)
+			}
+		})
+	}
+}
+
+func TestAgentRunJobValidationAcceptsKubernetesDefaults(t *testing.T) {
+	t.Parallel()
+
+	run := &controlv1alpha1.AgentRun{ObjectMeta: metav1.ObjectMeta{Name: "run", Namespace: "agents", UID: "run-uid"}, Spec: controlv1alpha1.AgentRunSpec{SourceRef: controlv1alpha1.AgentRunSourceRef{Kind: "Manual", Name: "operator"}}}
+	controller := true
+	owner := metav1.OwnerReference{APIVersion: controlv1alpha1.GroupVersion.String(), Kind: "AgentRun", Name: run.Name, UID: run.UID, Controller: &controller}
+	desired := agentRunJob(run, "run-harness", "payload", nil)
+	desired.OwnerReferences = []metav1.OwnerReference{owner}
+	actual := desired.DeepCopy()
+	actual.UID = "job-uid"
+	one := int32(1)
+	falseValue := false
+	completionMode := batchv1.NonIndexedCompletion
+	replacementPolicy := batchv1.TerminatingOrFailed
+	thirty := int64(30)
+	defaultMode := int32(0o644)
+	actual.Spec.Parallelism = &one
+	actual.Spec.Completions = &one
+	actual.Spec.ManualSelector = &falseValue
+	actual.Spec.CompletionMode = &completionMode
+	actual.Spec.Suspend = &falseValue
+	actual.Spec.PodReplacementPolicy = &replacementPolicy
+	actual.Spec.Selector = &metav1.LabelSelector{MatchLabels: map[string]string{"batch.kubernetes.io/controller-uid": string(actual.UID)}}
+	actual.Spec.Template.Labels["batch.kubernetes.io/controller-uid"] = string(actual.UID)
+	actual.Spec.Template.Labels["batch.kubernetes.io/job-name"] = actual.Name
+	actual.Spec.Template.Labels["controller-uid"] = string(actual.UID)
+	actual.Spec.Template.Labels["job-name"] = actual.Name
+	pod := &actual.Spec.Template.Spec
+	pod.DeprecatedServiceAccount = pod.ServiceAccountName
+	pod.EnableServiceLinks = boolPtr(true)
+	preemptLowerPriority := corev1.PreemptLowerPriority
+	pod.PreemptionPolicy = &preemptLowerPriority
+	pod.DNSPolicy = corev1.DNSClusterFirst
+	pod.SchedulerName = corev1.DefaultSchedulerName
+	pod.TerminationGracePeriodSeconds = &thirty
+	pod.Containers[0].TerminationMessagePath = corev1.TerminationMessagePathDefault
+	pod.Containers[0].TerminationMessagePolicy = corev1.TerminationMessageReadFile
+	pod.Volumes[0].ConfigMap.DefaultMode = &defaultMode
+
+	if err := validateAgentRunJob(actual, desired, run); err != nil {
+		t.Fatalf("Kubernetes-defaulted Job rejected: %v", err)
+	}
+	desiredDigest, err := agentRunJobSnapshotDigest(desired)
+	if err != nil {
+		t.Fatalf("digest desired Job: %v", err)
+	}
+	actualDigest, err := agentRunJobSnapshotDigest(actual)
+	if err != nil {
+		t.Fatalf("digest defaulted Job: %v", err)
+	}
+	if actualDigest != desiredDigest {
+		t.Fatalf("defaulted Job digest = %q, want %q", actualDigest, desiredDigest)
+	}
+}
+
+func TestAgentRunConfigMapMigrationMakesExactLegacyPayloadImmutable(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	scheme := runtime.NewScheme()
+	if err := controlv1alpha1.AddToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
+	if err := corev1.AddToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
+	run := &controlv1alpha1.AgentRun{
+		ObjectMeta: metav1.ObjectMeta{Name: "legacy-run", Namespace: "agents", UID: "run-uid"},
+		Spec:       controlv1alpha1.AgentRunSpec{SourceRef: controlv1alpha1.AgentRunSourceRef{Kind: "Manual", Name: "operator"}},
+	}
+	reconciler := &AgentRunReconciler{Scheme: scheme}
+	contextBody, err := reconciler.agentRunContextJSON(ctx, run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := reconciler.agentRunConfigMapData(ctx, run, "trusted prompt", string(contextBody))
+	if err != nil {
+		t.Fatal(err)
+	}
+	controller := true
+	configMap := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      agentRunChildName(run.Name, "context", "prompt-hash"),
+			Namespace: run.Namespace,
+			Labels:    agentRunLabels(run, ""),
+			OwnerReferences: []metav1.OwnerReference{{
+				APIVersion: controlv1alpha1.GroupVersion.String(), Kind: "AgentRun", Name: run.Name, UID: run.UID, Controller: &controller,
+			}},
+		},
+		Data: data,
+	}
+	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(configMap).Build()
+	reconciler.Client = c
+
+	resolved, _, err := reconciler.ensureAgentRunConfigMap(ctx, run, "trusted prompt", "prompt-hash")
+	if err != nil {
+		t.Fatalf("migrate legacy ConfigMap: %v", err)
+	}
+	if resolved.Immutable == nil || !*resolved.Immutable {
+		t.Fatalf("resolved ConfigMap immutable = %#v, want true", resolved.Immutable)
+	}
+	stored := &corev1.ConfigMap{}
+	if err := c.Get(ctx, client.ObjectKeyFromObject(configMap), stored); err != nil {
+		t.Fatal(err)
+	}
+	if stored.Immutable == nil || !*stored.Immutable {
+		t.Fatalf("stored ConfigMap immutable = %#v, want true", stored.Immutable)
+	}
+}
+
+func TestAgentRunRunnerPodSelectionRequiresJobOwnerUID(t *testing.T) {
+	t.Parallel()
+
+	scheme := runtime.NewScheme()
+	if err := corev1.AddToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
+	job := &batchv1.Job{ObjectMeta: metav1.ObjectMeta{Name: "run-harness", Namespace: "agents", UID: "job-uid"}}
+	controller := true
+	legitimate := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "legitimate", Namespace: "agents", CreationTimestamp: metav1.NewTime(time.Unix(1, 0)), Labels: map[string]string{agentRunJobLabel: job.Name}, OwnerReferences: []metav1.OwnerReference{{APIVersion: batchv1.SchemeGroupVersion.String(), Kind: "Job", Name: job.Name, UID: job.UID, Controller: &controller}}}}
+	forged := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "forged", Namespace: "agents", CreationTimestamp: metav1.NewTime(time.Unix(2, 0)), Labels: map[string]string{agentRunJobLabel: job.Name}}}
+	reconciler := &AgentRunReconciler{Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(legitimate, forged).Build()}
+	ref, pod, err := reconciler.findAgentRunRunnerPod(context.Background(), job)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pod == nil || pod.Name != legitimate.Name || ref == nil || ref.Name != legitimate.Name {
+		t.Fatalf("selected pod = %#v ref=%#v, want legitimate owner", pod, ref)
 	}
 }
 
@@ -1721,6 +1982,7 @@ func TestAgentRunReconcileUsesExistingStatusJobRef(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{
 			Name:       "platform-health",
 			Namespace:  "anvilhub",
+			UID:        "platform-health-uid",
 			Generation: 1,
 		},
 		Spec: controlv1alpha1.AgentRunSpec{
@@ -1742,13 +2004,16 @@ func TestAgentRunReconcileUsesExistingStatusJobRef(t *testing.T) {
 			},
 		},
 	}
+	controller := true
 	existingJob := &batchv1.Job{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "platform-health-harness-oldhash",
 			Namespace: "anvilhub",
+			UID:       types.UID("platform-health-job-uid"),
 			Labels: map[string]string{
 				agentRunJobLabel: "platform-health-harness-oldhash",
 			},
+			OwnerReferences: []metav1.OwnerReference{{APIVersion: controlv1alpha1.GroupVersion.String(), Kind: "AgentRun", Name: run.Name, UID: run.UID, Controller: &controller}},
 		},
 		Status: batchv1.JobStatus{
 			Active: 1,
@@ -1791,6 +2056,9 @@ func TestAgentRunReconcileUsesExistingStatusJobRef(t *testing.T) {
 	if updated.Status.JobRef == nil || updated.Status.JobRef.Name != existingJob.Name {
 		t.Fatalf("updated job ref = %#v, want %s", updated.Status.JobRef, existingJob.Name)
 	}
+	if updated.Status.JobUID != string(existingJob.UID) {
+		t.Fatalf("updated Job UID = %q, want %q", updated.Status.JobUID, existingJob.UID)
+	}
 	if got, want := updated.Status.PromptHash, "oldhash"; got != want {
 		t.Fatalf("prompt hash = %q, want %q", got, want)
 	}
@@ -1818,6 +2086,7 @@ func TestAgentRunReconcilePreservesJobRefAcrossGenerationChange(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{
 			Name:       "platform-health",
 			Namespace:  "anvilhub",
+			UID:        "platform-health-uid",
 			Generation: 2,
 		},
 		Spec: controlv1alpha1.AgentRunSpec{
@@ -1834,19 +2103,23 @@ func TestAgentRunReconcilePreservesJobRefAcrossGenerationChange(t *testing.T) {
 			ObservedGeneration: 1,
 			Phase:              controlv1alpha1.AgentRunPhaseRunning,
 			PromptHash:         "oldhash",
+			JobUID:             "platform-health-job-uid",
 			JobRef: &controlv1alpha1.NamespacedObjectReference{
 				Name:      "platform-health-harness-oldhash",
 				Namespace: "anvilhub",
 			},
 		},
 	}
+	controller := true
 	existingJob := &batchv1.Job{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "platform-health-harness-oldhash",
 			Namespace: "anvilhub",
+			UID:       types.UID("platform-health-job-uid"),
 			Labels: map[string]string{
 				agentRunJobLabel: "platform-health-harness-oldhash",
 			},
+			OwnerReferences: []metav1.OwnerReference{{APIVersion: controlv1alpha1.GroupVersion.String(), Kind: "AgentRun", Name: run.Name, UID: run.UID, Controller: &controller}},
 		},
 		Status: batchv1.JobStatus{
 			Active: 1,
@@ -1988,23 +2261,32 @@ func TestResolveAgentRunDataVolumesRejectsBlockedDriftAndUsesResolvedClaim(t *te
 			if err := controlv1alpha1.AddToScheme(scheme); err != nil {
 				t.Fatalf("add control scheme: %v", err)
 			}
+			if err := corev1.AddToScheme(scheme); err != nil {
+				t.Fatalf("add core scheme: %v", err)
+			}
+			controller := true
 			volume := &controlv1alpha1.AgentDataVolume{
-				ObjectMeta: metav1.ObjectMeta{Name: "agent-home", Namespace: "anvilhub", Generation: test.generation},
+				ObjectMeta: metav1.ObjectMeta{Name: "agent-home", Namespace: "anvilhub", UID: "agent-home-uid", Generation: test.generation},
 				Spec:       controlv1alpha1.AgentDataVolumeSpec{ClaimName: "rejected-spec-claim", MountPath: "/agent-home"},
 				Status: controlv1alpha1.AgentDataVolumeStatus{
 					ObservedGeneration: test.observed,
 					Phase:              test.phase,
 					LastError:          "immutable claim drift",
 					ClaimRef:           &controlv1alpha1.NamespacedObjectReference{Name: "accepted-claim", Namespace: "anvilhub"},
+					ClaimUID:           "accepted-claim-uid",
 				},
 			}
+			pvc := &corev1.PersistentVolumeClaim{ObjectMeta: metav1.ObjectMeta{
+				Name: "accepted-claim", Namespace: "anvilhub", UID: "accepted-claim-uid",
+				OwnerReferences: []metav1.OwnerReference{{APIVersion: controlv1alpha1.GroupVersion.String(), Kind: "AgentDataVolume", Name: volume.Name, UID: volume.UID, Controller: &controller}},
+			}}
 			run := &controlv1alpha1.AgentRun{
 				ObjectMeta: metav1.ObjectMeta{Name: "run", Namespace: "anvilhub"},
 				Spec: controlv1alpha1.AgentRunSpec{Harness: controlv1alpha1.AgentRunHarnessSpec{Execution: controlv1alpha1.AgentRunHarnessExecutionSpec{
 					DataVolumeRefs: []controlv1alpha1.AgentRunDataVolumeRef{{Name: volume.Name}},
 				}}},
 			}
-			reconciler := &AgentRunReconciler{Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(volume).Build(), Scheme: scheme}
+			reconciler := &AgentRunReconciler{Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(volume, pvc).Build(), Scheme: scheme}
 			resolved, phase, reason, _, err := reconciler.resolveAgentRunDataVolumes(ctx, run)
 			if err != nil {
 				t.Fatalf("resolve data volume: %v", err)
@@ -2035,20 +2317,22 @@ func TestResolveAgentRunDataVolumesAllowsWaitForFirstConsumerClaim(t *testing.T)
 	}
 	storageClassName := "local-path"
 	bindingMode := storagev1.VolumeBindingWaitForFirstConsumer
+	controller := true
 	volume := &controlv1alpha1.AgentDataVolume{
-		ObjectMeta: metav1.ObjectMeta{Name: "agent-home", Namespace: "agents", Generation: 1},
+		ObjectMeta: metav1.ObjectMeta{Name: "agent-home", Namespace: "agents", UID: "agent-home-uid", Generation: 1},
 		Spec:       controlv1alpha1.AgentDataVolumeSpec{MountPath: "/agent-home"},
 		Status: controlv1alpha1.AgentDataVolumeStatus{
 			ObservedGeneration: 1,
 			Phase:              controlv1alpha1.AgentDataVolumePhasePending,
 			ClaimRef:           &controlv1alpha1.NamespacedObjectReference{Name: "agent-data-agent-home", Namespace: "agents"},
+			ClaimUID:           "agent-home-pvc-uid",
 			Conditions: []metav1.Condition{{
 				Type: "Ready", Status: metav1.ConditionFalse, Reason: "ClaimPending",
 			}},
 		},
 	}
 	pvc := &corev1.PersistentVolumeClaim{
-		ObjectMeta: metav1.ObjectMeta{Name: "agent-data-agent-home", Namespace: "agents"},
+		ObjectMeta: metav1.ObjectMeta{Name: "agent-data-agent-home", Namespace: "agents", UID: "agent-home-pvc-uid", OwnerReferences: []metav1.OwnerReference{{APIVersion: controlv1alpha1.GroupVersion.String(), Kind: "AgentDataVolume", Name: volume.Name, UID: volume.UID, Controller: &controller}}},
 		Spec:       corev1.PersistentVolumeClaimSpec{StorageClassName: &storageClassName},
 		Status:     corev1.PersistentVolumeClaimStatus{Phase: corev1.ClaimPending},
 	}
@@ -2084,8 +2368,12 @@ func TestResolveAgentRunDataVolumesUsesResolvedProfileStatus(t *testing.T) {
 	if err := controlv1alpha1.AddToScheme(scheme); err != nil {
 		t.Fatalf("add control scheme: %v", err)
 	}
+	if err := corev1.AddToScheme(scheme); err != nil {
+		t.Fatalf("add core scheme: %v", err)
+	}
+	controller := true
 	volume := &controlv1alpha1.AgentDataVolume{
-		ObjectMeta: metav1.ObjectMeta{Name: "agent-home", Namespace: "anvilhub", Generation: 1},
+		ObjectMeta: metav1.ObjectMeta{Name: "agent-home", Namespace: "anvilhub", UID: "agent-home-uid", Generation: 1},
 		Spec: controlv1alpha1.AgentDataVolumeSpec{
 			ClaimName: "agent-home",
 			MountPath: "/legacy-home",
@@ -2094,19 +2382,24 @@ func TestResolveAgentRunDataVolumesUsesResolvedProfileStatus(t *testing.T) {
 			ObservedGeneration: 1,
 			Phase:              controlv1alpha1.AgentDataVolumePhaseReady,
 			ClaimRef:           &controlv1alpha1.NamespacedObjectReference{Name: "agent-home", Namespace: "anvilhub"},
+			ClaimUID:           "agent-home-pvc-uid",
 			MountPath:          "/profile-home",
 			SubPath:            "state",
 			NodeSelector:       map[string]string{"hazyforge.io/storage": "observability-local"},
-			ExtraEnv:           []corev1.EnvVar{{Name: "CODEX_HOME", Value: "/profile-home/codex"}},
+			ExtraEnv:           []controlv1alpha1.AgentDataVolumePathEnvVar{{Name: "CODEX_HOME", Value: "/profile-home/codex"}},
 		},
 	}
+	pvc := &corev1.PersistentVolumeClaim{ObjectMeta: metav1.ObjectMeta{
+		Name: "agent-home", Namespace: "anvilhub", UID: "agent-home-pvc-uid",
+		OwnerReferences: []metav1.OwnerReference{{APIVersion: controlv1alpha1.GroupVersion.String(), Kind: "AgentDataVolume", Name: volume.Name, UID: volume.UID, Controller: &controller}},
+	}}
 	run := &controlv1alpha1.AgentRun{
 		ObjectMeta: metav1.ObjectMeta{Name: "run", Namespace: "anvilhub"},
 		Spec: controlv1alpha1.AgentRunSpec{Harness: controlv1alpha1.AgentRunHarnessSpec{Execution: controlv1alpha1.AgentRunHarnessExecutionSpec{
 			DataVolumeRefs: []controlv1alpha1.AgentRunDataVolumeRef{{Name: volume.Name}},
 		}}},
 	}
-	reconciler := &AgentRunReconciler{Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(volume).Build(), Scheme: scheme}
+	reconciler := &AgentRunReconciler{Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(volume, pvc).Build(), Scheme: scheme}
 	resolved, phase, reason, _, err := reconciler.resolveAgentRunDataVolumes(ctx, run)
 	if err != nil {
 		t.Fatalf("resolve data volume: %v", err)
@@ -2122,6 +2415,41 @@ func TestResolveAgentRunDataVolumesUsesResolvedProfileStatus(t *testing.T) {
 	}
 	if len(resolved[0].ExtraEnv) != 1 || resolved[0].ExtraEnv[0].Value != "/profile-home/codex" {
 		t.Fatalf("extra env = %#v, want resolved profile env", resolved[0].ExtraEnv)
+	}
+}
+
+func TestResolveAgentRunDataVolumesRejectsReplacementClaim(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	scheme := runtime.NewScheme()
+	if err := controlv1alpha1.AddToScheme(scheme); err != nil {
+		t.Fatalf("add control scheme: %v", err)
+	}
+	if err := corev1.AddToScheme(scheme); err != nil {
+		t.Fatalf("add core scheme: %v", err)
+	}
+	controller := true
+	volume := &controlv1alpha1.AgentDataVolume{
+		ObjectMeta: metav1.ObjectMeta{Name: "agent-home", Namespace: "agents", UID: "volume-uid", Generation: 1},
+		Spec:       controlv1alpha1.AgentDataVolumeSpec{ClaimName: "agent-home", MountPath: "/agent-home"},
+		Status: controlv1alpha1.AgentDataVolumeStatus{
+			ObservedGeneration: 1, Phase: controlv1alpha1.AgentDataVolumePhaseReady,
+			ClaimRef: &controlv1alpha1.NamespacedObjectReference{Name: "agent-home", Namespace: "agents"}, ClaimUID: "original-claim-uid",
+		},
+	}
+	pvc := &corev1.PersistentVolumeClaim{ObjectMeta: metav1.ObjectMeta{
+		Name: "agent-home", Namespace: "agents", UID: "replacement-claim-uid",
+		OwnerReferences: []metav1.OwnerReference{{APIVersion: controlv1alpha1.GroupVersion.String(), Kind: "AgentDataVolume", Name: volume.Name, UID: volume.UID, Controller: &controller}},
+	}}
+	run := &controlv1alpha1.AgentRun{ObjectMeta: metav1.ObjectMeta{Name: "run", Namespace: "agents"}, Spec: controlv1alpha1.AgentRunSpec{Harness: controlv1alpha1.AgentRunHarnessSpec{Execution: controlv1alpha1.AgentRunHarnessExecutionSpec{DataVolumeRefs: []controlv1alpha1.AgentRunDataVolumeRef{{Name: volume.Name}}}}}}
+	reconciler := &AgentRunReconciler{Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(volume, pvc).Build(), Scheme: scheme}
+	_, phase, reason, _, err := reconciler.resolveAgentRunDataVolumes(ctx, run)
+	if err != nil {
+		t.Fatalf("resolve replacement claim: %v", err)
+	}
+	if phase != controlv1alpha1.AgentRunPhaseFailed || reason != "DataVolumeClaimReplaced" {
+		t.Fatalf("phase/reason = %q/%q, want Failed/DataVolumeClaimReplaced", phase, reason)
 	}
 }
 

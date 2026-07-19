@@ -22,7 +22,6 @@ func main() {
 	flag.BoolVar(&options.LeaderElection, "leader-elect", options.LeaderElection, "Enable leader election.")
 	flag.StringVar(&options.LeaderElectionID, "leader-election-id", options.LeaderElectionID, "Leader election resource name.")
 	flag.StringVar(&options.WatchNamespaces, "watch-namespaces", options.WatchNamespaces, "Comma-separated namespaces to watch; empty watches all namespaces.")
-	flag.StringVar(&options.AgentRunArchiveDatabaseURL, "archive-database-url", options.AgentRunArchiveDatabaseURL, "Optional Postgres URL for terminal AgentRun archives.")
 	flag.DurationVar(&options.AgentRunTerminalRetention, "terminal-retention", options.AgentRunTerminalRetention, "Retention after successful archive; zero disables pruning.")
 	flag.StringVar(&options.PlatformRepository, "platform-repository", options.PlatformRepository, "Repository name exposed to agent harnesses for operator context.")
 	flag.StringVar(&options.PlatformRepositoryURL, "platform-repository-url", options.PlatformRepositoryURL, "Repository URL exposed to agent harnesses for operator context.")

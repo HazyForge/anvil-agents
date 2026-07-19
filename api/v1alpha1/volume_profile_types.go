@@ -171,7 +171,7 @@ type VolumeProfileVolumeSpec struct {
 	// ExtraEnv provides non-secret path environment defaults for AgentRuns that
 	// attach an AgentDataVolume inheriting this profile entry.
 	// +optional
-	ExtraEnv []corev1.EnvVar `json:"extraEnv,omitempty"`
+	ExtraEnv []AgentDataVolumePathEnvVar `json:"extraEnv,omitempty"`
 	// ExternalSync declares reusable sync intent for this volume entry. Concrete
 	// volumes may inherit, override, or disable it.
 	// +optional

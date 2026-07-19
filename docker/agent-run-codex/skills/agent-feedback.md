@@ -14,8 +14,12 @@ Required Discord environment:
 - `ANVIL_AGENT_FEEDBACK_DISCORD_BOT_TOKEN`
 - `ANVIL_AGENT_FEEDBACK_DISCORD_CHANNEL_ID`
 
-Optional controls include `ANVIL_AGENT_FEEDBACK_ALLOWED_USER_IDS`,
-`ANVIL_AGENT_FEEDBACK_TIMEOUT`, `ANVIL_AGENT_FEEDBACK_POLL_INTERVAL`, and
+Set `ANVIL_AGENT_FEEDBACK_ALLOWED_USER_IDS` to the comma-separated Discord user
+IDs authorized to answer. The helper fails closed without an allowlist unless
+`ANVIL_AGENT_FEEDBACK_ALLOW_ANY_USER=true` is explicitly selected for a
+channel whose membership is itself the authorization boundary. Other optional
+controls include `ANVIL_AGENT_FEEDBACK_TIMEOUT`,
+`ANVIL_AGENT_FEEDBACK_POLL_INTERVAL`, and
 `ANVIL_AGENT_FEEDBACK_ACCEPT_ANY_AFTER`.
 
 Ask a single question that states the blocked decision, material consequence,

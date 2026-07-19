@@ -190,7 +190,8 @@ cache import/export, multiple tags, custom registries, and fork-aware OCI
 source metadata. Image pushes reject dirty worktrees unless explicitly
 overridden. `publish-release.sh` runs `make verify` and `make kind-e2e`,
 publishes all seven versioned images, verifies their immutable digests and source
-revision, writes a digest lock, and pushes the version-coupled OCI chart.
+revision, writes a digest lock, and pushes an OCI chart whose seven default image
+references are pinned to that lock.
 GitHub workflows use the same repository-owned build and test contracts and are
 optional.
 The optional release workflow runs only for a `v*` tag push or a manual rerun

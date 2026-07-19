@@ -134,7 +134,11 @@ suite, then publishes and verifies all seven images, writes
 another OCI chart namespace. `--skip-verification` is an explicit escape hatch
 only when equivalent checks already ran for that exact tag. The optional GitHub
 workflow uses the same repository-owned contracts; it is a convenience, not a
-release prerequisite.
+release prerequisite. Published release charts use the generated image lock,
+so all seven default image references are pinned by digest. For an offline manual
+package, pass that same file to `package-chart.sh --image-lock` together with
+`--source-revision "$(git rev-parse 'vX.Y.Z^{commit}')"`. The package command
+rejects lock metadata that does not match the expected version-tag commit.
 
 ## Add A Real Harness
 

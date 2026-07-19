@@ -79,6 +79,7 @@ verify-runner-contract:
 	@bash -n hack/install-judge-prerequisites_test.sh
 	@bash -n hack/test-judge-kind.sh
 	@bash -n hack/test-kind-upgrade.sh
+	@bash -n hack/test-kind-upgrade-cleanup.sh
 	@bash -n hack/test-runner-repository-checkout.sh
 	@bash -n hack/test-opencode-runner.sh
 	@bash -n hack/stream-agent-run.sh
@@ -110,6 +111,7 @@ verify-runner-contract:
 	@hack/build-images_test.sh
 	@hack/publish-images_test.sh
 	@hack/publish-release_test.sh
+	@hack/test-kind-upgrade-cleanup.sh
 	@hack/test-runner-repository-checkout.sh
 	@hack/test-opencode-runner.sh
 	@hack/stream-agent-run.sh --help >/dev/null
@@ -124,6 +126,7 @@ verify-runner-contract:
 		rg -q 'ANVIL_AGENT_RUN_TOOL_SETUP_FILES' "$$script"; \
 		rg -q 'ANVIL_AGENT_RUN_TOOLS_JSON' "$$script"; \
 		rg -q 'repository-checkout.sh' "$$script"; \
+		rg -q 'anvil_clone_repository_url' "$$script"; \
 		rg -q '^run_tool_setup$$' "$$script"; \
 	done
 	@for dockerfile in docker/agent-run-*/Dockerfile; do \

@@ -91,6 +91,8 @@ done
 chart_registry="${chart_registry:-oci://${prefix}/charts}"
 [[ "${chart_registry}" == oci://* ]] || { echo "--chart-registry must use oci://" >&2; exit 2; }
 command -v helm >/dev/null 2>&1 || { echo "helm is required" >&2; exit 1; }
+command -v git >/dev/null 2>&1 || { echo "git is required" >&2; exit 1; }
+source_revision="$(git -C "${repo_root}" rev-parse HEAD)"
 
 if [[ "${skip_verification}" != "true" ]]; then
 	make -C "${repo_root}" verify
@@ -111,7 +113,9 @@ chart="${output_dir}/anvil-agents-${chart_version}.tgz"
 "${repo_root}/hack/package-chart.sh" \
 	--version "${version}" \
 	--output "${output_dir}" \
-	--image-prefix "${prefix}"
+	--image-prefix "${prefix}" \
+	--image-lock "${lock}" \
+	--source-revision "${source_revision}"
 
 helm push "${chart}" "${chart_registry}"
 "${repo_root}/hack/publish-images.sh" --verify-lock "${lock}"

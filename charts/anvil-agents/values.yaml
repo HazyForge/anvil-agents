@@ -179,6 +179,8 @@ api:
       bindings: []
     cors:
       allowedOrigins: []
+    list:
+      maxItems: 5000
     stream:
       heartbeatInterval: 15s
       statusPollInterval: 2s

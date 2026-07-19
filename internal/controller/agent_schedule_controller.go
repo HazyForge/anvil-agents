@@ -555,6 +555,7 @@ func (r *AgentScheduleReconciler) createScheduledAgentRun(ctx context.Context, s
 		},
 		Spec: spec,
 	}
+	expected := run.DeepCopy()
 	if err := r.Create(ctx, run); err != nil {
 		if !apierrors.IsAlreadyExists(err) {
 			return nil, "", err
@@ -562,8 +563,90 @@ func (r *AgentScheduleReconciler) createScheduledAgentRun(ctx context.Context, s
 		if err := r.Get(ctx, client.ObjectKey{Namespace: run.Namespace, Name: run.Name}, run); err != nil {
 			return nil, "", err
 		}
+		if err := validateScheduledAgentRun(run, expected, schedule); err != nil {
+			return nil, "", err
+		}
 	}
 	return run, templateName, nil
+}
+
+func validateScheduledAgentRun(run, expected *controlv1alpha1.AgentRun, schedule *controlv1alpha1.AgentSchedule) error {
+	if run == nil || expected == nil || schedule == nil {
+		return fmt.Errorf("scheduled AgentRun provenance cannot be validated")
+	}
+	if run.Namespace != expected.Namespace || run.Name != expected.Name || run.Spec.SourceUID != string(schedule.UID) {
+		return fmt.Errorf("AgentRun %s/%s collides with the expected child for AgentSchedule %s/%s", run.Namespace, run.Name, schedule.Namespace, schedule.Name)
+	}
+	for key, value := range expected.Labels {
+		if key == agentRunTemplateLabel {
+			continue
+		}
+		if run.Labels[key] != value {
+			return fmt.Errorf("AgentRun %s/%s has invalid AgentSchedule provenance label %s", run.Namespace, run.Name, key)
+		}
+	}
+	if scheduledAgentRunSpecMatches(run.Spec, expected.Spec) || scheduledAgentRunMatchesSelectedTemplate(run, schedule, expected) {
+		return nil
+	}
+	return fmt.Errorf("AgentRun %s/%s collides with the expected child for AgentSchedule %s/%s", run.Namespace, run.Name, schedule.Namespace, schedule.Name)
+}
+
+func scheduledAgentRunSpecMatches(actual, expected controlv1alpha1.AgentRunSpec) bool {
+	expected.Trigger.DetectedAt = actual.Trigger.DetectedAt
+	return digestJSON(actual) == digestJSON(expected)
+}
+
+func scheduledAgentRunMatchesSelectedTemplate(run *controlv1alpha1.AgentRun, schedule *controlv1alpha1.AgentSchedule, expected *controlv1alpha1.AgentRun) bool {
+	if run.Spec.Trigger.Reason != "ScheduledAgentRun" {
+		return false
+	}
+	templateLabel := strings.TrimSpace(run.Labels[agentRunTemplateLabel])
+	templates := []struct {
+		name string
+		spec controlv1alpha1.AgentRunSpec
+	}{{spec: schedule.Spec.RunTemplate}}
+	for _, item := range schedule.Spec.RunTemplates {
+		templates = append(templates, struct {
+			name string
+			spec controlv1alpha1.AgentRunSpec
+		}{name: item.Name, spec: item.Template})
+	}
+	for _, item := range templates {
+		if sanitizeLabelValue(item.name) != templateLabel {
+			continue
+		}
+		candidate := *item.spec.DeepCopy()
+		if strings.TrimSpace(string(candidate.Purpose)) == "" {
+			candidate.Purpose = controlv1alpha1.AgentRunPurposeScheduledHealthCheck
+		}
+		if expected.Spec.Scope.ApplicationRef != nil {
+			if candidate.Scope.ApplicationRef == nil {
+				candidate.Scope.ApplicationRef = expected.Spec.Scope.ApplicationRef.DeepCopy()
+			} else if strings.TrimSpace(candidate.Scope.ApplicationRef.Name) != strings.TrimSpace(expected.Spec.Scope.ApplicationRef.Name) {
+				continue
+			}
+		}
+		if strings.TrimSpace(candidate.SourceRef.Kind) == "" {
+			candidate.SourceRef = controlv1alpha1.AgentRunSourceRef{APIVersion: controlv1alpha1.GroupVersion.String(), Kind: "AgentSchedule", Namespace: schedule.Namespace, Name: schedule.Name}
+		}
+		if candidate.SourceUID != "" && candidate.SourceUID != string(schedule.UID) {
+			continue
+		}
+		candidate.SourceUID = string(schedule.UID)
+		if candidate.SourceGeneration != 0 && candidate.SourceGeneration != schedule.Generation {
+			continue
+		}
+		candidate.SourceGeneration = schedule.Generation
+		candidate.Trigger = expected.Spec.Trigger
+		candidate.Trigger.DetectedAt = run.Spec.Trigger.DetectedAt
+		if candidate.ScheduleRef == nil {
+			candidate.ScheduleRef = &controlv1alpha1.NamespacedObjectReference{Name: schedule.Name, Namespace: schedule.Namespace}
+		}
+		if scheduledAgentRunSpecMatches(run.Spec, candidate) {
+			return true
+		}
+	}
+	return false
 }
 
 func detachAgentRunControllerOwner(run *controlv1alpha1.AgentRun, apiVersion, kind, name string, uid types.UID) bool {
@@ -652,7 +735,7 @@ func agentRunBelongsToSchedule(run *controlv1alpha1.AgentRun, schedule *controlv
 	if namespace != schedule.Namespace || strings.TrimSpace(run.Spec.ScheduleRef.Name) != schedule.Name {
 		return false
 	}
-	return strings.TrimSpace(run.Spec.SourceUID) == "" || run.Spec.SourceUID == string(schedule.UID)
+	return strings.TrimSpace(run.Spec.SourceUID) != "" && run.Spec.SourceUID == string(schedule.UID)
 }
 
 func agentScheduleManualRunRequest(schedule *controlv1alpha1.AgentSchedule, token, templateName string, now metav1.Time) agentScheduleRunRequest {

@@ -134,7 +134,7 @@ func (r *AgentRunControlReconciler) countAgentRunControlSubjects(ctx context.Con
 		if err != nil || name != applicationName {
 			continue
 		}
-		if run.Status.JobRef == nil {
+		if run.Status.JobRef == nil && run.Status.JobCreateAttemptedAt == nil {
 			status.PendingRunCount++
 		} else {
 			status.ActiveRunCount++

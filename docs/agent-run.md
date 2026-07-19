@@ -31,13 +31,20 @@ looks up another API group.
 An `AgentRun` resolves its optional `AgentRunProfile`, selected
 `AgentHarnessProfile`, and ordered `AgentSkillSet` and `AgentToolSet`
 references, validates
-credentials and durable volume references, writes a payload ConfigMap, and
-creates one Job. The Job and ConfigMap are owned by the run. Status is derived
-from the Job, pod state, logs, and the structured harness status contract.
+credentials and durable volume references, writes a payload ConfigMap, records
+the payload UID/digest and normalized Job execution digest in status, then
+records a create-attempt timestamp immediately before creating one Job. The Job
+and ConfigMap are owned by the run. Status is derived from the Job, pod state,
+logs, and the structured harness status contract.
 
 Terminal phases are `Succeeded`, `Failed`, and `NeedsHuman`. Pending and
 running resources remain resumable. A controller restart observes the existing
-children rather than creating a replacement Job.
+children rather than creating a replacement Job. If creation succeeded before
+the Job UID was persisted, recovery validates the pre-recorded payload and Job
+digests before accepting the child and does not depend on profiles that may have
+changed after launch planning. A missing Job after the create-attempt receipt is
+ambiguous and fails closed; the controller never creates a replacement that
+could duplicate external side effects.
 
 The backend adapters are `codex`, `openCode`, `hermesAgent`, `openClaw`,
 `grokBuild`, `piAgent`, and `custom`. Backend images are selected by each
@@ -168,10 +175,12 @@ Harness images should emit newline-delimited JSON through
 should include the action, summary, remaining risk, human requirement, and pull
 request URL when applicable. The controller retains recent reports in status.
 
-An optional Postgres archive is enabled with `--archive-database-url` or
-`ANVIL_AGENTS_ARCHIVE_DATABASE_URL`. `--terminal-retention` enables pruning only
-after terminal status has been archived successfully. The historical table
-name is retained so deployments can adopt existing archive records.
+An optional Postgres archive is enabled with the Secret-backed
+`ANVIL_AGENTS_ARCHIVE_DATABASE_URL` environment variable. The controller does
+not accept the database URL as a CLI flag because process arguments are not a
+credential-safe transport. `--terminal-retention` enables pruning only after
+terminal status has been archived successfully. The historical table name is
+retained so deployments can adopt existing archive records.
 
 The Helm chart supports an external database, a small standalone PostgreSQL
 StatefulSet, or a CloudNativePG `Cluster`; every mode still supplies the same
@@ -216,7 +225,6 @@ Useful operator flags:
 | `--platform-docs` | standalone runtime implementation paths |
 | `--adverse-source-gvks` | none |
 | `--adverse-sources-json` | none |
-| `--archive-database-url` | disabled |
 | `--terminal-retention` | disabled |
 | `--runner-image-{codex,opencode,hermes-agent,openclaw,grok-build,pi-agent}` | local `:dev` image; packaged charts use matching `vVERSION` |
 

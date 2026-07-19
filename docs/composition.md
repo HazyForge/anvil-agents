@@ -82,6 +82,15 @@ tool sets and identical subagent personas are deduplicated by name. Conflicting
 definitions of the same tool or persona fail the run instead of choosing one
 silently. Duplicate refs and duplicate override names in one layer also fail.
 
+Remote GitHub skill sources require a full 40- or 64-character commit object
+ID. Branches, tags, and repository defaults are deliberately rejected so the
+resolved payload cannot change without a spec change. An `AgentSkillSet`
+cannot select its own token. For private repositories, map the exact GitHub API
+host to a same-namespace token Secret in the selected
+`AgentHarnessProfile.spec.execution.skillSourceCredentials`. This lets the same
+skill set remain portable across public, private, and mirrored deployments
+without transferring credential authority to capability-pack authors.
+
 ## Skill Overrides
 
 Overrides change one resolved skill without modifying the shared set:

@@ -141,6 +141,8 @@ type AdverseSituationStatus struct {
 	PullRequestObservedAt *metav1.Time               `json:"pullRequestObservedAt,omitempty"`
 	PullRequestQuietUntil *metav1.Time               `json:"pullRequestQuietUntil,omitempty"`
 	ActiveResponderRef    *NamespacedObjectReference `json:"activeResponderRef,omitempty"`
+	ActiveResponderUID    string                     `json:"activeResponderUID,omitempty"`
+	ActiveResponderDigest string                     `json:"activeResponderDigest,omitempty"`
 	PullRequestURL        string                     `json:"pullRequestURL,omitempty"`
 	Summary               string                     `json:"summary,omitempty"`
 }

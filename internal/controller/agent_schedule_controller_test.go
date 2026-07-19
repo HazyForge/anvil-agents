@@ -519,6 +519,7 @@ func TestAgentScheduleQueueDoesNotCreateSecondTemplateForSameDueAt(t *testing.T)
 			},
 		},
 		Spec: controlv1alpha1.AgentRunSpec{
+			SourceUID: string(schedule.UID),
 			Trigger: controlv1alpha1.AgentRunTriggerSnapshot{
 				Reason:  "ScheduledAgentRun",
 				Message: agentScheduleIntervalTriggerMessage(schedule, metav1.NewTime(dueAt)),
@@ -1413,6 +1414,7 @@ func testAgentScheduleWithPolicy(policy controlv1alpha1.AgentScheduleConcurrency
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "platform-health-30m",
 			Namespace: "anvilhub",
+			UID:       "platform-health-30m-uid",
 		},
 		Spec: controlv1alpha1.AgentScheduleSpec{
 			IntervalSeconds:   1800,
@@ -1432,6 +1434,7 @@ func testScheduledAgentRun(name string, created time.Time) *controlv1alpha1.Agen
 			},
 		},
 		Spec: controlv1alpha1.AgentRunSpec{
+			SourceUID: "platform-health-30m-uid",
 			SourceRef: controlv1alpha1.AgentRunSourceRef{
 				APIVersion: controlv1alpha1.GroupVersion.String(),
 				Kind:       "AgentSchedule",

@@ -19,6 +19,7 @@ import (
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
+	apiequality "k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -79,6 +80,7 @@ const (
 )
 
 var agentRunSkillFileNameUnsafeChars = regexp.MustCompile(`[^A-Za-z0-9_.-]+`)
+var agentRunImmutableGitRefPattern = regexp.MustCompile(`^([0-9a-fA-F]{40}|[0-9a-fA-F]{64})$`)
 
 // +kubebuilder:rbac:groups="control.anvil.hazyforge.io",resources=agentruns,verbs=create;delete;get;list;patch;update;watch
 // +kubebuilder:rbac:groups="control.anvil.hazyforge.io",resources=agentruns/status,verbs=get;patch;update
@@ -119,19 +121,14 @@ func (r *AgentRunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	original := obj.DeepCopy()
 	status := obj.Status
 	if status.ObservedGeneration != 0 && status.ObservedGeneration != obj.Generation {
-		// Spec changes bump generation and would otherwise wipe status. Preserve the
-		// non-terminal harness Job identity so prompt/context edits cannot replace an
-		// already-running execution (see status.jobRef single-execution contract).
-		preservedJobRef := status.JobRef
-		preservedStartedAt := status.StartedAt
-		preservedPromptHash := status.PromptHash
-		preservedPhase := status.Phase
-		status = controlv1alpha1.AgentRunStatus{}
-		if !agentRunPhaseTerminal(preservedPhase) && preservedJobRef != nil && strings.TrimSpace(preservedJobRef.Name) != "" {
-			status.JobRef = preservedJobRef.DeepCopy()
-			status.StartedAt = preservedStartedAt
-			status.PromptHash = preservedPromptHash
-			status.Phase = preservedPhase
+		// Preserve the complete execution receipt atomically. This rolling-upgrade
+		// guard prevents a generation change from turning a prepared or running
+		// single execution into an incomplete identity that could be relaunched.
+		preserveExecution := !agentRunPhaseTerminal(status.Phase) &&
+			((status.JobRef != nil && strings.TrimSpace(status.JobRef.Name) != "") ||
+				agentRunLaunchReceiptComplete(&status) || status.JobCreateAttemptedAt != nil)
+		if !preserveExecution {
+			status = controlv1alpha1.AgentRunStatus{}
 		}
 	}
 	status.ObservedGeneration = obj.Generation
@@ -141,9 +138,18 @@ func (r *AgentRunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	// persisting status.jobRef; later profile deletion or drift must not
 	// terminalize the record while that already-created execution runs unseen.
 	now := metav1.Now()
-	job, missingJobMessage, err := r.existingAgentRunJob(ctx, obj, status.JobRef)
+	plannedLaunch := agentRunLaunchReceiptComplete(&status) && status.JobRef == nil && status.JobUID == ""
+	jobLookupRef := status.JobRef
+	if plannedLaunch {
+		jobLookupRef = status.PlannedJobRef
+	}
+	allowPreparedJobMissing := plannedLaunch && status.JobCreateAttemptedAt == nil
+	job, missingJobMessage, err := r.existingAgentRunJob(ctx, obj, jobLookupRef, status.JobUID, allowPreparedJobMissing)
 	if err != nil {
 		return ctrl.Result{}, err
+	}
+	if missingJobMessage != "" && plannedLaunch && status.JobCreateAttemptedAt != nil {
+		missingJobMessage = fmt.Sprintf("Agent run job %s/%s is absent after a recorded create attempt; refusing to create a replacement execution.", jobLookupRef.Namespace, jobLookupRef.Name)
 	}
 	if missingJobMessage != "" {
 		status.Phase = controlv1alpha1.AgentRunPhaseFailed
@@ -161,19 +167,37 @@ func (r *AgentRunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		obj.Status = status
 		return r.patchAgentRunStatus(ctx, original, obj, false)
 	}
-	if job != nil && status.JobRef == nil {
+	jobNeedsValidation := job != nil && status.JobRef == nil
+	if job != nil && status.JobUID == "" && agentRunLaunchReceiptComplete(&status) {
+		if status.JobCreateAttemptedAt == nil {
+			return ctrl.Result{}, fmt.Errorf("AgentRun Job %s/%s exists without the required create-attempt receipt", job.Namespace, job.Name)
+		}
+		if err := r.validateAgentRunLaunchReceipt(ctx, obj, job, &status); err != nil {
+			return ctrl.Result{}, err
+		}
+		status.JobUID = string(job.UID)
 		status.JobRef = &controlv1alpha1.NamespacedObjectReference{Name: job.Name, Namespace: job.Namespace}
+		if status.ResolvedComposition != nil && status.ResolvedComposition.ResolvedAt == nil {
+			resolvedAt := now
+			status.ResolvedComposition.ResolvedAt = &resolvedAt
+		}
+		jobNeedsValidation = false
 	}
-	if job != nil && status.ResolvedComposition == nil {
-		status.ResolvedComposition = agentRunResolvedCompositionFromJob(job)
-	}
-	if job != nil && len(status.DataVolumes) == 0 {
-		status.DataVolumes = agentRunDataVolumeStatusesFromJob(job)
+	if job != nil && !jobNeedsValidation {
+		if status.JobUID == "" {
+			status.JobUID = string(job.UID)
+		}
+		if status.ResolvedComposition == nil {
+			status.ResolvedComposition = agentRunResolvedCompositionFromJob(job)
+		}
+		if len(status.DataVolumes) == 0 {
+			status.DataVolumes = agentRunDataVolumeStatusesFromJob(job)
+		}
 	}
 
 	effective := obj.DeepCopy()
 	var resolvedComposition *controlv1alpha1.AgentRunResolvedCompositionStatus
-	if job == nil {
+	if job == nil || jobNeedsValidation {
 		var phase controlv1alpha1.AgentRunPhase
 		var reason, message string
 		effective, resolvedComposition, phase, reason, message, err = r.resolveAgentRunComposition(ctx, obj)
@@ -184,6 +208,9 @@ func (r *AgentRunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		status.Intent = string(agentRunIntent(effective))
 		status.Image = r.agentRunImage(effective)
 		if phase != "" {
+			if jobNeedsValidation {
+				return ctrl.Result{}, fmt.Errorf("cannot validate recovered AgentRun Job %s/%s without its original resolved composition: %s", job.Namespace, job.Name, message)
+			}
 			status.Phase = phase
 			if status.StartedAt == nil {
 				status.StartedAt = &now
@@ -280,7 +307,7 @@ func (r *AgentRunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	}
 
 	var dataVolumes []resolvedAgentRunDataVolume
-	if job == nil {
+	if job == nil || jobNeedsValidation {
 		var phase controlv1alpha1.AgentRunPhase
 		var reason, message string
 		dataVolumes, phase, reason, message, err = r.resolveAgentRunDataVolumes(ctx, effective)
@@ -289,6 +316,9 @@ func (r *AgentRunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		}
 		status.DataVolumes = agentRunDataVolumeStatuses(dataVolumes)
 		if phase != "" {
+			if jobNeedsValidation {
+				return ctrl.Result{}, fmt.Errorf("cannot validate recovered AgentRun Job %s/%s without its original resolved data volumes: %s", job.Namespace, job.Name, message)
+			}
 			status.Phase = phase
 			if phase == controlv1alpha1.AgentRunPhasePending {
 				status.CompletedAt = nil
@@ -310,6 +340,48 @@ func (r *AgentRunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 			})
 			obj.Status = status
 			return r.patchAgentRunStatus(ctx, original, obj, phase == controlv1alpha1.AgentRunPhasePending)
+		}
+	}
+	if jobNeedsValidation {
+		prompt := buildAgentRunPrompt(effective)
+		promptHash := shortHash(prompt)
+		expectedJobName := agentRunChildName(effective.Name, "harness", promptHash)
+		if job.Name != expectedJobName {
+			return ctrl.Result{}, fmt.Errorf("recovered AgentRun Job %s/%s does not match expected identity %s/%s", job.Namespace, job.Name, effective.Namespace, expectedJobName)
+		}
+		if resolvedComposition != nil {
+			effective.Status.ResolvedComposition = resolvedComposition.DeepCopy()
+		}
+		payload, payloadDigest, err := r.ensureAgentRunConfigMap(ctx, effective, prompt, promptHash)
+		if err != nil {
+			return ctrl.Result{}, err
+		}
+		if resolvedComposition != nil {
+			resolvedComposition.PayloadDigest = payloadDigest
+			effective.Status.ResolvedComposition = resolvedComposition.DeepCopy()
+		}
+		validatedJob, err := r.ensureAgentRunJob(ctx, effective, promptHash, dataVolumes)
+		if err != nil {
+			return ctrl.Result{}, err
+		}
+		if job.UID != "" && validatedJob.UID != job.UID {
+			return ctrl.Result{}, fmt.Errorf("recovered AgentRun Job %s/%s changed UID during validation", job.Namespace, job.Name)
+		}
+		job = validatedJob
+		status.PromptHash = promptHash
+		status.JobRef = &controlv1alpha1.NamespacedObjectReference{Name: job.Name, Namespace: job.Namespace}
+		status.JobUID = string(job.UID)
+		status.PayloadRef = &controlv1alpha1.NamespacedObjectReference{Name: payload.Name, Namespace: payload.Namespace}
+		status.PayloadUID = string(payload.UID)
+		status.JobSpecDigest, err = agentRunJobSnapshotDigest(job)
+		if err != nil {
+			return ctrl.Result{}, err
+		}
+		status.DataVolumes = agentRunDataVolumeStatuses(dataVolumes)
+		if resolvedComposition != nil {
+			resolvedAt := now
+			resolvedComposition.ResolvedAt = &resolvedAt
+			status.ResolvedComposition = resolvedComposition.DeepCopy()
 		}
 	}
 
@@ -358,12 +430,7 @@ func (r *AgentRunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		}
 		prompt := buildAgentRunPrompt(effective)
 		promptHash := shortHash(prompt)
-		if resolvedComposition != nil {
-			resolvedAt := now
-			resolvedComposition.ResolvedAt = &resolvedAt
-			effective.Status.ResolvedComposition = resolvedComposition.DeepCopy()
-		}
-		_, payloadDigest, err := r.ensureAgentRunConfigMap(ctx, effective, prompt, promptHash)
+		payload, payloadDigest, err := r.ensureAgentRunConfigMap(ctx, effective, prompt, promptHash)
 		if err != nil {
 			return ctrl.Result{}, err
 		}
@@ -371,13 +438,50 @@ func (r *AgentRunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 			resolvedComposition.PayloadDigest = payloadDigest
 			effective.Status.ResolvedComposition = resolvedComposition.DeepCopy()
 		}
+		jobName := agentRunChildName(effective.Name, "harness", promptHash)
+		desiredJob := r.agentRunJob(effective, jobName, payload.Name, dataVolumes)
+		jobSpecDigest, err := agentRunJobSnapshotDigest(desiredJob)
+		if err != nil {
+			return ctrl.Result{}, err
+		}
+		if !agentRunLaunchReceiptComplete(&status) {
+			status.PromptHash = promptHash
+			status.PlannedJobRef = &controlv1alpha1.NamespacedObjectReference{Name: jobName, Namespace: effective.Namespace}
+			status.JobSpecDigest = jobSpecDigest
+			status.PayloadRef = &controlv1alpha1.NamespacedObjectReference{Name: payload.Name, Namespace: payload.Namespace}
+			status.PayloadUID = string(payload.UID)
+			status.DataVolumes = agentRunDataVolumeStatuses(dataVolumes)
+			if resolvedComposition != nil {
+				status.ResolvedComposition = resolvedComposition.DeepCopy()
+			}
+			obj.Status = status
+			return r.patchAgentRunStatus(ctx, original, obj, true)
+		}
+		if err := validateAgentRunLaunchPlan(&status, desiredJob, payload, promptHash, resolvedComposition, dataVolumes); err != nil {
+			return ctrl.Result{}, err
+		}
+		if status.JobCreateAttemptedAt == nil {
+			attemptedAt := now
+			status.JobCreateAttemptedAt = &attemptedAt
+			obj.Status = status
+			if err := r.Status().Patch(ctx, obj, client.MergeFrom(original)); err != nil {
+				if apierrors.IsConflict(err) {
+					return ctrl.Result{Requeue: true}, nil
+				}
+				return ctrl.Result{}, err
+			}
+			original = obj.DeepCopy()
+		}
 		job, err = r.ensureAgentRunJob(ctx, effective, promptHash, dataVolumes)
 		if err != nil {
 			return ctrl.Result{}, err
 		}
 		status.PromptHash = promptHash
 		status.JobRef = &controlv1alpha1.NamespacedObjectReference{Name: job.Name, Namespace: job.Namespace}
+		status.JobUID = string(job.UID)
 		if resolvedComposition != nil {
+			resolvedAt := now
+			resolvedComposition.ResolvedAt = &resolvedAt
 			status.ResolvedComposition = resolvedComposition.DeepCopy()
 		}
 	}
@@ -387,12 +491,14 @@ func (r *AgentRunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	}
 	status.Image = firstNonEmpty(agentRunJobContainerImage(job), r.agentRunImage(effective))
 
-	runnerRef, runnerPod, err := r.findAgentRunRunnerPod(ctx, obj.Namespace, job.Name)
+	runnerRef, runnerPod, err := r.findAgentRunRunnerPod(ctx, job)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
 	status.RunnerPodRef = runnerRef
+	status.RunnerPodUID = ""
 	if runnerPod != nil {
+		status.RunnerPodUID = string(runnerPod.UID)
 		status.RunnerNode = runnerPod.Spec.NodeName
 		if logs, err := r.readAgentRunRunnerLogs(ctx, runnerPod.Namespace, runnerPod.Name); err == nil {
 			agentRunApplyStatusReports(&status, agentRunStatusReportsFromOutput(logs))
@@ -497,14 +603,14 @@ func (r *AgentRunReconciler) ensureAgentRunConfigMap(ctx context.Context, obj *c
 		return nil, "", err
 	}
 	name := agentRunChildName(obj.Name, "context", promptHash)
+	data, err := r.agentRunConfigMapData(ctx, obj, prompt, string(contextBody))
+	if err != nil {
+		return nil, "", err
+	}
 	configMap := &corev1.ConfigMap{}
 	key := client.ObjectKey{Name: name, Namespace: obj.Namespace}
 	if err := r.Get(ctx, key, configMap); err != nil {
 		if client.IgnoreNotFound(err) != nil {
-			return nil, "", err
-		}
-		data, err := r.agentRunConfigMapData(ctx, obj, prompt, string(contextBody))
-		if err != nil {
 			return nil, "", err
 		}
 		configMap = &corev1.ConfigMap{
@@ -513,12 +619,26 @@ func (r *AgentRunReconciler) ensureAgentRunConfigMap(ctx context.Context, obj *c
 				Namespace: obj.Namespace,
 				Labels:    agentRunLabels(obj, ""),
 			},
-			Data: data,
+			Data:      data,
+			Immutable: boolPtr(true),
 		}
 		if err := controllerutil.SetControllerReference(obj, configMap, r.Scheme); err != nil {
 			return nil, "", err
 		}
 		if err := r.Create(ctx, configMap); err != nil {
+			return nil, "", err
+		}
+	} else {
+		if err := validateAgentRunConfigMapIdentityAndData(configMap, obj, data); err != nil {
+			return nil, "", err
+		}
+		if configMap.Immutable == nil || !*configMap.Immutable {
+			configMap.Immutable = boolPtr(true)
+			if err := r.Update(ctx, configMap); err != nil {
+				return nil, "", fmt.Errorf("make AgentRun payload ConfigMap %s/%s immutable: %w", configMap.Namespace, configMap.Name, err)
+			}
+		}
+		if err := validateAgentRunConfigMap(configMap, obj, data); err != nil {
 			return nil, "", err
 		}
 	}
@@ -576,23 +696,305 @@ func agentRunConfigMapDataSize(data map[string]string) int {
 
 func (r *AgentRunReconciler) ensureAgentRunJob(ctx context.Context, obj *controlv1alpha1.AgentRun, promptHash string, dataVolumes []resolvedAgentRunDataVolume) (*batchv1.Job, error) {
 	jobName := agentRunChildName(obj.Name, "harness", promptHash)
+	desired := r.agentRunJob(obj, jobName, agentRunChildName(obj.Name, "context", promptHash), dataVolumes)
 	job := &batchv1.Job{}
 	key := client.ObjectKey{Name: jobName, Namespace: obj.Namespace}
 	if err := r.Get(ctx, key, job); err != nil {
 		if client.IgnoreNotFound(err) != nil {
 			return nil, err
 		}
-		job = r.agentRunJob(obj, jobName, agentRunChildName(obj.Name, "context", promptHash), dataVolumes)
+		job = desired
 		if err := controllerutil.SetControllerReference(obj, job, r.Scheme); err != nil {
 			return nil, err
 		}
 		if err := r.Create(ctx, job); err != nil {
 			return nil, err
 		}
-	} else if !job.DeletionTimestamp.IsZero() {
-		return nil, fmt.Errorf("AgentRun Job %s/%s is still terminating; retry after deletion completes", job.Namespace, job.Name)
+	} else {
+		if !job.DeletionTimestamp.IsZero() {
+			return nil, fmt.Errorf("AgentRun Job %s/%s is still terminating; retry after deletion completes", job.Namespace, job.Name)
+		}
+		if err := validateAgentRunJob(job, desired, obj); err != nil {
+			return nil, err
+		}
 	}
 	return job, nil
+}
+
+func validateAgentRunConfigMap(configMap *corev1.ConfigMap, run *controlv1alpha1.AgentRun, expectedData map[string]string) error {
+	if err := validateAgentRunConfigMapIdentityAndData(configMap, run, expectedData); err != nil {
+		return err
+	}
+	if configMap.Immutable == nil || !*configMap.Immutable {
+		return fmt.Errorf("AgentRun payload ConfigMap %s/%s is mutable; refusing to execute it", configMap.Namespace, configMap.Name)
+	}
+	return nil
+}
+
+func validateAgentRunConfigMapIdentityAndData(configMap *corev1.ConfigMap, run *controlv1alpha1.AgentRun, expectedData map[string]string) error {
+	if !agentRunControllerOwnerMatches(configMap, run) {
+		return fmt.Errorf("AgentRun payload ConfigMap %s/%s is not controlled by AgentRun %s/%s with the current UID", configMap.Namespace, configMap.Name, run.Namespace, run.Name)
+	}
+	if !apiequality.Semantic.DeepEqual(configMap.Data, expectedData) || len(configMap.BinaryData) != 0 {
+		return fmt.Errorf("AgentRun payload ConfigMap %s/%s does not match the resolved run payload", configMap.Namespace, configMap.Name)
+	}
+	for key, value := range agentRunLabels(run, "") {
+		if configMap.Labels[key] != value {
+			return fmt.Errorf("AgentRun payload ConfigMap %s/%s has invalid label %s", configMap.Namespace, configMap.Name, key)
+		}
+	}
+	return nil
+}
+
+func validateAgentRunJob(job, desired *batchv1.Job, run *controlv1alpha1.AgentRun) error {
+	if !agentRunControllerOwnerMatches(job, run) {
+		return fmt.Errorf("AgentRun Job %s/%s is not controlled by AgentRun %s/%s with the current UID", job.Namespace, job.Name, run.Namespace, run.Name)
+	}
+	if !apiequality.Semantic.DeepEqual(job.Labels, desired.Labels) {
+		return fmt.Errorf("AgentRun Job %s/%s has invalid labels", job.Namespace, job.Name)
+	}
+	if !apiequality.Semantic.DeepEqual(job.Annotations, desired.Annotations) {
+		return fmt.Errorf("AgentRun Job %s/%s has invalid annotations", job.Namespace, job.Name)
+	}
+	normalizedDesired, err := normalizeAgentRunJobSpec(desired.Spec, job)
+	if err != nil {
+		return err
+	}
+	normalizedActual, err := normalizeAgentRunJobSpec(job.Spec, job)
+	if err != nil {
+		return err
+	}
+	if !apiequality.Semantic.DeepEqual(normalizedDesired, normalizedActual) {
+		return fmt.Errorf("AgentRun Job %s/%s does not match the resolved run execution spec", job.Namespace, job.Name)
+	}
+	return nil
+}
+
+type agentRunJobSnapshot struct {
+	Labels      map[string]string `json:"labels,omitempty"`
+	Annotations map[string]string `json:"annotations,omitempty"`
+	Spec        batchv1.JobSpec   `json:"spec"`
+}
+
+func agentRunJobSnapshotDigest(job *batchv1.Job) (string, error) {
+	if job == nil {
+		return "", fmt.Errorf("AgentRun Job snapshot is nil")
+	}
+	normalized, err := normalizeAgentRunJobSpec(job.Spec, job)
+	if err != nil {
+		return "", err
+	}
+	digest := digestJSON(agentRunJobSnapshot{
+		Labels:      job.Labels,
+		Annotations: job.Annotations,
+		Spec:        normalized,
+	})
+	if digest == "" {
+		return "", fmt.Errorf("digest AgentRun Job %s/%s execution snapshot", job.Namespace, job.Name)
+	}
+	return digest, nil
+}
+
+func agentRunLaunchReceiptComplete(status *controlv1alpha1.AgentRunStatus) bool {
+	return status != nil &&
+		status.PlannedJobRef != nil && strings.TrimSpace(status.PlannedJobRef.Name) != "" && strings.TrimSpace(status.PlannedJobRef.Namespace) != "" &&
+		strings.TrimSpace(status.JobSpecDigest) != "" &&
+		status.PayloadRef != nil && strings.TrimSpace(status.PayloadRef.Name) != "" && strings.TrimSpace(status.PayloadRef.Namespace) != "" &&
+		strings.TrimSpace(status.PayloadUID) != "" &&
+		strings.TrimSpace(status.PromptHash) != "" &&
+		status.ResolvedComposition != nil && strings.TrimSpace(status.ResolvedComposition.PayloadDigest) != ""
+}
+
+func validateAgentRunLaunchPlan(status *controlv1alpha1.AgentRunStatus, desiredJob *batchv1.Job, payload *corev1.ConfigMap, promptHash string, composition *controlv1alpha1.AgentRunResolvedCompositionStatus, dataVolumes []resolvedAgentRunDataVolume) error {
+	if !agentRunLaunchReceiptComplete(status) {
+		return fmt.Errorf("AgentRun launch receipt is incomplete")
+	}
+	if status.PlannedJobRef.Namespace != desiredJob.Namespace || status.PlannedJobRef.Name != desiredJob.Name {
+		return fmt.Errorf("AgentRun launch plan references Job %s/%s, not resolved Job %s/%s", status.PlannedJobRef.Namespace, status.PlannedJobRef.Name, desiredJob.Namespace, desiredJob.Name)
+	}
+	digest, err := agentRunJobSnapshotDigest(desiredJob)
+	if err != nil {
+		return err
+	}
+	if status.JobSpecDigest != digest {
+		return fmt.Errorf("AgentRun resolved execution changed after its launch receipt was recorded")
+	}
+	if status.PayloadRef.Namespace != payload.Namespace || status.PayloadRef.Name != payload.Name {
+		return fmt.Errorf("AgentRun launch plan references payload %s/%s, not resolved payload %s/%s", status.PayloadRef.Namespace, status.PayloadRef.Name, payload.Namespace, payload.Name)
+	}
+	if status.PayloadUID != "" && status.PayloadUID != string(payload.UID) {
+		return fmt.Errorf("AgentRun payload ConfigMap %s/%s UID %s does not match recorded UID %s", payload.Namespace, payload.Name, payload.UID, status.PayloadUID)
+	}
+	if status.PromptHash != promptHash {
+		return fmt.Errorf("AgentRun prompt changed after its launch receipt was recorded")
+	}
+	if !apiequality.Semantic.DeepEqual(status.DataVolumes, agentRunDataVolumeStatuses(dataVolumes)) {
+		return fmt.Errorf("AgentRun data volumes changed after its launch receipt was recorded")
+	}
+	if composition == nil || !apiequality.Semantic.DeepEqual(status.ResolvedComposition, composition) {
+		return fmt.Errorf("AgentRun composition changed after its launch receipt was recorded")
+	}
+	return nil
+}
+
+func (r *AgentRunReconciler) validateAgentRunLaunchReceipt(ctx context.Context, run *controlv1alpha1.AgentRun, job *batchv1.Job, status *controlv1alpha1.AgentRunStatus) error {
+	if !agentRunLaunchReceiptComplete(status) {
+		return fmt.Errorf("AgentRun %s/%s has no complete launch receipt", run.Namespace, run.Name)
+	}
+	if status.PlannedJobRef.Namespace != run.Namespace || status.PlannedJobRef.Name != job.Name || job.Namespace != run.Namespace {
+		return fmt.Errorf("recovered AgentRun Job %s/%s does not match the recorded planned Job %s/%s", job.Namespace, job.Name, status.PlannedJobRef.Namespace, status.PlannedJobRef.Name)
+	}
+	digest, err := agentRunJobSnapshotDigest(job)
+	if err != nil {
+		return err
+	}
+	if digest != status.JobSpecDigest {
+		return fmt.Errorf("recovered AgentRun Job %s/%s does not match the recorded execution snapshot", job.Namespace, job.Name)
+	}
+	namespace := firstNonEmpty(strings.TrimSpace(status.PayloadRef.Namespace), run.Namespace)
+	if namespace != run.Namespace {
+		return fmt.Errorf("AgentRun payload reference %s/%s is outside AgentRun namespace %s", namespace, status.PayloadRef.Name, run.Namespace)
+	}
+	payload := &corev1.ConfigMap{}
+	reader := client.Reader(r.Client)
+	if r.APIReader != nil {
+		reader = r.APIReader
+	}
+	if err := reader.Get(ctx, client.ObjectKey{Namespace: namespace, Name: strings.TrimSpace(status.PayloadRef.Name)}, payload); err != nil {
+		return fmt.Errorf("get recorded AgentRun payload ConfigMap %s/%s: %w", namespace, status.PayloadRef.Name, err)
+	}
+	if !agentRunControllerOwnerMatches(payload, run) {
+		return fmt.Errorf("AgentRun payload ConfigMap %s/%s is not controlled by AgentRun %s/%s with the current UID", payload.Namespace, payload.Name, run.Namespace, run.Name)
+	}
+	if status.PayloadUID != "" && string(payload.UID) != status.PayloadUID {
+		return fmt.Errorf("AgentRun payload ConfigMap %s/%s UID %s does not match recorded UID %s", payload.Namespace, payload.Name, payload.UID, status.PayloadUID)
+	}
+	if payload.Immutable == nil || !*payload.Immutable {
+		return fmt.Errorf("AgentRun payload ConfigMap %s/%s is mutable; refusing recovered execution", payload.Namespace, payload.Name)
+	}
+	if len(payload.BinaryData) != 0 || digestJSON(payload.Data) != status.ResolvedComposition.PayloadDigest {
+		return fmt.Errorf("AgentRun payload ConfigMap %s/%s does not match the recorded payload digest", payload.Namespace, payload.Name)
+	}
+	if shortHash(payload.Data[agentRunPromptFile]) != status.PromptHash {
+		return fmt.Errorf("AgentRun payload ConfigMap %s/%s prompt does not match the recorded prompt hash", payload.Namespace, payload.Name)
+	}
+	if payload.Name != agentRunChildName(run.Name, "context", status.PromptHash) || job.Name != agentRunChildName(run.Name, "harness", status.PromptHash) {
+		return fmt.Errorf("AgentRun recovered child names do not match the recorded prompt identity")
+	}
+	return nil
+}
+
+func normalizeAgentRunJobSpec(spec batchv1.JobSpec, job *batchv1.Job) (batchv1.JobSpec, error) {
+	normalized := *spec.DeepCopy()
+	if normalized.Selector != nil {
+		if job == nil || job.UID == "" {
+			return batchv1.JobSpec{}, fmt.Errorf("AgentRun Job selector cannot be validated without a Job UID")
+		}
+		expected := &metav1.LabelSelector{MatchLabels: map[string]string{"batch.kubernetes.io/controller-uid": string(job.UID)}}
+		if !apiequality.Semantic.DeepEqual(normalized.Selector, expected) {
+			return batchv1.JobSpec{}, fmt.Errorf("AgentRun Job %s/%s has an invalid controller selector", job.Namespace, job.Name)
+		}
+		normalized.Selector = nil
+	}
+	if normalized.ManualSelector != nil && !*normalized.ManualSelector {
+		normalized.ManualSelector = nil
+	}
+	if normalized.Parallelism != nil && *normalized.Parallelism == 1 {
+		normalized.Parallelism = nil
+	}
+	if normalized.Completions != nil && *normalized.Completions == 1 {
+		normalized.Completions = nil
+	}
+	if normalized.CompletionMode != nil && *normalized.CompletionMode == batchv1.NonIndexedCompletion {
+		normalized.CompletionMode = nil
+	}
+	if normalized.Suspend != nil && !*normalized.Suspend {
+		normalized.Suspend = nil
+	}
+	if normalized.PodReplacementPolicy != nil && *normalized.PodReplacementPolicy == batchv1.TerminatingOrFailed {
+		normalized.PodReplacementPolicy = nil
+	}
+
+	pod := &normalized.Template.Spec
+	if pod.EnableServiceLinks != nil && *pod.EnableServiceLinks {
+		pod.EnableServiceLinks = nil
+	}
+	if pod.PreemptionPolicy != nil && *pod.PreemptionPolicy == corev1.PreemptLowerPriority {
+		pod.PreemptionPolicy = nil
+	}
+	if pod.DeprecatedServiceAccount == pod.ServiceAccountName {
+		pod.DeprecatedServiceAccount = ""
+	}
+	if pod.DNSPolicy == corev1.DNSClusterFirst {
+		pod.DNSPolicy = ""
+	}
+	if pod.SchedulerName == corev1.DefaultSchedulerName {
+		pod.SchedulerName = ""
+	}
+	if pod.TerminationGracePeriodSeconds != nil && *pod.TerminationGracePeriodSeconds == 30 {
+		pod.TerminationGracePeriodSeconds = nil
+	}
+	for index := range pod.Containers {
+		container := &pod.Containers[index]
+		if container.TerminationMessagePath == corev1.TerminationMessagePathDefault {
+			container.TerminationMessagePath = ""
+		}
+		if container.TerminationMessagePolicy == corev1.TerminationMessageReadFile {
+			container.TerminationMessagePolicy = ""
+		}
+	}
+	for index := range pod.InitContainers {
+		container := &pod.InitContainers[index]
+		if container.TerminationMessagePath == corev1.TerminationMessagePathDefault {
+			container.TerminationMessagePath = ""
+		}
+		if container.TerminationMessagePolicy == corev1.TerminationMessageReadFile {
+			container.TerminationMessagePolicy = ""
+		}
+	}
+	for index := range pod.Volumes {
+		volume := &pod.Volumes[index]
+		if volume.ConfigMap != nil && volume.ConfigMap.DefaultMode != nil && *volume.ConfigMap.DefaultMode == 0o644 {
+			volume.ConfigMap.DefaultMode = nil
+		}
+		if volume.Secret != nil && volume.Secret.DefaultMode != nil && *volume.Secret.DefaultMode == 0o644 {
+			volume.Secret.DefaultMode = nil
+		}
+		if volume.DownwardAPI != nil && volume.DownwardAPI.DefaultMode != nil && *volume.DownwardAPI.DefaultMode == 0o644 {
+			volume.DownwardAPI.DefaultMode = nil
+		}
+		if volume.Projected != nil && volume.Projected.DefaultMode != nil && *volume.Projected.DefaultMode == 0o644 {
+			volume.Projected.DefaultMode = nil
+		}
+	}
+	if normalized.Template.Labels != nil {
+		expectedControllerLabels := map[string]string{
+			"batch.kubernetes.io/controller-uid": string(job.UID),
+			"batch.kubernetes.io/job-name":       job.Name,
+			"controller-uid":                     string(job.UID),
+			"job-name":                           job.Name,
+		}
+		for key, expected := range expectedControllerLabels {
+			if actual, exists := normalized.Template.Labels[key]; exists {
+				if job.UID == "" || actual != expected {
+					return batchv1.JobSpec{}, fmt.Errorf("AgentRun Job %s/%s has invalid controller label %s", job.Namespace, job.Name, key)
+				}
+				delete(normalized.Template.Labels, key)
+			}
+		}
+		if len(normalized.Template.Labels) == 0 {
+			normalized.Template.Labels = nil
+		}
+	}
+	return normalized, nil
+}
+
+func agentRunControllerOwnerMatches(obj metav1.Object, run *controlv1alpha1.AgentRun) bool {
+	if obj == nil || run == nil || run.UID == "" {
+		return false
+	}
+	owner := metav1.GetControllerOf(obj)
+	return owner != nil && owner.APIVersion == controlv1alpha1.GroupVersion.String() && owner.Kind == "AgentRun" && owner.Name == run.Name && owner.UID == run.UID
 }
 
 func (r *AgentRunReconciler) ensureAgentRunExternalSecretFreshness(ctx context.Context, obj *controlv1alpha1.AgentRun, status *controlv1alpha1.AgentRunStatus) (bool, controlv1alpha1.AgentRunPhase, string, string, error) {
@@ -745,7 +1147,7 @@ func agentRunExternalSecretTargetName(obj *unstructured.Unstructured, fallback s
 	return fallback
 }
 
-func (r *AgentRunReconciler) existingAgentRunJob(ctx context.Context, obj *controlv1alpha1.AgentRun, ref *controlv1alpha1.NamespacedObjectReference) (*batchv1.Job, string, error) {
+func (r *AgentRunReconciler) existingAgentRunJob(ctx context.Context, obj *controlv1alpha1.AgentRun, ref *controlv1alpha1.NamespacedObjectReference, expectedUID string, allowPlannedMissing bool) (*batchv1.Job, string, error) {
 	reader := client.Reader(r.Client)
 	if r.APIReader != nil {
 		reader = r.APIReader
@@ -761,11 +1163,7 @@ func (r *AgentRunReconciler) existingAgentRunJob(ctx context.Context, obj *contr
 			if !job.DeletionTimestamp.IsZero() {
 				continue
 			}
-			owner := metav1.GetControllerOf(job)
-			if owner == nil || owner.Kind != "AgentRun" || owner.Name != obj.Name {
-				continue
-			}
-			if obj.UID != "" && owner.UID != obj.UID {
+			if !agentRunControllerOwnerMatches(job, obj) {
 				continue
 			}
 			if owned != nil {
@@ -783,17 +1181,18 @@ func (r *AgentRunReconciler) existingAgentRunJob(ctx context.Context, obj *contr
 	job := &batchv1.Job{}
 	if err := reader.Get(ctx, client.ObjectKey{Namespace: namespace, Name: name}, job); err != nil {
 		if apierrors.IsNotFound(err) {
+			if allowPlannedMissing && expectedUID == "" {
+				return nil, "", nil
+			}
 			return nil, fmt.Sprintf("Agent run job %s/%s no longer exists.", namespace, name), nil
 		}
 		return nil, "", fmt.Errorf("get agent run job %s/%s: %w", namespace, name, err)
 	}
-	owner := metav1.GetControllerOf(job)
-	if owner == nil {
-		if obj.UID != "" {
-			return nil, fmt.Sprintf("Agent run job %s/%s is not controller-owned by AgentRun %s/%s.", namespace, name, obj.Namespace, obj.Name), nil
-		}
-	} else if owner.Kind != "AgentRun" || owner.Name != obj.Name || (obj.UID != "" && owner.UID != obj.UID) {
-		return nil, fmt.Sprintf("Agent run job %s/%s is controlled by %s %s (UID %s), not AgentRun %s/%s (UID %s).", namespace, name, owner.Kind, owner.Name, owner.UID, obj.Namespace, obj.Name, obj.UID), nil
+	if !agentRunControllerOwnerMatches(job, obj) {
+		return nil, fmt.Sprintf("Agent run job %s/%s is not controller-owned by AgentRun %s/%s with the current UID.", namespace, name, obj.Namespace, obj.Name), nil
+	}
+	if expectedUID != "" && string(job.UID) != expectedUID {
+		return nil, fmt.Sprintf("Agent run job %s/%s UID %s does not match recorded UID %s.", namespace, name, job.UID, expectedUID), nil
 	}
 	return job, "", nil
 }
@@ -883,7 +1282,7 @@ func (r *AgentRunReconciler) agentRunJob(obj *controlv1alpha1.AgentRun, jobName,
 					Labels: agentRunLabels(obj, jobName),
 				},
 				Spec: corev1.PodSpec{
-					ServiceAccountName: strings.TrimSpace(obj.Spec.Harness.Execution.ServiceAccountName),
+					ServiceAccountName: firstNonEmpty(strings.TrimSpace(obj.Spec.Harness.Execution.ServiceAccountName), "default"),
 					RestartPolicy:      corev1.RestartPolicyNever,
 					NodeSelector:       agentRunNodeSelector(obj, dataVolumes),
 					Affinity:           obj.Spec.Harness.Execution.Affinity,
@@ -986,6 +1385,9 @@ func (r *AgentRunReconciler) ensureTerminalAgentRunJobTTL(ctx context.Context, r
 	job := &batchv1.Job{}
 	if err := r.Get(ctx, client.ObjectKey{Namespace: namespace, Name: strings.TrimSpace(run.Status.JobRef.Name)}, job); err != nil {
 		return client.IgnoreNotFound(err)
+	}
+	if run.Status.JobUID != "" && string(job.UID) != run.Status.JobUID {
+		return fmt.Errorf("terminal AgentRun Job %s/%s UID %s does not match recorded UID %s", job.Namespace, job.Name, job.UID, run.Status.JobUID)
 	}
 	if job.Spec.TTLSecondsAfterFinished != nil {
 		return nil
@@ -1333,8 +1735,12 @@ func (r *AgentRunReconciler) resolveAgentRunGitHubSkillSource(ctx context.Contex
 	}
 
 	token := ""
-	if spec.TokenSecretRef != nil {
-		token, err = r.agentRunReadSkillSourceToken(ctx, obj, *spec.TokenSecretRef)
+	tokenRef, err := agentRunSkillSourceCredentialRef(obj, sourceURL)
+	if err != nil {
+		return resolvedAgentRunSkillSource{}, err
+	}
+	if tokenRef != nil {
+		token, err = r.agentRunReadSkillSourceToken(ctx, obj, *tokenRef)
 		if err != nil {
 			return resolvedAgentRunSkillSource{}, err
 		}
@@ -1363,8 +1769,7 @@ func (r *AgentRunReconciler) resolveAgentRunGitHubSkillSource(ctx context.Contex
 	defer resp.Body.Close()
 
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
-		return resolvedAgentRunSkillSource{}, fmt.Errorf("GitHub contents request failed for %s:%s with HTTP %d: %s", spec.Repository, spec.Path, resp.StatusCode, strings.TrimSpace(string(body)))
+		return resolvedAgentRunSkillSource{}, fmt.Errorf("GitHub contents request failed for %s:%s with HTTP %d", spec.Repository, spec.Path, resp.StatusCode)
 	}
 
 	content, err := io.ReadAll(io.LimitReader(resp.Body, agentRunRemoteSkillMaxBytes+1))
@@ -1386,6 +1791,42 @@ func (r *AgentRunReconciler) resolveAgentRunGitHubSkillSource(ctx context.Contex
 		Description: fmt.Sprintf("GitHub %s:%s @ %s", strings.TrimSpace(spec.Repository), strings.TrimSpace(spec.Path), ref),
 		Content:     string(content),
 	}, nil
+}
+
+func agentRunSkillSourceCredentialRef(obj *controlv1alpha1.AgentRun, sourceURL string) (*controlv1alpha1.SecretKeyReference, error) {
+	if obj == nil {
+		return nil, nil
+	}
+	parsed, err := url.Parse(sourceURL)
+	if err != nil {
+		return nil, err
+	}
+	host := strings.ToLower(parsed.Host)
+	var selected *controlv1alpha1.SecretKeyReference
+	for _, credential := range obj.Spec.Harness.Execution.SkillSourceCredentials {
+		credentialHost, err := normalizeAgentRunSkillCredentialHost(credential.APIHost)
+		if err != nil {
+			return nil, err
+		}
+		if credentialHost != host {
+			continue
+		}
+		if selected != nil {
+			return nil, fmt.Errorf("multiple skill source credentials select API host %s", host)
+		}
+		ref := credential.TokenSecretRef
+		selected = &ref
+	}
+	return selected, nil
+}
+
+func normalizeAgentRunSkillCredentialHost(raw string) (string, error) {
+	raw = strings.TrimSpace(raw)
+	parsed, err := url.Parse("https://" + raw)
+	if err != nil || parsed.User != nil || parsed.Host == "" || parsed.Path != "" || parsed.RawQuery != "" || parsed.Fragment != "" {
+		return "", fmt.Errorf("skill source credential apiHost %q must be an exact host without scheme or path", raw)
+	}
+	return strings.ToLower(parsed.Host), nil
 }
 
 func (r *AgentRunReconciler) agentRunReadSkillSourceToken(ctx context.Context, obj *controlv1alpha1.AgentRun, ref controlv1alpha1.SecretKeyReference) (string, error) {
@@ -1610,6 +2051,24 @@ func (r *AgentRunReconciler) resolveAgentRunDataVolumes(ctx context.Context, obj
 		}
 		if strings.TrimSpace(claimName) == "" {
 			return nil, controlv1alpha1.AgentRunPhaseNeedsHuman, "DataVolumeClaimNotConfigured", fmt.Sprintf("AgentDataVolume %s/%s does not resolve to a PersistentVolumeClaim.", namespace, name), nil
+		}
+		claimUID := strings.TrimSpace(volume.Status.ClaimUID)
+		if claimUID == "" {
+			return nil, controlv1alpha1.AgentRunPhasePending, "DataVolumeClaimIdentityPending", fmt.Sprintf("Waiting for AgentDataVolume %s/%s to record its PersistentVolumeClaim UID.", namespace, name), nil
+		}
+		pvc := &corev1.PersistentVolumeClaim{}
+		if err := reader.Get(ctx, client.ObjectKey{Namespace: namespace, Name: claimName}, pvc); err != nil {
+			if apierrors.IsNotFound(err) {
+				return nil, controlv1alpha1.AgentRunPhasePending, "DataVolumeClaimMissing", fmt.Sprintf("Waiting for PersistentVolumeClaim %s/%s recorded by AgentDataVolume %s/%s.", namespace, claimName, namespace, name), nil
+			}
+			return nil, "", "", "", fmt.Errorf("get AgentDataVolume claim %s/%s: %w", namespace, claimName, err)
+		}
+		owner := metav1.GetControllerOf(pvc)
+		if owner == nil || owner.APIVersion != controlv1alpha1.GroupVersion.String() || owner.Kind != "AgentDataVolume" || owner.Name != volume.Name || owner.UID != volume.UID {
+			return nil, controlv1alpha1.AgentRunPhaseFailed, "ForeignDataVolumeClaim", fmt.Sprintf("PersistentVolumeClaim %s/%s is not controlled by AgentDataVolume %s/%s with the current UID.", namespace, claimName, namespace, name), nil
+		}
+		if string(pvc.UID) != claimUID {
+			return nil, controlv1alpha1.AgentRunPhaseFailed, "DataVolumeClaimReplaced", fmt.Sprintf("PersistentVolumeClaim %s/%s UID no longer matches AgentDataVolume %s/%s status.", namespace, claimName, namespace, name), nil
 		}
 		volumeNodeSelector := agentDataVolumeResolvedNodeSelector(volume)
 		for key, value := range volumeNodeSelector {
@@ -2117,6 +2576,7 @@ func agentRunMergeExecution(profile, run controlv1alpha1.AgentRunHarnessExecutio
 		out.ServiceAccountName = run.ServiceAccountName
 	}
 	out.EnvSecretRefs = mergeNamespacedRefs(out.EnvSecretRefs, run.EnvSecretRefs)
+	out.SkillSourceCredentials = mergeAgentRunSkillSourceCredentials(out.SkillSourceCredentials, run.SkillSourceCredentials)
 	out.ExternalSecretRefreshRefs = mergeAgentRunExternalSecretRefreshRefs(out.ExternalSecretRefreshRefs, run.ExternalSecretRefreshRefs)
 	out.ExtraEnv = mergeEnvVars(out.ExtraEnv, run.ExtraEnv)
 	out.DataVolumeRefs = mergeAgentRunDataVolumeRefs(out.DataVolumeRefs, run.DataVolumeRefs)
@@ -2147,6 +2607,22 @@ func agentRunMergeExecution(profile, run controlv1alpha1.AgentRunHarnessExecutio
 	if run.TTLSecondsAfterFinished != nil {
 		value := *run.TTLSecondsAfterFinished
 		out.TTLSecondsAfterFinished = &value
+	}
+	return out
+}
+
+func mergeAgentRunSkillSourceCredentials(base, additions []controlv1alpha1.AgentRunGitHubSkillCredential) []controlv1alpha1.AgentRunGitHubSkillCredential {
+	out := make([]controlv1alpha1.AgentRunGitHubSkillCredential, 0, len(base)+len(additions))
+	index := map[string]int{}
+	for _, credential := range append(append([]controlv1alpha1.AgentRunGitHubSkillCredential(nil), base...), additions...) {
+		key := strings.ToLower(strings.TrimSpace(credential.APIHost))
+		credential.APIHost = key
+		if position, ok := index[key]; ok {
+			out[position] = credential
+			continue
+		}
+		index[key] = len(out)
+		out = append(out, credential)
 	}
 	return out
 }
@@ -2544,17 +3020,8 @@ func (r *AgentRunReconciler) agentRunValidateGitHubSkillSource(obj *controlv1alp
 	if _, err := r.agentRunGitHubContentsURL(source); err != nil {
 		return controlv1alpha1.AgentRunPhaseFailed, "InvalidSkillSource", "spec.harness.skillInjections sourceRefs.github is invalid: " + err.Error()
 	}
-	if source.TokenSecretRef != nil {
-		ref := source.TokenSecretRef
-		if strings.TrimSpace(ref.Name) == "" {
-			return controlv1alpha1.AgentRunPhaseFailed, "InvalidSkillSourceToken", "spec.harness.skillInjections sourceRefs.github.tokenSecretRef.name is required."
-		}
-		if strings.TrimSpace(ref.Key) == "" {
-			return controlv1alpha1.AgentRunPhaseFailed, "InvalidSkillSourceToken", "spec.harness.skillInjections sourceRefs.github.tokenSecretRef.key is required."
-		}
-		if namespace := strings.TrimSpace(ref.Namespace); namespace != "" && namespace != obj.Namespace {
-			return controlv1alpha1.AgentRunPhaseFailed, "CrossNamespaceSkillSourceToken", "Skill source token Secret refs must be in the agent run namespace."
-		}
+	if !agentRunImmutableGitRefPattern.MatchString(strings.TrimSpace(source.Ref)) {
+		return controlv1alpha1.AgentRunPhaseFailed, "MutableSkillSourceRef", "spec.harness.skillInjections sourceRefs.github.ref must be a full immutable Git commit object ID."
 	}
 	return "", "", ""
 }
@@ -2565,6 +3032,16 @@ func (r *AgentRunReconciler) agentRunBlockingValidation(obj *controlv1alpha1.Age
 	}
 	if strings.TrimSpace(obj.Spec.SourceRef.Name) == "" {
 		return controlv1alpha1.AgentRunPhaseFailed, "MissingSourceName", "spec.sourceRef.name is required."
+	}
+	if obj.Spec.SituationRef != nil {
+		if namespace := strings.TrimSpace(obj.Spec.SituationRef.Namespace); namespace != "" && namespace != obj.Namespace {
+			return controlv1alpha1.AgentRunPhaseFailed, "CrossNamespaceSituationRef", "AgentRun situationRef must be in the agent run namespace."
+		}
+	}
+	if obj.Spec.ScheduleRef != nil {
+		if namespace := strings.TrimSpace(obj.Spec.ScheduleRef.Namespace); namespace != "" && namespace != obj.Namespace {
+			return controlv1alpha1.AgentRunPhaseFailed, "CrossNamespaceScheduleRef", "AgentRun scheduleRef must be in the agent run namespace."
+		}
 	}
 	if obj.Spec.Harness.Execution.TimeoutSeconds < 0 {
 		return controlv1alpha1.AgentRunPhaseFailed, "InvalidTimeout", "spec.harness.execution.timeoutSeconds cannot be negative."
@@ -2590,6 +3067,24 @@ func (r *AgentRunReconciler) agentRunBlockingValidation(obj *controlv1alpha1.Age
 		}
 		if namespace := strings.TrimSpace(ref.Namespace); namespace != "" && namespace != obj.Namespace {
 			return controlv1alpha1.AgentRunPhaseFailed, "CrossNamespaceEnvSecretRef", "Kubernetes envFrom secret refs must be in the agent run namespace."
+		}
+	}
+	skillCredentialHosts := map[string]struct{}{}
+	for _, credential := range obj.Spec.Harness.Execution.SkillSourceCredentials {
+		host, err := normalizeAgentRunSkillCredentialHost(credential.APIHost)
+		if err != nil {
+			return controlv1alpha1.AgentRunPhaseFailed, "InvalidSkillSourceCredential", err.Error()
+		}
+		if _, exists := skillCredentialHosts[host]; exists {
+			return controlv1alpha1.AgentRunPhaseFailed, "DuplicateSkillSourceCredential", fmt.Sprintf("spec.harness.execution.skillSourceCredentials contains duplicate API host %q.", host)
+		}
+		skillCredentialHosts[host] = struct{}{}
+		ref := credential.TokenSecretRef
+		if strings.TrimSpace(ref.Name) == "" || strings.TrimSpace(ref.Key) == "" {
+			return controlv1alpha1.AgentRunPhaseFailed, "InvalidSkillSourceCredential", "skill source credential tokenSecretRef name and key are required."
+		}
+		if namespace := strings.TrimSpace(ref.Namespace); namespace != "" && namespace != obj.Namespace {
+			return controlv1alpha1.AgentRunPhaseFailed, "CrossNamespaceSkillSourceToken", "Skill source credential Secret refs must be in the agent run namespace."
 		}
 	}
 	envSecretRefs := map[string]struct{}{}
@@ -2900,6 +3395,9 @@ func (r *AgentRunReconciler) agentRunContextJSON(ctx context.Context, obj *contr
 	}
 	if obj.Spec.SituationRef != nil && strings.TrimSpace(obj.Spec.SituationRef.Name) != "" {
 		namespace := firstNonEmpty(strings.TrimSpace(obj.Spec.SituationRef.Namespace), obj.Namespace)
+		if namespace != obj.Namespace {
+			return nil, fmt.Errorf("AgentRun situationRef must be in namespace %s", obj.Namespace)
+		}
 		situation := &controlv1alpha1.AdverseSituation{}
 		if err := r.Get(ctx, client.ObjectKey{Namespace: namespace, Name: strings.TrimSpace(obj.Spec.SituationRef.Name)}, situation); err == nil {
 			sanitized := situation.DeepCopy()
@@ -2912,6 +3410,9 @@ func (r *AgentRunReconciler) agentRunContextJSON(ctx context.Context, obj *contr
 	}
 	if obj.Spec.ScheduleRef != nil && strings.TrimSpace(obj.Spec.ScheduleRef.Name) != "" {
 		namespace := firstNonEmpty(strings.TrimSpace(obj.Spec.ScheduleRef.Namespace), obj.Namespace)
+		if namespace != obj.Namespace {
+			return nil, fmt.Errorf("AgentRun scheduleRef must be in namespace %s", obj.Namespace)
+		}
 		schedule := &controlv1alpha1.AgentSchedule{}
 		if err := r.Get(ctx, client.ObjectKey{Namespace: namespace, Name: strings.TrimSpace(obj.Spec.ScheduleRef.Name)}, schedule); err == nil {
 			sanitized := schedule.DeepCopy()
@@ -3061,19 +3562,30 @@ func (r *AgentRunReconciler) deleteAgentRunJobAfterLaunchFailure(ctx context.Con
 	return client.IgnoreNotFound(r.Delete(ctx, job, client.PropagationPolicy(propagation)))
 }
 
-func (r *AgentRunReconciler) findAgentRunRunnerPod(ctx context.Context, namespace, jobName string) (*controlv1alpha1.NamespacedObjectReference, *corev1.Pod, error) {
-	podList := &corev1.PodList{}
-	if err := r.List(ctx, podList, client.InNamespace(namespace), client.MatchingLabels{agentRunJobLabel: jobName}); err != nil {
-		return nil, nil, fmt.Errorf("list agent run pods: %w", err)
+func (r *AgentRunReconciler) findAgentRunRunnerPod(ctx context.Context, job *batchv1.Job) (*controlv1alpha1.NamespacedObjectReference, *corev1.Pod, error) {
+	if job == nil {
+		return nil, nil, fmt.Errorf("AgentRun Job identity is required to select a runner Pod")
 	}
-	if len(podList.Items) == 0 {
+	if job.UID == "" {
 		return nil, nil, nil
 	}
-	selected := &podList.Items[0]
-	for i := 1; i < len(podList.Items); i++ {
-		if podList.Items[i].CreationTimestamp.After(selected.CreationTimestamp.Time) {
-			selected = &podList.Items[i]
+	podList := &corev1.PodList{}
+	if err := r.List(ctx, podList, client.InNamespace(job.Namespace), client.MatchingLabels{agentRunJobLabel: job.Name}); err != nil {
+		return nil, nil, fmt.Errorf("list agent run pods: %w", err)
+	}
+	var selected *corev1.Pod
+	for i := range podList.Items {
+		pod := &podList.Items[i]
+		owner := metav1.GetControllerOf(pod)
+		if owner == nil || owner.APIVersion != batchv1.SchemeGroupVersion.String() || owner.Kind != "Job" || owner.Name != job.Name || owner.UID != job.UID {
+			continue
 		}
+		if selected == nil || pod.CreationTimestamp.After(selected.CreationTimestamp.Time) {
+			selected = pod
+		}
+	}
+	if selected == nil {
+		return nil, nil, nil
 	}
 	return &controlv1alpha1.NamespacedObjectReference{Name: selected.Name, Namespace: selected.Namespace}, selected, nil
 }

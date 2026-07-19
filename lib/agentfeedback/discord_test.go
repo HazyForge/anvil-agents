@@ -61,9 +61,10 @@ func TestDiscordAdapterWaitsForReplyToQuestion(t *testing.T) {
 	}
 
 	response, err := adapter.Ask(context.Background(), Question{
-		Prompt:       "Should I restart the controller?",
-		PollInterval: time.Millisecond,
-		Timeout:      time.Second,
+		Prompt:         "Should I restart the controller?",
+		PollInterval:   time.Millisecond,
+		Timeout:        time.Second,
+		AllowedUserIDs: []string{"u1"},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -92,10 +93,11 @@ func TestDiscordAdapterCanAcceptAnyMessageAfterQuestion(t *testing.T) {
 	defer server.Close()
 
 	adapter, err := NewDiscordAdapter(DiscordConfig{
-		BotToken:   "test-token",
-		ChannelID:  "c123",
-		APIBaseURL: server.URL,
-		HTTPClient: server.Client(),
+		BotToken:     "test-token",
+		ChannelID:    "c123",
+		APIBaseURL:   server.URL,
+		HTTPClient:   server.Client(),
+		AllowAnyUser: true,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -112,5 +114,22 @@ func TestDiscordAdapterCanAcceptAnyMessageAfterQuestion(t *testing.T) {
 	}
 	if got, want := response.Text, "continue"; got != want {
 		t.Fatalf("response text = %q, want %q", got, want)
+	}
+}
+
+func TestDiscordAdapterRequiresAuthorizedUserByDefault(t *testing.T) {
+	t.Parallel()
+
+	adapter, err := NewDiscordAdapter(DiscordConfig{
+		BotToken:  "test-token",
+		ChannelID: "c123",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = adapter.Ask(context.Background(), Question{Prompt: "Continue?"})
+	if err == nil || !strings.Contains(err.Error(), "allowed Discord user id") {
+		t.Fatalf("Ask() error = %v, want missing allowlist error", err)
 	}
 }

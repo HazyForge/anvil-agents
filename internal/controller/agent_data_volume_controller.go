@@ -3,6 +3,8 @@ package controller
 import (
 	"context"
 	"fmt"
+	"path"
+	"regexp"
 	"strings"
 
 	corev1 "k8s.io/api/core/v1"
@@ -25,6 +27,8 @@ const (
 	agentDataVolumeDefaultSize = "10Gi"
 	agentDataVolumeLabel       = "control.anvil.hazyforge.io/agent-data-volume"
 )
+
+var agentDataVolumePathEnvNamePattern = regexp.MustCompile(`^([A-Z][A-Z0-9_]*_)?(HOME|STATE_DIR|CACHE_DIR|CONFIG_DIR|DATA_DIR)$`)
 
 // +kubebuilder:rbac:groups="control.anvil.hazyforge.io",resources=agentdatavolumes,verbs=create;delete;get;list;patch;update;watch
 // +kubebuilder:rbac:groups="control.anvil.hazyforge.io",resources=agentdatavolumes/status,verbs=get;patch;update
@@ -60,7 +64,7 @@ func (r *AgentDataVolumeReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	status.MountPath = agentDataVolumeMountPath(effective)
 	status.SubPath = strings.TrimSpace(effective.Spec.SubPath)
 	status.NodeSelector = cloneStringMap(effective.Spec.NodeSelector)
-	status.ExtraEnv = append([]corev1.EnvVar(nil), effective.Spec.ExtraEnv...)
+	status.ExtraEnv = nil
 	status.ExternalSync = externalVolumeSyncStatus(effective.Spec.ExternalSync, status.ExternalSync, now)
 	if profileBlockReason != "" {
 		status.Phase = controlv1alpha1.AgentDataVolumePhaseBlocked
@@ -76,6 +80,21 @@ func (r *AgentDataVolumeReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		obj.Status = status
 		return r.patchAgentDataVolumeStatus(ctx, original, obj)
 	}
+	if err := validateAgentDataVolumePathEnv(effective.Spec.ExtraEnv, status.MountPath); err != nil {
+		status.Phase = controlv1alpha1.AgentDataVolumePhaseBlocked
+		status.LastError = err.Error()
+		apimeta.SetStatusCondition(&status.Conditions, metav1.Condition{
+			Type:               agentDataVolumeReady,
+			Status:             metav1.ConditionFalse,
+			ObservedGeneration: obj.Generation,
+			LastTransitionTime: now,
+			Reason:             "InvalidPathEnvironment",
+			Message:            status.LastError,
+		})
+		obj.Status = status
+		return r.patchAgentDataVolumeStatus(ctx, original, obj)
+	}
+	status.ExtraEnv = append([]controlv1alpha1.AgentDataVolumePathEnvVar(nil), effective.Spec.ExtraEnv...)
 
 	if effective.Spec.Size.Sign() < 0 {
 		status.Phase = controlv1alpha1.AgentDataVolumePhaseBlocked
@@ -107,11 +126,11 @@ func (r *AgentDataVolumeReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		return r.patchAgentDataVolumeStatus(ctx, original, obj)
 	}
 
-	pvc, err := r.ensureAgentDataVolumePVC(ctx, obj, effective)
+	pvc, created, err := r.ensureAgentDataVolumePVC(ctx, obj, effective)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
-	if owner := metav1.GetControllerOf(pvc); owner == nil || owner.UID != obj.UID || owner.APIVersion != controlv1alpha1.GroupVersion.String() || owner.Kind != "AgentDataVolume" {
+	if owner := metav1.GetControllerOf(pvc); owner == nil || owner.UID != obj.UID || owner.Name != obj.Name || owner.APIVersion != controlv1alpha1.GroupVersion.String() || owner.Kind != "AgentDataVolume" {
 		status.Phase = controlv1alpha1.AgentDataVolumePhaseBlocked
 		status.LastError = fmt.Sprintf("PersistentVolumeClaim %s/%s is not controller-owned by this AgentDataVolume; automatic claim adoption is forbidden.", pvc.Namespace, pvc.Name)
 		apimeta.SetStatusCondition(&status.Conditions, metav1.Condition{
@@ -125,12 +144,27 @@ func (r *AgentDataVolumeReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		obj.Status = status
 		return r.patchAgentDataVolumeStatus(ctx, original, obj)
 	}
+	if status.ClaimUID != "" && status.ClaimUID != string(pvc.UID) {
+		status.Phase = controlv1alpha1.AgentDataVolumePhaseBlocked
+		status.LastError = fmt.Sprintf("PersistentVolumeClaim %s/%s UID changed from %s to %s; refusing replacement claim.", pvc.Namespace, pvc.Name, status.ClaimUID, pvc.UID)
+		apimeta.SetStatusCondition(&status.Conditions, metav1.Condition{Type: agentDataVolumeReady, Status: metav1.ConditionFalse, ObservedGeneration: obj.Generation, LastTransitionTime: now, Reason: "ClaimIdentityChanged", Message: status.LastError})
+		obj.Status = status
+		return r.patchAgentDataVolumeStatus(ctx, original, obj)
+	}
+	if status.ClaimUID == "" && !created && strings.TrimSpace(pvc.Spec.VolumeName) != "" {
+		status.Phase = controlv1alpha1.AgentDataVolumePhaseBlocked
+		status.LastError = fmt.Sprintf("PersistentVolumeClaim %s/%s is already bound before this AgentDataVolume recorded its UID; refusing unsafe crash-gap adoption.", pvc.Namespace, pvc.Name)
+		apimeta.SetStatusCondition(&status.Conditions, metav1.Condition{Type: agentDataVolumeReady, Status: metav1.ConditionFalse, ObservedGeneration: obj.Generation, LastTransitionTime: now, Reason: "UnverifiedBoundClaim", Message: status.LastError})
+		obj.Status = status
+		return r.patchAgentDataVolumeStatus(ctx, original, obj)
+	}
 	expansionPending, driftReason, driftMessage, err := r.reconcileAgentDataVolumePVC(ctx, effective, pvc)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
 
 	status.ClaimRef = &controlv1alpha1.NamespacedObjectReference{Name: pvc.Name, Namespace: pvc.Namespace}
+	status.ClaimUID = string(pvc.UID)
 	status.StorageClassName = ""
 	if pvc.Spec.StorageClassName != nil {
 		status.StorageClassName = strings.TrimSpace(*pvc.Spec.StorageClassName)
@@ -299,7 +333,7 @@ func applyVolumeProfileDefaults(obj *controlv1alpha1.AgentDataVolume, profileVol
 		obj.Spec.SubPath = strings.TrimSpace(profileVolume.SubPath)
 	}
 	obj.Spec.NodeSelector = mergeStringMap(profileVolume.NodeSelector, obj.Spec.NodeSelector)
-	obj.Spec.ExtraEnv = mergeEnvVars(profileVolume.ExtraEnv, obj.Spec.ExtraEnv)
+	obj.Spec.ExtraEnv = mergeAgentDataVolumePathEnv(profileVolume.ExtraEnv, obj.Spec.ExtraEnv)
 	if obj.Spec.ExternalSync == nil && profileVolume.ExternalSync != nil {
 		obj.Spec.ExternalSync = profileVolume.ExternalSync.DeepCopy()
 	}
@@ -324,13 +358,13 @@ func (r *AgentDataVolumeReconciler) agentDataVolumesForVolumeProfile(ctx context
 	return requests
 }
 
-func (r *AgentDataVolumeReconciler) ensureAgentDataVolumePVC(ctx context.Context, owner, effective *controlv1alpha1.AgentDataVolume) (*corev1.PersistentVolumeClaim, error) {
+func (r *AgentDataVolumeReconciler) ensureAgentDataVolumePVC(ctx context.Context, owner, effective *controlv1alpha1.AgentDataVolume) (*corev1.PersistentVolumeClaim, bool, error) {
 	name := agentDataVolumeClaimName(effective)
 	pvc := &corev1.PersistentVolumeClaim{}
 	key := client.ObjectKey{Name: name, Namespace: owner.Namespace}
 	if err := r.Get(ctx, key, pvc); err != nil {
 		if client.IgnoreNotFound(err) != nil {
-			return nil, err
+			return nil, false, err
 		}
 		storageClassName := r.agentDataVolumeStorageClassName(effective)
 		var storageClassNameRef *string
@@ -354,16 +388,21 @@ func (r *AgentDataVolumeReconciler) ensureAgentDataVolumePVC(ctx context.Context
 			},
 		}
 		if err := controllerutil.SetControllerReference(owner, pvc, r.Scheme); err != nil {
-			return nil, err
+			return nil, false, err
 		}
-		if err := r.Create(ctx, pvc); err != nil && !apierrors.IsAlreadyExists(err) {
-			return nil, err
+		created := true
+		if err := r.Create(ctx, pvc); err != nil {
+			if !apierrors.IsAlreadyExists(err) {
+				return nil, false, err
+			}
+			created = false
 		}
 		if err := r.Get(ctx, key, pvc); err != nil {
-			return nil, err
+			return nil, false, err
 		}
+		return pvc, created, nil
 	}
-	return pvc, nil
+	return pvc, false, nil
 }
 
 func (r *AgentDataVolumeReconciler) reconcileAgentDataVolumePVC(ctx context.Context, obj *controlv1alpha1.AgentDataVolume, pvc *corev1.PersistentVolumeClaim) (bool, string, string, error) {
@@ -378,6 +417,9 @@ func (r *AgentDataVolumeReconciler) reconcileAgentDataVolumePVC(ctx context.Cont
 	desiredAccessModes := agentDataVolumeAccessModes(obj)
 	if !agentDataVolumeAccessModesEqual(desiredAccessModes, pvc.Spec.AccessModes) {
 		return false, "ImmutableAccessModesDrift", fmt.Sprintf("spec.accessModes %v do not match immutable PersistentVolumeClaim %s/%s accessModes %v.", desiredAccessModes, pvc.Namespace, pvc.Name, pvc.Spec.AccessModes), nil
+	}
+	if pvc.Spec.Selector != nil || pvc.Spec.DataSource != nil || pvc.Spec.DataSourceRef != nil || (pvc.Spec.VolumeMode != nil && *pvc.Spec.VolumeMode != corev1.PersistentVolumeFilesystem) {
+		return false, "UnsupportedClaimProvenance", fmt.Sprintf("PersistentVolumeClaim %s/%s contains selector, data source, or volume mode fields not created by AgentDataVolume.", pvc.Namespace, pvc.Name), nil
 	}
 
 	currentRequest := pvc.Spec.Resources.Requests[corev1.ResourceStorage]
@@ -514,11 +556,47 @@ func agentDataVolumeResolvedNodeSelector(obj *controlv1alpha1.AgentDataVolume) m
 }
 
 func agentDataVolumeResolvedExtraEnv(obj *controlv1alpha1.AgentDataVolume) []corev1.EnvVar {
+	var values []controlv1alpha1.AgentDataVolumePathEnvVar
 	if agentDataVolumeStatusCurrent(obj) && obj.Status.ExtraEnv != nil {
-		return append([]corev1.EnvVar(nil), obj.Status.ExtraEnv...)
+		values = obj.Status.ExtraEnv
+	} else if obj != nil {
+		values = obj.Spec.ExtraEnv
 	}
-	if obj != nil {
-		return append([]corev1.EnvVar(nil), obj.Spec.ExtraEnv...)
+	result := make([]corev1.EnvVar, 0, len(values))
+	for _, item := range values {
+		result = append(result, corev1.EnvVar{Name: item.Name, Value: item.Value})
+	}
+	return result
+}
+
+func mergeAgentDataVolumePathEnv(base, additions []controlv1alpha1.AgentDataVolumePathEnvVar) []controlv1alpha1.AgentDataVolumePathEnvVar {
+	merged := make([]controlv1alpha1.AgentDataVolumePathEnvVar, 0, len(base)+len(additions))
+	index := map[string]int{}
+	for _, item := range append(append([]controlv1alpha1.AgentDataVolumePathEnvVar(nil), base...), additions...) {
+		name := strings.TrimSpace(item.Name)
+		item.Name = name
+		item.Value = strings.TrimSpace(item.Value)
+		if position, ok := index[name]; ok {
+			merged[position] = item
+			continue
+		}
+		index[name] = len(merged)
+		merged = append(merged, item)
+	}
+	return merged
+}
+
+func validateAgentDataVolumePathEnv(values []controlv1alpha1.AgentDataVolumePathEnvVar, mountPath string) error {
+	mountPath = path.Clean(strings.TrimSpace(mountPath))
+	for _, item := range values {
+		name := strings.TrimSpace(item.Name)
+		value := path.Clean(strings.TrimSpace(item.Value))
+		if !agentDataVolumePathEnvNamePattern.MatchString(name) {
+			return fmt.Errorf("extraEnv name %q must identify a backend HOME, STATE_DIR, CACHE_DIR, CONFIG_DIR, or DATA_DIR", name)
+		}
+		if !path.IsAbs(value) || (value != mountPath && !strings.HasPrefix(value, mountPath+"/")) {
+			return fmt.Errorf("extraEnv %s value must be an absolute path under mountPath %s", name, mountPath)
+		}
 	}
 	return nil
 }

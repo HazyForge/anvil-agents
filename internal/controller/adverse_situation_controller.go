@@ -8,6 +8,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	apiequality "k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -139,7 +140,9 @@ func (r *AdverseSituationReconciler) ensureAdverseSituationAgentRun(ctx context.
 		status.Sequence = 1
 	}
 	name := agentRunChildName("agrun", situation.Name, fmt.Sprintf("%d", status.Sequence), shortHash(string(situation.UID)))
-	if status.ActiveResponderRef != nil && strings.TrimSpace(status.ActiveResponderRef.Name) != "" {
+	hasResponderRef := status.ActiveResponderRef != nil && strings.TrimSpace(status.ActiveResponderRef.Name) != ""
+	established := hasResponderRef && strings.TrimSpace(status.ActiveResponderUID) != "" && strings.TrimSpace(status.ActiveResponderDigest) != ""
+	if hasResponderRef {
 		name = strings.TrimSpace(status.ActiveResponderRef.Name)
 	}
 	run := &controlv1alpha1.AgentRun{}
@@ -148,15 +151,40 @@ func (r *AdverseSituationReconciler) ensureAdverseSituationAgentRun(ctx context.
 		if client.IgnoreNotFound(err) != nil {
 			return nil, err
 		}
+		if hasResponderRef {
+			return nil, fmt.Errorf("recorded adverse responder AgentRun %s/%s no longer exists", key.Namespace, key.Name)
+		}
 		run = adverseSituationAgentRunFor(situation, name)
 		if err := r.Create(ctx, run); err != nil {
 			return nil, err
 		}
 	}
-	if !adverseSituationAgentRunMatches(run, situation) {
+	if established {
+		if !adverseSituationAgentRunStableIdentityMatches(run, situation) {
+			return nil, fmt.Errorf("AgentRun %s/%s no longer matches the established adverse responder identity for AdverseSituation UID %s", run.Namespace, run.Name, situation.UID)
+		}
+		digest := digestJSON(run.Spec)
+		if status.ActiveResponderUID != string(run.UID) {
+			return nil, fmt.Errorf("AgentRun %s/%s UID %s does not match the established adverse responder UID %s", run.Namespace, run.Name, run.UID, status.ActiveResponderUID)
+		}
+		if status.ActiveResponderDigest != digest {
+			return nil, fmt.Errorf("AgentRun %s/%s spec no longer matches the established adverse responder digest", run.Namespace, run.Name)
+		}
+		status.ActiveResponderUID = string(run.UID)
+		status.ActiveResponderDigest = digest
+	} else if hasResponderRef {
+		if strings.TrimSpace(status.ActiveResponderUID) != "" || strings.TrimSpace(status.ActiveResponderDigest) != "" {
+			return nil, fmt.Errorf("AdverseSituation %s/%s has an incomplete established responder receipt", situation.Namespace, situation.Name)
+		}
+		if !adverseSituationAgentRunMatches(run, situation) {
+			return nil, fmt.Errorf("legacy adverse responder AgentRun %s/%s has no receipt and no longer exactly matches the current creation snapshot", run.Namespace, run.Name)
+		}
+	} else if !adverseSituationAgentRunMatches(run, situation) {
 		return nil, fmt.Errorf("AgentRun %s/%s collides with adverse responder identity for AdverseSituation UID %s", run.Namespace, run.Name, situation.UID)
 	}
 	status.ActiveResponderRef = &controlv1alpha1.NamespacedObjectReference{Name: run.Name, Namespace: run.Namespace}
+	status.ActiveResponderUID = string(run.UID)
+	status.ActiveResponderDigest = digestJSON(run.Spec)
 	return run, nil
 }
 
@@ -164,7 +192,7 @@ func adverseSituationAgentRunMatches(run *controlv1alpha1.AgentRun, situation *c
 	if run == nil || situation == nil {
 		return false
 	}
-	return run.Namespace == situation.Namespace &&
+	if !(run.Namespace == situation.Namespace &&
 		run.Spec.Purpose == controlv1alpha1.AgentRunPurposeAdverseSituation &&
 		run.Spec.SourceRef.APIVersion == controlv1alpha1.GroupVersion.String() &&
 		run.Spec.SourceRef.Kind == "AdverseSituation" &&
@@ -173,7 +201,38 @@ func adverseSituationAgentRunMatches(run *controlv1alpha1.AgentRun, situation *c
 		run.Spec.SourceUID == string(situation.UID) &&
 		run.Spec.SituationRef != nil &&
 		run.Spec.SituationRef.Name == situation.Name &&
-		firstNonEmpty(run.Spec.SituationRef.Namespace, run.Namespace) == situation.Namespace
+		firstNonEmpty(run.Spec.SituationRef.Namespace, run.Namespace) == situation.Namespace) {
+		return false
+	}
+	expected := adverseSituationAgentRunFor(situation, run.Name)
+	if !apiequality.Semantic.DeepEqual(run.Spec, expected.Spec) {
+		return false
+	}
+	for key, value := range expected.Labels {
+		if run.Labels[key] != value {
+			return false
+		}
+	}
+	return true
+}
+
+func adverseSituationAgentRunStableIdentityMatches(run *controlv1alpha1.AgentRun, situation *controlv1alpha1.AdverseSituation) bool {
+	if run == nil || situation == nil {
+		return false
+	}
+	if !(run.Namespace == situation.Namespace &&
+		run.Spec.Purpose == controlv1alpha1.AgentRunPurposeAdverseSituation &&
+		run.Spec.SourceRef.APIVersion == controlv1alpha1.GroupVersion.String() &&
+		run.Spec.SourceRef.Kind == "AdverseSituation" &&
+		run.Spec.SourceRef.Namespace == situation.Namespace &&
+		run.Spec.SourceRef.Name == situation.Name &&
+		run.Spec.SourceUID == string(situation.UID) &&
+		run.Spec.SituationRef != nil &&
+		run.Spec.SituationRef.Name == situation.Name &&
+		firstNonEmpty(run.Spec.SituationRef.Namespace, run.Namespace) == situation.Namespace) {
+		return false
+	}
+	return run.Labels[adverseSituationLabel] == sanitizeLabelValue(situation.Name)
 }
 
 func (r *AdverseSituationReconciler) detachAdverseSituationAgentRunOwners(ctx context.Context, situation *controlv1alpha1.AdverseSituation) error {
@@ -625,6 +684,8 @@ func adverseSituationPrepareSequence(status *controlv1alpha1.AdverseSituationSta
 	status.EventCount = 0
 	status.DuplicateCount = 0
 	status.ActiveResponderRef = nil
+	status.ActiveResponderUID = ""
+	status.ActiveResponderDigest = ""
 	status.PullRequestURL = ""
 	status.PullRequestObservedAt = nil
 	status.PullRequestQuietUntil = nil

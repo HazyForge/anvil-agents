@@ -65,7 +65,7 @@ func FormatQuestionMessage(question Question) string {
 		builder.WriteString("\n\nContext:\n")
 		builder.WriteString(question.Context)
 	}
-	builder.WriteString("\n\nPlease reply directly to this message. The agent is waiting for the first non-bot reply.")
+	builder.WriteString("\n\nPlease reply directly to this message. The agent is waiting for an authorized operator reply.")
 	return limitRunes(builder.String(), 1900)
 }
 

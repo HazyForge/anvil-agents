@@ -2439,6 +2439,42 @@ spec:
                                   ServiceAccountName selects the Kubernetes service account for the
                                   agent pod. Use this to grant internal API and Kubernetes read access.
                                 type: string
+                              skillSourceCredentials:
+                                description: |-
+                                  SkillSourceCredentials authorizes private remote skill reads by exact API
+                                  host. Credential selection belongs to the harness execution envelope, not
+                                  reusable AgentSkillSet content.
+                                items:
+                                  description: |-
+                                    AgentRunGitHubSkillCredential binds a GitHub API host to a token selected by
+                                    the trusted harness execution envelope. AgentSkillSet authors cannot select
+                                    credentials through remote content references.
+                                  properties:
+                                    apiHost:
+                                      description: |-
+                                        APIHost is the exact GitHub or GitHub Enterprise API host, including an
+                                        optional port and without a URL scheme or path.
+                                      minLength: 1
+                                      type: string
+                                    tokenSecretRef:
+                                      description: TokenSecretRef selects a same-namespace
+                                        Secret key containing the token.
+                                      properties:
+                                        key:
+                                          type: string
+                                        name:
+                                          type: string
+                                        namespace:
+                                          type: string
+                                      required:
+                                      - key
+                                      - name
+                                      type: object
+                                  required:
+                                  - apiHost
+                                  - tokenSecretRef
+                                  type: object
+                                type: array
                               spiffeWorkloadAPI:
                                 description: |-
                                   SpiffeWorkloadAPI opts this run into the SPIFFE CSI Workload API mount.
@@ -2582,9 +2618,10 @@ spec:
                                             minLength: 1
                                             type: string
                                           ref:
-                                            description: |-
-                                              Ref is a branch, tag, or commit SHA. Empty uses the repository default
-                                              branch at the time the controller resolves the source.
+                                            description: Ref is the full immutable
+                                              Git commit object ID used to resolve
+                                              the source.
+                                            pattern: ^([0-9a-fA-F]{40}|[0-9a-fA-F]{64})$
                                             type: string
                                           repository:
                                             description: |-
@@ -2592,24 +2629,9 @@ spec:
                                               example/agent-skills.
                                             minLength: 1
                                             type: string
-                                          tokenSecretRef:
-                                            description: |-
-                                              TokenSecretRef optionally references a same-namespace Kubernetes Secret
-                                              key containing a GitHub token for private repositories or protected
-                                              contents.
-                                            properties:
-                                              key:
-                                                type: string
-                                              name:
-                                                type: string
-                                              namespace:
-                                                type: string
-                                            required:
-                                            - key
-                                            - name
-                                            type: object
                                         required:
                                         - path
+                                        - ref
                                         - repository
                                         type: object
                                     type: object
@@ -2970,9 +2992,10 @@ spec:
                                             minLength: 1
                                             type: string
                                           ref:
-                                            description: |-
-                                              Ref is a branch, tag, or commit SHA. Empty uses the repository default
-                                              branch at the time the controller resolves the source.
+                                            description: Ref is the full immutable
+                                              Git commit object ID used to resolve
+                                              the source.
+                                            pattern: ^([0-9a-fA-F]{40}|[0-9a-fA-F]{64})$
                                             type: string
                                           repository:
                                             description: |-
@@ -2980,24 +3003,9 @@ spec:
                                               example/agent-skills.
                                             minLength: 1
                                             type: string
-                                          tokenSecretRef:
-                                            description: |-
-                                              TokenSecretRef optionally references a same-namespace Kubernetes Secret
-                                              key containing a GitHub token for private repositories or protected
-                                              contents.
-                                            properties:
-                                              key:
-                                                type: string
-                                              name:
-                                                type: string
-                                              namespace:
-                                                type: string
-                                            required:
-                                            - key
-                                            - name
-                                            type: object
                                         required:
                                         - path
+                                        - ref
                                         - repository
                                         type: object
                                     type: object
@@ -3066,6 +3074,8 @@ spec:
             type: object
           status:
             properties:
+              activeResponderDigest:
+                type: string
               activeResponderRef:
                 description: |-
                   NamespacedObjectReference identifies a Kubernetes object without importing
@@ -3079,6 +3089,8 @@ spec:
                 required:
                 - name
                 type: object
+              activeResponderUID:
+                type: string
               conditions:
                 items:
                   description: Condition contains details for one aspect of the current
@@ -3426,158 +3438,23 @@ spec:
                   this volume, for example CODEX_HOME, HERMES_HOME, or OPENCLAW_STATE_DIR.
                   Credentials must still come from AgentRun envSecretRefs.
                 items:
-                  description: EnvVar represents an environment variable present in
-                    a Container.
+                  description: |-
+                    AgentDataVolumePathEnvVar exposes only a named absolute state path. It is
+                    intentionally narrower than corev1.EnvVar so storage metadata cannot select
+                    Secrets or inject general runner configuration.
                   properties:
                     name:
-                      description: |-
-                        Name of the environment variable.
-                        May consist of any printable ASCII characters except '='.
+                      description: Name identifies a backend home, state, cache, config,
+                        or data directory.
+                      pattern: ^([A-Z][A-Z0-9_]*_)?(HOME|STATE_DIR|CACHE_DIR|CONFIG_DIR|DATA_DIR)$
                       type: string
                     value:
-                      description: |-
-                        Variable references $(VAR_NAME) are expanded
-                        using the previously defined environment variables in the container and
-                        any service environment variables. If a variable cannot be resolved,
-                        the reference in the input string will be unchanged. Double $$ are reduced
-                        to a single $, which allows for escaping the $(VAR_NAME) syntax: i.e.
-                        "$$(VAR_NAME)" will produce the string literal "$(VAR_NAME)".
-                        Escaped references will never be expanded, regardless of whether the variable
-                        exists or not.
-                        Defaults to "".
+                      description: Value is an absolute path under the volume's mountPath.
+                      pattern: ^/
                       type: string
-                    valueFrom:
-                      description: Source for the environment variable's value. Cannot
-                        be used if value is not empty.
-                      properties:
-                        configMapKeyRef:
-                          description: Selects a key of a ConfigMap.
-                          properties:
-                            key:
-                              description: The key to select.
-                              type: string
-                            name:
-                              default: ""
-                              description: |-
-                                Name of the referent.
-                                This field is effectively required, but due to backwards compatibility is
-                                allowed to be empty. Instances of this type with an empty value here are
-                                almost certainly wrong.
-                                More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
-                              type: string
-                            optional:
-                              description: Specify whether the ConfigMap or its key
-                                must be defined
-                              type: boolean
-                          required:
-                          - key
-                          type: object
-                          x-kubernetes-map-type: atomic
-                        fieldRef:
-                          description: |-
-                            Selects a field of the pod: supports metadata.name, metadata.namespace, `metadata.labels['<KEY>']`, `metadata.annotations['<KEY>']`,
-                            spec.nodeName, spec.serviceAccountName, status.hostIP, status.podIP, status.podIPs.
-                          properties:
-                            apiVersion:
-                              description: Version of the schema the FieldPath is
-                                written in terms of, defaults to "v1".
-                              type: string
-                            fieldPath:
-                              description: Path of the field to select in the specified
-                                API version.
-                              type: string
-                          required:
-                          - fieldPath
-                          type: object
-                          x-kubernetes-map-type: atomic
-                        fileKeyRef:
-                          description: |-
-                            FileKeyRef selects a key of the env file.
-                            Requires the EnvFiles feature gate to be enabled.
-                          properties:
-                            key:
-                              description: |-
-                                The key within the env file. An invalid key will prevent the pod from starting.
-                                The keys defined within a source may consist of any printable ASCII characters except '='.
-                                During Alpha stage of the EnvFiles feature gate, the key size is limited to 128 characters.
-                              type: string
-                            optional:
-                              default: false
-                              description: |-
-                                Specify whether the file or its key must be defined. If the file or key
-                                does not exist, then the env var is not published.
-                                If optional is set to true and the specified key does not exist,
-                                the environment variable will not be set in the Pod's containers.
-
-                                If optional is set to false and the specified key does not exist,
-                                an error will be returned during Pod creation.
-                              type: boolean
-                            path:
-                              description: |-
-                                The path within the volume from which to select the file.
-                                Must be relative and may not contain the '..' path or start with '..'.
-                              type: string
-                            volumeName:
-                              description: The name of the volume mount containing
-                                the env file.
-                              type: string
-                          required:
-                          - key
-                          - path
-                          - volumeName
-                          type: object
-                          x-kubernetes-map-type: atomic
-                        resourceFieldRef:
-                          description: |-
-                            Selects a resource of the container: only resources limits and requests
-                            (limits.cpu, limits.memory, limits.ephemeral-storage, requests.cpu, requests.memory and requests.ephemeral-storage) are currently supported.
-                          properties:
-                            containerName:
-                              description: 'Container name: required for volumes,
-                                optional for env vars'
-                              type: string
-                            divisor:
-                              anyOf:
-                              - type: integer
-                              - type: string
-                              description: Specifies the output format of the exposed
-                                resources, defaults to "1"
-                              pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
-                              x-kubernetes-int-or-string: true
-                            resource:
-                              description: 'Required: resource to select'
-                              type: string
-                          required:
-                          - resource
-                          type: object
-                          x-kubernetes-map-type: atomic
-                        secretKeyRef:
-                          description: Selects a key of a secret in the pod's namespace
-                          properties:
-                            key:
-                              description: The key of the secret to select from.  Must
-                                be a valid secret key.
-                              type: string
-                            name:
-                              default: ""
-                              description: |-
-                                Name of the referent.
-                                This field is effectively required, but due to backwards compatibility is
-                                allowed to be empty. Instances of this type with an empty value here are
-                                almost certainly wrong.
-                                More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
-                              type: string
-                            optional:
-                              description: Specify whether the Secret or its key must
-                                be defined
-                              type: boolean
-                          required:
-                          - key
-                          type: object
-                          x-kubernetes-map-type: atomic
-                      type: object
                   required:
                   - name
+                  - value
                   type: object
                 type: array
               mountPath:
@@ -3658,6 +3535,8 @@ spec:
                 required:
                 - name
                 type: object
+              claimUID:
+                type: string
               conditions:
                 items:
                   description: Condition contains details for one aspect of the current
@@ -3795,158 +3674,23 @@ spec:
                 type: object
               extraEnv:
                 items:
-                  description: EnvVar represents an environment variable present in
-                    a Container.
+                  description: |-
+                    AgentDataVolumePathEnvVar exposes only a named absolute state path. It is
+                    intentionally narrower than corev1.EnvVar so storage metadata cannot select
+                    Secrets or inject general runner configuration.
                   properties:
                     name:
-                      description: |-
-                        Name of the environment variable.
-                        May consist of any printable ASCII characters except '='.
+                      description: Name identifies a backend home, state, cache, config,
+                        or data directory.
+                      pattern: ^([A-Z][A-Z0-9_]*_)?(HOME|STATE_DIR|CACHE_DIR|CONFIG_DIR|DATA_DIR)$
                       type: string
                     value:
-                      description: |-
-                        Variable references $(VAR_NAME) are expanded
-                        using the previously defined environment variables in the container and
-                        any service environment variables. If a variable cannot be resolved,
-                        the reference in the input string will be unchanged. Double $$ are reduced
-                        to a single $, which allows for escaping the $(VAR_NAME) syntax: i.e.
-                        "$$(VAR_NAME)" will produce the string literal "$(VAR_NAME)".
-                        Escaped references will never be expanded, regardless of whether the variable
-                        exists or not.
-                        Defaults to "".
+                      description: Value is an absolute path under the volume's mountPath.
+                      pattern: ^/
                       type: string
-                    valueFrom:
-                      description: Source for the environment variable's value. Cannot
-                        be used if value is not empty.
-                      properties:
-                        configMapKeyRef:
-                          description: Selects a key of a ConfigMap.
-                          properties:
-                            key:
-                              description: The key to select.
-                              type: string
-                            name:
-                              default: ""
-                              description: |-
-                                Name of the referent.
-                                This field is effectively required, but due to backwards compatibility is
-                                allowed to be empty. Instances of this type with an empty value here are
-                                almost certainly wrong.
-                                More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
-                              type: string
-                            optional:
-                              description: Specify whether the ConfigMap or its key
-                                must be defined
-                              type: boolean
-                          required:
-                          - key
-                          type: object
-                          x-kubernetes-map-type: atomic
-                        fieldRef:
-                          description: |-
-                            Selects a field of the pod: supports metadata.name, metadata.namespace, `metadata.labels['<KEY>']`, `metadata.annotations['<KEY>']`,
-                            spec.nodeName, spec.serviceAccountName, status.hostIP, status.podIP, status.podIPs.
-                          properties:
-                            apiVersion:
-                              description: Version of the schema the FieldPath is
-                                written in terms of, defaults to "v1".
-                              type: string
-                            fieldPath:
-                              description: Path of the field to select in the specified
-                                API version.
-                              type: string
-                          required:
-                          - fieldPath
-                          type: object
-                          x-kubernetes-map-type: atomic
-                        fileKeyRef:
-                          description: |-
-                            FileKeyRef selects a key of the env file.
-                            Requires the EnvFiles feature gate to be enabled.
-                          properties:
-                            key:
-                              description: |-
-                                The key within the env file. An invalid key will prevent the pod from starting.
-                                The keys defined within a source may consist of any printable ASCII characters except '='.
-                                During Alpha stage of the EnvFiles feature gate, the key size is limited to 128 characters.
-                              type: string
-                            optional:
-                              default: false
-                              description: |-
-                                Specify whether the file or its key must be defined. If the file or key
-                                does not exist, then the env var is not published.
-                                If optional is set to true and the specified key does not exist,
-                                the environment variable will not be set in the Pod's containers.
-
-                                If optional is set to false and the specified key does not exist,
-                                an error will be returned during Pod creation.
-                              type: boolean
-                            path:
-                              description: |-
-                                The path within the volume from which to select the file.
-                                Must be relative and may not contain the '..' path or start with '..'.
-                              type: string
-                            volumeName:
-                              description: The name of the volume mount containing
-                                the env file.
-                              type: string
-                          required:
-                          - key
-                          - path
-                          - volumeName
-                          type: object
-                          x-kubernetes-map-type: atomic
-                        resourceFieldRef:
-                          description: |-
-                            Selects a resource of the container: only resources limits and requests
-                            (limits.cpu, limits.memory, limits.ephemeral-storage, requests.cpu, requests.memory and requests.ephemeral-storage) are currently supported.
-                          properties:
-                            containerName:
-                              description: 'Container name: required for volumes,
-                                optional for env vars'
-                              type: string
-                            divisor:
-                              anyOf:
-                              - type: integer
-                              - type: string
-                              description: Specifies the output format of the exposed
-                                resources, defaults to "1"
-                              pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
-                              x-kubernetes-int-or-string: true
-                            resource:
-                              description: 'Required: resource to select'
-                              type: string
-                          required:
-                          - resource
-                          type: object
-                          x-kubernetes-map-type: atomic
-                        secretKeyRef:
-                          description: Selects a key of a secret in the pod's namespace
-                          properties:
-                            key:
-                              description: The key of the secret to select from.  Must
-                                be a valid secret key.
-                              type: string
-                            name:
-                              default: ""
-                              description: |-
-                                Name of the referent.
-                                This field is effectively required, but due to backwards compatibility is
-                                allowed to be empty. Instances of this type with an empty value here are
-                                almost certainly wrong.
-                                More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
-                              type: string
-                            optional:
-                              description: Specify whether the Secret or its key must
-                                be defined
-                              type: boolean
-                          required:
-                          - key
-                          type: object
-                          x-kubernetes-map-type: atomic
-                      type: object
                   required:
                   - name
+                  - value
                   type: object
                 type: array
               lastError:
@@ -6053,6 +5797,42 @@ spec:
                       ServiceAccountName selects the Kubernetes service account for the
                       agent pod. Use this to grant internal API and Kubernetes read access.
                     type: string
+                  skillSourceCredentials:
+                    description: |-
+                      SkillSourceCredentials authorizes private remote skill reads by exact API
+                      host. Credential selection belongs to the harness execution envelope, not
+                      reusable AgentSkillSet content.
+                    items:
+                      description: |-
+                        AgentRunGitHubSkillCredential binds a GitHub API host to a token selected by
+                        the trusted harness execution envelope. AgentSkillSet authors cannot select
+                        credentials through remote content references.
+                      properties:
+                        apiHost:
+                          description: |-
+                            APIHost is the exact GitHub or GitHub Enterprise API host, including an
+                            optional port and without a URL scheme or path.
+                          minLength: 1
+                          type: string
+                        tokenSecretRef:
+                          description: TokenSecretRef selects a same-namespace Secret
+                            key containing the token.
+                          properties:
+                            key:
+                              type: string
+                            name:
+                              type: string
+                            namespace:
+                              type: string
+                          required:
+                          - key
+                          - name
+                          type: object
+                      required:
+                      - apiHost
+                      - tokenSecretRef
+                      type: object
+                    type: array
                   spiffeWorkloadAPI:
                     description: |-
                       SpiffeWorkloadAPI opts this run into the SPIFFE CSI Workload API mount.
@@ -8457,6 +8237,42 @@ spec:
                           ServiceAccountName selects the Kubernetes service account for the
                           agent pod. Use this to grant internal API and Kubernetes read access.
                         type: string
+                      skillSourceCredentials:
+                        description: |-
+                          SkillSourceCredentials authorizes private remote skill reads by exact API
+                          host. Credential selection belongs to the harness execution envelope, not
+                          reusable AgentSkillSet content.
+                        items:
+                          description: |-
+                            AgentRunGitHubSkillCredential binds a GitHub API host to a token selected by
+                            the trusted harness execution envelope. AgentSkillSet authors cannot select
+                            credentials through remote content references.
+                          properties:
+                            apiHost:
+                              description: |-
+                                APIHost is the exact GitHub or GitHub Enterprise API host, including an
+                                optional port and without a URL scheme or path.
+                              minLength: 1
+                              type: string
+                            tokenSecretRef:
+                              description: TokenSecretRef selects a same-namespace
+                                Secret key containing the token.
+                              properties:
+                                key:
+                                  type: string
+                                name:
+                                  type: string
+                                namespace:
+                                  type: string
+                              required:
+                              - key
+                              - name
+                              type: object
+                          required:
+                          - apiHost
+                          - tokenSecretRef
+                          type: object
+                        type: array
                       spiffeWorkloadAPI:
                         description: |-
                           SpiffeWorkloadAPI opts this run into the SPIFFE CSI Workload API mount.
@@ -8599,9 +8415,9 @@ spec:
                                     minLength: 1
                                     type: string
                                   ref:
-                                    description: |-
-                                      Ref is a branch, tag, or commit SHA. Empty uses the repository default
-                                      branch at the time the controller resolves the source.
+                                    description: Ref is the full immutable Git commit
+                                      object ID used to resolve the source.
+                                    pattern: ^([0-9a-fA-F]{40}|[0-9a-fA-F]{64})$
                                     type: string
                                   repository:
                                     description: |-
@@ -8609,24 +8425,9 @@ spec:
                                       example/agent-skills.
                                     minLength: 1
                                     type: string
-                                  tokenSecretRef:
-                                    description: |-
-                                      TokenSecretRef optionally references a same-namespace Kubernetes Secret
-                                      key containing a GitHub token for private repositories or protected
-                                      contents.
-                                    properties:
-                                      key:
-                                        type: string
-                                      name:
-                                        type: string
-                                      namespace:
-                                        type: string
-                                    required:
-                                    - key
-                                    - name
-                                    type: object
                                 required:
                                 - path
+                                - ref
                                 - repository
                                 type: object
                             type: object
@@ -8964,9 +8765,9 @@ spec:
                                     minLength: 1
                                     type: string
                                   ref:
-                                    description: |-
-                                      Ref is a branch, tag, or commit SHA. Empty uses the repository default
-                                      branch at the time the controller resolves the source.
+                                    description: Ref is the full immutable Git commit
+                                      object ID used to resolve the source.
+                                    pattern: ^([0-9a-fA-F]{40}|[0-9a-fA-F]{64})$
                                     type: string
                                   repository:
                                     description: |-
@@ -8974,24 +8775,9 @@ spec:
                                       example/agent-skills.
                                     minLength: 1
                                     type: string
-                                  tokenSecretRef:
-                                    description: |-
-                                      TokenSecretRef optionally references a same-namespace Kubernetes Secret
-                                      key containing a GitHub token for private repositories or protected
-                                      contents.
-                                    properties:
-                                      key:
-                                        type: string
-                                      name:
-                                        type: string
-                                      namespace:
-                                        type: string
-                                    required:
-                                    - key
-                                    - name
-                                    type: object
                                 required:
                                 - path
+                                - ref
                                 - repository
                                 type: object
                             type: object
@@ -11157,6 +10943,42 @@ spec:
                           ServiceAccountName selects the Kubernetes service account for the
                           agent pod. Use this to grant internal API and Kubernetes read access.
                         type: string
+                      skillSourceCredentials:
+                        description: |-
+                          SkillSourceCredentials authorizes private remote skill reads by exact API
+                          host. Credential selection belongs to the harness execution envelope, not
+                          reusable AgentSkillSet content.
+                        items:
+                          description: |-
+                            AgentRunGitHubSkillCredential binds a GitHub API host to a token selected by
+                            the trusted harness execution envelope. AgentSkillSet authors cannot select
+                            credentials through remote content references.
+                          properties:
+                            apiHost:
+                              description: |-
+                                APIHost is the exact GitHub or GitHub Enterprise API host, including an
+                                optional port and without a URL scheme or path.
+                              minLength: 1
+                              type: string
+                            tokenSecretRef:
+                              description: TokenSecretRef selects a same-namespace
+                                Secret key containing the token.
+                              properties:
+                                key:
+                                  type: string
+                                name:
+                                  type: string
+                                namespace:
+                                  type: string
+                              required:
+                              - key
+                              - name
+                              type: object
+                          required:
+                          - apiHost
+                          - tokenSecretRef
+                          type: object
+                        type: array
                       spiffeWorkloadAPI:
                         description: |-
                           SpiffeWorkloadAPI opts this run into the SPIFFE CSI Workload API mount.
@@ -11299,9 +11121,9 @@ spec:
                                     minLength: 1
                                     type: string
                                   ref:
-                                    description: |-
-                                      Ref is a branch, tag, or commit SHA. Empty uses the repository default
-                                      branch at the time the controller resolves the source.
+                                    description: Ref is the full immutable Git commit
+                                      object ID used to resolve the source.
+                                    pattern: ^([0-9a-fA-F]{40}|[0-9a-fA-F]{64})$
                                     type: string
                                   repository:
                                     description: |-
@@ -11309,24 +11131,9 @@ spec:
                                       example/agent-skills.
                                     minLength: 1
                                     type: string
-                                  tokenSecretRef:
-                                    description: |-
-                                      TokenSecretRef optionally references a same-namespace Kubernetes Secret
-                                      key containing a GitHub token for private repositories or protected
-                                      contents.
-                                    properties:
-                                      key:
-                                        type: string
-                                      name:
-                                        type: string
-                                      namespace:
-                                        type: string
-                                    required:
-                                    - key
-                                    - name
-                                    type: object
                                 required:
                                 - path
+                                - ref
                                 - repository
                                 type: object
                             type: object
@@ -11714,9 +11521,9 @@ spec:
                                     minLength: 1
                                     type: string
                                   ref:
-                                    description: |-
-                                      Ref is a branch, tag, or commit SHA. Empty uses the repository default
-                                      branch at the time the controller resolves the source.
+                                    description: Ref is the full immutable Git commit
+                                      object ID used to resolve the source.
+                                    pattern: ^([0-9a-fA-F]{40}|[0-9a-fA-F]{64})$
                                     type: string
                                   repository:
                                     description: |-
@@ -11724,24 +11531,9 @@ spec:
                                       example/agent-skills.
                                     minLength: 1
                                     type: string
-                                  tokenSecretRef:
-                                    description: |-
-                                      TokenSecretRef optionally references a same-namespace Kubernetes Secret
-                                      key containing a GitHub token for private repositories or protected
-                                      contents.
-                                    properties:
-                                      key:
-                                        type: string
-                                      name:
-                                        type: string
-                                      namespace:
-                                        type: string
-                                    required:
-                                    - key
-                                    - name
-                                    type: object
                                 required:
                                 - path
+                                - ref
                                 - repository
                                 type: object
                             type: object
@@ -11983,6 +11775,9 @@ spec:
                 type: string
               intent:
                 type: string
+              jobCreateAttemptedAt:
+                format: date-time
+                type: string
               jobRef:
                 description: |-
                   NamespacedObjectReference identifies a Kubernetes object without importing
@@ -11996,13 +11791,45 @@ spec:
                 required:
                 - name
                 type: object
+              jobSpecDigest:
+                type: string
+              jobUID:
+                type: string
               observedGeneration:
                 format: int64
                 type: integer
               output:
                 type: string
+              payloadRef:
+                description: |-
+                  NamespacedObjectReference identifies a Kubernetes object without importing
+                  another API group. Namespace may be omitted where same-namespace resolution
+                  is part of the containing resource contract.
+                properties:
+                  name:
+                    type: string
+                  namespace:
+                    type: string
+                required:
+                - name
+                type: object
+              payloadUID:
+                type: string
               phase:
                 type: string
+              plannedJobRef:
+                description: |-
+                  NamespacedObjectReference identifies a Kubernetes object without importing
+                  another API group. Namespace may be omitted where same-namespace resolution
+                  is part of the containing resource contract.
+                properties:
+                  name:
+                    type: string
+                  namespace:
+                    type: string
+                required:
+                - name
+                type: object
               promptHash:
                 type: string
               pullRequestURL:
@@ -12172,6 +11999,8 @@ spec:
                 required:
                 - name
                 type: object
+              runnerPodUID:
+                type: string
               startedAt:
                 format: date-time
                 type: string
@@ -14357,6 +14186,42 @@ spec:
                               ServiceAccountName selects the Kubernetes service account for the
                               agent pod. Use this to grant internal API and Kubernetes read access.
                             type: string
+                          skillSourceCredentials:
+                            description: |-
+                              SkillSourceCredentials authorizes private remote skill reads by exact API
+                              host. Credential selection belongs to the harness execution envelope, not
+                              reusable AgentSkillSet content.
+                            items:
+                              description: |-
+                                AgentRunGitHubSkillCredential binds a GitHub API host to a token selected by
+                                the trusted harness execution envelope. AgentSkillSet authors cannot select
+                                credentials through remote content references.
+                              properties:
+                                apiHost:
+                                  description: |-
+                                    APIHost is the exact GitHub or GitHub Enterprise API host, including an
+                                    optional port and without a URL scheme or path.
+                                  minLength: 1
+                                  type: string
+                                tokenSecretRef:
+                                  description: TokenSecretRef selects a same-namespace
+                                    Secret key containing the token.
+                                  properties:
+                                    key:
+                                      type: string
+                                    name:
+                                      type: string
+                                    namespace:
+                                      type: string
+                                  required:
+                                  - key
+                                  - name
+                                  type: object
+                              required:
+                              - apiHost
+                              - tokenSecretRef
+                              type: object
+                            type: array
                           spiffeWorkloadAPI:
                             description: |-
                               SpiffeWorkloadAPI opts this run into the SPIFFE CSI Workload API mount.
@@ -14499,9 +14364,9 @@ spec:
                                         minLength: 1
                                         type: string
                                       ref:
-                                        description: |-
-                                          Ref is a branch, tag, or commit SHA. Empty uses the repository default
-                                          branch at the time the controller resolves the source.
+                                        description: Ref is the full immutable Git
+                                          commit object ID used to resolve the source.
+                                        pattern: ^([0-9a-fA-F]{40}|[0-9a-fA-F]{64})$
                                         type: string
                                       repository:
                                         description: |-
@@ -14509,24 +14374,9 @@ spec:
                                           example/agent-skills.
                                         minLength: 1
                                         type: string
-                                      tokenSecretRef:
-                                        description: |-
-                                          TokenSecretRef optionally references a same-namespace Kubernetes Secret
-                                          key containing a GitHub token for private repositories or protected
-                                          contents.
-                                        properties:
-                                          key:
-                                            type: string
-                                          name:
-                                            type: string
-                                          namespace:
-                                            type: string
-                                        required:
-                                        - key
-                                        - name
-                                        type: object
                                     required:
                                     - path
+                                    - ref
                                     - repository
                                     type: object
                                 type: object
@@ -14916,9 +14766,9 @@ spec:
                                         minLength: 1
                                         type: string
                                       ref:
-                                        description: |-
-                                          Ref is a branch, tag, or commit SHA. Empty uses the repository default
-                                          branch at the time the controller resolves the source.
+                                        description: Ref is the full immutable Git
+                                          commit object ID used to resolve the source.
+                                        pattern: ^([0-9a-fA-F]{40}|[0-9a-fA-F]{64})$
                                         type: string
                                       repository:
                                         description: |-
@@ -14926,24 +14776,9 @@ spec:
                                           example/agent-skills.
                                         minLength: 1
                                         type: string
-                                      tokenSecretRef:
-                                        description: |-
-                                          TokenSecretRef optionally references a same-namespace Kubernetes Secret
-                                          key containing a GitHub token for private repositories or protected
-                                          contents.
-                                        properties:
-                                          key:
-                                            type: string
-                                          name:
-                                            type: string
-                                          namespace:
-                                            type: string
-                                        required:
-                                        - key
-                                        - name
-                                        type: object
                                     required:
                                     - path
+                                    - ref
                                     - repository
                                     type: object
                                 type: object
@@ -17139,6 +16974,42 @@ spec:
                                     ServiceAccountName selects the Kubernetes service account for the
                                     agent pod. Use this to grant internal API and Kubernetes read access.
                                   type: string
+                                skillSourceCredentials:
+                                  description: |-
+                                    SkillSourceCredentials authorizes private remote skill reads by exact API
+                                    host. Credential selection belongs to the harness execution envelope, not
+                                    reusable AgentSkillSet content.
+                                  items:
+                                    description: |-
+                                      AgentRunGitHubSkillCredential binds a GitHub API host to a token selected by
+                                      the trusted harness execution envelope. AgentSkillSet authors cannot select
+                                      credentials through remote content references.
+                                    properties:
+                                      apiHost:
+                                        description: |-
+                                          APIHost is the exact GitHub or GitHub Enterprise API host, including an
+                                          optional port and without a URL scheme or path.
+                                        minLength: 1
+                                        type: string
+                                      tokenSecretRef:
+                                        description: TokenSecretRef selects a same-namespace
+                                          Secret key containing the token.
+                                        properties:
+                                          key:
+                                            type: string
+                                          name:
+                                            type: string
+                                          namespace:
+                                            type: string
+                                        required:
+                                        - key
+                                        - name
+                                        type: object
+                                    required:
+                                    - apiHost
+                                    - tokenSecretRef
+                                    type: object
+                                  type: array
                                 spiffeWorkloadAPI:
                                   description: |-
                                     SpiffeWorkloadAPI opts this run into the SPIFFE CSI Workload API mount.
@@ -17282,9 +17153,10 @@ spec:
                                               minLength: 1
                                               type: string
                                             ref:
-                                              description: |-
-                                                Ref is a branch, tag, or commit SHA. Empty uses the repository default
-                                                branch at the time the controller resolves the source.
+                                              description: Ref is the full immutable
+                                                Git commit object ID used to resolve
+                                                the source.
+                                              pattern: ^([0-9a-fA-F]{40}|[0-9a-fA-F]{64})$
                                               type: string
                                             repository:
                                               description: |-
@@ -17292,24 +17164,9 @@ spec:
                                                 example/agent-skills.
                                               minLength: 1
                                               type: string
-                                            tokenSecretRef:
-                                              description: |-
-                                                TokenSecretRef optionally references a same-namespace Kubernetes Secret
-                                                key containing a GitHub token for private repositories or protected
-                                                contents.
-                                              properties:
-                                                key:
-                                                  type: string
-                                                name:
-                                                  type: string
-                                                namespace:
-                                                  type: string
-                                              required:
-                                              - key
-                                              - name
-                                              type: object
                                           required:
                                           - path
+                                          - ref
                                           - repository
                                           type: object
                                       type: object
@@ -17700,9 +17557,10 @@ spec:
                                               minLength: 1
                                               type: string
                                             ref:
-                                              description: |-
-                                                Ref is a branch, tag, or commit SHA. Empty uses the repository default
-                                                branch at the time the controller resolves the source.
+                                              description: Ref is the full immutable
+                                                Git commit object ID used to resolve
+                                                the source.
+                                              pattern: ^([0-9a-fA-F]{40}|[0-9a-fA-F]{64})$
                                               type: string
                                             repository:
                                               description: |-
@@ -17710,24 +17568,9 @@ spec:
                                                 example/agent-skills.
                                               minLength: 1
                                               type: string
-                                            tokenSecretRef:
-                                              description: |-
-                                                TokenSecretRef optionally references a same-namespace Kubernetes Secret
-                                                key containing a GitHub token for private repositories or protected
-                                                contents.
-                                              properties:
-                                                key:
-                                                  type: string
-                                                name:
-                                                  type: string
-                                                namespace:
-                                                  type: string
-                                              required:
-                                              - key
-                                              - name
-                                              type: object
                                           required:
                                           - path
+                                          - ref
                                           - repository
                                           type: object
                                       type: object
@@ -18071,9 +17914,9 @@ spec:
                                 minLength: 1
                                 type: string
                               ref:
-                                description: |-
-                                  Ref is a branch, tag, or commit SHA. Empty uses the repository default
-                                  branch at the time the controller resolves the source.
+                                description: Ref is the full immutable Git commit
+                                  object ID used to resolve the source.
+                                pattern: ^([0-9a-fA-F]{40}|[0-9a-fA-F]{64})$
                                 type: string
                               repository:
                                 description: |-
@@ -18081,24 +17924,9 @@ spec:
                                   example/agent-skills.
                                 minLength: 1
                                 type: string
-                              tokenSecretRef:
-                                description: |-
-                                  TokenSecretRef optionally references a same-namespace Kubernetes Secret
-                                  key containing a GitHub token for private repositories or protected
-                                  contents.
-                                properties:
-                                  key:
-                                    type: string
-                                  name:
-                                    type: string
-                                  namespace:
-                                    type: string
-                                required:
-                                - key
-                                - name
-                                type: object
                             required:
                             - path
+                            - ref
                             - repository
                             type: object
                         type: object
@@ -18456,159 +18284,24 @@ spec:
                         ExtraEnv provides non-secret path environment defaults for AgentRuns that
                         attach an AgentDataVolume inheriting this profile entry.
                       items:
-                        description: EnvVar represents an environment variable present
-                          in a Container.
+                        description: |-
+                          AgentDataVolumePathEnvVar exposes only a named absolute state path. It is
+                          intentionally narrower than corev1.EnvVar so storage metadata cannot select
+                          Secrets or inject general runner configuration.
                         properties:
                           name:
-                            description: |-
-                              Name of the environment variable.
-                              May consist of any printable ASCII characters except '='.
+                            description: Name identifies a backend home, state, cache,
+                              config, or data directory.
+                            pattern: ^([A-Z][A-Z0-9_]*_)?(HOME|STATE_DIR|CACHE_DIR|CONFIG_DIR|DATA_DIR)$
                             type: string
                           value:
-                            description: |-
-                              Variable references $(VAR_NAME) are expanded
-                              using the previously defined environment variables in the container and
-                              any service environment variables. If a variable cannot be resolved,
-                              the reference in the input string will be unchanged. Double $$ are reduced
-                              to a single $, which allows for escaping the $(VAR_NAME) syntax: i.e.
-                              "$$(VAR_NAME)" will produce the string literal "$(VAR_NAME)".
-                              Escaped references will never be expanded, regardless of whether the variable
-                              exists or not.
-                              Defaults to "".
+                            description: Value is an absolute path under the volume's
+                              mountPath.
+                            pattern: ^/
                             type: string
-                          valueFrom:
-                            description: Source for the environment variable's value.
-                              Cannot be used if value is not empty.
-                            properties:
-                              configMapKeyRef:
-                                description: Selects a key of a ConfigMap.
-                                properties:
-                                  key:
-                                    description: The key to select.
-                                    type: string
-                                  name:
-                                    default: ""
-                                    description: |-
-                                      Name of the referent.
-                                      This field is effectively required, but due to backwards compatibility is
-                                      allowed to be empty. Instances of this type with an empty value here are
-                                      almost certainly wrong.
-                                      More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
-                                    type: string
-                                  optional:
-                                    description: Specify whether the ConfigMap or
-                                      its key must be defined
-                                    type: boolean
-                                required:
-                                - key
-                                type: object
-                                x-kubernetes-map-type: atomic
-                              fieldRef:
-                                description: |-
-                                  Selects a field of the pod: supports metadata.name, metadata.namespace, `metadata.labels['<KEY>']`, `metadata.annotations['<KEY>']`,
-                                  spec.nodeName, spec.serviceAccountName, status.hostIP, status.podIP, status.podIPs.
-                                properties:
-                                  apiVersion:
-                                    description: Version of the schema the FieldPath
-                                      is written in terms of, defaults to "v1".
-                                    type: string
-                                  fieldPath:
-                                    description: Path of the field to select in the
-                                      specified API version.
-                                    type: string
-                                required:
-                                - fieldPath
-                                type: object
-                                x-kubernetes-map-type: atomic
-                              fileKeyRef:
-                                description: |-
-                                  FileKeyRef selects a key of the env file.
-                                  Requires the EnvFiles feature gate to be enabled.
-                                properties:
-                                  key:
-                                    description: |-
-                                      The key within the env file. An invalid key will prevent the pod from starting.
-                                      The keys defined within a source may consist of any printable ASCII characters except '='.
-                                      During Alpha stage of the EnvFiles feature gate, the key size is limited to 128 characters.
-                                    type: string
-                                  optional:
-                                    default: false
-                                    description: |-
-                                      Specify whether the file or its key must be defined. If the file or key
-                                      does not exist, then the env var is not published.
-                                      If optional is set to true and the specified key does not exist,
-                                      the environment variable will not be set in the Pod's containers.
-
-                                      If optional is set to false and the specified key does not exist,
-                                      an error will be returned during Pod creation.
-                                    type: boolean
-                                  path:
-                                    description: |-
-                                      The path within the volume from which to select the file.
-                                      Must be relative and may not contain the '..' path or start with '..'.
-                                    type: string
-                                  volumeName:
-                                    description: The name of the volume mount containing
-                                      the env file.
-                                    type: string
-                                required:
-                                - key
-                                - path
-                                - volumeName
-                                type: object
-                                x-kubernetes-map-type: atomic
-                              resourceFieldRef:
-                                description: |-
-                                  Selects a resource of the container: only resources limits and requests
-                                  (limits.cpu, limits.memory, limits.ephemeral-storage, requests.cpu, requests.memory and requests.ephemeral-storage) are currently supported.
-                                properties:
-                                  containerName:
-                                    description: 'Container name: required for volumes,
-                                      optional for env vars'
-                                    type: string
-                                  divisor:
-                                    anyOf:
-                                    - type: integer
-                                    - type: string
-                                    description: Specifies the output format of the
-                                      exposed resources, defaults to "1"
-                                    pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
-                                    x-kubernetes-int-or-string: true
-                                  resource:
-                                    description: 'Required: resource to select'
-                                    type: string
-                                required:
-                                - resource
-                                type: object
-                                x-kubernetes-map-type: atomic
-                              secretKeyRef:
-                                description: Selects a key of a secret in the pod's
-                                  namespace
-                                properties:
-                                  key:
-                                    description: The key of the secret to select from.  Must
-                                      be a valid secret key.
-                                    type: string
-                                  name:
-                                    default: ""
-                                    description: |-
-                                      Name of the referent.
-                                      This field is effectively required, but due to backwards compatibility is
-                                      allowed to be empty. Instances of this type with an empty value here are
-                                      almost certainly wrong.
-                                      More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
-                                    type: string
-                                  optional:
-                                    description: Specify whether the Secret or its
-                                      key must be defined
-                                    type: boolean
-                                required:
-                                - key
-                                type: object
-                                x-kubernetes-map-type: atomic
-                            type: object
                         required:
                         - name
+                        - value
                         type: object
                       type: array
                     mountPath:
