@@ -2,7 +2,7 @@ CONTROLLER_GEN ?= go run sigs.k8s.io/controller-tools/cmd/controller-gen@v0.19.0
 IMAGE_PREFIX ?=
 IMAGE_TAG ?= dev
 
-.PHONY: generate manifests test verify verify-runner-contract build docker-build images image-checks helm-lint archive-postgres-integration chart-package release-publish kind-upgrade-e2e kind-e2e
+.PHONY: generate manifests test verify verify-runner-contract build docker-build images image-checks helm-lint archive-postgres-integration chart-package release-publish judge-kind-e2e kind-upgrade-e2e kind-e2e
 
 generate:
 	$(CONTROLLER_GEN) object paths=./api/...
@@ -50,6 +50,9 @@ release-publish:
 		--prefix "$${REGISTRY_PREFIX:?set REGISTRY_PREFIX, for example ghcr.io/hazyforge}" \
 		--version "$${VERSION:?set VERSION, for example v0.1.1}"
 
+judge-kind-e2e:
+	./hack/test-judge-kind.sh
+
 kind-upgrade-e2e:
 	./hack/test-kind-upgrade.sh
 
@@ -69,6 +72,7 @@ verify-runner-contract:
 	@bash -n hack/package-chart.sh
 	@bash -n hack/package-chart_test.sh
 	@bash -n hack/test-kind.sh
+	@bash -n hack/test-judge-kind.sh
 	@bash -n hack/test-kind-upgrade.sh
 	@bash -n hack/test-runner-repository-checkout.sh
 	@bash -n hack/test-opencode-runner.sh
@@ -79,6 +83,17 @@ verify-runner-contract:
 	@hack/publish-release.sh --help >/dev/null
 	@hack/package-chart.sh --help >/dev/null
 	@hack/package-chart_test.sh
+	@hack/test-judge-kind.sh --help >/dev/null
+	@rg -q 'oci://ghcr.io/hazyforge/charts/anvil-agents' hack/test-judge-kind.sh
+	@rg -q 'sha256:16a867c09b21287029797e43ba42cb633277ed1d3eb8d764dc3516f00a4c970c' hack/test-judge-kind.sh
+	@rg -q 'github.com/google/go-licenses/v2@' Dockerfile
+	@rg -q '/usr/share/licenses/anvil-agents' Dockerfile
+	@rg -q 'GROK_VERSION=0.2.103' docker/agent-run-grok-build/Dockerfile
+	@rg -q '/usr/share/doc/grok-build/THIRD-PARTY-NOTICES' docker/agent-run-grok-build/Dockerfile
+	@if rg -q 'docker build|build-images\.sh' hack/test-judge-kind.sh; then \
+		echo "judge Kind test must not build images" >&2; \
+		exit 1; \
+	fi
 	@hack/build-images_test.sh
 	@hack/publish-images_test.sh
 	@hack/publish-release_test.sh

@@ -1,0 +1,175 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: anvil-agents-judge
+  labels:
+    control.anvil.hazyforge.io/judge-fixture: "true"
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: agent-runner
+  namespace: anvil-agents-judge
+automountServiceAccountToken: false
+---
+apiVersion: control.anvil.hazyforge.io/v1alpha1
+kind: VolumeProfile
+metadata:
+  name: judge-state
+  namespace: anvil-agents-judge
+spec:
+  description: Small persistent fixture using the Kind default StorageClass.
+  volumes:
+    - name: state
+      purpose: judge-storage-proof
+      mountPath: /var/lib/anvil-agent
+      size:
+        request: 64Mi
+      accessModes:
+        - ReadWriteOnce
+---
+apiVersion: control.anvil.hazyforge.io/v1alpha1
+kind: AgentDataVolume
+metadata:
+  name: judge-state
+  namespace: anvil-agents-judge
+spec:
+  agentName: build-week-judge
+  backend: custom
+  profileRef:
+    name: judge-state
+  profileVolumeName: state
+  applicationRef:
+    name: build-week-judge
+---
+apiVersion: control.anvil.hazyforge.io/v1alpha1
+kind: AgentHarnessProfile
+metadata:
+  name: judge-runtime
+  namespace: anvil-agents-judge
+spec:
+  description: Credential-free, no-build validation harness for judges.
+  backend:
+    kind: custom
+    image: docker.io/library/busybox@sha256:9532d8c39891ca2ecde4d30d7710e01fb739c87a8b9299685c63704296b16028
+    imagePullPolicy: IfNotPresent
+    custom:
+      command:
+        - /bin/sh
+        - -ceu
+      args:
+        - |
+          prompt_file="${ANVIL_AGENT_RUN_PROMPT_FILE:?missing prompt file}"
+          context_file="${ANVIL_AGENT_RUN_CONTEXT_FILE:?missing context file}"
+          skill_file="${ANVIL_AGENT_RUN_SKILL_FILES:?missing skill file}"
+          data_volumes="${ANVIL_AGENT_RUN_DATA_VOLUMES_JSON:?missing data volume metadata}"
+          status_prefix="${ANVIL_AGENT_RUN_STATUS_LOG_PREFIX:-ANVIL_AGENT_RUN_STATUS_JSON=}"
+          marker_file=/var/lib/anvil-agent/judge-kind-marker
+
+          test -s "${prompt_file}"
+          test -s "${context_file}"
+          test -s "${skill_file}"
+          grep -Fq 'Credential-free judge run' "${skill_file}"
+          grep -Fq "\"name\": \"${ANVIL_AGENT_RUN}\"" "${context_file}"
+          printf '%s' "${data_volumes}" | grep -Fq '"claimName":"agent-data-judge-state"'
+          case "${ANVIL_AGENT_RUN}" in
+            judge-write-001)
+              grep -Fq 'Prove public chart installation' "${prompt_file}"
+              test ! -e "${marker_file}"
+              printf '%s\n' 'anvil-agents-judge-storage-v1' >"${marker_file}"
+              storage_state=created
+              ;;
+            judge-read-002)
+              grep -Fq 'Create a new append-only run' "${prompt_file}"
+              test -f "${marker_file}"
+              storage_state=retained
+              ;;
+            *)
+              echo "unexpected AgentRun ${ANVIL_AGENT_RUN}" >&2
+              exit 64
+              ;;
+          esac
+          test "$(cat "${marker_file}")" = anvil-agents-judge-storage-v1
+
+          printf 'judge-harness payload=valid storage=%s\n' "${storage_state}"
+          printf '%s%s\n' "${status_prefix}" "{\"type\":\"decision\",\"classification\":\"judge-test\",\"action\":\"inspect\",\"summary\":\"Credential-free judge harness succeeded; storage=${storage_state}.\",\"residualRisk\":\"This path validates the operator without credentials and does not claim to exercise GPT-5.6.\"}"
+  execution:
+    serviceAccountName: agent-runner
+    dataVolumeRefs:
+      - name: judge-state
+    podSecurityContext:
+      runAsNonRoot: true
+      runAsUser: 65532
+      runAsGroup: 65532
+      fsGroup: 65532
+      fsGroupChangePolicy: OnRootMismatch
+      seccompProfile:
+        type: RuntimeDefault
+    securityContext:
+      runAsNonRoot: true
+      runAsUser: 65532
+      runAsGroup: 65532
+      allowPrivilegeEscalation: false
+      readOnlyRootFilesystem: true
+      capabilities:
+        drop:
+          - ALL
+    timeoutSeconds: 120
+    resources:
+      requests:
+        cpu: 10m
+        memory: 16Mi
+      limits:
+        cpu: 100m
+        memory: 64Mi
+---
+apiVersion: control.anvil.hazyforge.io/v1alpha1
+kind: AgentSkillSet
+metadata:
+  name: judge-contract
+  namespace: anvil-agents-judge
+spec:
+  description: Instructions used to prove payload composition.
+  skills:
+    - name: validate-mounted-contract
+      content: Credential-free judge run must inspect its mounted prompt, context, skill file, and durable state.
+---
+apiVersion: control.anvil.hazyforge.io/v1alpha1
+kind: AgentRunProfile
+metadata:
+  name: judge
+  namespace: anvil-agents-judge
+spec:
+  description: Public, credential-free operator validation profile.
+  scope:
+    summary: Validate released Anvil Agents scheduling and persistence.
+  harnessProfileRef:
+    name: judge-runtime
+  skillSets:
+    refs:
+      - name: judge-contract
+  harness:
+    intent: observe
+    systemPrompt: Validate only the mounted payload, structured result, and durable state.
+---
+apiVersion: control.anvil.hazyforge.io/v1alpha1
+kind: AgentRun
+metadata:
+  name: judge-write-001
+  namespace: anvil-agents-judge
+spec:
+  purpose: manual
+  sourceRef:
+    kind: BuildWeekJudgeTest
+    name: public-release
+  profileRef:
+    name: judge
+  skillSets:
+    overrides:
+      - name: validate-mounted-contract
+        operation: Augment
+        content: This first immutable run must create the persistent marker.
+  prompt: Prove public chart installation, payload resolution, Job execution, and PVC creation.
+  scope:
+    applicationRef:
+      name: build-week-judge
