@@ -1,0 +1,3 @@
+# Require the repository owner to review every change to the default branch.
+* @PaleHazy
+/.github/CODEOWNERS @PaleHazy
