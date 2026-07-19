@@ -2897,6 +2897,22 @@ func TestAgentRunExternalSecretFreshnessRequiresAChangedRefreshTime(t *testing.T
 	}
 }
 
+func TestAgentRunExternalSecretRefreshTimeoutIgnoresCompletedEntries(t *testing.T) {
+	t.Parallel()
+
+	requested := metav1.NewTime(time.Now().Add(-agentRunExternalSecretRefreshTimeout - time.Minute))
+	entry := &controlv1alpha1.AgentRunExternalSecretRefreshStatus{RequestedAt: &requested}
+	if !agentRunExternalSecretRefreshTimedOut(entry) {
+		t.Fatal("an overdue incomplete refresh must time out")
+	}
+
+	refreshed := metav1.NewTime(requested.Add(time.Second))
+	entry.RefreshedAt = &refreshed
+	if agentRunExternalSecretRefreshTimedOut(entry) {
+		t.Fatal("a completed refresh must stay complete while later sequential refreshes run")
+	}
+}
+
 func TestAgentRunExternalSecretTargetMismatchFailsBeforeForceSync(t *testing.T) {
 	t.Parallel()
 

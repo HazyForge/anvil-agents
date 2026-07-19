@@ -1102,7 +1102,7 @@ func agentRunExternalSecretRefreshStatus(status *controlv1alpha1.AgentRunStatus,
 }
 
 func agentRunExternalSecretRefreshTimedOut(entry *controlv1alpha1.AgentRunExternalSecretRefreshStatus) bool {
-	return entry != nil && entry.RequestedAt != nil && time.Since(entry.RequestedAt.Time) >= agentRunExternalSecretRefreshTimeout
+	return entry != nil && entry.RefreshedAt == nil && entry.RequestedAt != nil && time.Since(entry.RequestedAt.Time) >= agentRunExternalSecretRefreshTimeout
 }
 
 func agentRunExternalSecretRefreshChanged(entry *controlv1alpha1.AgentRunExternalSecretRefreshStatus, refreshTime time.Time) bool {
