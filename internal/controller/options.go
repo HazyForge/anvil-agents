@@ -69,7 +69,6 @@ func DefaultOptions() *Options {
 		MetricsBindAddress:           defaultMetricsBindAddress,
 		HealthProbeBindAddress:       defaultHealthProbeBindAddress,
 		LeaderElectionID:             defaultLeaderElectionID,
-		AgentRunArchiveDatabaseURL:   strings.TrimSpace(os.Getenv(archiveDatabaseURLEnv)),
 		AgentRunTerminalRetention:    durationEnv(terminalRetentionEnv),
 		PlatformRepository:           firstNonEmpty(strings.TrimSpace(os.Getenv(platformRepositoryEnv)), defaultPlatformRepository),
 		PlatformRepositoryURL:        firstNonEmpty(strings.TrimSpace(os.Getenv(platformRepositoryURLEnv)), defaultPlatformRepositoryURL),
@@ -85,6 +84,13 @@ func DefaultOptions() *Options {
 		GrokBuildRunnerImage:         firstNonEmpty(strings.TrimSpace(os.Getenv(grokBuildRunnerImageEnv)), agentRunDefaultGrokBuildImage),
 		PiAgentRunnerImage:           firstNonEmpty(strings.TrimSpace(os.Getenv(piAgentRunnerImageEnv)), agentRunDefaultPiAgentImage),
 	}
+}
+
+func applySensitiveEnvironment(options *Options) {
+	if options == nil || strings.TrimSpace(options.AgentRunArchiveDatabaseURL) != "" {
+		return
+	}
+	options.AgentRunArchiveDatabaseURL = strings.TrimSpace(os.Getenv(archiveDatabaseURLEnv))
 }
 
 func ParseWatchNamespaces(raw string) []string {

@@ -98,4 +98,78 @@ if [[ "${option_status}" -ne 22 || "${option_output}" != *ANVIL_AGENT_RUN_REPO_C
 	exit 1
 fi
 
+credential_url="https://runner:topsecret@example.invalid/repo.git"
+credential_consumer="${test_dir}/credential-consumer"
+credential_clone_invocation="${test_dir}/credential-clone-invocation"
+real_git="$(command -v git)"
+git() {
+	if [[ "${1:-}" == clone && "${2:-}" == "https://example.invalid/repo.git" ]]; then
+		printf '%s\n' "$@" > "${credential_clone_invocation}"
+		if [[ "$*" == *topsecret* ]]; then
+			echo "credential-bearing URL appeared in git clone argv" >&2
+			return 1
+		fi
+		config_index="$((GIT_CONFIG_COUNT - 1))"
+		key_name="GIT_CONFIG_KEY_${config_index}"
+		value_name="GIT_CONFIG_VALUE_${config_index}"
+		if [[ "${!key_name}" != "url.${credential_url}.insteadOf" || "${!value_name}" != "https://example.invalid/repo.git" ]]; then
+			echo "credential transport rewrite was not isolated in Git process environment" >&2
+			return 1
+		fi
+		"${real_git}" clone --quiet "${remote}" "${3}"
+		"${real_git}" -C "${3}" remote set-url origin "${2}"
+		return
+	fi
+	"${real_git}" "$@"
+}
+anvil_clone_repository_url "${credential_url}" "${credential_consumer}"
+if [[ "$(sed -n '1p' "${credential_clone_invocation}")" != "clone" || "$(sed -n '2p' "${credential_clone_invocation}")" != "https://example.invalid/repo.git" ]]; then
+	echo "runner clone did not use the sanitized repository URL as its persisted source" >&2
+	exit 1
+fi
+origin_url="$(git -C "${credential_consumer}" remote get-url origin)"
+if [[ "${origin_url}" != "https://example.invalid/repo.git" ]]; then
+	echo "runner clone did not sanitize credential-bearing origin URL" >&2
+	exit 1
+fi
+if rg -q 'topsecret|runner@|runner:topsecret' "${credential_consumer}/.git/config"; then
+	echo "runner clone persisted URL credentials in .git/config" >&2
+	exit 1
+fi
+credential_consumer_with_config="${test_dir}/credential-consumer-with-config"
+GIT_CONFIG_COUNT=1 \
+	GIT_CONFIG_KEY_0="credential.helper" \
+	GIT_CONFIG_VALUE_0="" \
+	anvil_clone_repository_url "${credential_url}" "${credential_consumer_with_config}"
+if [[ "$(git -C "${credential_consumer_with_config}" remote get-url origin)" != "https://example.invalid/repo.git" ]]; then
+	echo "runner clone did not preserve existing process-local Git configuration" >&2
+	exit 1
+fi
+sanitized_url="$(anvil_sanitize_repository_url 'https://runner:secret@example.invalid/repo.git?access_token=query-secret#fragment')"
+if [[ "${sanitized_url}" != "https://example.invalid/repo.git" ]]; then
+	echo "runner URL sanitizer did not strip userinfo, query, and fragment" >&2
+	exit 1
+fi
+pathless_url="$(anvil_sanitize_repository_url 'https://runner:secret@example.invalid?access_token=query-secret#fragment')"
+if [[ "${pathless_url}" != "https://example.invalid" ]]; then
+	echo "runner URL sanitizer did not strip credentials from a pathless URL" >&2
+	exit 1
+fi
+if anvil_sanitize_repository_url 'ftp://runner:topsecret@example.invalid/repo.git?access_token=query-secret#fragment' >/dev/null; then
+	echo "runner URL sanitizer accepted credentials in an unsupported URI scheme" >&2
+	exit 1
+fi
+if anvil_sanitize_repository_url 'ssh://runner:topsecret@example.invalid/repo.git' >/dev/null; then
+	echo "runner URL sanitizer accepted an SSH password in URI userinfo" >&2
+	exit 1
+fi
+if [[ "$(anvil_sanitize_repository_url 'ssh://git@example.invalid/repo.git')" != "ssh://git@example.invalid/repo.git" ]]; then
+	echo "runner URL sanitizer rejected a normal SSH username" >&2
+	exit 1
+fi
+if anvil_sanitize_repository_url 'runner:topsecret@example.invalid:repo.git' >/dev/null; then
+	echo "runner URL sanitizer accepted password-like SCP userinfo" >&2
+	exit 1
+fi
+
 echo "Runner repository checkout contract passed"

@@ -521,24 +521,30 @@ type AgentRunGitHubSkillSourceSpec struct {
 	// example/agent-skills.
 	// +kubebuilder:validation:MinLength=1
 	Repository string `json:"repository"`
-	// Ref is a branch, tag, or commit SHA. Empty uses the repository default
-	// branch at the time the controller resolves the source.
-	// +optional
-	Ref string `json:"ref,omitempty"`
+	// Ref is the full immutable Git commit object ID used to resolve the source.
+	// +kubebuilder:validation:Pattern=`^([0-9a-fA-F]{40}|[0-9a-fA-F]{64})$`
+	Ref string `json:"ref"`
 	// Path is the repository-relative file path to download.
 	// +kubebuilder:validation:MinLength=1
 	Path string `json:"path"`
-	// TokenSecretRef optionally references a same-namespace Kubernetes Secret
-	// key containing a GitHub token for private repositories or protected
-	// contents.
-	// +optional
-	TokenSecretRef *SecretKeyReference `json:"tokenSecretRef,omitempty"`
 	// APIBaseURL overrides the GitHub API base URL for GitHub Enterprise.
 	// Empty defaults to https://api.github.com. The operator must explicitly
 	// allowlist the host and requires HTTPS unless test-only insecure access is
 	// enabled at process startup.
 	// +optional
 	APIBaseURL string `json:"apiBaseURL,omitempty"`
+}
+
+// AgentRunGitHubSkillCredential binds a GitHub API host to a token selected by
+// the trusted harness execution envelope. AgentSkillSet authors cannot select
+// credentials through remote content references.
+type AgentRunGitHubSkillCredential struct {
+	// APIHost is the exact GitHub or GitHub Enterprise API host, including an
+	// optional port and without a URL scheme or path.
+	// +kubebuilder:validation:MinLength=1
+	APIHost string `json:"apiHost"`
+	// TokenSecretRef selects a same-namespace Secret key containing the token.
+	TokenSecretRef SecretKeyReference `json:"tokenSecretRef"`
 }
 
 type AgentRunSubagentSpec struct {
@@ -632,6 +638,11 @@ type AgentRunHarnessExecutionSpec struct {
 	// selected backend. Each secret is projected with envFrom.
 	// +optional
 	EnvSecretRefs []NamespacedObjectReference `json:"envSecretRefs,omitempty"`
+	// SkillSourceCredentials authorizes private remote skill reads by exact API
+	// host. Credential selection belongs to the harness execution envelope, not
+	// reusable AgentSkillSet content.
+	// +optional
+	SkillSourceCredentials []AgentRunGitHubSkillCredential `json:"skillSourceCredentials,omitempty"`
 	// ExternalSecretRefreshRefs names ExternalSecrets and their target Secrets
 	// that must be reconciled from an external store before this run's Job is
 	// created. Each target Secret must also appear in EnvSecretRefs so the
@@ -895,8 +906,15 @@ type AgentRunStatus struct {
 	Backend                 string                                `json:"backend,omitempty"`
 	Intent                  string                                `json:"intent,omitempty"`
 	Image                   string                                `json:"image,omitempty"`
+	PlannedJobRef           *NamespacedObjectReference            `json:"plannedJobRef,omitempty"`
+	JobCreateAttemptedAt    *metav1.Time                          `json:"jobCreateAttemptedAt,omitempty"`
 	JobRef                  *NamespacedObjectReference            `json:"jobRef,omitempty"`
+	JobUID                  string                                `json:"jobUID,omitempty"`
+	JobSpecDigest           string                                `json:"jobSpecDigest,omitempty"`
+	PayloadRef              *NamespacedObjectReference            `json:"payloadRef,omitempty"`
+	PayloadUID              string                                `json:"payloadUID,omitempty"`
 	RunnerPodRef            *NamespacedObjectReference            `json:"runnerPodRef,omitempty"`
+	RunnerPodUID            string                                `json:"runnerPodUID,omitempty"`
 	RunnerNode              string                                `json:"runnerNode,omitempty"`
 	DataVolumes             []AgentRunDataVolumeStatus            `json:"dataVolumes,omitempty"`
 	ExternalSecretRefreshes []AgentRunExternalSecretRefreshStatus `json:"externalSecretRefreshes,omitempty"`

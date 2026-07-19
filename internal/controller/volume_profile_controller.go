@@ -78,6 +78,10 @@ func (r *VolumeProfileReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 			total.Add(volume.Size.Request)
 			requested = volume.Size.Request.String()
 		}
+		if err := validateAgentDataVolumePathEnv(volume.ExtraEnv, firstNonEmpty(strings.TrimSpace(volume.MountPath), "/agent-state")); err != nil && blockReason == "" {
+			blockReason = "InvalidPathEnvironment"
+			blockMessage = fmt.Sprintf("spec.volumes[%q] %s", name, err.Error())
+		}
 		volumeStatuses = append(volumeStatuses, controlv1alpha1.VolumeProfileVolumeStatus{
 			Name:             name,
 			Purpose:          strings.TrimSpace(volume.Purpose),

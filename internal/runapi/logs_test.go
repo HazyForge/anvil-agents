@@ -18,7 +18,9 @@ func TestKubernetesLogSourceValidatesRunJobAndPodOwnership(t *testing.T) {
 	isController := true
 	run := testAgentRun(agentsv1alpha1.AgentRunPhaseRunning)
 	run.Status.JobRef = &agentsv1alpha1.NamespacedObjectReference{Name: "run-job", Namespace: "agents"}
+	run.Status.JobUID = "job-uid"
 	run.Status.RunnerPodRef = &agentsv1alpha1.NamespacedObjectReference{Name: "run-pod", Namespace: "agents"}
+	run.Status.RunnerPodUID = "pod-uid"
 	job := &batchv1.Job{ObjectMeta: metav1.ObjectMeta{
 		Name:      "run-job",
 		Namespace: "agents",
@@ -57,6 +59,17 @@ func TestKubernetesLogSourceValidatesRunJobAndPodOwnership(t *testing.T) {
 	tampered.Labels[agentRunLabel] = "different-run"
 	if err := source.validateOwnership(context.Background(), run, tampered); err == nil || !strings.Contains(err.Error(), "not labeled") {
 		t.Fatalf("expected tampered pod rejection, got %v", err)
+	}
+
+	replacedJob := run.DeepCopy()
+	replacedJob.Status.JobUID = "different-job-uid"
+	if err := source.validateOwnership(context.Background(), replacedJob, pod); err == nil || !strings.Contains(err.Error(), "recorded AgentRun Job UID") {
+		t.Fatalf("expected replacement Job rejection, got %v", err)
+	}
+	replacedPod := run.DeepCopy()
+	replacedPod.Status.RunnerPodUID = "different-pod-uid"
+	if err := source.validateOwnership(context.Background(), replacedPod, pod); err == nil || !strings.Contains(err.Error(), "recorded UID") {
+		t.Fatalf("expected replacement Pod rejection, got %v", err)
 	}
 }
 

@@ -50,11 +50,25 @@ kubectl --context "${kube_context}" apply --dry-run=server \
 	--kustomize "${root_dir}/.hazyforge/agents" >/dev/null
 
 helm --kube-context "${kube_context}" uninstall anvil-agents --namespace anvil-agents-system >/dev/null
-crd_count="$(kubectl --context "${kube_context}" get crd --output=name | rg -c 'control\.anvil\.hazyforge\.io')"
-[[ "${crd_count}" -eq 11 ]] || {
-	echo "Helm uninstall retained ${crd_count} agent CRDs, want 11" >&2
-	exit 1
-}
+expected_crds=(
+	adversesignals.control.anvil.hazyforge.io
+	adversesituations.control.anvil.hazyforge.io
+	agentdatavolumes.control.anvil.hazyforge.io
+	agentharnessprofiles.control.anvil.hazyforge.io
+	agentruncontrols.control.anvil.hazyforge.io
+	agentrunprofiles.control.anvil.hazyforge.io
+	agentruns.control.anvil.hazyforge.io
+	agentschedules.control.anvil.hazyforge.io
+	agentskillsets.control.anvil.hazyforge.io
+	agenttoolsets.control.anvil.hazyforge.io
+	volumeprofiles.control.anvil.hazyforge.io
+)
+for crd in "${expected_crds[@]}"; do
+	kubectl --context "${kube_context}" get "customresourcedefinition/${crd}" >/dev/null || {
+		echo "Helm uninstall did not retain expected CRD ${crd}" >&2
+		exit 1
+	}
+done
 for resource in \
 	volumeprofile/demo-state \
 	agentdatavolume/demo-state \
@@ -80,6 +94,12 @@ kubectl --context "${kube_context}" wait --namespace anvil-agents-system \
 
 kubectl --context "${kube_context}" delete agentrun demo-002 \
 	--namespace agents-quickstart \
+	--ignore-not-found \
+	--cascade=foreground \
+	--wait=true >/dev/null
+kubectl --context "${kube_context}" delete configmap,job \
+	--namespace agents-quickstart \
+	--selector control.anvil.hazyforge.io/agent-run=demo-002 \
 	--ignore-not-found \
 	--wait=true >/dev/null
 kubectl --context "${kube_context}" apply \

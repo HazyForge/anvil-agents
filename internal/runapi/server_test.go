@@ -2,6 +2,7 @@ package runapi
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -51,6 +52,16 @@ type blockingAfterFirstReader struct {
 	gets     atomic.Int32
 	entered  chan struct{}
 	canceled chan struct{}
+}
+
+type deadlineRecorder struct {
+	*httptest.ResponseRecorder
+	deadlines []time.Time
+}
+
+func (writer *deadlineRecorder) SetWriteDeadline(deadline time.Time) error {
+	writer.deadlines = append(writer.deadlines, deadline)
+	return nil
 }
 
 func (reader *blockingAfterFirstReader) Get(ctx context.Context, key client.ObjectKey, object client.Object, options ...client.GetOption) error {
@@ -126,6 +137,40 @@ func TestListAndGetReturnCuratedViews(t *testing.T) {
 	server.routes().ServeHTTP(response, request)
 	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), "captured output") {
 		t.Fatalf("unexpected detail response: %d %s", response.Code, response.Body.String())
+	}
+}
+
+func TestListRejectsNamespacesAboveConfiguredObjectBound(t *testing.T) {
+	authenticator := staticAuthenticator{ready: true, principal: testPrincipal(time.Now().Add(time.Hour))}
+	server := testServer(t, nil, authenticator, staticLogSource{})
+	server.config.List.MaxItems = 2
+	scheme := runtime.NewScheme()
+	if err := agentsv1alpha1.AddToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
+	objects := make([]client.Object, 0, 3)
+	for index := 0; index < 3; index++ {
+		run := testAgentRun(agentsv1alpha1.AgentRunPhaseRunning)
+		run.Name = fmt.Sprintf("run-%d", index)
+		run.UID = types.UID(fmt.Sprintf("run-%d-uid", index))
+		objects = append(objects, run)
+	}
+	server.runs = fake.NewClientBuilder().WithScheme(scheme).WithObjects(objects...).Build()
+
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/namespaces/agents/agent-runs", nil)
+	request.Header.Set("Authorization", "Bearer valid")
+	response := httptest.NewRecorder()
+	server.routes().ServeHTTP(response, request)
+	if response.Code != http.StatusUnprocessableEntity || !strings.Contains(response.Body.String(), "list_too_large") {
+		t.Fatalf("response = %d %s, want bounded-list rejection", response.Code, response.Body.String())
+	}
+}
+
+func TestJSONResponsesSetAndClearWriteDeadline(t *testing.T) {
+	writer := &deadlineRecorder{ResponseRecorder: httptest.NewRecorder()}
+	writeJSON(writer, http.StatusOK, map[string]bool{"ok": true})
+	if len(writer.deadlines) != 2 || writer.deadlines[0].IsZero() || !writer.deadlines[1].IsZero() {
+		t.Fatalf("write deadlines = %#v, want bounded deadline followed by clear", writer.deadlines)
 	}
 }
 

@@ -23,6 +23,11 @@ import (
 
 type principalContextKey struct{}
 
+const (
+	listPageSize         int64 = 500
+	responseWriteTimeout       = 15 * time.Second
+)
+
 type Server struct {
 	config        Config
 	authenticator AccessTokenAuthenticator
@@ -128,10 +133,28 @@ func (server *Server) handleListRuns(writer http.ResponseWriter, request *http.R
 		limit = parsed
 	}
 	list := &agentsv1alpha1.AgentRunList{}
-	if err := server.runs.List(request.Context(), list, client.InNamespace(namespace)); err != nil {
-		server.log.Error(err, "list AgentRuns", "subject", principal.Subject, "namespace", namespace)
-		writeAPIError(writer, http.StatusServiceUnavailable, "kubernetes_unavailable", "AgentRun state is unavailable")
-		return
+	continueToken := ""
+	for {
+		page := &agentsv1alpha1.AgentRunList{}
+		pageLimit := min(listPageSize, server.config.List.MaxItems+1-int64(len(list.Items)))
+		opts := []client.ListOption{client.InNamespace(namespace), client.Limit(pageLimit)}
+		if continueToken != "" {
+			opts = append(opts, client.Continue(continueToken))
+		}
+		if err := server.runs.List(request.Context(), page, opts...); err != nil {
+			server.log.Error(err, "list AgentRuns", "subject", principal.Subject, "namespace", namespace)
+			writeAPIError(writer, http.StatusServiceUnavailable, "kubernetes_unavailable", "AgentRun state is unavailable")
+			return
+		}
+		list.Items = append(list.Items, page.Items...)
+		if int64(len(list.Items)) > server.config.List.MaxItems || (int64(len(list.Items)) == server.config.List.MaxItems && page.Continue != "") {
+			writeAPIError(writer, http.StatusUnprocessableEntity, "list_too_large", "namespace contains too many AgentRuns to list safely")
+			return
+		}
+		continueToken = page.Continue
+		if continueToken == "" {
+			break
+		}
 	}
 	sort.Slice(list.Items, func(i, j int) bool {
 		return list.Items[i].CreationTimestamp.After(list.Items[j].CreationTimestamp.Time)
@@ -257,6 +280,9 @@ func principalFromContext(ctx context.Context) Principal {
 }
 
 func writeJSON(writer http.ResponseWriter, status int, value any) {
+	controller := http.NewResponseController(writer)
+	_ = controller.SetWriteDeadline(time.Now().Add(responseWriteTimeout))
+	defer func() { _ = controller.SetWriteDeadline(time.Time{}) }()
 	writer.Header().Set("Content-Type", "application/json")
 	writer.WriteHeader(status)
 	_ = json.NewEncoder(writer).Encode(value)

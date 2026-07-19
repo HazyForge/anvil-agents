@@ -87,4 +87,22 @@ ANVIL_AGENTS_IMAGE_SOURCE=https://code.example.com/fork/anvil-agents \
 source_command="$(tail -n 1 "${FAKE_DOCKER_LOG}")"
 [[ "${source_command}" == *"--label org.opencontainers.image.source=https://code.example.com/fork/anvil-agents"* ]] || fail "source label override is missing"
 
+: > "${FAKE_DOCKER_LOG}"
+ANVIL_AGENTS_IMAGE_SOURCE='https://builder:TOPSECRET@code.example.com/fork/anvil-agents?token=QUERYSECRET#fragment' \
+	"${repo_root}/hack/build-images.sh" --component controller --tag sanitized-source >/dev/null
+source_command="$(tail -n 1 "${FAKE_DOCKER_LOG}")"
+[[ "${source_command}" == *"--label org.opencontainers.image.source=https://code.example.com/fork/anvil-agents"* ]] || fail "source label credentials were not removed"
+[[ "${source_command}" != *"TOPSECRET"* && "${source_command}" != *"QUERYSECRET"* ]] || fail "source label leaked URL credentials"
+
+: > "${FAKE_DOCKER_LOG}"
+ANVIL_AGENTS_IMAGE_SOURCE='https://builder:TOPSECRET@code.example.com?token=QUERYSECRET#fragment' \
+	"${repo_root}/hack/build-images.sh" --component controller --tag sanitized-pathless-source >/dev/null
+source_command="$(tail -n 1 "${FAKE_DOCKER_LOG}")"
+[[ "${source_command}" == *"--label org.opencontainers.image.source=https://code.example.com"* ]] || fail "pathless source label credentials were not removed"
+[[ "${source_command}" != *"TOPSECRET"* && "${source_command}" != *"QUERYSECRET"* ]] || fail "pathless source label leaked URL credentials"
+
+for pattern in '.env' '.env.*' '**/.env' '**/.env.*' '**/.aws' '**/.kube' '**/.ssh' '**/*.key' '**/*.pem'; do
+	rg -Fxq "${pattern}" "${repo_root}/.dockerignore" || fail ".dockerignore is missing ${pattern}"
+done
+
 echo "build-images contract tests passed"

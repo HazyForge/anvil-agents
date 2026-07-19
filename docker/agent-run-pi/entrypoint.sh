@@ -112,7 +112,7 @@ if truthy "${ANVIL_AGENT_RUN_AUTO_CLONE_REPO:-true}" && [[ ! -d .git ]]; then
 	if [[ -n "${repository_url}" ]]; then
 		if workspace_empty; then
 			echo "ANVIL_AGENT_RUN_REPO_CLONE repository_url_configured=true"
-			git clone "${repository_url}" . >/dev/null 2>&1 || { echo "ANVIL_AGENT_RUN_REPO_CLONE_FAILED repository_url_configured=true" >&2; exit 20; }
+			anvil_clone_repository_url "${repository_url}" . || { echo "ANVIL_AGENT_RUN_REPO_CLONE_FAILED repository_url_configured=true" >&2; exit 20; }
 		else
 			echo "ANVIL_AGENT_RUN_REPO_CLONE_SKIPPED reason=workspace-not-empty"
 		fi

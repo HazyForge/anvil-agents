@@ -69,7 +69,7 @@ type AgentDataVolumeSpec struct {
 	// this volume, for example CODEX_HOME, HERMES_HOME, or OPENCLAW_STATE_DIR.
 	// Credentials must still come from AgentRun envSecretRefs.
 	// +optional
-	ExtraEnv []corev1.EnvVar `json:"extraEnv,omitempty"`
+	ExtraEnv []AgentDataVolumePathEnvVar `json:"extraEnv,omitempty"`
 	// ExternalSync declares future object-store sync for this concrete volume.
 	// It can inherit defaults from ProfileRef/ProfileVolumeName and can disable
 	// inherited sync with disabled=true. The v1alpha1 controller records status
@@ -82,22 +82,35 @@ type AgentDataVolumeSpec struct {
 	Notes string `json:"notes,omitempty"`
 }
 
+// AgentDataVolumePathEnvVar exposes only a named absolute state path. It is
+// intentionally narrower than corev1.EnvVar so storage metadata cannot select
+// Secrets or inject general runner configuration.
+type AgentDataVolumePathEnvVar struct {
+	// Name identifies a backend home, state, cache, config, or data directory.
+	// +kubebuilder:validation:Pattern=`^([A-Z][A-Z0-9_]*_)?(HOME|STATE_DIR|CACHE_DIR|CONFIG_DIR|DATA_DIR)$`
+	Name string `json:"name"`
+	// Value is an absolute path under the volume's mountPath.
+	// +kubebuilder:validation:Pattern=`^/`
+	Value string `json:"value"`
+}
+
 type AgentDataVolumeStatus struct {
-	ObservedGeneration int64                      `json:"observedGeneration,omitempty"`
-	Conditions         []metav1.Condition         `json:"conditions,omitempty"`
-	Phase              AgentDataVolumePhase       `json:"phase,omitempty"`
-	ProfileRef         *NamespacedObjectReference `json:"profileRef,omitempty"`
-	ProfileVolumeName  string                     `json:"profileVolumeName,omitempty"`
-	ClaimRef           *NamespacedObjectReference `json:"claimRef,omitempty"`
-	StorageClassName   string                     `json:"storageClassName,omitempty"`
-	VolumeName         string                     `json:"volumeName,omitempty"`
-	Capacity           string                     `json:"capacity,omitempty"`
-	MountPath          string                     `json:"mountPath,omitempty"`
-	SubPath            string                     `json:"subPath,omitempty"`
-	NodeSelector       map[string]string          `json:"nodeSelector,omitempty"`
-	ExtraEnv           []corev1.EnvVar            `json:"extraEnv,omitempty"`
-	ExternalSync       *ExternalVolumeSyncStatus  `json:"externalSync,omitempty"`
-	LastError          string                     `json:"lastError,omitempty"`
+	ObservedGeneration int64                       `json:"observedGeneration,omitempty"`
+	Conditions         []metav1.Condition          `json:"conditions,omitempty"`
+	Phase              AgentDataVolumePhase        `json:"phase,omitempty"`
+	ProfileRef         *NamespacedObjectReference  `json:"profileRef,omitempty"`
+	ProfileVolumeName  string                      `json:"profileVolumeName,omitempty"`
+	ClaimRef           *NamespacedObjectReference  `json:"claimRef,omitempty"`
+	ClaimUID           string                      `json:"claimUID,omitempty"`
+	StorageClassName   string                      `json:"storageClassName,omitempty"`
+	VolumeName         string                      `json:"volumeName,omitempty"`
+	Capacity           string                      `json:"capacity,omitempty"`
+	MountPath          string                      `json:"mountPath,omitempty"`
+	SubPath            string                      `json:"subPath,omitempty"`
+	NodeSelector       map[string]string           `json:"nodeSelector,omitempty"`
+	ExtraEnv           []AgentDataVolumePathEnvVar `json:"extraEnv,omitempty"`
+	ExternalSync       *ExternalVolumeSyncStatus   `json:"externalSync,omitempty"`
+	LastError          string                      `json:"lastError,omitempty"`
 }
 
 // +kubebuilder:object:root=true

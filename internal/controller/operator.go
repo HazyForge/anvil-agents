@@ -18,6 +18,7 @@ func Run(ctx context.Context, options *Options) error {
 	if options == nil {
 		options = DefaultOptions()
 	}
+	applySensitiveEnvironment(options)
 	scheme := runtime.NewScheme()
 	if err := clientgoscheme.AddToScheme(scheme); err != nil {
 		return fmt.Errorf("add Kubernetes scheme: %w", err)

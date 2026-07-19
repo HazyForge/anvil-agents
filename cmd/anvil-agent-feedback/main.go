@@ -55,6 +55,7 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 	pollRaw := flags.String("poll-interval", envFirstDefault("5s", "ANVIL_AGENT_FEEDBACK_POLL_INTERVAL"), "poll interval")
 	output := flags.String("output", envFirstDefault("text", "ANVIL_AGENT_FEEDBACK_OUTPUT"), "output format: text or json")
 	acceptAnyAfter := flags.Bool("accept-any-after", envBool("ANVIL_AGENT_FEEDBACK_ACCEPT_ANY_AFTER", false), "accept first non-bot message after the question instead of requiring a direct reply")
+	allowAnyUser := flags.Bool("allow-any-user", envBool("ANVIL_AGENT_FEEDBACK_ALLOW_ANY_USER", false), "allow replies from any non-bot channel member; disabled by default")
 	flags.Var(&allowedUserIDs, "allowed-user-id", "allowed Discord user id; may be repeated or comma-separated")
 	discordToken := flags.String("discord-token", "", "Discord bot token")
 	discordChannelID := flags.String("discord-channel-id", "", "Discord channel id")
@@ -91,7 +92,7 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 	discordChannelIDValue := envDefaultIfEmpty(*discordChannelID, "ANVIL_AGENT_FEEDBACK_DISCORD_CHANNEL_ID", "ANVIL_DISCORD_CHANNEL_ID", "DISCORD_CHANNEL_ID")
 	discordAPIBaseURLValue := envDefaultIfEmpty(*discordAPIBaseURL, "ANVIL_AGENT_FEEDBACK_DISCORD_API_BASE_URL", "DISCORD_API_BASE_URL")
 
-	adapter, err := buildTransport(*transport, discordTokenValue, discordChannelIDValue, discordAPIBaseURLValue, *acceptAnyAfter)
+	adapter, err := buildTransport(*transport, discordTokenValue, discordChannelIDValue, discordAPIBaseURLValue, *acceptAnyAfter, *allowAnyUser)
 	if err != nil {
 		return err
 	}
@@ -121,7 +122,7 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 	return err
 }
 
-func buildTransport(transport, discordToken, discordChannelID, discordAPIBaseURL string, acceptAnyAfter bool) (agentfeedback.Transport, error) {
+func buildTransport(transport, discordToken, discordChannelID, discordAPIBaseURL string, acceptAnyAfter, allowAnyUser bool) (agentfeedback.Transport, error) {
 	switch strings.ToLower(strings.TrimSpace(transport)) {
 	case "", "discord":
 		return agentfeedback.NewDiscordAdapter(agentfeedback.DiscordConfig{
@@ -129,6 +130,7 @@ func buildTransport(transport, discordToken, discordChannelID, discordAPIBaseURL
 			ChannelID:      discordChannelID,
 			APIBaseURL:     discordAPIBaseURL,
 			AcceptAnyAfter: acceptAnyAfter,
+			AllowAnyUser:   allowAnyUser,
 		})
 	default:
 		return nil, fmt.Errorf("%w: %s", agentfeedback.ErrUnsupportedTransport, transport)

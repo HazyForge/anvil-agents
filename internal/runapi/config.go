@@ -22,7 +22,12 @@ type Config struct {
 	OIDC          OIDCConfig          `json:"oidc"`
 	Authorization AuthorizationConfig `json:"authorization"`
 	CORS          CORSConfig          `json:"cors"`
+	List          ListConfig          `json:"list"`
 	Stream        StreamConfig        `json:"stream"`
+}
+
+type ListConfig struct {
+	MaxItems int64 `json:"maxItems"`
 }
 
 type OIDCConfig struct {
@@ -114,6 +119,7 @@ func DefaultConfig() Config {
 			GroupClaims:    []string{"groups"},
 			NamespaceClaim: "anvil_agents_namespaces",
 		},
+		List: ListConfig{MaxItems: 5000},
 		Stream: StreamConfig{
 			HeartbeatInterval:        NewDuration(15 * time.Second),
 			StatusPollInterval:       NewDuration(time.Second),
@@ -227,6 +233,9 @@ func (config Config) Validate() error {
 	}
 	if config.Stream.HeartbeatInterval.Duration <= 0 || config.Stream.StatusPollInterval.Duration <= 0 || config.Stream.MaxDuration.Duration <= 0 {
 		return fmt.Errorf("stream durations must be positive")
+	}
+	if config.List.MaxItems < 1 || config.List.MaxItems > 100_000 {
+		return fmt.Errorf("list.maxItems must be between 1 and 100000")
 	}
 	if config.Stream.DefaultTailLines < 0 || config.Stream.MaxTailLines < 1 || config.Stream.DefaultTailLines > config.Stream.MaxTailLines {
 		return fmt.Errorf("stream tail line limits are invalid")

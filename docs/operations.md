@@ -4,9 +4,48 @@
 
 The packaged chart, controller, and six official runner tags form one release
 set. The source chart defaults to locally built `:dev` images; packaging
-rewrites all seven defaults to the selected `vVERSION` and registry prefix.
-Production values should replace every image with an immutable digest. Do not
-mix runner versions without testing their payload and status contracts.
+without an image lock rewrites all seven defaults to the selected `vVERSION` and
+registry prefix, while release publishing supplies a verified digest lock.
+Production values should use immutable digests. Do not mix runner versions
+without testing their payload and status contracts.
+
+### Security-Hardening Upgrade Notes
+
+Before upgrading an existing pre-1.0 installation, update every remote skill
+source to a full 40- or 64-character commit object ID, move private-source
+`tokenSecretRef` entries into the selected harness execution
+`skillSourceCredentials`, and rewrite data-volume `extraEnv` entries as
+name/value path mappings. General or Secret-backed environment variables
+belong in the harness execution envelope instead. Before creating a new Job,
+the controller records the immutable payload ConfigMap UID/digest, planned Job
+name, and normalized execution digest in status. It records
+`jobCreateAttemptedAt` immediately before the create call. Crash-gap recovery
+validates those receipts without re-reading mutable profiles. If the planned
+Job is missing after that marker, the run fails closed and must not be retried
+under the same AgentRun name because execution may already have produced side
+effects. The controller safely makes
+an exact, current-UID-owned legacy payload ConfigMap immutable before launching
+a missing Job; a mismatched payload remains blocked for operator review. A
+receipt-less legacy Job that cannot be revalidated remains nonterminal instead
+of being reported complete while its execution is still running.
+Existing `AgentDataVolume` status must record the live claim UID before a new
+run can mount it. A bound PVC found during an old crash gap without that UID is
+blocked instead of being adopted by name; inspect and restore the intended
+claim relationship before retrying.
+
+To approve a legitimate legacy claim, first compare the `AgentDataVolume`
+metadata UID with the PVC's controller owner-reference UID and verify the PVC
+labels, storage class, access modes, volume mode, capacity, selector, and data
+sources against the intended profile. Recording the PVC UID in status is an
+explicit trust decision, not an automatic migration:
+
+```bash
+kubectl get agentdatavolume -n <namespace> <volume> -o yaml
+kubectl get pvc -n <namespace> <claim> -o yaml
+kubectl patch agentdatavolume -n <namespace> <volume> \
+  --subresource=status --type=merge \
+  --patch '{"status":{"claimUID":"<verified-pvc-uid>"}}'
+```
 
 Back up all eleven custom-resource kinds and relevant PVCs before an upgrade.
 Run `helm template` and review CRD changes first. Only one controller may
@@ -35,7 +74,10 @@ kubectl get jobs,pods -n <namespace> \
 Controller-owned status reasons distinguish invalid composition refs and
 overrides, missing images, credential freshness, launch controls, volume
 readiness, and Job outcomes. Inspect `.status.resolvedComposition` to identify
-the exact reusable inputs, inherited application scope, and payload digest.
+the exact reusable inputs, inherited application scope, and payload digest;
+`.status.payloadUID` and `.status.jobSpecDigest` anchor restart recovery to the
+same immutable payload and execution plan. `.status.plannedJobRef` is the
+prepared identity; `.status.jobRef` is populated only after the Job is observed.
 Treat a lost client connection as ambiguous and reattach to the same run.
 
 ## Capacity And Parallelism
@@ -118,11 +160,20 @@ existing lock with `--verify-lock FILE`; neither path requires GitHub Actions.
 `hack/publish-release.sh --prefix REGISTRY/PATH --version vX.Y.Z` is the
 complete reusable path. It calls the image publisher, packages the chart,
 pushes it to `oci://REGISTRY/PATH/charts` by default, and re-verifies the image
-lock after publication. By default it first runs `make verify` and
+lock after publication. The packaged release chart consumes that lock, so its
+controller and six runner defaults are immutable digest references rather
+than mutable version tags. By default it first runs `make verify` and
 `make kind-e2e`; `--skip-verification` records an explicit decision that those
 gates ran elsewhere for the exact tag. Authenticate both Docker and Helm to the
 registry first. The tag must point at a clean checkout so OCI source labels and
 the lock refer to exactly the reviewed commit.
+
+`hack/package-chart.sh` still supports a convenient version-tagged development
+package. Pass `--image-lock dist/images-vX.Y.Z.lock.tsv` when assembling an
+offline or manually distributed release artifact that must carry the same
+digest-pinned defaults as `publish-release.sh`. When the local version tag is
+not available, also pass the independently verified tag commit with
+`--source-revision`; lock metadata must match it exactly.
 
 ## Optional Release Workflow
 

@@ -2,13 +2,16 @@ package controller
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -16,6 +19,26 @@ import (
 
 	controlv1alpha1 "github.com/hazyforge/anvil-agents/api/v1alpha1"
 )
+
+type agentDataVolumeAlreadyExistsClient struct {
+	client.Client
+	firstPVCGet bool
+}
+
+func (c *agentDataVolumeAlreadyExistsClient) Get(ctx context.Context, key client.ObjectKey, object client.Object, options ...client.GetOption) error {
+	if _, ok := object.(*corev1.PersistentVolumeClaim); ok && !c.firstPVCGet {
+		c.firstPVCGet = true
+		return apierrors.NewNotFound(schema.GroupResource{Resource: "persistentvolumeclaims"}, key.Name)
+	}
+	return c.Client.Get(ctx, key, object, options...)
+}
+
+func (c *agentDataVolumeAlreadyExistsClient) Create(_ context.Context, object client.Object, _ ...client.CreateOption) error {
+	if _, ok := object.(*corev1.PersistentVolumeClaim); ok {
+		return apierrors.NewAlreadyExists(schema.GroupResource{Resource: "persistentvolumeclaims"}, object.GetName())
+	}
+	return fmt.Errorf("unexpected create of %T", object)
+}
 
 func TestAgentDataVolumePendingPVCStaysPending(t *testing.T) {
 	t.Parallel()
@@ -147,6 +170,85 @@ func TestAgentDataVolumeRejectsForeignClaimCollision(t *testing.T) {
 	condition := findAgentDataVolumeCondition(updated.Status.Conditions, agentDataVolumeReady)
 	if updated.Status.Phase != controlv1alpha1.AgentDataVolumePhaseBlocked || condition == nil || condition.Reason != "ForeignClaimCollision" {
 		t.Fatalf("status = %#v condition=%#v, want Blocked/ForeignClaimCollision", updated.Status, condition)
+	}
+}
+
+func TestAgentDataVolumeRecoversSelfOwnedClaimAfterStatusGap(t *testing.T) {
+	t.Parallel()
+
+	volume, pvc, scheme := agentDataVolumeTestObjects(t)
+	volume.Status = controlv1alpha1.AgentDataVolumeStatus{}
+	reconciler, c := agentDataVolumeTestReconciler(t, scheme, volume, pvc)
+	reconcileAgentDataVolumeForTest(t, reconciler, volume)
+	updated := getAgentDataVolumeForTest(t, c, volume)
+	if updated.Status.Phase == controlv1alpha1.AgentDataVolumePhaseBlocked {
+		t.Fatalf("self-owned claim was blocked after status gap: %#v", updated.Status)
+	}
+	if updated.Status.ClaimRef == nil || updated.Status.ClaimRef.Name != pvc.Name || updated.Status.ClaimUID != string(pvc.UID) {
+		t.Fatalf("claim identity = %#v uid=%q, want %s/%s", updated.Status.ClaimRef, updated.Status.ClaimUID, pvc.Name, pvc.UID)
+	}
+}
+
+func TestAgentDataVolumeRecoversCreateAlreadyExistsRace(t *testing.T) {
+	t.Parallel()
+
+	volume, pvc, scheme := agentDataVolumeTestObjects(t)
+	volume.Status = controlv1alpha1.AgentDataVolumeStatus{}
+	base := fake.NewClientBuilder().WithScheme(scheme).WithObjects(volume, pvc).WithStatusSubresource(&controlv1alpha1.AgentDataVolume{}, &controlv1alpha1.VolumeProfile{}, &corev1.PersistentVolumeClaim{}).Build()
+	reconciler := &AgentDataVolumeReconciler{Client: &agentDataVolumeAlreadyExistsClient{Client: base}, Scheme: scheme}
+	reconcileAgentDataVolumeForTest(t, reconciler, volume)
+	updated := getAgentDataVolumeForTest(t, base, volume)
+	if updated.Status.Phase == controlv1alpha1.AgentDataVolumePhaseBlocked {
+		t.Fatalf("self-owned AlreadyExists claim was blocked: %#v", updated.Status)
+	}
+	if updated.Status.ClaimRef == nil || updated.Status.ClaimRef.Name != pvc.Name || updated.Status.ClaimUID != string(pvc.UID) {
+		t.Fatalf("claim identity = %#v uid=%q, want %s/%s", updated.Status.ClaimRef, updated.Status.ClaimUID, pvc.Name, pvc.UID)
+	}
+}
+
+func TestAgentDataVolumeRejectsReplacementClaimUID(t *testing.T) {
+	t.Parallel()
+
+	volume, pvc, scheme := agentDataVolumeTestObjects(t)
+	volume.Status.ClaimUID = "original-pvc-uid"
+	pvc.UID = "replacement-pvc-uid"
+	reconciler, c := agentDataVolumeTestReconciler(t, scheme, volume, pvc)
+	reconcileAgentDataVolumeForTest(t, reconciler, volume)
+	updated := getAgentDataVolumeForTest(t, c, volume)
+	condition := findAgentDataVolumeCondition(updated.Status.Conditions, agentDataVolumeReady)
+	if updated.Status.Phase != controlv1alpha1.AgentDataVolumePhaseBlocked || condition == nil || condition.Reason != "ClaimIdentityChanged" {
+		t.Fatalf("status = %#v condition=%#v, want Blocked/ClaimIdentityChanged", updated.Status, condition)
+	}
+}
+
+func TestAgentDataVolumeRejectsBoundClaimBeforeUIDPersistence(t *testing.T) {
+	t.Parallel()
+
+	volume, pvc, scheme := agentDataVolumeTestObjects(t)
+	volume.Status = controlv1alpha1.AgentDataVolumeStatus{}
+	pvc.Spec.VolumeName = "prebound-volume"
+	reconciler, c := agentDataVolumeTestReconciler(t, scheme, volume, pvc)
+	reconcileAgentDataVolumeForTest(t, reconciler, volume)
+	updated := getAgentDataVolumeForTest(t, c, volume)
+	condition := findAgentDataVolumeCondition(updated.Status.Conditions, agentDataVolumeReady)
+	if updated.Status.Phase != controlv1alpha1.AgentDataVolumePhaseBlocked || condition == nil || condition.Reason != "UnverifiedBoundClaim" {
+		t.Fatalf("status = %#v condition=%#v, want Blocked/UnverifiedBoundClaim", updated.Status, condition)
+	}
+}
+
+func TestAgentDataVolumeRejectsGeneralRuntimeEnvironment(t *testing.T) {
+	t.Parallel()
+
+	volume, _, scheme := agentDataVolumeTestObjects(t)
+	volume.Status = controlv1alpha1.AgentDataVolumeStatus{}
+	volume.Spec.MountPath = "/agent-home"
+	volume.Spec.ExtraEnv = []controlv1alpha1.AgentDataVolumePathEnvVar{{Name: "PATH", Value: "/agent-home/bin"}}
+	reconciler, c := agentDataVolumeTestReconcilerWithObjects(t, scheme, volume)
+	reconcileAgentDataVolumeForTest(t, reconciler, volume)
+	updated := getAgentDataVolumeForTest(t, c, volume)
+	condition := findAgentDataVolumeCondition(updated.Status.Conditions, agentDataVolumeReady)
+	if updated.Status.Phase != controlv1alpha1.AgentDataVolumePhaseBlocked || condition == nil || condition.Reason != "InvalidPathEnvironment" {
+		t.Fatalf("status = %#v condition=%#v, want Blocked/InvalidPathEnvironment", updated.Status, condition)
 	}
 }
 
@@ -307,10 +409,13 @@ func agentDataVolumeTestObjects(t *testing.T) (*controlv1alpha1.AgentDataVolume,
 			StorageClassName: storageClass,
 			AccessModes:      []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
 		},
+		Status: controlv1alpha1.AgentDataVolumeStatus{
+			ClaimRef: &controlv1alpha1.NamespacedObjectReference{Name: "agent-home", Namespace: "agents"},
+		},
 	}
 	controller := true
 	pvc := &corev1.PersistentVolumeClaim{
-		ObjectMeta: metav1.ObjectMeta{Name: volume.Spec.ClaimName, Namespace: volume.Namespace, OwnerReferences: []metav1.OwnerReference{{
+		ObjectMeta: metav1.ObjectMeta{Name: volume.Spec.ClaimName, Namespace: volume.Namespace, UID: types.UID("agent-home-pvc-uid"), OwnerReferences: []metav1.OwnerReference{{
 			APIVersion: controlv1alpha1.GroupVersion.String(), Kind: "AgentDataVolume", Name: volume.Name, UID: volume.UID, Controller: &controller,
 		}}},
 		Spec: corev1.PersistentVolumeClaimSpec{
@@ -348,7 +453,7 @@ func agentDataVolumeTestProfile(name, volumeName string, size resource.Quantity)
 				Size:             controlv1alpha1.VolumeProfileVolumeSizeSpec{Request: size},
 				AccessModes:      []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
 				NodeSelector:     map[string]string{"hazyforge.io/storage": "observability-local"},
-				ExtraEnv:         []corev1.EnvVar{{Name: "CODEX_HOME", Value: "/agent-home/codex"}},
+				ExtraEnv:         []controlv1alpha1.AgentDataVolumePathEnvVar{{Name: "CODEX_HOME", Value: "/agent-home/codex"}},
 				ExternalSync: &controlv1alpha1.ExternalVolumeSyncSpec{
 					Provider:     controlv1alpha1.ExternalVolumeSyncProviderS3,
 					Direction:    controlv1alpha1.ExternalVolumeSyncDirectionBidirectional,

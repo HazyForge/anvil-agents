@@ -22,6 +22,7 @@ type DiscordConfig struct {
 	UserAgent      string
 	HTTPClient     *http.Client
 	AcceptAnyAfter bool
+	AllowAnyUser   bool
 }
 
 type DiscordAdapter struct {
@@ -54,6 +55,9 @@ func NewDiscordAdapter(config DiscordConfig) (*DiscordAdapter, error) {
 }
 
 func (a *DiscordAdapter) Ask(ctx context.Context, question Question) (Response, error) {
+	if len(normalizedDiscordUserIDs(question.AllowedUserIDs)) == 0 && !a.config.AllowAnyUser {
+		return Response{}, errors.New("at least one allowed Discord user id is required unless allow-any-user is explicitly enabled")
+	}
 	if question.Timeout > 0 {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, question.Timeout)
@@ -94,7 +98,7 @@ func (a *DiscordAdapter) waitForReply(ctx context.Context, questionMessageID str
 		if err != nil {
 			return Response{}, err
 		}
-		if message, ok := selectDiscordReply(messages, questionMessageID, a.config.ChannelID, question.AllowedUserIDs, acceptAnyAfter); ok {
+		if message, ok := selectDiscordReply(messages, questionMessageID, a.config.ChannelID, question.AllowedUserIDs, a.config.AllowAnyUser, acceptAnyAfter); ok {
 			return Response{
 				Text:           strings.TrimSpace(message.Content),
 				AuthorID:       message.Author.ID,
@@ -124,13 +128,21 @@ func (a *DiscordAdapter) channelMessagesAfter(ctx context.Context, messageID str
 	return messages, nil
 }
 
-func selectDiscordReply(messages []discordMessage, questionMessageID, channelID string, allowedUserIDs []string, acceptAnyAfter bool) (discordMessage, bool) {
+func normalizedDiscordUserIDs(allowedUserIDs []string) map[string]struct{} {
 	allowed := map[string]struct{}{}
 	for _, id := range allowedUserIDs {
 		id = strings.TrimSpace(id)
 		if id != "" {
 			allowed[id] = struct{}{}
 		}
+	}
+	return allowed
+}
+
+func selectDiscordReply(messages []discordMessage, questionMessageID, channelID string, allowedUserIDs []string, allowAnyUser, acceptAnyAfter bool) (discordMessage, bool) {
+	allowed := normalizedDiscordUserIDs(allowedUserIDs)
+	if len(allowed) == 0 && !allowAnyUser {
+		return discordMessage{}, false
 	}
 	for i := len(messages) - 1; i >= 0; i-- {
 		message := messages[i]

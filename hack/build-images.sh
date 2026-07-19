@@ -227,6 +227,26 @@ source_url="${source_url:-https://github.com/HazyForge/anvil-agents}"
 if [[ "${source_url}" =~ ^git@([^:]+):(.+)$ ]]; then
 	source_url="https://${BASH_REMATCH[1]}/${BASH_REMATCH[2]%.git}"
 fi
+case "${source_url}" in
+	http://*|https://*)
+		source_scheme="${source_url%%://*}"
+		source_remainder="${source_url#*://}"
+		source_remainder="${source_remainder%%#*}"
+		source_remainder="${source_remainder%%\?*}"
+		source_authority="${source_remainder%%/*}"
+		source_path=""
+		if [[ "${source_remainder}" == */* ]]; then
+			source_path="/${source_remainder#*/}"
+		fi
+		source_authority="${source_authority##*@}"
+		[[ -n "${source_authority}" ]] || { echo "image source URL must include a host" >&2; exit 2; }
+		source_url="${source_scheme}://${source_authority}${source_path}"
+		;;
+	*)
+		echo "image source must be an HTTP(S) URL or git@host:path remote" >&2
+		exit 2
+		;;
+esac
 built_refs=()
 component_index=0
 

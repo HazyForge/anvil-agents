@@ -57,12 +57,24 @@ func (source KubernetesLogSource) Open(ctx context.Context, run *agentsv1alpha1.
 	if err != nil {
 		return nil, nil, fmt.Errorf("open runner logs: %w", err)
 	}
+	confirmed, err := source.Client.CoreV1().Pods(pod.Namespace).Get(ctx, pod.Name, metav1.GetOptions{})
+	if err != nil {
+		stream.Close()
+		return nil, nil, fmt.Errorf("confirm runner pod after opening logs: %w", err)
+	}
+	if confirmed.UID != pod.UID {
+		stream.Close()
+		return nil, nil, fmt.Errorf("runner pod was replaced while opening logs")
+	}
 	return stream, pod, nil
 }
 
 func (source KubernetesLogSource) validateOwnership(ctx context.Context, run *agentsv1alpha1.AgentRun, pod *corev1.Pod) error {
 	if pod == nil || pod.Labels[agentRunLabel] != sanitizeLabelValue(run.Name) {
 		return fmt.Errorf("runner pod is not labeled for AgentRun %s/%s", run.Namespace, run.Name)
+	}
+	if run.Status.RunnerPodUID != "" && string(pod.UID) != run.Status.RunnerPodUID {
+		return fmt.Errorf("runner pod does not match the recorded UID")
 	}
 	if run.Status.JobRef == nil || strings.TrimSpace(run.Status.JobRef.Name) == "" {
 		return fmt.Errorf("AgentRun has no controller-owned Job reference")
@@ -77,6 +89,9 @@ func (source KubernetesLogSource) validateOwnership(ctx context.Context, run *ag
 	}
 	if job.Labels[agentRunLabel] != sanitizeLabelValue(run.Name) || !ownedByAgentRun(job, run) {
 		return fmt.Errorf("Job is not owned by AgentRun %s/%s", run.Namespace, run.Name)
+	}
+	if run.Status.JobUID != "" && string(job.UID) != run.Status.JobUID {
+		return fmt.Errorf("Job does not match the recorded AgentRun Job UID")
 	}
 	if !ownedByJob(pod, job) {
 		return fmt.Errorf("runner pod is not owned by the referenced Job")

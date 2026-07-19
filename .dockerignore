@@ -2,6 +2,15 @@
 .github
 .idea
 .vscode
+.env
+.env.*
+**/.env
+**/.env.*
+**/.aws
+**/.kube
+**/.ssh
+**/*.key
+**/*.pem
 bin
 dist
 tmp

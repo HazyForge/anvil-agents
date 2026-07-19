@@ -49,6 +49,14 @@ if kubectl --context "${kube_context}" get namespace agents-quickstart >/dev/nul
 	kubectl --context "${kube_context}" delete agentrun demo-001 \
 		--namespace agents-quickstart \
 		--ignore-not-found \
+		--cascade=foreground \
+		--wait=true
+	# Clean up any children orphaned by an interrupted older demo run before
+	# recreating its deterministic name and payload digest.
+	kubectl --context "${kube_context}" delete configmap,job \
+		--namespace agents-quickstart \
+		--selector control.anvil.hazyforge.io/agent-run=demo-001 \
+		--ignore-not-found \
 		--wait=true
 fi
 kubectl --context "${kube_context}" apply --filename "${root_dir}/examples/quickstart/manifests.yaml"

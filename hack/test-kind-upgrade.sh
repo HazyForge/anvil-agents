@@ -10,10 +10,24 @@ created_cluster="false"
 export KUBECONFIG="${tmp_dir}/kubeconfig"
 
 cleanup() {
+	local status=$?
+	trap - EXIT
+	set +e
 	if [[ "${created_cluster}" == "true" ]]; then
-		kind delete cluster --name "${cluster_name}" >/dev/null
+		if ! kind delete cluster --name "${cluster_name}" >/dev/null; then
+			echo "failed to delete kind cluster ${cluster_name}" >&2
+			if [[ "${status}" -eq 0 ]]; then
+				status=1
+			fi
+		fi
 	fi
-	rm -rf "${tmp_dir}"
+	if ! rm -rf -- "${tmp_dir}"; then
+		echo "failed to remove upgrade-test temporary directory ${tmp_dir}" >&2
+		if [[ "${status}" -eq 0 ]]; then
+			status=1
+		fi
+	fi
+	exit "${status}"
 }
 trap cleanup EXIT
 
@@ -40,8 +54,8 @@ if kind get clusters | grep -Fxq "${cluster_name}"; then
 	exit 1
 fi
 
-kind create cluster --name "${cluster_name}" >/dev/null
 created_cluster="true"
+kind create cluster --name "${cluster_name}" >/dev/null
 
 if [[ -n "${baseline_ref}" ]]; then
 	mkdir -p "${tmp_dir}/baseline"

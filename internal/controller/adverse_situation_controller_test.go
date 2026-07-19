@@ -1,12 +1,20 @@
 package controller
 
 import (
+	"context"
+	"strings"
 	"testing"
+	"time"
 
+	apiequality "k8s.io/apimachinery/pkg/api/equality"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
+	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	controlv1alpha1 "github.com/hazyforge/anvil-agents/api/v1alpha1"
 )
@@ -179,6 +187,196 @@ func TestAdverseSituationAgentRunRejectsRetainedRunFromRecreatedSituation(t *tes
 	retained.Spec.SourceUID = "deleted-situation-uid"
 	if adverseSituationAgentRunMatches(retained, situation) {
 		t.Fatalf("run from deleted situation UID must not be adopted")
+	}
+}
+
+func TestAdverseSituationAgentRunUnestablishedMatchRejectsTriggerDrift(t *testing.T) {
+	t.Parallel()
+
+	detectedAt := metav1.Now()
+	situation := &controlv1alpha1.AdverseSituation{
+		ObjectMeta: metav1.ObjectMeta{Name: "checkout-health", Namespace: "store", UID: types.UID("situation-uid"), ResourceVersion: "12", Generation: 3},
+		Status: controlv1alpha1.AdverseSituationStatus{
+			Phase:              controlv1alpha1.AdverseSituationPhaseOpen,
+			ObservedGeneration: 3,
+			Events:             []controlv1alpha1.AdverseSituationEvent{{LastSeenAt: &detectedAt}},
+		},
+	}
+	run := adverseSituationAgentRunFor(situation, "responder")
+	otherDetectedAt := metav1.NewTime(detectedAt.Add(time.Second))
+	run.Spec.Trigger.DetectedAt = &otherDetectedAt
+	if adverseSituationAgentRunMatches(run, situation) {
+		t.Fatal("unestablished responder with detectedAt drift was accepted")
+	}
+	run = adverseSituationAgentRunFor(situation, "responder")
+	run.Spec.Trigger.Reason = "InjectedReason"
+	if adverseSituationAgentRunMatches(run, situation) {
+		t.Fatal("adverse responder with injected trigger reason was accepted")
+	}
+}
+
+func TestAdverseSituationReconcileReusesEstablishedResponderAfterStatusDrift(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	scheme := runtime.NewScheme()
+	if err := controlv1alpha1.AddToScheme(scheme); err != nil {
+		t.Fatalf("add control scheme: %v", err)
+	}
+	enabled := true
+	now := metav1.Now()
+	situation := &controlv1alpha1.AdverseSituation{
+		ObjectMeta: metav1.ObjectMeta{Name: "checkout-health", Namespace: "store", UID: types.UID("situation-uid"), Generation: 1},
+		Spec: controlv1alpha1.AdverseSituationSpec{Responders: controlv1alpha1.AdverseSituationRespondersSpec{AgentRun: &controlv1alpha1.AdverseSituationAgentRunResponderSpec{
+			Enabled: &enabled,
+			Harness: controlv1alpha1.AgentRunHarnessSpec{Intent: controlv1alpha1.AgentRunIntentObserve},
+		}}},
+		Status: controlv1alpha1.AdverseSituationStatus{
+			ObservedGeneration: 1,
+			Phase:              controlv1alpha1.AdverseSituationPhaseOpen,
+			Sequence:           1,
+			Events:             []controlv1alpha1.AdverseSituationEvent{{ID: "checkout-failed", LastSeenAt: &now}},
+		},
+	}
+	c := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(situation).
+		WithStatusSubresource(&controlv1alpha1.AdverseSituation{}, &controlv1alpha1.AgentRun{}).
+		Build()
+	storedSituation := &controlv1alpha1.AdverseSituation{}
+	if err := c.Get(ctx, client.ObjectKeyFromObject(situation), storedSituation); err != nil {
+		t.Fatalf("get stored situation: %v", err)
+	}
+	name := agentRunChildName("agrun", situation.Name, "1", shortHash(string(situation.UID)))
+	run := adverseSituationAgentRunFor(storedSituation, name)
+	run.UID = types.UID("responder-uid")
+	wantSpec := run.Spec.DeepCopy()
+	if err := c.Create(ctx, run); err != nil {
+		t.Fatalf("create exact responder fixture: %v", err)
+	}
+	reconciler := &AdverseSituationReconciler{Client: c, Scheme: scheme}
+	request := ctrl.Request{NamespacedName: client.ObjectKeyFromObject(situation)}
+
+	if _, err := reconciler.Reconcile(ctx, request); err != nil {
+		t.Fatalf("first reconcile: %v", err)
+	}
+	updated := &controlv1alpha1.AdverseSituation{}
+	if err := c.Get(ctx, client.ObjectKeyFromObject(situation), updated); err != nil {
+		t.Fatalf("get situation after first reconcile: %v", err)
+	}
+	if updated.Status.Phase != controlv1alpha1.AdverseSituationPhaseQuieting {
+		t.Fatalf("phase after first reconcile = %q, want Quieting", updated.Status.Phase)
+	}
+	if updated.Status.ActiveResponderRef == nil || updated.Status.ActiveResponderRef.Name != run.Name || updated.Status.ActiveResponderUID != string(run.UID) || updated.Status.ActiveResponderDigest == "" {
+		t.Fatalf("responder receipt after first reconcile = %#v", updated.Status)
+	}
+
+	if _, err := reconciler.Reconcile(ctx, request); err != nil {
+		t.Fatalf("second reconcile after parent status drift: %v", err)
+	}
+	runs := &controlv1alpha1.AgentRunList{}
+	if err := c.List(ctx, runs, client.InNamespace(situation.Namespace)); err != nil {
+		t.Fatalf("list responder AgentRuns: %v", err)
+	}
+	if len(runs.Items) != 1 || runs.Items[0].UID != run.UID || !apiequality.Semantic.DeepEqual(&runs.Items[0].Spec, wantSpec) {
+		t.Fatalf("responder after second reconcile = %#v, want same immutable run", runs.Items)
+	}
+}
+
+func TestAdverseSituationRejectsEstablishedResponderReplacementUID(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	scheme := runtime.NewScheme()
+	if err := controlv1alpha1.AddToScheme(scheme); err != nil {
+		t.Fatalf("add control scheme: %v", err)
+	}
+	enabled := true
+	situation := &controlv1alpha1.AdverseSituation{
+		ObjectMeta: metav1.ObjectMeta{Name: "checkout-health", Namespace: "store", UID: types.UID("situation-uid")},
+		Spec: controlv1alpha1.AdverseSituationSpec{Responders: controlv1alpha1.AdverseSituationRespondersSpec{
+			AgentRun: &controlv1alpha1.AdverseSituationAgentRunResponderSpec{Enabled: &enabled},
+		}},
+		Status: controlv1alpha1.AdverseSituationStatus{
+			Sequence:           1,
+			ActiveResponderRef: &controlv1alpha1.NamespacedObjectReference{Name: "responder", Namespace: "store"},
+			ActiveResponderUID: "original-responder-uid",
+		},
+	}
+	replacement := adverseSituationAgentRunFor(situation, "responder")
+	replacement.UID = types.UID("replacement-responder-uid")
+	situation.Status.ActiveResponderDigest = digestJSON(replacement.Spec)
+	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(replacement).Build()
+	reconciler := &AdverseSituationReconciler{Client: c, Scheme: scheme}
+	status := situation.Status.DeepCopy()
+
+	_, err := reconciler.ensureAdverseSituationAgentRun(ctx, situation, status)
+	if err == nil || !strings.Contains(err.Error(), "does not match the established adverse responder UID") {
+		t.Fatalf("replacement responder error = %v, want UID rejection", err)
+	}
+}
+
+func TestAdverseSituationLegacyResponderMigrationRequiresExactSnapshot(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	scheme := runtime.NewScheme()
+	if err := controlv1alpha1.AddToScheme(scheme); err != nil {
+		t.Fatalf("add control scheme: %v", err)
+	}
+	enabled := true
+	situation := &controlv1alpha1.AdverseSituation{
+		ObjectMeta: metav1.ObjectMeta{Name: "checkout-health", Namespace: "store", UID: types.UID("situation-uid")},
+		Spec: controlv1alpha1.AdverseSituationSpec{Responders: controlv1alpha1.AdverseSituationRespondersSpec{
+			AgentRun: &controlv1alpha1.AdverseSituationAgentRunResponderSpec{Enabled: &enabled},
+		}},
+		Status: controlv1alpha1.AdverseSituationStatus{
+			Sequence:           1,
+			ActiveResponderRef: &controlv1alpha1.NamespacedObjectReference{Name: "responder", Namespace: "store"},
+		},
+	}
+
+	t.Run("exact", func(t *testing.T) {
+		run := adverseSituationAgentRunFor(situation, "responder")
+		run.UID = types.UID("exact-responder-uid")
+		c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(run).Build()
+		status := situation.Status.DeepCopy()
+		if _, err := (&AdverseSituationReconciler{Client: c, Scheme: scheme}).ensureAdverseSituationAgentRun(ctx, situation, status); err != nil {
+			t.Fatalf("migrate exact legacy responder: %v", err)
+		}
+		if status.ActiveResponderUID != string(run.UID) || status.ActiveResponderDigest == "" {
+			t.Fatalf("migrated receipt = %#v", status)
+		}
+	})
+
+	t.Run("authority drift", func(t *testing.T) {
+		run := adverseSituationAgentRunFor(situation, "responder")
+		run.UID = types.UID("drifted-responder-uid")
+		run.Spec.Prompt = "injected authority-bearing prompt"
+		c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(run).Build()
+		status := situation.Status.DeepCopy()
+		_, err := (&AdverseSituationReconciler{Client: c, Scheme: scheme}).ensureAdverseSituationAgentRun(ctx, situation, status)
+		if err == nil || !strings.Contains(err.Error(), "no receipt and no longer exactly matches") {
+			t.Fatalf("legacy responder drift error = %v, want exact-snapshot rejection", err)
+		}
+	})
+}
+
+func TestAdverseSituationNewSequenceClearsResponderReceipt(t *testing.T) {
+	t.Parallel()
+
+	status := &controlv1alpha1.AdverseSituationStatus{
+		Phase:                 controlv1alpha1.AdverseSituationPhaseResolved,
+		Sequence:              4,
+		ActiveResponderRef:    &controlv1alpha1.NamespacedObjectReference{Name: "old-responder", Namespace: "store"},
+		ActiveResponderUID:    "old-responder-uid",
+		ActiveResponderDigest: "sha256:old-responder-digest",
+	}
+	if !adverseSituationPrepareSequence(status) {
+		t.Fatal("prepare new sequence unexpectedly blocked")
+	}
+	if status.Sequence != 5 || status.ActiveResponderRef != nil || status.ActiveResponderUID != "" || status.ActiveResponderDigest != "" {
+		t.Fatalf("new sequence retained responder receipt: %#v", status)
 	}
 }
 
