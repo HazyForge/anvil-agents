@@ -165,7 +165,8 @@ container, and aggregate controller, Job, Pod, and Event evidence. See
 
 ## Build Without GitHub Actions
 
-Local scripts are the canonical build and validation entry points:
+Local scripts and Make targets are the canonical build and validation entry
+points:
 
 ```bash
 make verify
@@ -180,26 +181,39 @@ make kind-e2e
 
 ./hack/package-chart.sh --version 0.1.1
 
-# From a clean vX.Y.Z tag after docker login and helm registry login:
-./hack/publish-release.sh \
-  --prefix registry.example.com/team \
-  --version vX.Y.Z
+# Complete local publication from a clean checkout after docker login and
+# helm registry login:
+make release-local-all VERSION=vX.Y.Z REGISTRY_PREFIX=registry.example.com/team
+
+# Update the first-party Anvil Primaris deploy overlay from the generated lock:
+make release-pin-deploy VERSION=vX.Y.Z
 ```
 
 `make images` builds the controller plus all six built-in runner images into
 local Docker. The reusable script supports component selection, platforms,
 cache import/export, multiple tags, custom registries, and fork-aware OCI
 source metadata. Image pushes reject dirty worktrees unless explicitly
-overridden. `publish-release.sh` runs `make verify` and `make kind-e2e`,
-publishes all seven versioned images, verifies their immutable digests and source
-revision, writes a digest lock, and pushes an OCI chart whose seven default image
-references are pinned to that lock.
+overridden. `make release-local-all` creates or verifies an annotated release
+tag, pushes that tag, runs `publish-release.sh`, then creates the GitHub
+Release page from the local chart package and image lock. The GitHub Release
+step uses the GitHub API through `gh`, verifies that the remote tag already
+exists, and does not use GitHub Actions minutes. If you only need the registry
+and chart artifacts, run `make release-local`.
+
+`publish-release.sh` runs `make verify` and `make kind-e2e`, publishes all
+seven versioned images, verifies their immutable digests and source revision,
+writes a digest lock, and pushes an OCI chart whose seven default image
+references are pinned to that lock. `make release-pin-deploy` updates the
+first-party Anvil Primaris overlay from that lock so the controller and built-in
+runner defaults move together.
+
 GitHub workflows use the same repository-owned build and test contracts and are
-optional.
-The optional release workflow runs only for a `v*` tag push or a manual rerun
-of an existing tag. It runs the same verification and Kind upgrade/install
-tests before publishing versioned images and an OCI chart; it never publishes
-`latest` from `master`.
+optional. The optional release workflow is manual-only for an existing `v*` tag.
+It verifies the tag and Kind upgrade/install tests, then invokes
+`publish-release.sh --skip-verification` so Actions and local publication
+produce the same digest-locked chart. It does not run for tag pushes or
+`master`, so the local GitHub Release step cannot accidentally start a second
+publisher for the same version.
 
 ## Security Boundary
 

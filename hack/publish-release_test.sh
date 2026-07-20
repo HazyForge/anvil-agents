@@ -28,7 +28,7 @@ mkdir -p "$(dirname "${output}")"
 	printf 'schema\tanvil-agents-image-lock/v1\n'
 	printf 'source-revision\t0123456789abcdef0123456789abcdef01234567\n'
 	printf 'platform\tlinux/amd64\n'
-	for component in controller codex grok-build hermes openclaw pi; do
+	for component in controller codex opencode grok-build hermes openclaw pi; do
 		printf '%s\tregistry.example.com/team/%s@sha256:%064d\n' "${component}" "${component}" 1
 	done
 } > "${output}"
