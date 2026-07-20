@@ -157,16 +157,34 @@ tags resolve to the same registry digest, verifies the OCI source revision, and
 atomically writes a deployment-ready digest lock under `dist/`. Recheck an
 existing lock with `--verify-lock FILE`; neither path requires GitHub Actions.
 
-`hack/publish-release.sh --prefix REGISTRY/PATH --version vX.Y.Z` is the
-complete reusable path. It calls the image publisher, packages the chart,
+`make release-local VERSION=vX.Y.Z REGISTRY_PREFIX=REGISTRY/PATH` is the
+complete local publication path when GitHub Actions is unavailable or slower
+than publishing from the operator workstation. It calls
+`hack/publish-release.sh`, which calls the image publisher, packages the chart,
 pushes it to `oci://REGISTRY/PATH/charts` by default, and re-verifies the image
 lock after publication. The packaged release chart consumes that lock, so its
-controller and six runner defaults are immutable digest references rather
-than mutable version tags. By default it first runs `make verify` and
-`make kind-e2e`; `--skip-verification` records an explicit decision that those
-gates ran elsewhere for the exact tag. Authenticate both Docker and Helm to the
-registry first. The tag must point at a clean checkout so OCI source labels and
-the lock refer to exactly the reviewed commit.
+controller and six runner defaults are immutable digest references rather than
+mutable version tags. By default it first runs `make verify` and `make
+kind-e2e`; `RELEASE_SKIP_VERIFICATION=true` records an explicit decision that
+those gates ran elsewhere for the exact tag. Authenticate both Docker and Helm
+to the registry first. The tag must point at a clean checkout so OCI source
+labels and the lock refer to exactly the reviewed commit.
+
+The Make release targets are deliberately split:
+
+- `make release-tag VERSION=vX.Y.Z` creates or verifies a local annotated tag at
+  `HEAD`; `make release-tag-push` also pushes that tag.
+- `make release-local VERSION=vX.Y.Z` publishes the seven images, digest lock,
+  and OCI chart without using GitHub Actions.
+- `make release-github VERSION=vX.Y.Z` creates the GitHub Release page from the
+  local chart package and image lock. This uses the GitHub API through `gh`,
+  requires the remote tag to already exist, and does not consume Actions
+  minutes. Set `RELEASE_UPDATE_EXISTING=true` only when intentionally replacing
+  matching release assets.
+- `make release-local-all VERSION=vX.Y.Z` runs `release-tag-push`,
+  `release-local`, and `release-github` in sequence.
+- `make release-pin-deploy VERSION=vX.Y.Z` rewrites the first-party Anvil
+  Primaris deployment values from `dist/images-vX.Y.Z.lock.tsv`.
 
 `hack/package-chart.sh` still supports a convenient version-tagged development
 package. Pass `--image-lock dist/images-vX.Y.Z.lock.tsv` when assembling an
@@ -178,9 +196,9 @@ not available, also pass the independently verified tag commit with
 ## Optional Release Workflow
 
 `.github/workflows/publish.yaml` is a release convenience built on the same
-scripts. It runs only for a `v*` tag push or a manual rerun of an existing tag,
-gates publication on `make verify` and `make kind-e2e`, publishes all seven images
-with version and commit tags, and pushes the version-coupled chart to the
-repository owner's GHCR `charts` namespace. It does not run for `master` and
-does not publish `latest`, so an intermediate merge cannot become the default
-artifact.
+scripts. It is manual-only for an existing `v*` tag, gates publication on `make
+verify` and `make kind-e2e`, then invokes `hack/publish-release.sh
+--skip-verification` to publish the same seven-image lock and digest-pinned
+chart produced by the local path. It does not run for tag pushes or `master`,
+and it does not publish `latest`, so an intermediate merge or a local GitHub
+Release creation cannot start a second publisher for the same version.
