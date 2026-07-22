@@ -35,7 +35,9 @@ the run exists and what it may do.
   reports it as uncertain instead of encouraging a duplicate retry.
 - Before the final decision, emit `effect-summary --completeness Complete` only
   when every attempted external effect has a terminal receipt. Use Incomplete
-  or Unknown when the receipt ledger cannot make that guarantee.
+  or Unknown when the receipt ledger cannot make that guarantee. Emit no new
+  effect receipt or external mutation after that final summary; if work changes,
+  emit a newer summary after the last receipt.
 - Prefer `anvil-observability` for configured Prometheus, Loki, Tempo, and
   Grafana endpoints. Report unavailable evidence explicitly.
 - Treat timeouts and caller loss as ambiguous. Reattach to durable state before

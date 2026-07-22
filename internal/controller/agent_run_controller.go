@@ -509,10 +509,17 @@ func (r *AgentRunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		status.RunnerNode = runnerPod.Spec.NodeName
 		if logs, err := r.readAgentRunRunnerLogs(ctx, runnerPod.Namespace, runnerPod.Name); err == nil {
 			agentRunApplyStatusReports(&status, agentRunStatusReportsFromOutput(logs))
-			effects, effectSummary, invalidEffectEvidence := agentRunExternalEffectsFromOutput(logs)
-			agentRunApplyExternalEffects(&status, effects, effectSummary, invalidEffectEvidence)
+			effects, effectSummary, invalidEffectEvidence, effectAfterSummary := agentRunExternalEffectsFromOutput(logs)
+			agentRunApplyExternalEffects(&status, effects, effectSummary, invalidEffectEvidence, effectAfterSummary)
 			status.Output = agentRunTrimOutput(logs)
 			status.Result = agentRunRawResult(status.Output, status.PullRequestURL, status.Decision, status.Reports)
+		} else if agentRunJobComplete(job) || agentRunJobFailed(job) {
+			if status.EffectSummary == nil {
+				status.EffectSummary = &controlv1alpha1.AgentRunExternalEffectSummaryStatus{}
+			}
+			status.EffectSummary.Completeness = controlv1alpha1.AgentRunExternalEffectCompletenessIncomplete
+			status.EffectSummary.CollectionError = agentRunLimitString(err.Error(), 1000)
+			status.EffectSummary.Summary = "The controller could not collect the terminal agent logs, so external-effect evidence may be missing."
 		}
 	}
 
@@ -3849,10 +3856,11 @@ func agentRunNormalizeStatusReport(report controlv1alpha1.AgentRunStatusReport) 
 	return report
 }
 
-func agentRunExternalEffectsFromOutput(output string) ([]controlv1alpha1.AgentRunExternalEffectReceipt, *controlv1alpha1.AgentRunExternalEffectSummaryStatus, bool) {
+func agentRunExternalEffectsFromOutput(output string) ([]controlv1alpha1.AgentRunExternalEffectReceipt, *controlv1alpha1.AgentRunExternalEffectSummaryStatus, bool, bool) {
 	receipts := []controlv1alpha1.AgentRunExternalEffectReceipt{}
 	var summary *controlv1alpha1.AgentRunExternalEffectSummaryStatus
 	invalidEvidence := false
+	effectAfterSummary := false
 	for _, report := range agentRunStatusReportsFromOutputUntrimmed(output) {
 		isEffect := strings.EqualFold(strings.TrimSpace(report.Type), "effect")
 		isSummary := strings.EqualFold(strings.TrimSpace(report.Type), "effectSummary")
@@ -3875,30 +3883,59 @@ func agentRunExternalEffectsFromOutput(output string) ([]controlv1alpha1.AgentRu
 				continue
 			}
 			receipts = append(receipts, receipt)
+			if summary != nil {
+				effectAfterSummary = true
+			}
 		case isSummary && (report.EffectSummary == nil || report.Effect != nil):
 			invalidEvidence = true
 		case isSummary:
 			value := *report.EffectSummary
 			summary = &value
+			effectAfterSummary = false
 		case report.Effect != nil || report.EffectSummary != nil:
 			invalidEvidence = true
 		}
 	}
-	return receipts, summary, invalidEvidence
+	return receipts, summary, invalidEvidence, effectAfterSummary
 }
 
-func agentRunApplyExternalEffects(status *controlv1alpha1.AgentRunStatus, receipts []controlv1alpha1.AgentRunExternalEffectReceipt, reportedSummary *controlv1alpha1.AgentRunExternalEffectSummaryStatus, invalidEvidence bool) {
+func agentRunApplyExternalEffects(status *controlv1alpha1.AgentRunStatus, receipts []controlv1alpha1.AgentRunExternalEffectReceipt, reportedSummary *controlv1alpha1.AgentRunExternalEffectSummaryStatus, invalidEvidence, effectAfterSummary bool) {
 	if status == nil {
 		return
 	}
+	previousCompleteness := controlv1alpha1.AgentRunExternalEffectCompleteness("")
+	previousLedgerDigest := ""
+	if status.EffectSummary != nil {
+		previousCompleteness = status.EffectSummary.Completeness
+		previousLedgerDigest = status.EffectSummary.LedgerDigest
+	}
 	merged, truncated, identityConflict := agentRunMergeExternalEffects(status.Effects, receipts)
 	status.Effects = merged
+	currentLedgerDigest := agentRunExternalEffectLedgerDigest(merged)
 	if reportedSummary != nil {
 		if status.EffectSummary == nil {
 			status.EffectSummary = &controlv1alpha1.AgentRunExternalEffectSummaryStatus{}
 		}
 		status.EffectSummary.Completeness = reportedSummary.Completeness
 		status.EffectSummary.Summary = reportedSummary.Summary
+		status.EffectSummary.CollectionError = ""
+		if reportedSummary.Completeness == controlv1alpha1.AgentRunExternalEffectCompletenessComplete && !effectAfterSummary {
+			status.EffectSummary.LedgerDigest = currentLedgerDigest
+		}
+	}
+	if effectAfterSummary {
+		if status.EffectSummary == nil {
+			status.EffectSummary = &controlv1alpha1.AgentRunExternalEffectSummaryStatus{}
+		}
+		status.EffectSummary.Completeness = controlv1alpha1.AgentRunExternalEffectCompletenessIncomplete
+		status.EffectSummary.Summary = "External-effect receipts were emitted after the latest final summary."
+	} else if reportedSummary == nil && previousCompleteness == controlv1alpha1.AgentRunExternalEffectCompletenessComplete &&
+		((previousLedgerDigest == "" && len(receipts) > 0) || (previousLedgerDigest != "" && previousLedgerDigest != currentLedgerDigest)) {
+		if status.EffectSummary == nil {
+			status.EffectSummary = &controlv1alpha1.AgentRunExternalEffectSummaryStatus{}
+		}
+		status.EffectSummary.Completeness = controlv1alpha1.AgentRunExternalEffectCompletenessIncomplete
+		status.EffectSummary.Summary = "The external-effect receipt ledger changed after its latest Complete summary."
 	}
 	if truncated || invalidEvidence || identityConflict || (status.EffectSummary != nil && (status.EffectSummary.ReceiptsTruncated || status.EffectSummary.ReceiptsInvalid)) {
 		if status.EffectSummary == nil {
@@ -3912,6 +3949,19 @@ func agentRunApplyExternalEffects(status *controlv1alpha1.AgentRunStatus, receip
 		}
 	}
 	agentRunFinalizeExternalEffectSummary(status)
+}
+
+func agentRunExternalEffectLedgerDigest(receipts []controlv1alpha1.AgentRunExternalEffectReceipt) string {
+	canonical := append([]controlv1alpha1.AgentRunExternalEffectReceipt(nil), receipts...)
+	sort.SliceStable(canonical, func(i, j int) bool {
+		return canonical[i].OperationID < canonical[j].OperationID
+	})
+	encoded, err := json.Marshal(canonical)
+	if err != nil {
+		return ""
+	}
+	sum := sha256.Sum256(encoded)
+	return hex.EncodeToString(sum[:])
 }
 
 func agentRunMergeExternalEffects(existing, incoming []controlv1alpha1.AgentRunExternalEffectReceipt) ([]controlv1alpha1.AgentRunExternalEffectReceipt, bool, bool) {
@@ -4120,6 +4170,8 @@ func agentRunNormalizeExternalEffectSummary(summary controlv1alpha1.AgentRunExte
 	summary.Outcome = ""
 	summary.ReconciliationRequired = false
 	summary.Summary = agentRunLimitString(strings.TrimSpace(summary.Summary), 1000)
+	summary.LedgerDigest = ""
+	summary.CollectionError = ""
 	summary.ReceiptsTruncated = false
 	summary.ReceiptsInvalid = false
 	return summary
@@ -4157,15 +4209,19 @@ func agentRunFinalizeExternalEffectSummary(status *controlv1alpha1.AgentRunStatu
 	}
 	var reportedCompleteness controlv1alpha1.AgentRunExternalEffectCompleteness
 	var reportedSummary string
+	var ledgerDigest string
+	var collectionError string
 	receiptsTruncated := false
 	receiptsInvalid := false
 	if status.EffectSummary != nil {
 		reportedCompleteness = status.EffectSummary.Completeness
 		reportedSummary = status.EffectSummary.Summary
+		ledgerDigest = status.EffectSummary.LedgerDigest
+		collectionError = status.EffectSummary.CollectionError
 		receiptsTruncated = status.EffectSummary.ReceiptsTruncated
 		receiptsInvalid = status.EffectSummary.ReceiptsInvalid
 	}
-	if receiptsTruncated || receiptsInvalid {
+	if receiptsTruncated || receiptsInvalid || collectionError != "" {
 		reportedCompleteness = controlv1alpha1.AgentRunExternalEffectCompletenessIncomplete
 	}
 	started, confirmed, failed := 0, 0, 0
@@ -4186,10 +4242,11 @@ func agentRunFinalizeExternalEffectSummary(status *controlv1alpha1.AgentRunStatu
 		}
 	}
 
-	mutationCapableFailure := status.Phase == controlv1alpha1.AgentRunPhaseFailed &&
+	controllerProvedNoEffects := status.Failure != nil && status.Failure.Reason == controlv1alpha1.AgentRunFailureReasonHarnessLaunchFailed
+	mutationCapableTerminal := agentRunPhaseTerminal(status.Phase) && !controllerProvedNoEffects &&
 		!strings.EqualFold(strings.TrimSpace(status.Intent), string(controlv1alpha1.AgentRunIntentObserve)) &&
 		(status.JobCreateAttemptedAt != nil || status.JobRef != nil)
-	if len(status.Effects) == 0 && reportedCompleteness == "" && !mutationCapableFailure {
+	if len(status.Effects) == 0 && reportedCompleteness == "" && !mutationCapableTerminal {
 		status.EffectSummary = nil
 		agentRunSetExternalEffectsReportedCondition(status)
 		return
@@ -4198,11 +4255,16 @@ func agentRunFinalizeExternalEffectSummary(status *controlv1alpha1.AgentRunStatu
 	summary := &controlv1alpha1.AgentRunExternalEffectSummaryStatus{
 		Completeness:      controlv1alpha1.AgentRunExternalEffectCompletenessUnknown,
 		Summary:           reportedSummary,
+		LedgerDigest:      ledgerDigest,
+		CollectionError:   collectionError,
 		ReceiptsTruncated: receiptsTruncated,
 		ReceiptsInvalid:   receiptsInvalid,
 	}
 	if reportedCompleteness != "" {
 		summary.Completeness = reportedCompleteness
+	}
+	if summary.Completeness == controlv1alpha1.AgentRunExternalEffectCompletenessComplete && summary.LedgerDigest == "" {
+		summary.LedgerDigest = agentRunExternalEffectLedgerDigest(status.Effects)
 	}
 	switch {
 	case confirmed > 0 && (started > 0 || failed > 0 || receiptsTruncated || receiptsInvalid || summary.Completeness == controlv1alpha1.AgentRunExternalEffectCompletenessIncomplete || status.Phase == controlv1alpha1.AgentRunPhaseFailed):
@@ -4215,12 +4277,13 @@ func agentRunFinalizeExternalEffectSummary(status *controlv1alpha1.AgentRunStatu
 		summary.Outcome = controlv1alpha1.AgentRunExternalEffectOutcomeConfirmed
 	case failed > 0 && summary.Completeness == controlv1alpha1.AgentRunExternalEffectCompletenessComplete:
 		summary.Outcome = controlv1alpha1.AgentRunExternalEffectOutcomeNone
-	case failed > 0 || mutationCapableFailure:
+	case failed > 0 || mutationCapableTerminal:
 		summary.Outcome = controlv1alpha1.AgentRunExternalEffectOutcomeUncertain
 	default:
 		summary.Outcome = controlv1alpha1.AgentRunExternalEffectOutcomeNone
 	}
-	summary.ReconciliationRequired = summary.Outcome == controlv1alpha1.AgentRunExternalEffectOutcomePartial ||
+	summary.ReconciliationRequired = summary.Completeness != controlv1alpha1.AgentRunExternalEffectCompletenessComplete ||
+		summary.Outcome == controlv1alpha1.AgentRunExternalEffectOutcomePartial ||
 		summary.Outcome == controlv1alpha1.AgentRunExternalEffectOutcomeUncertain
 	status.EffectSummary = summary
 	agentRunSetExternalEffectsReportedCondition(status)

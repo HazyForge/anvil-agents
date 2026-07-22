@@ -53,12 +53,14 @@ func TestAgentRunViewIncludesExternalEffectReceiptsWithoutAliasing(t *testing.T)
 	t.Parallel()
 
 	startedAt := metav1.Now()
+	exitCode := int32(137)
 	run := &agentsv1alpha1.AgentRun{
 		ObjectMeta: metav1.ObjectMeta{Name: "release", Namespace: "agents"},
 		Status: agentsv1alpha1.AgentRunStatus{
 			Failure: &agentsv1alpha1.AgentRunFailureStatus{
-				Reason:  agentsv1alpha1.AgentRunFailureReasonDeadlineExceeded,
-				Message: "Job exceeded its active deadline.",
+				Reason:                 agentsv1alpha1.AgentRunFailureReasonDeadlineExceeded,
+				Message:                "Job exceeded its active deadline.",
+				AgentContainerExitCode: &exitCode,
 			},
 			EffectSummary: &agentsv1alpha1.AgentRunExternalEffectSummaryStatus{
 				Outcome:                agentsv1alpha1.AgentRunExternalEffectOutcomePartial,
@@ -87,6 +89,7 @@ func TestAgentRunViewIncludesExternalEffectReceiptsWithoutAliasing(t *testing.T)
 	}
 	view.EffectSummary.Outcome = agentsv1alpha1.AgentRunExternalEffectOutcomeConfirmed
 	view.Failure.Reason = agentsv1alpha1.AgentRunFailureReasonHarnessFailed
+	*view.Failure.AgentContainerExitCode = 1
 	view.Effects[0].OperationID = "mutated"
 	view.Effects[0].StartedAt.Time = view.Effects[0].StartedAt.Add(time.Hour)
 	if run.Status.EffectSummary.Outcome != agentsv1alpha1.AgentRunExternalEffectOutcomePartial {
@@ -94,6 +97,9 @@ func TestAgentRunViewIncludesExternalEffectReceiptsWithoutAliasing(t *testing.T)
 	}
 	if run.Status.Failure.Reason != agentsv1alpha1.AgentRunFailureReasonDeadlineExceeded {
 		t.Fatalf("view aliased source failure: %#v", run.Status.Failure)
+	}
+	if run.Status.Failure.AgentContainerExitCode == nil || *run.Status.Failure.AgentContainerExitCode != 137 {
+		t.Fatalf("view aliased source failure exit code: %#v", run.Status.Failure)
 	}
 	if run.Status.Effects[0].OperationID != "submit-build-001" || !run.Status.Effects[0].StartedAt.Equal(&startedAt) {
 		t.Fatalf("view aliased source receipt: %#v", run.Status.Effects[0])

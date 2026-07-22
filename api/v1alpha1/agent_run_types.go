@@ -912,8 +912,14 @@ type AgentRunExternalEffectSummaryStatus struct {
 	Completeness           AgentRunExternalEffectCompleteness `json:"completeness,omitempty"`
 	ReconciliationRequired bool                               `json:"reconciliationRequired,omitempty"`
 	Summary                string                             `json:"summary,omitempty"`
-	ReceiptsTruncated      bool                               `json:"receiptsTruncated,omitempty"`
-	ReceiptsInvalid        bool                               `json:"receiptsInvalid,omitempty"`
+	// LedgerDigest is a controller-derived digest of the exact receipt ledger
+	// covered by the latest Complete summary. Harness-provided values are ignored.
+	LedgerDigest string `json:"ledgerDigest,omitempty"`
+	// CollectionError records why terminal agent logs could not be collected.
+	// Its presence makes completeness Incomplete and requires reconciliation.
+	CollectionError   string `json:"collectionError,omitempty"`
+	ReceiptsTruncated bool   `json:"receiptsTruncated,omitempty"`
+	ReceiptsInvalid   bool   `json:"receiptsInvalid,omitempty"`
 }
 
 type AgentRunStatusReport struct {

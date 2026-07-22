@@ -2901,6 +2901,11 @@ spec:
                 type: object
               effectSummary:
                 properties:
+                  collectionError:
+                    description: |-
+                      CollectionError records why terminal agent logs could not be collected.
+                      Its presence makes completeness Incomplete and requires reconciliation.
+                    type: string
                   completeness:
                     description: |-
                       AgentRunExternalEffectCompleteness records whether the harness explicitly
@@ -2910,6 +2915,11 @@ spec:
                     - Complete
                     - Incomplete
                     - Unknown
+                    type: string
+                  ledgerDigest:
+                    description: |-
+                      LedgerDigest is a controller-derived digest of the exact receipt ledger
+                      covered by the latest Complete summary. Harness-provided values are ignored.
                     type: string
                   outcome:
                     description: |-
@@ -3158,6 +3168,11 @@ spec:
                       type: object
                     effectSummary:
                       properties:
+                        collectionError:
+                          description: |-
+                            CollectionError records why terminal agent logs could not be collected.
+                            Its presence makes completeness Incomplete and requires reconciliation.
+                          type: string
                         completeness:
                           description: |-
                             AgentRunExternalEffectCompleteness records whether the harness explicitly
@@ -3167,6 +3182,11 @@ spec:
                           - Complete
                           - Incomplete
                           - Unknown
+                          type: string
+                        ledgerDigest:
+                          description: |-
+                            LedgerDigest is a controller-derived digest of the exact receipt ledger
+                            covered by the latest Complete summary. Harness-provided values are ignored.
                           type: string
                         outcome:
                           description: |-

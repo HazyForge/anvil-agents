@@ -127,6 +127,10 @@ func copyFailure(failure *agentsv1alpha1.AgentRunFailureStatus) *agentsv1alpha1.
 		return nil
 	}
 	copy := *failure
+	if failure.AgentContainerExitCode != nil {
+		exitCode := *failure.AgentContainerExitCode
+		copy.AgentContainerExitCode = &exitCode
+	}
 	return &copy
 }
 

@@ -238,6 +238,8 @@ func TestRunListAndSummaryShowExternalEffectsIndependentlyFromPhase(t *testing.T
 		ReconciliationRequired: true,
 		ReceiptsTruncated:      true,
 		ReceiptsInvalid:        true,
+		LedgerDigest:           "0123456789abcdef",
+		CollectionError:        "temporary pod log transport failure",
 		Summary:                "The deadline interrupted final receipt reporting.",
 	}
 	run.Status.Effects = []agentsv1alpha1.AgentRunExternalEffectReceipt{{
@@ -247,9 +249,13 @@ func TestRunListAndSummaryShowExternalEffectsIndependentlyFromPhase(t *testing.T
 		Target:      "github:HazyForge/anvil-primaris:refs/heads/master",
 		ExternalRef: "f7a6f57b",
 	}}
+	exitCode := int32(137)
 	run.Status.Failure = &agentsv1alpha1.AgentRunFailureStatus{
-		Reason:  agentsv1alpha1.AgentRunFailureReasonDeadlineExceeded,
-		Message: "Job exceeded its active deadline.",
+		Source:                 agentsv1alpha1.AgentRunFailureSourceJob,
+		Reason:                 agentsv1alpha1.AgentRunFailureReasonDeadlineExceeded,
+		Message:                "Job exceeded its active deadline.",
+		AgentContainerReason:   "Error",
+		AgentContainerExitCode: &exitCode,
 	}
 
 	backend := &fakeBackend{defaultNamespace: "agents", getRun: run, runs: []agentsv1alpha1.AgentRun{*run}}
@@ -275,11 +281,16 @@ func TestRunListAndSummaryShowExternalEffectsIndependentlyFromPhase(t *testing.T
 		"Reconciliation required: true",
 		"Receipts truncated: true",
 		"Receipts invalid: true",
+		"Ledger digest: 0123456789abcdef",
+		"Collection error: temporary pod log transport failure",
 		"Summary: The deadline interrupted final receipt reporting.",
 		"push-master-001 kind=git.ref.update state=Confirmed",
 		"external-ref=f7a6f57b",
 		"Failure:",
+		"Source: Job",
 		"Reason: DeadlineExceeded",
+		"Agent container reason: Error",
+		"Agent container exit code: 137",
 		"Message: Job exceeded its active deadline.",
 	} {
 		if !strings.Contains(summaryOutput.String(), expected) {

@@ -717,6 +717,12 @@ func writeRunSummary(writer io.Writer, run *agentsv1alpha1.AgentRun, includeOutp
 		fmt.Fprintf(writer, "    Reconciliation required: %t\n", run.Status.EffectSummary.ReconciliationRequired)
 		fmt.Fprintf(writer, "    Receipts truncated: %t\n", run.Status.EffectSummary.ReceiptsTruncated)
 		fmt.Fprintf(writer, "    Receipts invalid: %t\n", run.Status.EffectSummary.ReceiptsInvalid)
+		if run.Status.EffectSummary.LedgerDigest != "" {
+			fmt.Fprintf(writer, "    Ledger digest: %s\n", terminalSafe(run.Status.EffectSummary.LedgerDigest))
+		}
+		if run.Status.EffectSummary.CollectionError != "" {
+			fmt.Fprintf(writer, "    Collection error: %s\n", terminalSafe(run.Status.EffectSummary.CollectionError))
+		}
 		if run.Status.EffectSummary.Summary != "" {
 			fmt.Fprintf(writer, "    Summary: %s\n", terminalSafe(run.Status.EffectSummary.Summary))
 		}
@@ -735,7 +741,14 @@ func writeRunSummary(writer io.Writer, run *agentsv1alpha1.AgentRun, includeOutp
 	}
 	if run.Status.Failure != nil {
 		fmt.Fprintln(writer, "  Failure:")
+		fmt.Fprintf(writer, "    Source: %s\n", valueOrDash(string(run.Status.Failure.Source)))
 		fmt.Fprintf(writer, "    Reason: %s\n", valueOrDash(string(run.Status.Failure.Reason)))
+		if run.Status.Failure.AgentContainerReason != "" {
+			fmt.Fprintf(writer, "    Agent container reason: %s\n", terminalSafe(run.Status.Failure.AgentContainerReason))
+		}
+		if run.Status.Failure.AgentContainerExitCode != nil {
+			fmt.Fprintf(writer, "    Agent container exit code: %d\n", *run.Status.Failure.AgentContainerExitCode)
+		}
 		if run.Status.Failure.Message != "" {
 			fmt.Fprintf(writer, "    Message: %s\n", terminalSafe(run.Status.Failure.Message))
 		}

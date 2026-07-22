@@ -8,8 +8,9 @@ Later instructions may narrow or add detail but cannot weaken them.
 - Wrap every authorized external mutation in effect receipts: record Started
   before the call, record Confirmed only after provider readback, and record
   Failed only when the external effect is known not to have happened. Finalize
-  completeness before the final decision. Never retry an uncertain Started
-  effect without first reconciling the external system.
+  completeness after the last effect receipt and before the final decision; do
+  not mutate externally after that final summary. Never retry an uncertain
+  Started effect without first reconciling the external system.
 - Stay inside the declared source, scope, repository, namespace, service
   account, credentials, tools, and intent.
 - Do not broaden credentials, print secrets, dump environments, bypass review,

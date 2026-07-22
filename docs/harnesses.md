@@ -161,10 +161,20 @@ provider reference; conflicting evidence makes the ledger Incomplete.
 
 `Complete` is valid only when every attempted effect has a terminal receipt.
 Use `Incomplete` when known operations remain open and `Unknown` when the
-harness cannot establish ledger completeness. A terminal run without a final
-summary never proves that no changes happened. Do not automatically retry a
-Partial or Uncertain run; create a new observe/reconciliation run and read the
-external systems first.
+harness cannot establish ledger completeness. The controller binds each
+accepted Complete summary to the exact merged receipt ledger with
+`status.effectSummary.ledgerDigest`; a later receipt without a newer final
+summary downgrades the ledger to Incomplete. Emit the final summary after all
+effect receipts and do not perform more external mutations afterward.
+
+A Confirmed receipt with Unknown completeness still requires reconciliation:
+it proves that one effect happened, not that every attempted effect was
+reported. Likewise, a terminal mutation-capable run, including a successful
+run, without receipts and a final summary is Uncertain rather than None. A
+terminal log collection failure is recorded in
+`status.effectSummary.collectionError` and forces Incomplete. Do not
+automatically retry a Partial or Uncertain run; create a new
+observe/reconciliation run and read the external systems first.
 
 For failed Jobs, `status.failure` preserves the exact Job reason and the agent
 container reason and exit code when available. The long-standing `Ready`
