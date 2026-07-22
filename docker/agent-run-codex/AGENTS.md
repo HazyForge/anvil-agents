@@ -27,6 +27,15 @@ the run exists and what it may do.
 - Read repository guidance and injected skills before editing.
 - Inspect the source object, owned children, Kubernetes events, relevant logs,
   current repository state, and configured metrics or traces before deciding.
+- Before each authorized external mutation, emit an `effect-started` receipt
+  with a stable operation ID, intent and input digests, idempotency key, kind,
+  and target. Emit `effect-confirmed` only after provider readback proves the
+  intended effect, or `effect-failed` only after proving the effect did not
+  occur. An interrupted or ambiguous call stays Started so the controller
+  reports it as uncertain instead of encouraging a duplicate retry.
+- Before the final decision, emit `effect-summary --completeness Complete` only
+  when every attempted external effect has a terminal receipt. Use Incomplete
+  or Unknown when the receipt ledger cannot make that guarantee.
 - Prefer `anvil-observability` for configured Prometheus, Loki, Tempo, and
   Grafana endpoints. Report unavailable evidence explicitly.
 - Treat timeouts and caller loss as ambiguous. Reattach to durable state before
@@ -58,7 +67,8 @@ the run exists and what it may do.
 3. Gather current evidence and classify the state.
 4. Act only within the selected intent and authority.
 5. Run focused verification and inspect the resulting durable status.
-6. Record a final `anvil-agent-status decision` with the action, summary,
+6. Finalize the external-effect summary, then record a final
+   `anvil-agent-status decision` with the action, summary,
    residual risk, pull request URL, and human follow-up when applicable.
 
 The final answer must distinguish evidence checked, action taken, verification,

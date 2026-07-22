@@ -110,7 +110,7 @@ func TestAgentRunStatusReportsFromOutputAppliesDecision(t *testing.T) {
 func TestAgentRunExternalEffectsMergeMonotonicallyAcrossLogReads(t *testing.T) {
 	t.Parallel()
 
-	startedOutput := `ANVIL_AGENT_RUN_STATUS_JSON={"type":"effect","observedAt":"2026-07-20T09:45:00Z","effect":{"operationID":"push-master-7f8","kind":"git.ref.update","state":"Started","target":"HazyForge/anvil-primaris:refs/heads/master","intentDigest":"sha256:intent","idempotencyKey":"manager-run-1:push-master"}}`
+	startedOutput := `ANVIL_AGENT_RUN_STATUS_JSON={"type":"effect","observedAt":"2026-07-20T09:45:00Z","effect":{"operationID":"push-master-7f8","kind":"git.ref.update","state":"Started","target":"HazyForge/anvil-primaris:refs/heads/master","intentDigest":"sha256:intent","inputDigest":"sha256:commit-and-ref","idempotencyKey":"manager-run-1:push-master"}}`
 	confirmedOutput := strings.Join([]string{
 		startedOutput,
 		`ANVIL_AGENT_RUN_STATUS_JSON={"type":"effect","observedAt":"2026-07-20T09:46:00Z","effect":{"operationID":"push-master-7f8","kind":"git.ref.update","state":"Confirmed","externalRef":"f7a6f57b","externalURL":"https://github.com/HazyForge/anvil-primaris/commit/f7a6f57b","actor":"manager","executor":"github","message":"remote ref read back"}}`,
@@ -136,6 +136,9 @@ func TestAgentRunExternalEffectsMergeMonotonicallyAcrossLogReads(t *testing.T) {
 	}
 	if got, want := receipt.IntentDigest, "sha256:intent"; got != want {
 		t.Fatalf("intent digest = %q, want %q", got, want)
+	}
+	if got, want := receipt.InputDigest, "sha256:commit-and-ref"; got != want {
+		t.Fatalf("input digest = %q, want %q", got, want)
 	}
 	if got, want := receipt.ExternalRef, "f7a6f57b"; got != want {
 		t.Fatalf("external ref = %q, want %q", got, want)
@@ -452,6 +455,16 @@ func TestAgentRunArchivesTerminalRun(t *testing.T) {
 			PullRequestURL: "https://github.com/HazyForge/anvil-primaris/pull/415",
 			Decision:       &controlv1alpha1.AgentRunDecisionStatus{Classification: "missing human input", Summary: "needs approval"},
 			Reports:        []controlv1alpha1.AgentRunStatusReport{{Type: "decision", Summary: "needs approval", NeedsHuman: true}},
+			EffectSummary: &controlv1alpha1.AgentRunExternalEffectSummaryStatus{
+				Outcome:      controlv1alpha1.AgentRunExternalEffectOutcomeConfirmed,
+				Completeness: controlv1alpha1.AgentRunExternalEffectCompletenessComplete,
+			},
+			Effects: []controlv1alpha1.AgentRunExternalEffectReceipt{{
+				OperationID: "open-pr-415",
+				Kind:        "pullRequest.open",
+				State:       controlv1alpha1.AgentRunExternalEffectStateConfirmed,
+				ExternalRef: "415",
+			}},
 			Output:         "bounded output",
 		},
 	}
@@ -474,6 +487,9 @@ func TestAgentRunArchivesTerminalRun(t *testing.T) {
 	}
 	if got := string(store.records[0].Spec); !strings.Contains(got, `"issueTracking"`) || !strings.Contains(got, `"number":415`) {
 		t.Fatalf("archive spec missing issue context: %s", got)
+	}
+	if got := string(store.records[0].Status); !strings.Contains(got, `"effectSummary"`) || !strings.Contains(got, `"operationID":"open-pr-415"`) {
+		t.Fatalf("archive status missing external-effect receipts: %s", got)
 	}
 	updated := &controlv1alpha1.AgentRun{}
 	if err := reconciler.Get(ctx, types.NamespacedName{Namespace: run.Namespace, Name: run.Name}, updated); err != nil {

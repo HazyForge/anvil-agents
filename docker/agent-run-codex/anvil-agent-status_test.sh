@@ -22,6 +22,7 @@ receipt_args=(
 	--effect-kind git.ref.update
 	--target github:HazyForge/anvil-primaris:refs/heads/master
 	--intent-digest sha256:intent
+	--input-digest sha256:commit-and-ref
 	--idempotency-key run-001:push-master-001
 )
 
@@ -33,6 +34,7 @@ assert_status_line 0 '
 	.effect.state == "Started" and
 	.effect.target == "github:HazyForge/anvil-primaris:refs/heads/master" and
 	.effect.intentDigest == "sha256:intent" and
+	.effect.inputDigest == "sha256:commit-and-ref" and
 	.effect.idempotencyKey == "run-001:push-master-001" and
 	.effect.actor == "agent:manager" and
 	.effect.executor == "anvilctl" and
@@ -58,6 +60,7 @@ failed_args=(
 	--effect-kind release.publish
 	--target registry:ghcr.io/hazyforge/anvil-agents
 	--intent-digest sha256:release-intent
+	--input-digest sha256:image-and-tag
 	--idempotency-key run-001:release-001
 )
 "${status_tool}" effect-failed "${failed_args[@]}" --detail "Provider rejected the request before mutation." >/dev/null
@@ -99,6 +102,18 @@ if "${status_tool}" effect-confirmed "${receipt_args[@]}" >/dev/null 2>"${test_d
 	exit 1
 fi
 grep -q "external-ref is required" "${test_dir}/missing-ref.err"
+
+if "${status_tool}" effect-started \
+	--operation-id missing-input \
+	--effect-kind git.ref.update \
+	--target github:example/service:refs/heads/main \
+	--intent-digest sha256:intent \
+	--idempotency-key run-001:missing-input \
+	>/dev/null 2>"${test_dir}/missing-input.err"; then
+	echo "effect-started accepted a receipt without --input-digest" >&2
+	exit 1
+fi
+grep -q "input-digest is required" "${test_dir}/missing-input.err"
 
 if "${status_tool}" effect-summary --completeness Declared >/dev/null 2>"${test_dir}/invalid-completeness.err"; then
 	echo "effect-summary accepted an unknown completeness value" >&2

@@ -33,6 +33,7 @@ Flags:
   --effect-kind VALUE
   --target VALUE
   --intent-digest VALUE
+  --input-digest VALUE
   --idempotency-key VALUE
   --external-ref VALUE
   --external-url VALUE
@@ -70,6 +71,7 @@ operation_id=""
 effect_kind=""
 target=""
 intent_digest=""
+input_digest=""
 idempotency_key=""
 external_ref=""
 external_url=""
@@ -153,6 +155,11 @@ while [[ $# -gt 0 ]]; do
 			intent_digest="$2"
 			shift 2
 			;;
+		--input-digest)
+			need_value "$@"
+			input_digest="$2"
+			shift 2
+			;;
 		--idempotency-key)
 			need_value "$@"
 			idempotency_key="$2"
@@ -229,7 +236,7 @@ if [[ "${report_type}" == "effect" ]]; then
 			exit 2
 			;;
 	esac
-	for required in operation_id effect_kind target intent_digest idempotency_key; do
+	for required in operation_id effect_kind target intent_digest input_digest idempotency_key; do
 		if [[ -z "${!required}" ]]; then
 			echo "${required//_/-} is required for external-effect receipts" >&2
 			exit 2
@@ -275,6 +282,7 @@ json="$(
 		--arg effectKind "${effect_kind}" \
 		--arg target "${target}" \
 		--arg intentDigest "${intent_digest}" \
+		--arg inputDigest "${input_digest}" \
 		--arg idempotencyKey "${idempotency_key}" \
 		--arg externalRef "${external_ref}" \
 		--arg externalURL "${external_url}" \
@@ -300,6 +308,7 @@ json="$(
 				state: $effectState,
 				target: $target,
 				intentDigest: $intentDigest,
+				inputDigest: $inputDigest,
 				idempotencyKey: $idempotencyKey,
 				externalRef: $externalRef,
 				externalURL: $externalURL,

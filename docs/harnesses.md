@@ -121,6 +121,48 @@ ANVIL_AGENT_RUN_STATUS_JSON={"type":"decision","action":"inspect","summary":"com
 The controller also treats Kubernetes Job success or failure as terminal
 evidence. Structured reports enrich status; they do not override a failed Job.
 
+Job completion and external effects are separate status dimensions. A failed
+or deadline-exceeded Job can have already pushed a ref, opened a pull request,
+submitted a build, or changed another provider. Mutation-capable harnesses must
+therefore emit receipt-bearing effect reports around each external call:
+
+```sh
+anvil-agent-status effect-started \
+  --operation-id push-main-01 \
+  --effect-kind git.ref.update \
+  --target github:example/service:refs/heads/main \
+  --intent-digest sha256:INTENT \
+  --input-digest sha256:COMMIT_AND_REF \
+  --idempotency-key RUN_ID:push-main-01
+
+# Perform the authorized mutation, then read the provider state back.
+
+anvil-agent-status effect-confirmed \
+  --operation-id push-main-01 \
+  --effect-kind git.ref.update \
+  --target github:example/service:refs/heads/main \
+  --intent-digest sha256:INTENT \
+  --input-digest sha256:COMMIT_AND_REF \
+  --idempotency-key RUN_ID:push-main-01 \
+  --external-ref COMMIT_SHA
+
+anvil-agent-status effect-summary --completeness Complete
+```
+
+`effect-confirmed` means provider readback observed the intended result.
+`effect-failed` is reserved for a verified failure where the effect did not
+occur. A timeout, connection loss, or missing response leaves the operation in
+Started state. The controller derives `None`, `Confirmed`, `Partial`, or
+`Uncertain` from the merged receipts and records whether reconciliation is
+required; the harness does not choose that outcome.
+
+`Complete` is valid only when every attempted effect has a terminal receipt.
+Use `Incomplete` when known operations remain open and `Unknown` when the
+harness cannot establish ledger completeness. A terminal run without a final
+summary never proves that no changes happened. Do not automatically retry a
+Partial or Uncertain run; create a new observe/reconciliation run and read the
+external systems first.
+
 ## Source Preparation
 
 The built-in images honor their documented repository environment variables,
