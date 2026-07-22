@@ -660,16 +660,17 @@ func writeRunTable(writer io.Writer, runs []agentsv1alpha1.AgentRun, allNamespac
 	if allNamespaces {
 		fmt.Fprint(table, "NAMESPACE\t")
 	}
-	fmt.Fprintln(table, "NAME\tPHASE\tBACKEND\tINTENT\tSOURCE\tAGE")
+	fmt.Fprintln(table, "NAME\tPHASE\tEFFECTS\tBACKEND\tINTENT\tSOURCE\tAGE")
 	now := time.Now()
 	for i := range runs {
 		run := &runs[i]
 		if allNamespaces {
 			fmt.Fprintf(table, "%s\t", run.Namespace)
 		}
-		fmt.Fprintf(table, "%s\t%s\t%s\t%s\t%s/%s\t%s\n",
+		fmt.Fprintf(table, "%s\t%s\t%s\t%s\t%s\t%s/%s\t%s\n",
 			run.Name,
 			valueOrDash(string(run.Status.Phase)),
+			effectOutcome(run.Status.EffectSummary),
 			valueOrDash(run.Status.Backend),
 			valueOrDash(run.Status.Intent),
 			valueOrDash(run.Spec.SourceRef.Kind),
@@ -709,6 +710,35 @@ func writeRunSummary(writer io.Writer, run *agentsv1alpha1.AgentRun, includeOutp
 			fmt.Fprintf(writer, "    %s stage=%s level=%s summary=%s\n", valueOrDash(report.Type), valueOrDash(report.Stage), valueOrDash(report.Level), valueOrDash(report.Summary))
 		}
 	}
+	if run.Status.EffectSummary != nil {
+		fmt.Fprintln(writer, "  External effects:")
+		fmt.Fprintf(writer, "    Outcome: %s\n", valueOrDash(string(run.Status.EffectSummary.Outcome)))
+		fmt.Fprintf(writer, "    Completeness: %s\n", valueOrDash(string(run.Status.EffectSummary.Completeness)))
+		fmt.Fprintf(writer, "    Reconciliation required: %t\n", run.Status.EffectSummary.ReconciliationRequired)
+		fmt.Fprintf(writer, "    Receipts truncated: %t\n", run.Status.EffectSummary.ReceiptsTruncated)
+		if run.Status.EffectSummary.Summary != "" {
+			fmt.Fprintf(writer, "    Summary: %s\n", terminalSafe(run.Status.EffectSummary.Summary))
+		}
+	}
+	if len(run.Status.Effects) > 0 {
+		fmt.Fprintln(writer, "  Effect receipts:")
+		for _, effect := range run.Status.Effects {
+			fmt.Fprintf(writer, "    %s kind=%s state=%s target=%s external-ref=%s\n",
+				terminalSafe(valueOrDash(effect.OperationID)),
+				terminalSafe(valueOrDash(effect.Kind)),
+				terminalSafe(valueOrDash(string(effect.State))),
+				terminalSafe(valueOrDash(effect.Target)),
+				terminalSafe(valueOrDash(effect.ExternalRef)),
+			)
+		}
+	}
+	if run.Status.Failure != nil {
+		fmt.Fprintln(writer, "  Failure:")
+		fmt.Fprintf(writer, "    Reason: %s\n", valueOrDash(string(run.Status.Failure.Reason)))
+		if run.Status.Failure.Message != "" {
+			fmt.Fprintf(writer, "    Message: %s\n", terminalSafe(run.Status.Failure.Message))
+		}
+	}
 	if run.Status.Error != "" {
 		fmt.Fprintf(writer, "  Error: %s\n", terminalSafe(run.Status.Error))
 	}
@@ -721,6 +751,13 @@ func writeRunSummary(writer io.Writer, run *agentsv1alpha1.AgentRun, includeOutp
 			fmt.Fprintf(writer, "    %s\n", terminalSafe(line))
 		}
 	}
+}
+
+func effectOutcome(summary *agentsv1alpha1.AgentRunExternalEffectSummaryStatus) string {
+	if summary == nil {
+		return "-"
+	}
+	return valueOrDash(string(summary.Outcome))
 }
 
 func verifyJob(run *agentsv1alpha1.AgentRun, job *batchv1.Job) error {

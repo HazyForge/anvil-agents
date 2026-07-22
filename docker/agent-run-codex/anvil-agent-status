@@ -10,6 +10,11 @@ Types:
   progress        Record an intermediate status report.
   decision        Record the final classification/action decision.
   needsHuman      Record that human follow-up is required.
+  effect-started  Record an external mutation attempt before dispatch.
+  effect-confirmed
+                  Record an external mutation confirmed by provider readback.
+  effect-failed   Record a provider-confirmed mutation failure.
+  effect-summary  Record the run's external-effect ledger completeness.
 
 Flags:
   --type VALUE
@@ -24,6 +29,16 @@ Flags:
   --residual-risk VALUE
   --human-follow-up VALUE
   --needs-human
+  --operation-id VALUE
+  --effect-kind VALUE
+  --target VALUE
+  --intent-digest VALUE
+  --idempotency-key VALUE
+  --external-ref VALUE
+  --external-url VALUE
+  --actor VALUE
+  --executor VALUE
+  --completeness VALUE
 EOF
 }
 
@@ -40,6 +55,7 @@ if [[ $# -gt 0 && "${1:-}" != --* ]]; then
 	shift
 fi
 
+effect_state=""
 level="info"
 stage=""
 classification=""
@@ -50,6 +66,16 @@ pull_request_url=""
 residual_risk=""
 human_follow_up=""
 needs_human=false
+operation_id=""
+effect_kind=""
+target=""
+intent_digest=""
+idempotency_key=""
+external_ref=""
+external_url=""
+actor="${ANVIL_AGENT_RUN_EFFECT_ACTOR:-}"
+executor="${ANVIL_AGENT_RUN_EFFECT_EXECUTOR:-}"
+effect_completeness=""
 
 while [[ $# -gt 0 ]]; do
 	case "$1" in
@@ -107,6 +133,56 @@ while [[ $# -gt 0 ]]; do
 			needs_human=true
 			shift
 			;;
+		--operation-id)
+			need_value "$@"
+			operation_id="$2"
+			shift 2
+			;;
+		--effect-kind)
+			need_value "$@"
+			effect_kind="$2"
+			shift 2
+			;;
+		--target)
+			need_value "$@"
+			target="$2"
+			shift 2
+			;;
+		--intent-digest)
+			need_value "$@"
+			intent_digest="$2"
+			shift 2
+			;;
+		--idempotency-key)
+			need_value "$@"
+			idempotency_key="$2"
+			shift 2
+			;;
+		--external-ref)
+			need_value "$@"
+			external_ref="$2"
+			shift 2
+			;;
+		--external-url)
+			need_value "$@"
+			external_url="$2"
+			shift 2
+			;;
+		--actor)
+			need_value "$@"
+			actor="$2"
+			shift 2
+			;;
+		--executor)
+			need_value "$@"
+			executor="$2"
+			shift 2
+			;;
+		--completeness)
+			need_value "$@"
+			effect_completeness="$2"
+			shift 2
+			;;
 		-h|--help)
 			usage
 			exit 0
@@ -122,9 +198,61 @@ while [[ $# -gt 0 ]]; do
 	esac
 done
 
+case "${report_type}" in
+	effect-started)
+		report_type="effect"
+		effect_state="Started"
+		;;
+	effect-confirmed)
+		report_type="effect"
+		effect_state="Confirmed"
+		;;
+	effect-failed)
+		report_type="effect"
+		effect_state="Failed"
+		;;
+	effect-summary)
+		report_type="effectSummary"
+		;;
+esac
+
 if [[ "${report_type}" == "needsHuman" || "${report_type}" == "needs-human" ]]; then
 	report_type="needsHuman"
 	needs_human=true
+fi
+
+if [[ "${report_type}" == "effect" ]]; then
+	case "${effect_state}" in
+		Started|Confirmed|Failed) ;;
+		*)
+			echo "external-effect state is selected with effect-started, effect-confirmed, or effect-failed" >&2
+			exit 2
+			;;
+	esac
+	for required in operation_id effect_kind target intent_digest idempotency_key; do
+		if [[ -z "${!required}" ]]; then
+			echo "${required//_/-} is required for external-effect receipts" >&2
+			exit 2
+		fi
+	done
+	if [[ "${effect_state}" == "Confirmed" && -z "${external_ref}" ]]; then
+		echo "external-ref is required for confirmed external-effect receipts" >&2
+		exit 2
+	fi
+	if [[ "${effect_state}" == "Failed" && -z "${summary}" && -z "${detail}" ]]; then
+		echo "summary or detail is required for failed external-effect receipts" >&2
+		exit 2
+	fi
+fi
+
+if [[ "${report_type}" == "effectSummary" ]]; then
+	case "${effect_completeness}" in
+		Complete|Incomplete|Unknown) ;;
+		*)
+			echo "completeness must be Complete, Incomplete, or Unknown" >&2
+			exit 2
+			;;
+	esac
 fi
 
 observed_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
@@ -142,6 +270,17 @@ json="$(
 		--arg residualRisk "${residual_risk}" \
 		--arg humanFollowUp "${human_follow_up}" \
 		--argjson needsHuman "${needs_human}" \
+		--arg effectState "${effect_state}" \
+		--arg operationID "${operation_id}" \
+		--arg effectKind "${effect_kind}" \
+		--arg target "${target}" \
+		--arg intentDigest "${intent_digest}" \
+		--arg idempotencyKey "${idempotency_key}" \
+		--arg externalRef "${external_ref}" \
+		--arg externalURL "${external_url}" \
+		--arg actor "${actor}" \
+		--arg executor "${executor}" \
+		--arg completeness "${effect_completeness}" \
 		'{
 			type: $type,
 			observedAt: $observedAt,
@@ -154,7 +293,27 @@ json="$(
 			pullRequestURL: $pullRequestURL,
 			residualRisk: $residualRisk,
 			needsHuman: $needsHuman,
-			humanFollowUp: $humanFollowUp
+			humanFollowUp: $humanFollowUp,
+			effect: (if $type == "effect" then ({
+				operationID: $operationID,
+				kind: $effectKind,
+				state: $effectState,
+				target: $target,
+				intentDigest: $intentDigest,
+				idempotencyKey: $idempotencyKey,
+				externalRef: $externalRef,
+				externalURL: $externalURL,
+				actor: $actor,
+				executor: $executor,
+				startedAt: (if $effectState == "Started" then $observedAt else "" end),
+				completedAt: (if ($effectState == "Confirmed" or $effectState == "Failed") then $observedAt else "" end),
+				verifiedAt: (if $effectState == "Confirmed" then $observedAt else "" end),
+				message: (if $summary != "" then $summary else $detail end)
+			} | with_entries(select(.value != "" and .value != false and .value != null))) else null end),
+			effectSummary: (if $type == "effectSummary" then {
+				completeness: $completeness,
+				summary: $summary
+			} | with_entries(select(.value != "" and .value != false and .value != null)) else null end)
 		} | with_entries(select(.value != "" and .value != false and .value != null))'
 )"
 

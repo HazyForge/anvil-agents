@@ -128,6 +128,8 @@ verify-runner-contract:
 	@bash -n hack/test-runner-repository-checkout.sh
 	@bash -n hack/test-opencode-runner.sh
 	@bash -n hack/stream-agent-run.sh
+	@bash -n docker/agent-run-codex/anvil-agent-status
+	@bash -n docker/agent-run-codex/anvil-agent-status_test.sh
 	@hack/build-images.sh --help >/dev/null
 	@hack/build-images.sh --list >/dev/null
 	@hack/publish-images.sh --help >/dev/null
@@ -140,6 +142,7 @@ verify-runner-contract:
 	@hack/install-judge-prerequisites.sh --help >/dev/null
 	@hack/install-judge-prerequisites_test.sh
 	@hack/test-judge-kind.sh --help >/dev/null
+	@docker/agent-run-codex/anvil-agent-status_test.sh
 	@rg -q 'kind_sha256=a6875aaea358acf0ac07786b1a6755d08fd640f4c79b7a2e46681cc13f49a04b' hack/install-judge-prerequisites.sh
 	@rg -q 'kubectl_sha256=4f6a959dcc5b702135f8354cc7109b542a2933c46b808b248a214c1f69f817ea' hack/install-judge-prerequisites.sh
 	@rg -q 'helm_sha256=0a745198de24545d0055cd8414bc8d2ba10363ef5f5d38369ea1b399671cc083' hack/install-judge-prerequisites.sh

@@ -13,29 +13,32 @@ type AgentRunListResponse struct {
 }
 
 type AgentRunView struct {
-	Name                string                                            `json:"name"`
-	Namespace           string                                            `json:"namespace"`
-	UID                 string                                            `json:"uid"`
-	ResourceVersion     string                                            `json:"resourceVersion"`
-	CreatedAt           time.Time                                         `json:"createdAt"`
-	Phase               agentsv1alpha1.AgentRunPhase                      `json:"phase,omitempty"`
-	Backend             string                                            `json:"backend,omitempty"`
-	Intent              string                                            `json:"intent,omitempty"`
-	Source              AgentRunSourceView                                `json:"source"`
-	Application         string                                            `json:"application,omitempty"`
-	ApplicationTarget   string                                            `json:"applicationTarget,omitempty"`
-	Job                 *agentsv1alpha1.NamespacedObjectReference         `json:"job,omitempty"`
-	RunnerPod           *agentsv1alpha1.NamespacedObjectReference         `json:"runnerPod,omitempty"`
-	StartedAt           *metav1.Time                                      `json:"startedAt,omitempty"`
-	CompletedAt         *metav1.Time                                      `json:"completedAt,omitempty"`
-	Conditions          []metav1.Condition                                `json:"conditions,omitempty"`
-	Decision            *agentsv1alpha1.AgentRunDecisionStatus            `json:"decision,omitempty"`
-	Reports             []agentsv1alpha1.AgentRunStatusReport             `json:"reports,omitempty"`
-	ResolvedComposition *agentsv1alpha1.AgentRunResolvedCompositionStatus `json:"resolvedComposition,omitempty"`
-	PullRequestURL      string                                            `json:"pullRequestURL,omitempty"`
-	Error               string                                            `json:"error,omitempty"`
-	Output              string                                            `json:"output,omitempty"`
-	Archived            bool                                              `json:"archived"`
+	Name                string                                              `json:"name"`
+	Namespace           string                                              `json:"namespace"`
+	UID                 string                                              `json:"uid"`
+	ResourceVersion     string                                              `json:"resourceVersion"`
+	CreatedAt           time.Time                                           `json:"createdAt"`
+	Phase               agentsv1alpha1.AgentRunPhase                        `json:"phase,omitempty"`
+	Backend             string                                              `json:"backend,omitempty"`
+	Intent              string                                              `json:"intent,omitempty"`
+	Source              AgentRunSourceView                                  `json:"source"`
+	Application         string                                              `json:"application,omitempty"`
+	ApplicationTarget   string                                              `json:"applicationTarget,omitempty"`
+	Job                 *agentsv1alpha1.NamespacedObjectReference           `json:"job,omitempty"`
+	RunnerPod           *agentsv1alpha1.NamespacedObjectReference           `json:"runnerPod,omitempty"`
+	StartedAt           *metav1.Time                                        `json:"startedAt,omitempty"`
+	CompletedAt         *metav1.Time                                        `json:"completedAt,omitempty"`
+	Conditions          []metav1.Condition                                  `json:"conditions,omitempty"`
+	Decision            *agentsv1alpha1.AgentRunDecisionStatus              `json:"decision,omitempty"`
+	Reports             []agentsv1alpha1.AgentRunStatusReport               `json:"reports,omitempty"`
+	EffectSummary       *agentsv1alpha1.AgentRunExternalEffectSummaryStatus `json:"effectSummary,omitempty"`
+	Effects             []agentsv1alpha1.AgentRunExternalEffectReceipt      `json:"effects,omitempty"`
+	ResolvedComposition *agentsv1alpha1.AgentRunResolvedCompositionStatus   `json:"resolvedComposition,omitempty"`
+	PullRequestURL      string                                              `json:"pullRequestURL,omitempty"`
+	Failure             *agentsv1alpha1.AgentRunFailureStatus               `json:"failure,omitempty"`
+	Error               string                                              `json:"error,omitempty"`
+	Output              string                                              `json:"output,omitempty"`
+	Archived            bool                                                `json:"archived"`
 }
 
 type AgentRunSourceView struct {
@@ -71,8 +74,11 @@ func NewAgentRunView(run *agentsv1alpha1.AgentRun, includeOutput bool) AgentRunV
 		Conditions:          append([]metav1.Condition(nil), run.Status.Conditions...),
 		Decision:            copyDecision(run.Status.Decision),
 		Reports:             append([]agentsv1alpha1.AgentRunStatusReport(nil), run.Status.Reports...),
+		EffectSummary:       copyEffectSummary(run.Status.EffectSummary),
+		Effects:             copyEffects(run.Status.Effects),
 		ResolvedComposition: run.Status.ResolvedComposition.DeepCopy(),
 		PullRequestURL:      run.Status.PullRequestURL,
+		Failure:             copyFailure(run.Status.Failure),
 		Error:               run.Status.Error,
 		Archived:            run.Status.Archive != nil && run.Status.Archive.ArchivedAt != nil,
 	}
@@ -106,6 +112,36 @@ func copyDecision(decision *agentsv1alpha1.AgentRunDecisionStatus) *agentsv1alph
 	}
 	copy := *decision
 	return &copy
+}
+
+func copyEffectSummary(summary *agentsv1alpha1.AgentRunExternalEffectSummaryStatus) *agentsv1alpha1.AgentRunExternalEffectSummaryStatus {
+	if summary == nil {
+		return nil
+	}
+	copy := *summary
+	return &copy
+}
+
+func copyFailure(failure *agentsv1alpha1.AgentRunFailureStatus) *agentsv1alpha1.AgentRunFailureStatus {
+	if failure == nil {
+		return nil
+	}
+	copy := *failure
+	return &copy
+}
+
+func copyEffects(effects []agentsv1alpha1.AgentRunExternalEffectReceipt) []agentsv1alpha1.AgentRunExternalEffectReceipt {
+	if len(effects) == 0 {
+		return nil
+	}
+	copied := make([]agentsv1alpha1.AgentRunExternalEffectReceipt, len(effects))
+	for index := range effects {
+		copied[index] = effects[index]
+		copied[index].StartedAt = effects[index].StartedAt.DeepCopy()
+		copied[index].CompletedAt = effects[index].CompletedAt.DeepCopy()
+		copied[index].VerifiedAt = effects[index].VerifiedAt.DeepCopy()
+	}
+	return copied
 }
 
 func agentRunTerminal(phase agentsv1alpha1.AgentRunPhase) bool {

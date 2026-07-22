@@ -230,6 +230,62 @@ func TestRunListSortsNewestFirst(t *testing.T) {
 	}
 }
 
+func TestRunListAndSummaryShowExternalEffectsIndependentlyFromPhase(t *testing.T) {
+	run := testRun()
+	run.Status.EffectSummary = &agentsv1alpha1.AgentRunExternalEffectSummaryStatus{
+		Outcome:                agentsv1alpha1.AgentRunExternalEffectOutcomePartial,
+		Completeness:           agentsv1alpha1.AgentRunExternalEffectCompletenessUnknown,
+		ReconciliationRequired: true,
+		ReceiptsTruncated:      true,
+		Summary:                "The deadline interrupted final receipt reporting.",
+	}
+	run.Status.Effects = []agentsv1alpha1.AgentRunExternalEffectReceipt{{
+		OperationID: "push-master-001",
+		Kind:        "git.ref.update",
+		State:       agentsv1alpha1.AgentRunExternalEffectStateConfirmed,
+		Target:      "github:HazyForge/anvil-primaris:refs/heads/master",
+		ExternalRef: "f7a6f57b",
+	}}
+	run.Status.Failure = &agentsv1alpha1.AgentRunFailureStatus{
+		Reason:  agentsv1alpha1.AgentRunFailureReasonDeadlineExceeded,
+		Message: "Job exceeded its active deadline.",
+	}
+
+	backend := &fakeBackend{defaultNamespace: "agents", getRun: run, runs: []agentsv1alpha1.AgentRun{*run}}
+	var listOutput strings.Builder
+	if err := testApp(backend, &listOutput).Run(context.Background(), []string{"run", "list"}); err != nil {
+		t.Fatalf("list returned error: %v", err)
+	}
+	for _, expected := range []string{"PHASE", "EFFECTS", "Failed", "Partial"} {
+		if !strings.Contains(listOutput.String(), expected) {
+			t.Fatalf("list output missing %q:\n%s", expected, listOutput.String())
+		}
+	}
+
+	var summaryOutput strings.Builder
+	if err := testApp(backend, &summaryOutput).Run(context.Background(), []string{"run", "get", run.Name}); err != nil {
+		t.Fatalf("get returned error: %v", err)
+	}
+	for _, expected := range []string{
+		"Phase: Failed",
+		"External effects:",
+		"Outcome: Partial",
+		"Completeness: Unknown",
+		"Reconciliation required: true",
+		"Receipts truncated: true",
+		"Summary: The deadline interrupted final receipt reporting.",
+		"push-master-001 kind=git.ref.update state=Confirmed",
+		"external-ref=f7a6f57b",
+		"Failure:",
+		"Reason: DeadlineExceeded",
+		"Message: Job exceeded its active deadline.",
+	} {
+		if !strings.Contains(summaryOutput.String(), expected) {
+			t.Fatalf("summary output missing %q:\n%s", expected, summaryOutput.String())
+		}
+	}
+}
+
 func TestRunGetJSONIncludesStatus(t *testing.T) {
 	backend := &fakeBackend{defaultNamespace: "agents", getRun: testRun()}
 	var output strings.Builder
