@@ -2921,6 +2921,8 @@ spec:
                     - Partial
                     - Uncertain
                     type: string
+                  receiptsInvalid:
+                    type: boolean
                   receiptsTruncated:
                     type: boolean
                   reconciliationRequired:
@@ -3176,6 +3178,8 @@ spec:
                           - Partial
                           - Uncertain
                           type: string
+                        receiptsInvalid:
+                          type: boolean
                         receiptsTruncated:
                           type: boolean
                         reconciliationRequired:

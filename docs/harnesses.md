@@ -154,7 +154,10 @@ anvil-agent-status effect-summary --completeness Complete
 occur. A timeout, connection loss, or missing response leaves the operation in
 Started state. The controller derives `None`, `Confirmed`, `Partial`, or
 `Uncertain` from the merged receipts and records whether reconciliation is
-required; the harness does not choose that outcome.
+required; the harness does not choose that outcome. Receipts missing their
+identity fields, confirmation readback reference, or timestamps are rejected.
+The same operation ID cannot change kind, target, digests, idempotency key, or
+provider reference; conflicting evidence makes the ledger Incomplete.
 
 `Complete` is valid only when every attempted effect has a terminal receipt.
 Use `Incomplete` when known operations remain open and `Unknown` when the
@@ -162,6 +165,12 @@ harness cannot establish ledger completeness. A terminal run without a final
 summary never proves that no changes happened. Do not automatically retry a
 Partial or Uncertain run; create a new observe/reconciliation run and read the
 external systems first.
+
+For failed Jobs, `status.failure` preserves the exact Job reason and the agent
+container reason and exit code when available. The long-standing `Ready`
+condition keeps the compatibility reason `HarnessFailed` for non-deadline
+failures; consumers that need the precise cause must read `status.failure`.
+`DeadlineExceeded` remains explicit on both surfaces.
 
 ## Source Preparation
 

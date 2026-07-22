@@ -913,6 +913,7 @@ type AgentRunExternalEffectSummaryStatus struct {
 	ReconciliationRequired bool                               `json:"reconciliationRequired,omitempty"`
 	Summary                string                             `json:"summary,omitempty"`
 	ReceiptsTruncated      bool                               `json:"receiptsTruncated,omitempty"`
+	ReceiptsInvalid        bool                               `json:"receiptsInvalid,omitempty"`
 }
 
 type AgentRunStatusReport struct {

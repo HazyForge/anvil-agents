@@ -237,6 +237,7 @@ func TestRunListAndSummaryShowExternalEffectsIndependentlyFromPhase(t *testing.T
 		Completeness:           agentsv1alpha1.AgentRunExternalEffectCompletenessUnknown,
 		ReconciliationRequired: true,
 		ReceiptsTruncated:      true,
+		ReceiptsInvalid:        true,
 		Summary:                "The deadline interrupted final receipt reporting.",
 	}
 	run.Status.Effects = []agentsv1alpha1.AgentRunExternalEffectReceipt{{
@@ -273,6 +274,7 @@ func TestRunListAndSummaryShowExternalEffectsIndependentlyFromPhase(t *testing.T
 		"Completeness: Unknown",
 		"Reconciliation required: true",
 		"Receipts truncated: true",
+		"Receipts invalid: true",
 		"Summary: The deadline interrupted final receipt reporting.",
 		"push-master-001 kind=git.ref.update state=Confirmed",
 		"external-ref=f7a6f57b",
@@ -283,6 +285,23 @@ func TestRunListAndSummaryShowExternalEffectsIndependentlyFromPhase(t *testing.T
 		if !strings.Contains(summaryOutput.String(), expected) {
 			t.Fatalf("summary output missing %q:\n%s", expected, summaryOutput.String())
 		}
+	}
+}
+
+func TestRunListShowsUnreportedExternalEffectLedger(t *testing.T) {
+	run := testRun()
+	run.Status.Conditions = []metav1.Condition{{
+		Type:   "ExternalEffectsReported",
+		Status: metav1.ConditionUnknown,
+		Reason: "NotReported",
+	}}
+	backend := &fakeBackend{defaultNamespace: "agents", runs: []agentsv1alpha1.AgentRun{*run}}
+	var output strings.Builder
+	if err := testApp(backend, &output).Run(context.Background(), []string{"run", "list"}); err != nil {
+		t.Fatalf("list returned error: %v", err)
+	}
+	if !strings.Contains(output.String(), "Unreported") {
+		t.Fatalf("list hid unreported external-effect evidence:\n%s", output.String())
 	}
 }
 

@@ -42,6 +42,7 @@ const (
 	agentRunReady                                   = "Ready"
 	agentRunExternalEffectsReported                 = "ExternalEffectsReported"
 	agentRunMaxExternalEffectReceipts               = 100
+	agentRunMaxExternalEffectReceiptBytes           = 256 * 1024
 	agentRunDefaultCodexImage                       = "anvil-agent-run-codex:dev"
 	agentRunDefaultOpenCodeImage                    = "anvil-agent-run-opencode:dev"
 	agentRunDefaultHermesAgentImage                 = "anvil-agent-run-hermes:dev"
@@ -161,7 +162,7 @@ func (r *AgentRunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		status.CompletedAt = &now
 		agentRunSetFailure(&status, controlv1alpha1.AgentRunFailureSourceController, "HarnessJobMissing", missingJobMessage)
 		agentRunFinalizeExternalEffectSummary(&status)
-		status.Result = agentRunRawResult(status.Output, status.PullRequestURL, status.Decision, status.Reports, status.Failure, status.EffectSummary, status.Effects)
+		status.Result = agentRunRawResult(status.Output, status.PullRequestURL, status.Decision, status.Reports)
 		apimeta.SetStatusCondition(&status.Conditions, metav1.Condition{
 			Type:               agentRunReady,
 			Status:             metav1.ConditionFalse,
@@ -508,10 +509,10 @@ func (r *AgentRunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		status.RunnerNode = runnerPod.Spec.NodeName
 		if logs, err := r.readAgentRunRunnerLogs(ctx, runnerPod.Namespace, runnerPod.Name); err == nil {
 			agentRunApplyStatusReports(&status, agentRunStatusReportsFromOutput(logs))
-			effects, effectSummary := agentRunExternalEffectsFromOutput(logs)
-			agentRunApplyExternalEffects(&status, effects, effectSummary)
+			effects, effectSummary, invalidEffectEvidence := agentRunExternalEffectsFromOutput(logs)
+			agentRunApplyExternalEffects(&status, effects, effectSummary, invalidEffectEvidence)
 			status.Output = agentRunTrimOutput(logs)
-			status.Result = agentRunRawResult(status.Output, status.PullRequestURL, status.Decision, status.Reports, status.Failure, status.EffectSummary, status.Effects)
+			status.Result = agentRunRawResult(status.Output, status.PullRequestURL, status.Decision, status.Reports)
 		}
 	}
 
@@ -527,7 +528,7 @@ func (r *AgentRunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 			Summary:      "The harness container never started, so no external effects were possible.",
 		}
 		agentRunFinalizeExternalEffectSummary(&status)
-		status.Result = agentRunRawResult(status.Output, status.PullRequestURL, status.Decision, status.Reports, status.Failure, status.EffectSummary, status.Effects)
+		status.Result = agentRunRawResult(status.Output, status.PullRequestURL, status.Decision, status.Reports)
 		apimeta.SetStatusCondition(&status.Conditions, metav1.Condition{
 			Type:               agentRunReady,
 			Status:             metav1.ConditionFalse,
@@ -557,7 +558,7 @@ func (r *AgentRunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		if agentRunReportsNeedHuman(status.Reports) {
 			status.Phase = controlv1alpha1.AgentRunPhaseNeedsHuman
 			agentRunFinalizeExternalEffectSummary(&status)
-			status.Result = agentRunRawResult(status.Output, status.PullRequestURL, status.Decision, status.Reports, status.Failure, status.EffectSummary, status.Effects)
+			status.Result = agentRunRawResult(status.Output, status.PullRequestURL, status.Decision, status.Reports)
 			apimeta.SetStatusCondition(&status.Conditions, metav1.Condition{
 				Type:               agentRunReady,
 				Status:             metav1.ConditionFalse,
@@ -571,7 +572,7 @@ func (r *AgentRunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		}
 		status.Phase = controlv1alpha1.AgentRunPhaseSucceeded
 		agentRunFinalizeExternalEffectSummary(&status)
-		status.Result = agentRunRawResult(status.Output, status.PullRequestURL, status.Decision, status.Reports, status.Failure, status.EffectSummary, status.Effects)
+		status.Result = agentRunRawResult(status.Output, status.PullRequestURL, status.Decision, status.Reports)
 		apimeta.SetStatusCondition(&status.Conditions, metav1.Condition{
 			Type:               agentRunReady,
 			Status:             metav1.ConditionTrue,
@@ -588,7 +589,7 @@ func (r *AgentRunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		status.Failure = agentRunJobFailureStatus(job, runnerPod)
 		status.Error = status.Failure.Message
 		agentRunFinalizeExternalEffectSummary(&status)
-		status.Result = agentRunRawResult(status.Output, status.PullRequestURL, status.Decision, status.Reports, status.Failure, status.EffectSummary, status.Effects)
+		status.Result = agentRunRawResult(status.Output, status.PullRequestURL, status.Decision, status.Reports)
 		apimeta.SetStatusCondition(&status.Conditions, metav1.Condition{
 			Type:               agentRunReady,
 			Status:             metav1.ConditionFalse,
@@ -605,7 +606,7 @@ func (r *AgentRunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		status.Error = ""
 		status.Failure = nil
 		agentRunFinalizeExternalEffectSummary(&status)
-		status.Result = agentRunRawResult(status.Output, status.PullRequestURL, status.Decision, status.Reports, status.Failure, status.EffectSummary, status.Effects)
+		status.Result = agentRunRawResult(status.Output, status.PullRequestURL, status.Decision, status.Reports)
 		apimeta.SetStatusCondition(&status.Conditions, metav1.Condition{
 			Type:               agentRunReady,
 			Status:             metav1.ConditionFalse,
@@ -3732,15 +3733,16 @@ func agentRunOutputSummary(output string) string {
 	return summary
 }
 
-func agentRunRawResult(output, pullRequestURL string, decision *controlv1alpha1.AgentRunDecisionStatus, reports []controlv1alpha1.AgentRunStatusReport, failure *controlv1alpha1.AgentRunFailureStatus, effectSummary *controlv1alpha1.AgentRunExternalEffectSummaryStatus, effects []controlv1alpha1.AgentRunExternalEffectReceipt) runtime.RawExtension {
+func agentRunRawResult(output, pullRequestURL string, decision *controlv1alpha1.AgentRunDecisionStatus, reports []controlv1alpha1.AgentRunStatusReport) runtime.RawExtension {
+	// Failure and external-effect evidence are first-class status fields. Do not
+	// duplicate them into the compatibility result blob: receipts are bounded by
+	// serialized size so the terminal status patch remains safely below the
+	// Kubernetes object limit.
 	raw, err := json.Marshal(map[string]any{
 		"output":         strings.TrimSpace(output),
 		"pullRequestURL": strings.TrimSpace(pullRequestURL),
 		"decision":       decision,
 		"reports":        reports,
-		"failure":        failure,
-		"effectSummary":  effectSummary,
-		"effects":        effects,
 	})
 	if err != nil {
 		return runtime.RawExtension{}
@@ -3749,7 +3751,21 @@ func agentRunRawResult(output, pullRequestURL string, decision *controlv1alpha1.
 }
 
 func agentRunStatusReportsFromOutput(output string) []controlv1alpha1.AgentRunStatusReport {
-	return agentRunTrimStatusReports(agentRunStatusReportsFromOutputUntrimmed(output))
+	reports := agentRunStatusReportsFromOutputUntrimmed(output)
+	generic := make([]controlv1alpha1.AgentRunStatusReport, 0, len(reports))
+	for _, report := range reports {
+		if agentRunStatusReportIsExternalEffect(report) {
+			continue
+		}
+		generic = append(generic, report)
+	}
+	return agentRunTrimStatusReports(generic)
+}
+
+func agentRunStatusReportIsExternalEffect(report controlv1alpha1.AgentRunStatusReport) bool {
+	return strings.EqualFold(strings.TrimSpace(report.Type), "effect") ||
+		strings.EqualFold(strings.TrimSpace(report.Type), "effectSummary") ||
+		report.Effect != nil || report.EffectSummary != nil
 }
 
 func agentRunStatusReportsFromOutputUntrimmed(output string) []controlv1alpha1.AgentRunStatusReport {
@@ -3811,8 +3827,9 @@ func agentRunNormalizeStatusReport(report controlv1alpha1.AgentRunStatusReport) 
 	report.ResidualRisk = agentRunLimitString(strings.TrimSpace(report.ResidualRisk), 1000)
 	report.HumanFollowUp = agentRunLimitString(strings.TrimSpace(report.HumanFollowUp), 1000)
 	if report.Effect != nil {
+		identityValid := agentRunExternalEffectIdentityLengthsValid(*report.Effect)
 		normalized := agentRunNormalizeExternalEffect(*report.Effect)
-		if normalized.OperationID == "" || normalized.State == "" {
+		if !identityValid || normalized.OperationID == "" || normalized.State == "" {
 			report.Effect = nil
 		} else {
 			report.Effect = &normalized
@@ -3832,11 +3849,17 @@ func agentRunNormalizeStatusReport(report controlv1alpha1.AgentRunStatusReport) 
 	return report
 }
 
-func agentRunExternalEffectsFromOutput(output string) ([]controlv1alpha1.AgentRunExternalEffectReceipt, *controlv1alpha1.AgentRunExternalEffectSummaryStatus) {
+func agentRunExternalEffectsFromOutput(output string) ([]controlv1alpha1.AgentRunExternalEffectReceipt, *controlv1alpha1.AgentRunExternalEffectSummaryStatus, bool) {
 	receipts := []controlv1alpha1.AgentRunExternalEffectReceipt{}
 	var summary *controlv1alpha1.AgentRunExternalEffectSummaryStatus
+	invalidEvidence := false
 	for _, report := range agentRunStatusReportsFromOutputUntrimmed(output) {
-		if report.Effect != nil {
+		isEffect := strings.EqualFold(strings.TrimSpace(report.Type), "effect")
+		isSummary := strings.EqualFold(strings.TrimSpace(report.Type), "effectSummary")
+		switch {
+		case isEffect && (report.Effect == nil || report.EffectSummary != nil):
+			invalidEvidence = true
+		case isEffect:
 			receipt := *report.Effect
 			if receipt.StartedAt == nil && report.ObservedAt != nil && receipt.State == controlv1alpha1.AgentRunExternalEffectStateStarted {
 				receipt.StartedAt = report.ObservedAt.DeepCopy()
@@ -3847,21 +3870,28 @@ func agentRunExternalEffectsFromOutput(output string) ([]controlv1alpha1.AgentRu
 			if receipt.VerifiedAt == nil && report.ObservedAt != nil && receipt.State == controlv1alpha1.AgentRunExternalEffectStateConfirmed {
 				receipt.VerifiedAt = report.ObservedAt.DeepCopy()
 			}
+			if !agentRunExternalEffectReceiptValid(receipt) {
+				invalidEvidence = true
+				continue
+			}
 			receipts = append(receipts, receipt)
-		}
-		if report.EffectSummary != nil {
+		case isSummary && (report.EffectSummary == nil || report.Effect != nil):
+			invalidEvidence = true
+		case isSummary:
 			value := *report.EffectSummary
 			summary = &value
+		case report.Effect != nil || report.EffectSummary != nil:
+			invalidEvidence = true
 		}
 	}
-	return receipts, summary
+	return receipts, summary, invalidEvidence
 }
 
-func agentRunApplyExternalEffects(status *controlv1alpha1.AgentRunStatus, receipts []controlv1alpha1.AgentRunExternalEffectReceipt, reportedSummary *controlv1alpha1.AgentRunExternalEffectSummaryStatus) {
+func agentRunApplyExternalEffects(status *controlv1alpha1.AgentRunStatus, receipts []controlv1alpha1.AgentRunExternalEffectReceipt, reportedSummary *controlv1alpha1.AgentRunExternalEffectSummaryStatus, invalidEvidence bool) {
 	if status == nil {
 		return
 	}
-	merged, truncated := agentRunMergeExternalEffects(status.Effects, receipts)
+	merged, truncated, identityConflict := agentRunMergeExternalEffects(status.Effects, receipts)
 	status.Effects = merged
 	if reportedSummary != nil {
 		if status.EffectSummary == nil {
@@ -3870,33 +3900,44 @@ func agentRunApplyExternalEffects(status *controlv1alpha1.AgentRunStatus, receip
 		status.EffectSummary.Completeness = reportedSummary.Completeness
 		status.EffectSummary.Summary = reportedSummary.Summary
 	}
-	if truncated || (status.EffectSummary != nil && status.EffectSummary.ReceiptsTruncated) {
+	if truncated || invalidEvidence || identityConflict || (status.EffectSummary != nil && (status.EffectSummary.ReceiptsTruncated || status.EffectSummary.ReceiptsInvalid)) {
 		if status.EffectSummary == nil {
 			status.EffectSummary = &controlv1alpha1.AgentRunExternalEffectSummaryStatus{}
 		}
 		status.EffectSummary.Completeness = controlv1alpha1.AgentRunExternalEffectCompletenessIncomplete
-		status.EffectSummary.ReceiptsTruncated = true
+		status.EffectSummary.ReceiptsTruncated = status.EffectSummary.ReceiptsTruncated || truncated
+		status.EffectSummary.ReceiptsInvalid = status.EffectSummary.ReceiptsInvalid || invalidEvidence || identityConflict
+		if status.EffectSummary.Summary == "" && status.EffectSummary.ReceiptsInvalid {
+			status.EffectSummary.Summary = "One or more external-effect receipts were invalid or changed identity and could not be trusted."
+		}
 	}
 	agentRunFinalizeExternalEffectSummary(status)
 }
 
-func agentRunMergeExternalEffects(existing, incoming []controlv1alpha1.AgentRunExternalEffectReceipt) ([]controlv1alpha1.AgentRunExternalEffectReceipt, bool) {
+func agentRunMergeExternalEffects(existing, incoming []controlv1alpha1.AgentRunExternalEffectReceipt) ([]controlv1alpha1.AgentRunExternalEffectReceipt, bool, bool) {
 	merged := make([]controlv1alpha1.AgentRunExternalEffectReceipt, 0, len(existing)+len(incoming))
 	indexes := make(map[string]int, len(existing)+len(incoming))
+	identityConflict := false
 	for _, receipt := range append(append([]controlv1alpha1.AgentRunExternalEffectReceipt(nil), existing...), incoming...) {
 		receipt = agentRunNormalizeExternalEffect(receipt)
-		if receipt.OperationID == "" || receipt.State == "" {
+		if !agentRunExternalEffectReceiptValid(receipt) {
+			identityConflict = true
 			continue
 		}
 		if index, ok := indexes[receipt.OperationID]; ok {
+			if agentRunExternalEffectIdentityConflicts(merged[index], receipt) {
+				identityConflict = true
+				continue
+			}
 			merged[index] = agentRunMergeExternalEffect(merged[index], receipt)
 			continue
 		}
 		indexes[receipt.OperationID] = len(merged)
 		merged = append(merged, receipt)
 	}
-	if len(merged) <= agentRunMaxExternalEffectReceipts {
-		return merged, false
+	serialized, err := json.Marshal(merged)
+	if err == nil && len(merged) <= agentRunMaxExternalEffectReceipts && len(serialized) <= agentRunMaxExternalEffectReceiptBytes {
+		return merged, false, identityConflict
 	}
 	// Retain unresolved work first, then the newest terminal receipts. Sorting
 	// makes the bounded subset stable when later log reads contain overlapping or
@@ -3914,7 +3955,25 @@ func agentRunMergeExternalEffects(existing, incoming []controlv1alpha1.AgentRunE
 		}
 		return merged[i].OperationID < merged[j].OperationID
 	})
-	return append([]controlv1alpha1.AgentRunExternalEffectReceipt(nil), merged[:agentRunMaxExternalEffectReceipts]...), true
+	retained := make([]controlv1alpha1.AgentRunExternalEffectReceipt, 0, min(len(merged), agentRunMaxExternalEffectReceipts))
+	serializedBytes := 2 // JSON array brackets.
+	for _, receipt := range merged {
+		encoded, err := json.Marshal(receipt)
+		if err != nil {
+			identityConflict = true
+			continue
+		}
+		separatorBytes := 0
+		if len(retained) > 0 {
+			separatorBytes = 1
+		}
+		if len(retained) >= agentRunMaxExternalEffectReceipts || serializedBytes+separatorBytes+len(encoded) > agentRunMaxExternalEffectReceiptBytes {
+			continue
+		}
+		retained = append(retained, receipt)
+		serializedBytes += separatorBytes + len(encoded)
+	}
+	return retained, len(retained) != len(merged), identityConflict
 }
 
 func agentRunMergeExternalEffect(current, incoming controlv1alpha1.AgentRunExternalEffectReceipt) controlv1alpha1.AgentRunExternalEffectReceipt {
@@ -3988,6 +4047,63 @@ func agentRunNormalizeExternalEffect(receipt controlv1alpha1.AgentRunExternalEff
 	return receipt
 }
 
+func agentRunExternalEffectReceiptValid(receipt controlv1alpha1.AgentRunExternalEffectReceipt) bool {
+	if receipt.OperationID == "" || receipt.Kind == "" || receipt.Target == "" || receipt.IntentDigest == "" || receipt.InputDigest == "" || receipt.IdempotencyKey == "" || receipt.State == "" {
+		return false
+	}
+	switch receipt.State {
+	case controlv1alpha1.AgentRunExternalEffectStateStarted:
+		return receipt.StartedAt != nil
+	case controlv1alpha1.AgentRunExternalEffectStateConfirmed:
+		return receipt.ExternalRef != "" && receipt.CompletedAt != nil && receipt.VerifiedAt != nil
+	case controlv1alpha1.AgentRunExternalEffectStateFailed:
+		return receipt.Message != "" && receipt.CompletedAt != nil
+	default:
+		return false
+	}
+}
+
+func agentRunExternalEffectIdentityLengthsValid(receipt controlv1alpha1.AgentRunExternalEffectReceipt) bool {
+	limits := []struct {
+		value string
+		max   int
+	}{
+		{receipt.OperationID, 200},
+		{receipt.Kind, 128},
+		{receipt.Target, 500},
+		{receipt.IntentDigest, 128},
+		{receipt.InputDigest, 128},
+		{receipt.IdempotencyKey, 200},
+		{receipt.ExternalRef, 500},
+		{receipt.Actor, 200},
+		{receipt.Executor, 200},
+	}
+	for _, item := range limits {
+		if len(strings.TrimSpace(item.value)) > item.max {
+			return false
+		}
+	}
+	return true
+}
+
+func agentRunExternalEffectIdentityConflicts(current, incoming controlv1alpha1.AgentRunExternalEffectReceipt) bool {
+	pairs := [][2]string{
+		{current.Kind, incoming.Kind},
+		{current.Target, incoming.Target},
+		{current.IntentDigest, incoming.IntentDigest},
+		{current.InputDigest, incoming.InputDigest},
+		{current.IdempotencyKey, incoming.IdempotencyKey},
+		{current.Actor, incoming.Actor},
+		{current.Executor, incoming.Executor},
+	}
+	for _, pair := range pairs {
+		if pair[0] != "" && pair[1] != "" && pair[0] != pair[1] {
+			return true
+		}
+	}
+	return current.ExternalRef != "" && incoming.ExternalRef != "" && current.ExternalRef != incoming.ExternalRef
+}
+
 func agentRunNormalizeExternalEffectSummary(summary controlv1alpha1.AgentRunExternalEffectSummaryStatus) controlv1alpha1.AgentRunExternalEffectSummaryStatus {
 	switch strings.ToLower(strings.TrimSpace(string(summary.Completeness))) {
 	case strings.ToLower(string(controlv1alpha1.AgentRunExternalEffectCompletenessComplete)):
@@ -4005,6 +4121,7 @@ func agentRunNormalizeExternalEffectSummary(summary controlv1alpha1.AgentRunExte
 	summary.ReconciliationRequired = false
 	summary.Summary = agentRunLimitString(strings.TrimSpace(summary.Summary), 1000)
 	summary.ReceiptsTruncated = false
+	summary.ReceiptsInvalid = false
 	return summary
 }
 
@@ -4041,12 +4158,14 @@ func agentRunFinalizeExternalEffectSummary(status *controlv1alpha1.AgentRunStatu
 	var reportedCompleteness controlv1alpha1.AgentRunExternalEffectCompleteness
 	var reportedSummary string
 	receiptsTruncated := false
+	receiptsInvalid := false
 	if status.EffectSummary != nil {
 		reportedCompleteness = status.EffectSummary.Completeness
 		reportedSummary = status.EffectSummary.Summary
 		receiptsTruncated = status.EffectSummary.ReceiptsTruncated
+		receiptsInvalid = status.EffectSummary.ReceiptsInvalid
 	}
-	if receiptsTruncated {
+	if receiptsTruncated || receiptsInvalid {
 		reportedCompleteness = controlv1alpha1.AgentRunExternalEffectCompletenessIncomplete
 	}
 	started, confirmed, failed := 0, 0, 0
@@ -4058,6 +4177,12 @@ func agentRunFinalizeExternalEffectSummary(status *controlv1alpha1.AgentRunStatu
 			confirmed++
 		case controlv1alpha1.AgentRunExternalEffectStateFailed:
 			failed++
+		}
+	}
+	if started > 0 && reportedCompleteness == controlv1alpha1.AgentRunExternalEffectCompletenessComplete {
+		reportedCompleteness = controlv1alpha1.AgentRunExternalEffectCompletenessIncomplete
+		if reportedSummary == "" {
+			reportedSummary = "The harness reported a complete ledger while external-effect operations were still open."
 		}
 	}
 
@@ -4074,14 +4199,15 @@ func agentRunFinalizeExternalEffectSummary(status *controlv1alpha1.AgentRunStatu
 		Completeness:      controlv1alpha1.AgentRunExternalEffectCompletenessUnknown,
 		Summary:           reportedSummary,
 		ReceiptsTruncated: receiptsTruncated,
+		ReceiptsInvalid:   receiptsInvalid,
 	}
 	if reportedCompleteness != "" {
 		summary.Completeness = reportedCompleteness
 	}
 	switch {
-	case confirmed > 0 && (started > 0 || failed > 0 || status.Phase == controlv1alpha1.AgentRunPhaseFailed):
+	case confirmed > 0 && (started > 0 || failed > 0 || receiptsTruncated || receiptsInvalid || summary.Completeness == controlv1alpha1.AgentRunExternalEffectCompletenessIncomplete || status.Phase == controlv1alpha1.AgentRunPhaseFailed):
 		summary.Outcome = controlv1alpha1.AgentRunExternalEffectOutcomePartial
-	case receiptsTruncated || summary.Completeness == controlv1alpha1.AgentRunExternalEffectCompletenessIncomplete:
+	case receiptsTruncated || receiptsInvalid || summary.Completeness == controlv1alpha1.AgentRunExternalEffectCompletenessIncomplete:
 		summary.Outcome = controlv1alpha1.AgentRunExternalEffectOutcomeUncertain
 	case started > 0:
 		summary.Outcome = controlv1alpha1.AgentRunExternalEffectOutcomeUncertain
@@ -4144,7 +4270,7 @@ func agentRunJobFailureStatus(job *batchv1.Job, runnerPod *corev1.Pod) *controlv
 		Message: message,
 	}
 	for _, condition := range job.Status.Conditions {
-		if condition.Type != batchv1.JobFailed {
+		if condition.Type != batchv1.JobFailed || condition.Status != corev1.ConditionTrue {
 			continue
 		}
 		if reason := strings.TrimSpace(condition.Reason); reason != "" {

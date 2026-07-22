@@ -39,7 +39,7 @@ func jobFailureMessage(job *batchv1.Job) string {
 		return ""
 	}
 	for _, condition := range job.Status.Conditions {
-		if condition.Type == batchv1.JobFailed && strings.TrimSpace(condition.Message) != "" {
+		if condition.Type == batchv1.JobFailed && condition.Status == corev1.ConditionTrue && strings.TrimSpace(condition.Message) != "" {
 			return strings.TrimSpace(condition.Message)
 		}
 	}

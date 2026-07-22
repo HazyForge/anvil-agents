@@ -670,7 +670,7 @@ func writeRunTable(writer io.Writer, runs []agentsv1alpha1.AgentRun, allNamespac
 		fmt.Fprintf(table, "%s\t%s\t%s\t%s\t%s\t%s/%s\t%s\n",
 			run.Name,
 			valueOrDash(string(run.Status.Phase)),
-			effectOutcome(run.Status.EffectSummary),
+			effectOutcome(run.Status),
 			valueOrDash(run.Status.Backend),
 			valueOrDash(run.Status.Intent),
 			valueOrDash(run.Spec.SourceRef.Kind),
@@ -716,6 +716,7 @@ func writeRunSummary(writer io.Writer, run *agentsv1alpha1.AgentRun, includeOutp
 		fmt.Fprintf(writer, "    Completeness: %s\n", valueOrDash(string(run.Status.EffectSummary.Completeness)))
 		fmt.Fprintf(writer, "    Reconciliation required: %t\n", run.Status.EffectSummary.ReconciliationRequired)
 		fmt.Fprintf(writer, "    Receipts truncated: %t\n", run.Status.EffectSummary.ReceiptsTruncated)
+		fmt.Fprintf(writer, "    Receipts invalid: %t\n", run.Status.EffectSummary.ReceiptsInvalid)
 		if run.Status.EffectSummary.Summary != "" {
 			fmt.Fprintf(writer, "    Summary: %s\n", terminalSafe(run.Status.EffectSummary.Summary))
 		}
@@ -753,11 +754,16 @@ func writeRunSummary(writer io.Writer, run *agentsv1alpha1.AgentRun, includeOutp
 	}
 }
 
-func effectOutcome(summary *agentsv1alpha1.AgentRunExternalEffectSummaryStatus) string {
-	if summary == nil {
-		return "-"
+func effectOutcome(status agentsv1alpha1.AgentRunStatus) string {
+	if status.EffectSummary != nil {
+		return valueOrDash(string(status.EffectSummary.Outcome))
 	}
-	return valueOrDash(string(summary.Outcome))
+	for _, condition := range status.Conditions {
+		if condition.Type == "ExternalEffectsReported" {
+			return "Unreported"
+		}
+	}
+	return "-"
 }
 
 func verifyJob(run *agentsv1alpha1.AgentRun, job *batchv1.Job) error {

@@ -90,7 +90,7 @@ func TestAgentRunStatusReportsFromOutputAppliesDecision(t *testing.T) {
 		t.Fatalf("latest human follow-up = %q, want %q", got, want)
 	}
 
-	raw := agentRunRawResult(output, status.PullRequestURL, status.Decision, status.Reports, status.Failure, status.EffectSummary, status.Effects)
+	raw := agentRunRawResult(output, status.PullRequestURL, status.Decision, status.Reports)
 	var result struct {
 		PullRequestURL string                                  `json:"pullRequestURL"`
 		Decision       *controlv1alpha1.AgentRunDecisionStatus `json:"decision"`
@@ -113,16 +113,16 @@ func TestAgentRunExternalEffectsMergeMonotonicallyAcrossLogReads(t *testing.T) {
 	startedOutput := `ANVIL_AGENT_RUN_STATUS_JSON={"type":"effect","observedAt":"2026-07-20T09:45:00Z","effect":{"operationID":"push-master-7f8","kind":"git.ref.update","state":"Started","target":"HazyForge/anvil-primaris:refs/heads/master","intentDigest":"sha256:intent","inputDigest":"sha256:commit-and-ref","idempotencyKey":"manager-run-1:push-master"}}`
 	confirmedOutput := strings.Join([]string{
 		startedOutput,
-		`ANVIL_AGENT_RUN_STATUS_JSON={"type":"effect","observedAt":"2026-07-20T09:46:00Z","effect":{"operationID":"push-master-7f8","kind":"git.ref.update","state":"Confirmed","externalRef":"f7a6f57b","externalURL":"https://github.com/HazyForge/anvil-primaris/commit/f7a6f57b","actor":"manager","executor":"github","message":"remote ref read back"}}`,
+		`ANVIL_AGENT_RUN_STATUS_JSON={"type":"effect","observedAt":"2026-07-20T09:46:00Z","effect":{"operationID":"push-master-7f8","kind":"git.ref.update","state":"Confirmed","target":"HazyForge/anvil-primaris:refs/heads/master","intentDigest":"sha256:intent","inputDigest":"sha256:commit-and-ref","idempotencyKey":"manager-run-1:push-master","externalRef":"f7a6f57b","externalURL":"https://github.com/HazyForge/anvil-primaris/commit/f7a6f57b","message":"remote ref read back"}}`,
 		// A repeated tail read must not create another receipt or regress it.
 		startedOutput,
 	}, "\n")
 
 	status := controlv1alpha1.AgentRunStatus{Phase: controlv1alpha1.AgentRunPhaseRunning, Intent: string(controlv1alpha1.AgentRunIntentProposeChange)}
-	effects, summary := agentRunExternalEffectsFromOutput(startedOutput)
-	agentRunApplyExternalEffects(&status, effects, summary)
-	effects, summary = agentRunExternalEffectsFromOutput(confirmedOutput)
-	agentRunApplyExternalEffects(&status, effects, summary)
+	effects, summary, invalidEvidence := agentRunExternalEffectsFromOutput(startedOutput)
+	agentRunApplyExternalEffects(&status, effects, summary, invalidEvidence)
+	effects, summary, invalidEvidence = agentRunExternalEffectsFromOutput(confirmedOutput)
+	agentRunApplyExternalEffects(&status, effects, summary, invalidEvidence)
 
 	if len(status.Effects) != 1 {
 		t.Fatalf("effects = %d, want 1: %#v", len(status.Effects), status.Effects)
@@ -249,12 +249,12 @@ func TestAgentRunEffectSummaryCompletenessRequiresExplicitFinalReport(t *testing
 	t.Parallel()
 
 	output := strings.Join([]string{
-		`ANVIL_AGENT_RUN_STATUS_JSON={"type":"effect","observedAt":"2026-07-20T09:46:00Z","effect":{"operationID":"build-1","kind":"artifact.build.submit","state":"Confirmed","externalRef":"artifactbuild/build-1"}}`,
+		`ANVIL_AGENT_RUN_STATUS_JSON={"type":"effect","observedAt":"2026-07-20T09:46:00Z","effect":{"operationID":"build-1","kind":"artifact.build.submit","state":"Confirmed","target":"anvilhub/manager-images","intentDigest":"sha256:intent","inputDigest":"sha256:build-spec","idempotencyKey":"run-1:build-1","externalRef":"artifactbuild/build-1"}}`,
 		`ANVIL_AGENT_RUN_STATUS_JSON={"type":"effectSummary","effectSummary":{"outcome":"None","completeness":"Complete","reconciliationRequired":true}}`,
 	}, "\n")
-	effects, reportedSummary := agentRunExternalEffectsFromOutput(output)
+	effects, reportedSummary, invalidEvidence := agentRunExternalEffectsFromOutput(output)
 	status := controlv1alpha1.AgentRunStatus{Phase: controlv1alpha1.AgentRunPhaseSucceeded, Intent: string(controlv1alpha1.AgentRunIntentProposeChange)}
-	agentRunApplyExternalEffects(&status, effects, reportedSummary)
+	agentRunApplyExternalEffects(&status, effects, reportedSummary, invalidEvidence)
 
 	if status.EffectSummary == nil {
 		t.Fatal("effect summary is nil")
@@ -272,16 +272,63 @@ func TestAgentRunEffectSummaryCompletenessRequiresExplicitFinalReport(t *testing
 	if condition == nil || condition.Status != metav1.ConditionTrue || condition.Reason != "Complete" {
 		t.Fatalf("external effects condition = %#v, want True/Complete", condition)
 	}
-	raw := agentRunRawResult("done", "", nil, nil, nil, status.EffectSummary, status.Effects)
-	var result struct {
-		EffectSummary *controlv1alpha1.AgentRunExternalEffectSummaryStatus `json:"effectSummary"`
-		Effects       []controlv1alpha1.AgentRunExternalEffectReceipt      `json:"effects"`
-	}
+	raw := agentRunRawResult("done", "", nil, nil)
+	var result map[string]json.RawMessage
 	if err := json.Unmarshal(raw.Raw, &result); err != nil {
 		t.Fatalf("unmarshal raw result: %v", err)
 	}
-	if result.EffectSummary == nil || result.EffectSummary.Outcome != controlv1alpha1.AgentRunExternalEffectOutcomeConfirmed || len(result.Effects) != 1 {
-		t.Fatalf("raw result omitted effect receipt fields: %#v", result)
+	if _, found := result["effectSummary"]; found {
+		t.Fatalf("raw result duplicated first-class effect summary: %#v", result)
+	}
+	if _, found := result["effects"]; found {
+		t.Fatalf("raw result duplicated first-class effect receipts: %#v", result)
+	}
+}
+
+func TestAgentRunInvalidConfirmedReceiptIsNotTrusted(t *testing.T) {
+	t.Parallel()
+
+	output := strings.Join([]string{
+		`ANVIL_AGENT_RUN_STATUS_JSON={"type":"effect","observedAt":"2026-07-20T09:46:00Z","effect":{"operationID":"push-1","state":"Confirmed","externalRef":"abc123"}}`,
+		`ANVIL_AGENT_RUN_STATUS_JSON={"type":"effectSummary","effectSummary":{"completeness":"Complete"}}`,
+	}, "\n")
+	receipts, reportedSummary, invalidEvidence := agentRunExternalEffectsFromOutput(output)
+	if !invalidEvidence {
+		t.Fatal("malformed confirmed receipt was accepted as valid evidence")
+	}
+	status := controlv1alpha1.AgentRunStatus{Phase: controlv1alpha1.AgentRunPhaseSucceeded, Intent: string(controlv1alpha1.AgentRunIntentProposeChange)}
+	agentRunApplyExternalEffects(&status, receipts, reportedSummary, invalidEvidence)
+
+	if len(status.Effects) != 0 {
+		t.Fatalf("invalid receipt persisted as trusted evidence: %#v", status.Effects)
+	}
+	if status.EffectSummary == nil || !status.EffectSummary.ReceiptsInvalid || status.EffectSummary.Completeness != controlv1alpha1.AgentRunExternalEffectCompletenessIncomplete {
+		t.Fatalf("effect summary = %#v, want invalid/incomplete", status.EffectSummary)
+	}
+	if status.EffectSummary.Outcome != controlv1alpha1.AgentRunExternalEffectOutcomeUncertain || !status.EffectSummary.ReconciliationRequired {
+		t.Fatalf("effect summary = %#v, want Uncertain reconciliation", status.EffectSummary)
+	}
+	if reports := agentRunStatusReportsFromOutput(output); len(reports) != 0 {
+		t.Fatalf("effect evidence leaked into generic reports/result: %#v", reports)
+	}
+}
+
+func TestAgentRunConflictingReceiptIdentityStaysUncertain(t *testing.T) {
+	t.Parallel()
+
+	output := strings.Join([]string{
+		`ANVIL_AGENT_RUN_STATUS_JSON={"type":"effect","observedAt":"2026-07-20T09:45:00Z","effect":{"operationID":"push-1","kind":"git.ref.update","state":"Started","target":"github:example/service:refs/heads/main","intentDigest":"sha256:intent","inputDigest":"sha256:commit","idempotencyKey":"run-1:push-1"}}`,
+		`ANVIL_AGENT_RUN_STATUS_JSON={"type":"effect","observedAt":"2026-07-20T09:46:00Z","effect":{"operationID":"push-1","kind":"git.ref.update","state":"Confirmed","target":"github:example/service:refs/heads/other","intentDigest":"sha256:intent","inputDigest":"sha256:commit","idempotencyKey":"run-1:push-1","externalRef":"abc123"}}`,
+	}, "\n")
+	receipts, reportedSummary, invalidEvidence := agentRunExternalEffectsFromOutput(output)
+	status := controlv1alpha1.AgentRunStatus{Phase: controlv1alpha1.AgentRunPhaseSucceeded, Intent: string(controlv1alpha1.AgentRunIntentProposeChange)}
+	agentRunApplyExternalEffects(&status, receipts, reportedSummary, invalidEvidence)
+
+	if len(status.Effects) != 1 || status.Effects[0].State != controlv1alpha1.AgentRunExternalEffectStateStarted || status.Effects[0].Target != "github:example/service:refs/heads/main" {
+		t.Fatalf("conflicting receipt retargeted the operation: %#v", status.Effects)
+	}
+	if status.EffectSummary == nil || !status.EffectSummary.ReceiptsInvalid || status.EffectSummary.Outcome != controlv1alpha1.AgentRunExternalEffectOutcomeUncertain {
+		t.Fatalf("identity conflict was not made uncertain: %#v", status.EffectSummary)
 	}
 }
 
@@ -310,16 +357,47 @@ func TestAgentRunCompleteEmptyEffectLedgerMeansNone(t *testing.T) {
 	}
 }
 
+func TestAgentRunOpenEffectOverridesCompleteLedgerClaim(t *testing.T) {
+	t.Parallel()
+
+	startedAt := metav1.Now()
+	status := controlv1alpha1.AgentRunStatus{
+		Phase: controlv1alpha1.AgentRunPhaseSucceeded,
+		Effects: []controlv1alpha1.AgentRunExternalEffectReceipt{{
+			OperationID:    "build-1",
+			Kind:           "artifact.build.submit",
+			State:          controlv1alpha1.AgentRunExternalEffectStateStarted,
+			Target:         "anvilhub/build-1",
+			IntentDigest:   "sha256:intent",
+			InputDigest:    "sha256:spec",
+			IdempotencyKey: "run-1:build-1",
+			StartedAt:      &startedAt,
+		}},
+		EffectSummary: &controlv1alpha1.AgentRunExternalEffectSummaryStatus{
+			Completeness: controlv1alpha1.AgentRunExternalEffectCompletenessComplete,
+		},
+	}
+	agentRunFinalizeExternalEffectSummary(&status)
+
+	if status.EffectSummary == nil || status.EffectSummary.Completeness != controlv1alpha1.AgentRunExternalEffectCompletenessIncomplete || status.EffectSummary.Outcome != controlv1alpha1.AgentRunExternalEffectOutcomeUncertain {
+		t.Fatalf("open effect accepted a complete ledger: %#v", status.EffectSummary)
+	}
+	condition := apimeta.FindStatusCondition(status.Conditions, agentRunExternalEffectsReported)
+	if condition == nil || condition.Status != metav1.ConditionFalse {
+		t.Fatalf("external effects condition = %#v, want False", condition)
+	}
+}
+
 func TestAgentRunExternalEffectsRemainStickyAcrossTruncatedLogReads(t *testing.T) {
 	t.Parallel()
 
 	status := controlv1alpha1.AgentRunStatus{Phase: controlv1alpha1.AgentRunPhaseRunning}
-	first := `ANVIL_AGENT_RUN_STATUS_JSON={"type":"effect","observedAt":"2026-07-20T09:45:00Z","effect":{"operationID":"push-1","kind":"git.ref.update","state":"Confirmed","externalRef":"abc123"}}`
-	secondTail := `ANVIL_AGENT_RUN_STATUS_JSON={"type":"effect","observedAt":"2026-07-20T09:47:00Z","effect":{"operationID":"build-1","kind":"artifact.build.submit","state":"Started"}}`
-	effects, summary := agentRunExternalEffectsFromOutput(first)
-	agentRunApplyExternalEffects(&status, effects, summary)
-	effects, summary = agentRunExternalEffectsFromOutput(secondTail)
-	agentRunApplyExternalEffects(&status, effects, summary)
+	first := `ANVIL_AGENT_RUN_STATUS_JSON={"type":"effect","observedAt":"2026-07-20T09:45:00Z","effect":{"operationID":"push-1","kind":"git.ref.update","state":"Confirmed","target":"github:example/service:refs/heads/main","intentDigest":"sha256:intent","inputDigest":"sha256:commit","idempotencyKey":"run-1:push-1","externalRef":"abc123"}}`
+	secondTail := `ANVIL_AGENT_RUN_STATUS_JSON={"type":"effect","observedAt":"2026-07-20T09:47:00Z","effect":{"operationID":"build-1","kind":"artifact.build.submit","state":"Started","target":"anvilhub/build-1","intentDigest":"sha256:intent","inputDigest":"sha256:spec","idempotencyKey":"run-1:build-1"}}`
+	effects, summary, invalidEvidence := agentRunExternalEffectsFromOutput(first)
+	agentRunApplyExternalEffects(&status, effects, summary, invalidEvidence)
+	effects, summary, invalidEvidence = agentRunExternalEffectsFromOutput(secondTail)
+	agentRunApplyExternalEffects(&status, effects, summary, invalidEvidence)
 
 	if len(status.Effects) != 2 {
 		t.Fatalf("effects = %#v, want receipts from both log windows", status.Effects)
@@ -342,14 +420,25 @@ func TestAgentRunExternalEffectRetentionIsBoundedAndConservative(t *testing.T) {
 		if i == 0 {
 			state = controlv1alpha1.AgentRunExternalEffectStateStarted
 		}
-		receipts = append(receipts, controlv1alpha1.AgentRunExternalEffectReceipt{
-			OperationID: fmt.Sprintf("operation-%03d", i),
-			State:       state,
-			StartedAt:   &at,
-		})
+		receipt := controlv1alpha1.AgentRunExternalEffectReceipt{
+			OperationID:    fmt.Sprintf("operation-%03d", i),
+			Kind:           "provider.mutate",
+			State:          state,
+			Target:         fmt.Sprintf("provider:target-%03d", i),
+			IntentDigest:   "sha256:intent",
+			InputDigest:    fmt.Sprintf("sha256:input-%03d", i),
+			IdempotencyKey: fmt.Sprintf("run-1:operation-%03d", i),
+			StartedAt:      &at,
+		}
+		if state == controlv1alpha1.AgentRunExternalEffectStateConfirmed {
+			receipt.ExternalRef = fmt.Sprintf("external-%03d", i)
+			receipt.CompletedAt = &at
+			receipt.VerifiedAt = &at
+		}
+		receipts = append(receipts, receipt)
 	}
 	status := controlv1alpha1.AgentRunStatus{Phase: controlv1alpha1.AgentRunPhaseRunning}
-	agentRunApplyExternalEffects(&status, receipts, &controlv1alpha1.AgentRunExternalEffectSummaryStatus{Completeness: controlv1alpha1.AgentRunExternalEffectCompletenessComplete})
+	agentRunApplyExternalEffects(&status, receipts, &controlv1alpha1.AgentRunExternalEffectSummaryStatus{Completeness: controlv1alpha1.AgentRunExternalEffectCompletenessComplete}, false)
 
 	if got, want := len(status.Effects), agentRunMaxExternalEffectReceipts; got != want {
 		t.Fatalf("retained effects = %d, want %d", got, want)
@@ -373,15 +462,52 @@ func TestAgentRunExternalEffectRetentionIsBoundedAndConservative(t *testing.T) {
 	}
 }
 
+func TestAgentRunExternalEffectRetentionHasSerializedByteBudget(t *testing.T) {
+	t.Parallel()
+
+	at := metav1.Now()
+	receipts := make([]controlv1alpha1.AgentRunExternalEffectReceipt, 0, agentRunMaxExternalEffectReceipts)
+	for i := 0; i < agentRunMaxExternalEffectReceipts; i++ {
+		receipts = append(receipts, controlv1alpha1.AgentRunExternalEffectReceipt{
+			OperationID:    fmt.Sprintf("large-%03d", i),
+			Kind:           "provider.mutate",
+			State:          controlv1alpha1.AgentRunExternalEffectStateConfirmed,
+			Target:         strings.Repeat("t", 500),
+			IntentDigest:   "sha256:intent",
+			InputDigest:    fmt.Sprintf("sha256:input-%03d", i),
+			IdempotencyKey: fmt.Sprintf("run-1:large-%03d", i),
+			ExternalRef:    strings.Repeat("r", 500),
+			ExternalURL:    "https://example.invalid/" + strings.Repeat("u", 900),
+			Actor:          strings.Repeat("a", 200),
+			Executor:       strings.Repeat("e", 200),
+			StartedAt:      &at,
+			CompletedAt:    &at,
+			VerifiedAt:     &at,
+			Message:        strings.Repeat("m", 2000),
+		})
+	}
+	status := controlv1alpha1.AgentRunStatus{Phase: controlv1alpha1.AgentRunPhaseSucceeded}
+	agentRunApplyExternalEffects(&status, receipts, &controlv1alpha1.AgentRunExternalEffectSummaryStatus{Completeness: controlv1alpha1.AgentRunExternalEffectCompletenessComplete}, false)
+
+	encoded, err := json.Marshal(status.Effects)
+	if err != nil {
+		t.Fatalf("marshal retained effects: %v", err)
+	}
+	if len(encoded) > agentRunMaxExternalEffectReceiptBytes {
+		t.Fatalf("retained effects use %d bytes, budget %d", len(encoded), agentRunMaxExternalEffectReceiptBytes)
+	}
+	if len(status.Effects) >= len(receipts) || status.EffectSummary == nil || !status.EffectSummary.ReceiptsTruncated {
+		t.Fatalf("byte budget did not truncate conservatively: effects=%d summary=%#v", len(status.Effects), status.EffectSummary)
+	}
+}
+
 func TestAgentRunJobFailureStatusRecognizesDeadlineExceeded(t *testing.T) {
 	t.Parallel()
 
-	job := &batchv1.Job{Status: batchv1.JobStatus{Conditions: []batchv1.JobCondition{{
-		Type:    batchv1.JobFailed,
-		Status:  corev1.ConditionTrue,
-		Reason:  "DeadlineExceeded",
-		Message: "Job was active longer than specified deadline",
-	}}}}
+	job := &batchv1.Job{Status: batchv1.JobStatus{Conditions: []batchv1.JobCondition{
+		{Type: batchv1.JobFailed, Status: corev1.ConditionFalse, Reason: "BackoffLimitExceeded", Message: "stale false condition"},
+		{Type: batchv1.JobFailed, Status: corev1.ConditionTrue, Reason: "DeadlineExceeded", Message: "Job was active longer than specified deadline"},
+	}}}
 	failure := agentRunJobFailureStatus(job, nil)
 	if got, want := failure.Source, controlv1alpha1.AgentRunFailureSourceJob; got != want {
 		t.Fatalf("failure source = %q, want %q", got, want)
@@ -465,7 +591,7 @@ func TestAgentRunArchivesTerminalRun(t *testing.T) {
 				State:       controlv1alpha1.AgentRunExternalEffectStateConfirmed,
 				ExternalRef: "415",
 			}},
-			Output:         "bounded output",
+			Output: "bounded output",
 		},
 	}
 	store := &recordingAgentRunArchiveStore{}
