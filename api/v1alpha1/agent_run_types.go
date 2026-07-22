@@ -821,19 +821,115 @@ type AgentRunDecisionStatus struct {
 	ResidualRisk   string `json:"residualRisk,omitempty"`
 }
 
+// AgentRunFailureReason records the exact controller, Job, or Pod reason why an
+// AgentRun execution did not complete. It is intentionally open-ended so new
+// Kubernetes reasons remain visible without an API migration.
+type AgentRunFailureReason string
+
+const (
+	AgentRunFailureReasonHarnessLaunchFailed AgentRunFailureReason = "HarnessLaunchFailed"
+	AgentRunFailureReasonDeadlineExceeded    AgentRunFailureReason = "DeadlineExceeded"
+	AgentRunFailureReasonHarnessFailed       AgentRunFailureReason = "HarnessFailed"
+)
+
+// +kubebuilder:validation:Enum=Controller;Job;Pod
+type AgentRunFailureSource string
+
+const (
+	AgentRunFailureSourceController AgentRunFailureSource = "Controller"
+	AgentRunFailureSourceJob        AgentRunFailureSource = "Job"
+	AgentRunFailureSourcePod        AgentRunFailureSource = "Pod"
+)
+
+type AgentRunFailureStatus struct {
+	Source                 AgentRunFailureSource `json:"source,omitempty"`
+	Reason                 AgentRunFailureReason `json:"reason,omitempty"`
+	Message                string                `json:"message,omitempty"`
+	AgentContainerReason   string                `json:"agentContainerReason,omitempty"`
+	AgentContainerExitCode *int32                `json:"agentContainerExitCode,omitempty"`
+}
+
+// AgentRunExternalEffectState is the monotonic lifecycle state of one external
+// mutation attempt. Confirmed means the external system was read back and the
+// intended effect was observed. Failed means a verified failure, not merely an
+// interrupted or unknown outcome.
+// +kubebuilder:validation:Enum=Started;Confirmed;Failed
+type AgentRunExternalEffectState string
+
+const (
+	AgentRunExternalEffectStateStarted   AgentRunExternalEffectState = "Started"
+	AgentRunExternalEffectStateConfirmed AgentRunExternalEffectState = "Confirmed"
+	AgentRunExternalEffectStateFailed    AgentRunExternalEffectState = "Failed"
+)
+
+// AgentRunExternalEffectOutcome summarizes the externally visible effects
+// independently from status.phase.
+// +kubebuilder:validation:Enum=None;Confirmed;Partial;Uncertain
+type AgentRunExternalEffectOutcome string
+
+const (
+	AgentRunExternalEffectOutcomeNone      AgentRunExternalEffectOutcome = "None"
+	AgentRunExternalEffectOutcomeConfirmed AgentRunExternalEffectOutcome = "Confirmed"
+	AgentRunExternalEffectOutcomePartial   AgentRunExternalEffectOutcome = "Partial"
+	AgentRunExternalEffectOutcomeUncertain AgentRunExternalEffectOutcome = "Uncertain"
+)
+
+// AgentRunExternalEffectCompleteness records whether the harness explicitly
+// finalized its effect ledger. A terminal Kubernetes Job alone cannot prove
+// that all external effects were reported.
+// +kubebuilder:validation:Enum=Complete;Incomplete;Unknown
+type AgentRunExternalEffectCompleteness string
+
+const (
+	AgentRunExternalEffectCompletenessComplete   AgentRunExternalEffectCompleteness = "Complete"
+	AgentRunExternalEffectCompletenessIncomplete AgentRunExternalEffectCompleteness = "Incomplete"
+	AgentRunExternalEffectCompletenessUnknown    AgentRunExternalEffectCompleteness = "Unknown"
+)
+
+// AgentRunExternalEffectReceipt records one receipt-bearing external mutation.
+// OperationID is stable across repeated log reads and retries of the same
+// provider request. New execution intent must use a new AgentRun.
+type AgentRunExternalEffectReceipt struct {
+	OperationID    string                      `json:"operationID"`
+	Kind           string                      `json:"kind,omitempty"`
+	State          AgentRunExternalEffectState `json:"state"`
+	Target         string                      `json:"target,omitempty"`
+	IntentDigest   string                      `json:"intentDigest,omitempty"`
+	InputDigest    string                      `json:"inputDigest,omitempty"`
+	IdempotencyKey string                      `json:"idempotencyKey,omitempty"`
+	ExternalRef    string                      `json:"externalRef,omitempty"`
+	ExternalURL    string                      `json:"externalURL,omitempty"`
+	Actor          string                      `json:"actor,omitempty"`
+	Executor       string                      `json:"executor,omitempty"`
+	StartedAt      *metav1.Time                `json:"startedAt,omitempty"`
+	CompletedAt    *metav1.Time                `json:"completedAt,omitempty"`
+	VerifiedAt     *metav1.Time                `json:"verifiedAt,omitempty"`
+	Message        string                      `json:"message,omitempty"`
+}
+
+type AgentRunExternalEffectSummaryStatus struct {
+	Outcome                AgentRunExternalEffectOutcome      `json:"outcome,omitempty"`
+	Completeness           AgentRunExternalEffectCompleteness `json:"completeness,omitempty"`
+	ReconciliationRequired bool                               `json:"reconciliationRequired,omitempty"`
+	Summary                string                             `json:"summary,omitempty"`
+	ReceiptsTruncated      bool                               `json:"receiptsTruncated,omitempty"`
+}
+
 type AgentRunStatusReport struct {
-	Type           string       `json:"type,omitempty"`
-	ObservedAt     *metav1.Time `json:"observedAt,omitempty"`
-	Level          string       `json:"level,omitempty"`
-	Stage          string       `json:"stage,omitempty"`
-	Classification string       `json:"classification,omitempty"`
-	Action         string       `json:"action,omitempty"`
-	Summary        string       `json:"summary,omitempty"`
-	Detail         string       `json:"detail,omitempty"`
-	PullRequestURL string       `json:"pullRequestURL,omitempty"`
-	ResidualRisk   string       `json:"residualRisk,omitempty"`
-	NeedsHuman     bool         `json:"needsHuman,omitempty"`
-	HumanFollowUp  string       `json:"humanFollowUp,omitempty"`
+	Type           string                               `json:"type,omitempty"`
+	ObservedAt     *metav1.Time                         `json:"observedAt,omitempty"`
+	Level          string                               `json:"level,omitempty"`
+	Stage          string                               `json:"stage,omitempty"`
+	Classification string                               `json:"classification,omitempty"`
+	Action         string                               `json:"action,omitempty"`
+	Summary        string                               `json:"summary,omitempty"`
+	Detail         string                               `json:"detail,omitempty"`
+	PullRequestURL string                               `json:"pullRequestURL,omitempty"`
+	ResidualRisk   string                               `json:"residualRisk,omitempty"`
+	NeedsHuman     bool                                 `json:"needsHuman,omitempty"`
+	HumanFollowUp  string                               `json:"humanFollowUp,omitempty"`
+	Effect         *AgentRunExternalEffectReceipt       `json:"effect,omitempty"`
+	EffectSummary  *AgentRunExternalEffectSummaryStatus `json:"effectSummary,omitempty"`
 }
 
 type AgentRunDataVolumeStatus struct {
@@ -929,12 +1025,17 @@ type AgentRunStatus struct {
 	Output                  string                                `json:"output,omitempty"`
 	PullRequestURL          string                                `json:"pullRequestURL,omitempty"`
 	Error                   string                                `json:"error,omitempty"`
+	Failure                 *AgentRunFailureStatus                `json:"failure,omitempty"`
+	EffectSummary           *AgentRunExternalEffectSummaryStatus  `json:"effectSummary,omitempty"`
+	// +kubebuilder:validation:MaxItems=100
+	Effects []AgentRunExternalEffectReceipt `json:"effects,omitempty"`
 }
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
 // +kubebuilder:resource:path=agentruns,scope=Namespaced,shortName=agrun
 // +kubebuilder:printcolumn:name="Phase",type="string",JSONPath=".status.phase"
+// +kubebuilder:printcolumn:name="Effects",type="string",JSONPath=".status.effectSummary.outcome"
 // +kubebuilder:printcolumn:name="Backend",type="string",JSONPath=".status.backend"
 // +kubebuilder:printcolumn:name="Source",type="string",JSONPath=".spec.sourceRef.name"
 // +kubebuilder:printcolumn:name="Reason",type="string",JSONPath=".spec.trigger.reason"

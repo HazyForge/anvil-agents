@@ -8870,6 +8870,9 @@ spec:
     - jsonPath: .status.phase
       name: Phase
       type: string
+    - jsonPath: .status.effectSummary.outcome
+      name: Effects
+      type: string
     - jsonPath: .status.backend
       name: Backend
       type: string
@@ -11746,6 +11749,90 @@ spec:
                   summary:
                     type: string
                 type: object
+              effectSummary:
+                properties:
+                  completeness:
+                    description: |-
+                      AgentRunExternalEffectCompleteness records whether the harness explicitly
+                      finalized its effect ledger. A terminal Kubernetes Job alone cannot prove
+                      that all external effects were reported.
+                    enum:
+                    - Complete
+                    - Incomplete
+                    - Unknown
+                    type: string
+                  outcome:
+                    description: |-
+                      AgentRunExternalEffectOutcome summarizes the externally visible effects
+                      independently from status.phase.
+                    enum:
+                    - None
+                    - Confirmed
+                    - Partial
+                    - Uncertain
+                    type: string
+                  receiptsTruncated:
+                    type: boolean
+                  reconciliationRequired:
+                    type: boolean
+                  summary:
+                    type: string
+                type: object
+              effects:
+                items:
+                  description: |-
+                    AgentRunExternalEffectReceipt records one receipt-bearing external mutation.
+                    OperationID is stable across repeated log reads and retries of the same
+                    provider request. New execution intent must use a new AgentRun.
+                  properties:
+                    actor:
+                      type: string
+                    completedAt:
+                      format: date-time
+                      type: string
+                    executor:
+                      type: string
+                    externalRef:
+                      type: string
+                    externalURL:
+                      type: string
+                    idempotencyKey:
+                      type: string
+                    inputDigest:
+                      type: string
+                    intentDigest:
+                      type: string
+                    kind:
+                      type: string
+                    message:
+                      type: string
+                    operationID:
+                      type: string
+                    startedAt:
+                      format: date-time
+                      type: string
+                    state:
+                      description: |-
+                        AgentRunExternalEffectState is the monotonic lifecycle state of one external
+                        mutation attempt. Confirmed means the external system was read back and the
+                        intended effect was observed. Failed means a verified failure, not merely an
+                        interrupted or unknown outcome.
+                      enum:
+                      - Started
+                      - Confirmed
+                      - Failed
+                      type: string
+                    target:
+                      type: string
+                    verifiedAt:
+                      format: date-time
+                      type: string
+                  required:
+                  - operationID
+                  - state
+                  type: object
+                maxItems: 100
+                type: array
               error:
                 type: string
               externalSecretRefreshes:
@@ -11771,6 +11858,28 @@ spec:
                       type: string
                   type: object
                 type: array
+              failure:
+                properties:
+                  agentContainerExitCode:
+                    format: int32
+                    type: integer
+                  agentContainerReason:
+                    type: string
+                  message:
+                    type: string
+                  reason:
+                    description: |-
+                      AgentRunFailureReason records the exact controller, Job, or Pod reason why an
+                      AgentRun execution did not complete. It is intentionally open-ended so new
+                      Kubernetes reasons remain visible without an API migration.
+                    type: string
+                  source:
+                    enum:
+                    - Controller
+                    - Job
+                    - Pod
+                    type: string
+                type: object
               image:
                 type: string
               intent:
@@ -11843,6 +11952,87 @@ spec:
                       type: string
                     detail:
                       type: string
+                    effect:
+                      description: |-
+                        AgentRunExternalEffectReceipt records one receipt-bearing external mutation.
+                        OperationID is stable across repeated log reads and retries of the same
+                        provider request. New execution intent must use a new AgentRun.
+                      properties:
+                        actor:
+                          type: string
+                        completedAt:
+                          format: date-time
+                          type: string
+                        executor:
+                          type: string
+                        externalRef:
+                          type: string
+                        externalURL:
+                          type: string
+                        idempotencyKey:
+                          type: string
+                        inputDigest:
+                          type: string
+                        intentDigest:
+                          type: string
+                        kind:
+                          type: string
+                        message:
+                          type: string
+                        operationID:
+                          type: string
+                        startedAt:
+                          format: date-time
+                          type: string
+                        state:
+                          description: |-
+                            AgentRunExternalEffectState is the monotonic lifecycle state of one external
+                            mutation attempt. Confirmed means the external system was read back and the
+                            intended effect was observed. Failed means a verified failure, not merely an
+                            interrupted or unknown outcome.
+                          enum:
+                          - Started
+                          - Confirmed
+                          - Failed
+                          type: string
+                        target:
+                          type: string
+                        verifiedAt:
+                          format: date-time
+                          type: string
+                      required:
+                      - operationID
+                      - state
+                      type: object
+                    effectSummary:
+                      properties:
+                        completeness:
+                          description: |-
+                            AgentRunExternalEffectCompleteness records whether the harness explicitly
+                            finalized its effect ledger. A terminal Kubernetes Job alone cannot prove
+                            that all external effects were reported.
+                          enum:
+                          - Complete
+                          - Incomplete
+                          - Unknown
+                          type: string
+                        outcome:
+                          description: |-
+                            AgentRunExternalEffectOutcome summarizes the externally visible effects
+                            independently from status.phase.
+                          enum:
+                          - None
+                          - Confirmed
+                          - Partial
+                          - Uncertain
+                          type: string
+                        receiptsTruncated:
+                          type: boolean
+                        reconciliationRequired:
+                          type: boolean
+                        summary:
+                          type: string
+                      type: object
                     humanFollowUp:
                       type: string
                     level:

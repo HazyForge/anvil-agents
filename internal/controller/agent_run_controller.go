@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -39,6 +40,8 @@ const (
 	agentRunExternalSecretRefreshPollInterval       = 2 * time.Second
 	agentRunExternalSecretRefreshTimeout            = 2 * time.Minute
 	agentRunReady                                   = "Ready"
+	agentRunExternalEffectsReported                 = "ExternalEffectsReported"
+	agentRunMaxExternalEffectReceipts               = 100
 	agentRunDefaultCodexImage                       = "anvil-agent-run-codex:dev"
 	agentRunDefaultOpenCodeImage                    = "anvil-agent-run-opencode:dev"
 	agentRunDefaultHermesAgentImage                 = "anvil-agent-run-hermes:dev"
@@ -156,8 +159,9 @@ func (r *AgentRunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	if missingJobMessage != "" {
 		status.Phase = controlv1alpha1.AgentRunPhaseFailed
 		status.CompletedAt = &now
-		status.Error = missingJobMessage
-		status.Result = agentRunRawResult(status.Output, status.PullRequestURL, status.Decision, status.Reports)
+		agentRunSetFailure(&status, controlv1alpha1.AgentRunFailureSourceController, "HarnessJobMissing", missingJobMessage)
+		agentRunFinalizeExternalEffectSummary(&status)
+		status.Result = agentRunRawResult(status.Output, status.PullRequestURL, status.Decision, status.Reports, status.Failure, status.EffectSummary, status.Effects)
 		apimeta.SetStatusCondition(&status.Conditions, metav1.Condition{
 			Type:               agentRunReady,
 			Status:             metav1.ConditionFalse,
@@ -504,8 +508,10 @@ func (r *AgentRunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		status.RunnerNode = runnerPod.Spec.NodeName
 		if logs, err := r.readAgentRunRunnerLogs(ctx, runnerPod.Namespace, runnerPod.Name); err == nil {
 			agentRunApplyStatusReports(&status, agentRunStatusReportsFromOutput(logs))
+			effects, effectSummary := agentRunExternalEffectsFromOutput(logs)
+			agentRunApplyExternalEffects(&status, effects, effectSummary)
 			status.Output = agentRunTrimOutput(logs)
-			status.Result = agentRunRawResult(status.Output, status.PullRequestURL, status.Decision, status.Reports)
+			status.Result = agentRunRawResult(status.Output, status.PullRequestURL, status.Decision, status.Reports, status.Failure, status.EffectSummary, status.Effects)
 		}
 	}
 
@@ -515,8 +521,13 @@ func (r *AgentRunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		}
 		status.Phase = controlv1alpha1.AgentRunPhaseFailed
 		status.CompletedAt = &now
-		status.Error = message
-		status.Result = agentRunRawResult(status.Output, status.PullRequestURL, status.Decision, status.Reports)
+		agentRunSetFailure(&status, controlv1alpha1.AgentRunFailureSourceController, controlv1alpha1.AgentRunFailureReasonHarnessLaunchFailed, message)
+		status.EffectSummary = &controlv1alpha1.AgentRunExternalEffectSummaryStatus{
+			Completeness: controlv1alpha1.AgentRunExternalEffectCompletenessComplete,
+			Summary:      "The harness container never started, so no external effects were possible.",
+		}
+		agentRunFinalizeExternalEffectSummary(&status)
+		status.Result = agentRunRawResult(status.Output, status.PullRequestURL, status.Decision, status.Reports, status.Failure, status.EffectSummary, status.Effects)
 		apimeta.SetStatusCondition(&status.Conditions, metav1.Condition{
 			Type:               agentRunReady,
 			Status:             metav1.ConditionFalse,
@@ -533,6 +544,7 @@ func (r *AgentRunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	case agentRunJobComplete(job):
 		status.CompletedAt = &now
 		status.Error = ""
+		status.Failure = nil
 		if status.Decision == nil {
 			status.Decision = &controlv1alpha1.AgentRunDecisionStatus{
 				Classification: "completed",
@@ -542,9 +554,10 @@ func (r *AgentRunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		} else if strings.TrimSpace(status.Decision.Summary) == "" {
 			status.Decision.Summary = agentRunOutputSummary(status.Output)
 		}
-		status.Result = agentRunRawResult(status.Output, status.PullRequestURL, status.Decision, status.Reports)
 		if agentRunReportsNeedHuman(status.Reports) {
 			status.Phase = controlv1alpha1.AgentRunPhaseNeedsHuman
+			agentRunFinalizeExternalEffectSummary(&status)
+			status.Result = agentRunRawResult(status.Output, status.PullRequestURL, status.Decision, status.Reports, status.Failure, status.EffectSummary, status.Effects)
 			apimeta.SetStatusCondition(&status.Conditions, metav1.Condition{
 				Type:               agentRunReady,
 				Status:             metav1.ConditionFalse,
@@ -557,6 +570,8 @@ func (r *AgentRunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 			return r.patchAgentRunStatus(ctx, original, obj, false)
 		}
 		status.Phase = controlv1alpha1.AgentRunPhaseSucceeded
+		agentRunFinalizeExternalEffectSummary(&status)
+		status.Result = agentRunRawResult(status.Output, status.PullRequestURL, status.Decision, status.Reports, status.Failure, status.EffectSummary, status.Effects)
 		apimeta.SetStatusCondition(&status.Conditions, metav1.Condition{
 			Type:               agentRunReady,
 			Status:             metav1.ConditionTrue,
@@ -570,14 +585,16 @@ func (r *AgentRunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	case agentRunJobFailed(job):
 		status.Phase = controlv1alpha1.AgentRunPhaseFailed
 		status.CompletedAt = &now
-		status.Error = firstNonEmpty(jobFailureMessage(job), podTerminationMessage(runnerPod), "Agent run harness failed.")
-		status.Result = agentRunRawResult(status.Output, status.PullRequestURL, status.Decision, status.Reports)
+		status.Failure = agentRunJobFailureStatus(job, runnerPod)
+		status.Error = status.Failure.Message
+		agentRunFinalizeExternalEffectSummary(&status)
+		status.Result = agentRunRawResult(status.Output, status.PullRequestURL, status.Decision, status.Reports, status.Failure, status.EffectSummary, status.Effects)
 		apimeta.SetStatusCondition(&status.Conditions, metav1.Condition{
 			Type:               agentRunReady,
 			Status:             metav1.ConditionFalse,
 			ObservedGeneration: obj.Generation,
 			LastTransitionTime: now,
-			Reason:             "HarnessFailed",
+			Reason:             agentRunReadyFailureReason(status.Failure),
 			Message:            status.Error,
 		})
 		obj.Status = status
@@ -586,6 +603,9 @@ func (r *AgentRunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		status.Phase = controlv1alpha1.AgentRunPhaseRunning
 		status.CompletedAt = nil
 		status.Error = ""
+		status.Failure = nil
+		agentRunFinalizeExternalEffectSummary(&status)
+		status.Result = agentRunRawResult(status.Output, status.PullRequestURL, status.Decision, status.Reports, status.Failure, status.EffectSummary, status.Effects)
 		apimeta.SetStatusCondition(&status.Conditions, metav1.Condition{
 			Type:               agentRunReady,
 			Status:             metav1.ConditionFalse,
@@ -3712,12 +3732,15 @@ func agentRunOutputSummary(output string) string {
 	return summary
 }
 
-func agentRunRawResult(output, pullRequestURL string, decision *controlv1alpha1.AgentRunDecisionStatus, reports []controlv1alpha1.AgentRunStatusReport) runtime.RawExtension {
+func agentRunRawResult(output, pullRequestURL string, decision *controlv1alpha1.AgentRunDecisionStatus, reports []controlv1alpha1.AgentRunStatusReport, failure *controlv1alpha1.AgentRunFailureStatus, effectSummary *controlv1alpha1.AgentRunExternalEffectSummaryStatus, effects []controlv1alpha1.AgentRunExternalEffectReceipt) runtime.RawExtension {
 	raw, err := json.Marshal(map[string]any{
 		"output":         strings.TrimSpace(output),
 		"pullRequestURL": strings.TrimSpace(pullRequestURL),
 		"decision":       decision,
 		"reports":        reports,
+		"failure":        failure,
+		"effectSummary":  effectSummary,
+		"effects":        effects,
 	})
 	if err != nil {
 		return runtime.RawExtension{}
@@ -3726,6 +3749,10 @@ func agentRunRawResult(output, pullRequestURL string, decision *controlv1alpha1.
 }
 
 func agentRunStatusReportsFromOutput(output string) []controlv1alpha1.AgentRunStatusReport {
+	return agentRunTrimStatusReports(agentRunStatusReportsFromOutputUntrimmed(output))
+}
+
+func agentRunStatusReportsFromOutputUntrimmed(output string) []controlv1alpha1.AgentRunStatusReport {
 	scanner := bufio.NewScanner(strings.NewReader(output))
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	reports := []controlv1alpha1.AgentRunStatusReport{}
@@ -3749,7 +3776,7 @@ func agentRunStatusReportsFromOutput(output string) []controlv1alpha1.AgentRunSt
 		}
 		reports = append(reports, report)
 	}
-	return agentRunTrimStatusReports(reports)
+	return reports
 }
 
 func agentRunApplyStatusReports(status *controlv1alpha1.AgentRunStatus, reports []controlv1alpha1.AgentRunStatusReport) {
@@ -3783,10 +3810,373 @@ func agentRunNormalizeStatusReport(report controlv1alpha1.AgentRunStatusReport) 
 	report.PullRequestURL = agentRunLimitString(strings.TrimSpace(report.PullRequestURL), 500)
 	report.ResidualRisk = agentRunLimitString(strings.TrimSpace(report.ResidualRisk), 1000)
 	report.HumanFollowUp = agentRunLimitString(strings.TrimSpace(report.HumanFollowUp), 1000)
-	if report.Type == "" && report.Level == "" && report.Stage == "" && report.Classification == "" && report.Action == "" && report.Summary == "" && report.Detail == "" && report.PullRequestURL == "" && report.ResidualRisk == "" && report.HumanFollowUp == "" && !report.NeedsHuman {
+	if report.Effect != nil {
+		normalized := agentRunNormalizeExternalEffect(*report.Effect)
+		if normalized.OperationID == "" || normalized.State == "" {
+			report.Effect = nil
+		} else {
+			report.Effect = &normalized
+		}
+	}
+	if report.EffectSummary != nil {
+		normalized := agentRunNormalizeExternalEffectSummary(*report.EffectSummary)
+		if normalized.Completeness == "" {
+			report.EffectSummary = nil
+		} else {
+			report.EffectSummary = &normalized
+		}
+	}
+	if report.Type == "" && report.Level == "" && report.Stage == "" && report.Classification == "" && report.Action == "" && report.Summary == "" && report.Detail == "" && report.PullRequestURL == "" && report.ResidualRisk == "" && report.HumanFollowUp == "" && !report.NeedsHuman && report.Effect == nil && report.EffectSummary == nil {
 		return controlv1alpha1.AgentRunStatusReport{}
 	}
 	return report
+}
+
+func agentRunExternalEffectsFromOutput(output string) ([]controlv1alpha1.AgentRunExternalEffectReceipt, *controlv1alpha1.AgentRunExternalEffectSummaryStatus) {
+	receipts := []controlv1alpha1.AgentRunExternalEffectReceipt{}
+	var summary *controlv1alpha1.AgentRunExternalEffectSummaryStatus
+	for _, report := range agentRunStatusReportsFromOutputUntrimmed(output) {
+		if report.Effect != nil {
+			receipt := *report.Effect
+			if receipt.StartedAt == nil && report.ObservedAt != nil && receipt.State == controlv1alpha1.AgentRunExternalEffectStateStarted {
+				receipt.StartedAt = report.ObservedAt.DeepCopy()
+			}
+			if receipt.CompletedAt == nil && report.ObservedAt != nil && receipt.State != controlv1alpha1.AgentRunExternalEffectStateStarted {
+				receipt.CompletedAt = report.ObservedAt.DeepCopy()
+			}
+			if receipt.VerifiedAt == nil && report.ObservedAt != nil && receipt.State == controlv1alpha1.AgentRunExternalEffectStateConfirmed {
+				receipt.VerifiedAt = report.ObservedAt.DeepCopy()
+			}
+			receipts = append(receipts, receipt)
+		}
+		if report.EffectSummary != nil {
+			value := *report.EffectSummary
+			summary = &value
+		}
+	}
+	return receipts, summary
+}
+
+func agentRunApplyExternalEffects(status *controlv1alpha1.AgentRunStatus, receipts []controlv1alpha1.AgentRunExternalEffectReceipt, reportedSummary *controlv1alpha1.AgentRunExternalEffectSummaryStatus) {
+	if status == nil {
+		return
+	}
+	merged, truncated := agentRunMergeExternalEffects(status.Effects, receipts)
+	status.Effects = merged
+	if reportedSummary != nil {
+		if status.EffectSummary == nil {
+			status.EffectSummary = &controlv1alpha1.AgentRunExternalEffectSummaryStatus{}
+		}
+		status.EffectSummary.Completeness = reportedSummary.Completeness
+		status.EffectSummary.Summary = reportedSummary.Summary
+	}
+	if truncated || (status.EffectSummary != nil && status.EffectSummary.ReceiptsTruncated) {
+		if status.EffectSummary == nil {
+			status.EffectSummary = &controlv1alpha1.AgentRunExternalEffectSummaryStatus{}
+		}
+		status.EffectSummary.Completeness = controlv1alpha1.AgentRunExternalEffectCompletenessIncomplete
+		status.EffectSummary.ReceiptsTruncated = true
+	}
+	agentRunFinalizeExternalEffectSummary(status)
+}
+
+func agentRunMergeExternalEffects(existing, incoming []controlv1alpha1.AgentRunExternalEffectReceipt) ([]controlv1alpha1.AgentRunExternalEffectReceipt, bool) {
+	merged := make([]controlv1alpha1.AgentRunExternalEffectReceipt, 0, len(existing)+len(incoming))
+	indexes := make(map[string]int, len(existing)+len(incoming))
+	for _, receipt := range append(append([]controlv1alpha1.AgentRunExternalEffectReceipt(nil), existing...), incoming...) {
+		receipt = agentRunNormalizeExternalEffect(receipt)
+		if receipt.OperationID == "" || receipt.State == "" {
+			continue
+		}
+		if index, ok := indexes[receipt.OperationID]; ok {
+			merged[index] = agentRunMergeExternalEffect(merged[index], receipt)
+			continue
+		}
+		indexes[receipt.OperationID] = len(merged)
+		merged = append(merged, receipt)
+	}
+	if len(merged) <= agentRunMaxExternalEffectReceipts {
+		return merged, false
+	}
+	// Retain unresolved work first, then the newest terminal receipts. Sorting
+	// makes the bounded subset stable when later log reads contain overlapping or
+	// truncated windows instead of reintroducing old receipts arbitrarily.
+	sort.SliceStable(merged, func(i, j int) bool {
+		iStarted := merged[i].State == controlv1alpha1.AgentRunExternalEffectStateStarted
+		jStarted := merged[j].State == controlv1alpha1.AgentRunExternalEffectStateStarted
+		if iStarted != jStarted {
+			return iStarted
+		}
+		iTime := agentRunExternalEffectLatestTime(merged[i])
+		jTime := agentRunExternalEffectLatestTime(merged[j])
+		if !iTime.Equal(jTime) {
+			return iTime.After(jTime)
+		}
+		return merged[i].OperationID < merged[j].OperationID
+	})
+	return append([]controlv1alpha1.AgentRunExternalEffectReceipt(nil), merged[:agentRunMaxExternalEffectReceipts]...), true
+}
+
+func agentRunMergeExternalEffect(current, incoming controlv1alpha1.AgentRunExternalEffectReceipt) controlv1alpha1.AgentRunExternalEffectReceipt {
+	// Confirmed is irreversible provider-readback evidence and never regresses.
+	// Started may advance to either terminal state. A verified Confirmed receipt
+	// may correct an earlier Failed receipt when an idempotent provider request
+	// was later read back as applied; an unverified assertion cannot do so.
+	switch current.State {
+	case controlv1alpha1.AgentRunExternalEffectStateConfirmed:
+	case controlv1alpha1.AgentRunExternalEffectStateFailed:
+		if incoming.State == controlv1alpha1.AgentRunExternalEffectStateConfirmed && incoming.VerifiedAt != nil {
+			current.State = incoming.State
+		}
+	case controlv1alpha1.AgentRunExternalEffectStateStarted:
+		if incoming.State == controlv1alpha1.AgentRunExternalEffectStateConfirmed || incoming.State == controlv1alpha1.AgentRunExternalEffectStateFailed {
+			current.State = incoming.State
+		}
+	default:
+		current.State = incoming.State
+	}
+	current.Kind = firstNonEmpty(incoming.Kind, current.Kind)
+	current.Target = firstNonEmpty(incoming.Target, current.Target)
+	current.IntentDigest = firstNonEmpty(incoming.IntentDigest, current.IntentDigest)
+	current.InputDigest = firstNonEmpty(incoming.InputDigest, current.InputDigest)
+	current.IdempotencyKey = firstNonEmpty(incoming.IdempotencyKey, current.IdempotencyKey)
+	current.Actor = firstNonEmpty(incoming.Actor, current.Actor)
+	current.Executor = firstNonEmpty(incoming.Executor, current.Executor)
+	current.StartedAt = agentRunEarlierTime(current.StartedAt, incoming.StartedAt)
+	if incoming.State == current.State {
+		current.ExternalRef = firstNonEmpty(incoming.ExternalRef, current.ExternalRef)
+		current.ExternalURL = firstNonEmpty(incoming.ExternalURL, current.ExternalURL)
+		current.Message = firstNonEmpty(incoming.Message, current.Message)
+		current.CompletedAt = agentRunLaterTime(current.CompletedAt, incoming.CompletedAt)
+		current.VerifiedAt = agentRunLaterTime(current.VerifiedAt, incoming.VerifiedAt)
+	}
+	return current
+}
+
+func agentRunExternalEffectLatestTime(receipt controlv1alpha1.AgentRunExternalEffectReceipt) time.Time {
+	latest := time.Time{}
+	for _, value := range []*metav1.Time{receipt.StartedAt, receipt.CompletedAt, receipt.VerifiedAt} {
+		if value != nil && value.Time.After(latest) {
+			latest = value.Time
+		}
+	}
+	return latest
+}
+
+func agentRunNormalizeExternalEffect(receipt controlv1alpha1.AgentRunExternalEffectReceipt) controlv1alpha1.AgentRunExternalEffectReceipt {
+	receipt.OperationID = agentRunLimitString(strings.TrimSpace(receipt.OperationID), 200)
+	receipt.Kind = agentRunLimitString(strings.TrimSpace(receipt.Kind), 128)
+	receipt.Target = agentRunLimitString(strings.TrimSpace(receipt.Target), 500)
+	receipt.IntentDigest = agentRunLimitString(strings.TrimSpace(receipt.IntentDigest), 128)
+	receipt.InputDigest = agentRunLimitString(strings.TrimSpace(receipt.InputDigest), 128)
+	receipt.IdempotencyKey = agentRunLimitString(strings.TrimSpace(receipt.IdempotencyKey), 200)
+	receipt.ExternalRef = agentRunLimitString(strings.TrimSpace(receipt.ExternalRef), 500)
+	receipt.ExternalURL = agentRunLimitString(strings.TrimSpace(receipt.ExternalURL), 1000)
+	receipt.Actor = agentRunLimitString(strings.TrimSpace(receipt.Actor), 200)
+	receipt.Executor = agentRunLimitString(strings.TrimSpace(receipt.Executor), 200)
+	receipt.Message = agentRunLimitString(strings.TrimSpace(receipt.Message), 2000)
+	switch strings.ToLower(strings.TrimSpace(string(receipt.State))) {
+	case strings.ToLower(string(controlv1alpha1.AgentRunExternalEffectStateStarted)):
+		receipt.State = controlv1alpha1.AgentRunExternalEffectStateStarted
+	case strings.ToLower(string(controlv1alpha1.AgentRunExternalEffectStateConfirmed)):
+		receipt.State = controlv1alpha1.AgentRunExternalEffectStateConfirmed
+	case strings.ToLower(string(controlv1alpha1.AgentRunExternalEffectStateFailed)):
+		receipt.State = controlv1alpha1.AgentRunExternalEffectStateFailed
+	default:
+		receipt.State = ""
+	}
+	return receipt
+}
+
+func agentRunNormalizeExternalEffectSummary(summary controlv1alpha1.AgentRunExternalEffectSummaryStatus) controlv1alpha1.AgentRunExternalEffectSummaryStatus {
+	switch strings.ToLower(strings.TrimSpace(string(summary.Completeness))) {
+	case strings.ToLower(string(controlv1alpha1.AgentRunExternalEffectCompletenessComplete)):
+		summary.Completeness = controlv1alpha1.AgentRunExternalEffectCompletenessComplete
+	case strings.ToLower(string(controlv1alpha1.AgentRunExternalEffectCompletenessIncomplete)):
+		summary.Completeness = controlv1alpha1.AgentRunExternalEffectCompletenessIncomplete
+	case strings.ToLower(string(controlv1alpha1.AgentRunExternalEffectCompletenessUnknown)):
+		summary.Completeness = controlv1alpha1.AgentRunExternalEffectCompletenessUnknown
+	default:
+		summary.Completeness = ""
+	}
+	// Outcome and reconciliation are controller-derived from the merged receipt
+	// ledger and execution phase; never trust a harness-provided assertion.
+	summary.Outcome = ""
+	summary.ReconciliationRequired = false
+	summary.Summary = agentRunLimitString(strings.TrimSpace(summary.Summary), 1000)
+	summary.ReceiptsTruncated = false
+	return summary
+}
+
+func agentRunEarlierTime(current, candidate *metav1.Time) *metav1.Time {
+	if current == nil {
+		if candidate == nil {
+			return nil
+		}
+		return candidate.DeepCopy()
+	}
+	if candidate == nil || !candidate.Time.Before(current.Time) {
+		return current
+	}
+	return candidate.DeepCopy()
+}
+
+func agentRunLaterTime(current, candidate *metav1.Time) *metav1.Time {
+	if current == nil {
+		if candidate == nil {
+			return nil
+		}
+		return candidate.DeepCopy()
+	}
+	if candidate == nil || !candidate.After(current.Time) {
+		return current
+	}
+	return candidate.DeepCopy()
+}
+
+func agentRunFinalizeExternalEffectSummary(status *controlv1alpha1.AgentRunStatus) {
+	if status == nil {
+		return
+	}
+	var reportedCompleteness controlv1alpha1.AgentRunExternalEffectCompleteness
+	var reportedSummary string
+	receiptsTruncated := false
+	if status.EffectSummary != nil {
+		reportedCompleteness = status.EffectSummary.Completeness
+		reportedSummary = status.EffectSummary.Summary
+		receiptsTruncated = status.EffectSummary.ReceiptsTruncated
+	}
+	if receiptsTruncated {
+		reportedCompleteness = controlv1alpha1.AgentRunExternalEffectCompletenessIncomplete
+	}
+	started, confirmed, failed := 0, 0, 0
+	for _, effect := range status.Effects {
+		switch effect.State {
+		case controlv1alpha1.AgentRunExternalEffectStateStarted:
+			started++
+		case controlv1alpha1.AgentRunExternalEffectStateConfirmed:
+			confirmed++
+		case controlv1alpha1.AgentRunExternalEffectStateFailed:
+			failed++
+		}
+	}
+
+	mutationCapableFailure := status.Phase == controlv1alpha1.AgentRunPhaseFailed &&
+		!strings.EqualFold(strings.TrimSpace(status.Intent), string(controlv1alpha1.AgentRunIntentObserve)) &&
+		(status.JobCreateAttemptedAt != nil || status.JobRef != nil)
+	if len(status.Effects) == 0 && reportedCompleteness == "" && !mutationCapableFailure {
+		status.EffectSummary = nil
+		agentRunSetExternalEffectsReportedCondition(status)
+		return
+	}
+
+	summary := &controlv1alpha1.AgentRunExternalEffectSummaryStatus{
+		Completeness:      controlv1alpha1.AgentRunExternalEffectCompletenessUnknown,
+		Summary:           reportedSummary,
+		ReceiptsTruncated: receiptsTruncated,
+	}
+	if reportedCompleteness != "" {
+		summary.Completeness = reportedCompleteness
+	}
+	switch {
+	case confirmed > 0 && (started > 0 || failed > 0 || status.Phase == controlv1alpha1.AgentRunPhaseFailed):
+		summary.Outcome = controlv1alpha1.AgentRunExternalEffectOutcomePartial
+	case receiptsTruncated || summary.Completeness == controlv1alpha1.AgentRunExternalEffectCompletenessIncomplete:
+		summary.Outcome = controlv1alpha1.AgentRunExternalEffectOutcomeUncertain
+	case started > 0:
+		summary.Outcome = controlv1alpha1.AgentRunExternalEffectOutcomeUncertain
+	case confirmed > 0:
+		summary.Outcome = controlv1alpha1.AgentRunExternalEffectOutcomeConfirmed
+	case failed > 0 && summary.Completeness == controlv1alpha1.AgentRunExternalEffectCompletenessComplete:
+		summary.Outcome = controlv1alpha1.AgentRunExternalEffectOutcomeNone
+	case failed > 0 || mutationCapableFailure:
+		summary.Outcome = controlv1alpha1.AgentRunExternalEffectOutcomeUncertain
+	default:
+		summary.Outcome = controlv1alpha1.AgentRunExternalEffectOutcomeNone
+	}
+	summary.ReconciliationRequired = summary.Outcome == controlv1alpha1.AgentRunExternalEffectOutcomePartial ||
+		summary.Outcome == controlv1alpha1.AgentRunExternalEffectOutcomeUncertain
+	status.EffectSummary = summary
+	agentRunSetExternalEffectsReportedCondition(status)
+}
+
+func agentRunSetExternalEffectsReportedCondition(status *controlv1alpha1.AgentRunStatus) {
+	condition := metav1.Condition{
+		Type:               agentRunExternalEffectsReported,
+		Status:             metav1.ConditionUnknown,
+		ObservedGeneration: status.ObservedGeneration,
+		LastTransitionTime: metav1.Now(),
+		Reason:             "NotReported",
+		Message:            "The harness has not finalized its external-effect ledger.",
+	}
+	if status.EffectSummary != nil {
+		condition.Message = firstNonEmpty(status.EffectSummary.Summary, condition.Message)
+		switch status.EffectSummary.Completeness {
+		case controlv1alpha1.AgentRunExternalEffectCompletenessComplete:
+			condition.Status = metav1.ConditionTrue
+			condition.Reason = "Complete"
+			condition.Message = firstNonEmpty(status.EffectSummary.Summary, "The harness finalized its external-effect ledger.")
+		case controlv1alpha1.AgentRunExternalEffectCompletenessIncomplete:
+			condition.Status = metav1.ConditionFalse
+			condition.Reason = "Incomplete"
+			condition.Message = firstNonEmpty(status.EffectSummary.Summary, "The external-effect ledger is incomplete and requires reconciliation.")
+		case controlv1alpha1.AgentRunExternalEffectCompletenessUnknown:
+			condition.Reason = "CompletenessUnknown"
+			condition.Message = firstNonEmpty(status.EffectSummary.Summary, "External effects were observed, but the harness did not finalize the ledger.")
+		}
+	}
+	apimeta.SetStatusCondition(&status.Conditions, condition)
+}
+
+func agentRunSetFailure(status *controlv1alpha1.AgentRunStatus, source controlv1alpha1.AgentRunFailureSource, reason controlv1alpha1.AgentRunFailureReason, message string) {
+	if status == nil {
+		return
+	}
+	status.Error = strings.TrimSpace(message)
+	status.Failure = &controlv1alpha1.AgentRunFailureStatus{Source: source, Reason: reason, Message: status.Error}
+}
+
+func agentRunJobFailureStatus(job *batchv1.Job, runnerPod *corev1.Pod) *controlv1alpha1.AgentRunFailureStatus {
+	message := firstNonEmpty(jobFailureMessage(job), podTerminationMessage(runnerPod), "Agent run harness failed.")
+	failure := &controlv1alpha1.AgentRunFailureStatus{
+		Source:  controlv1alpha1.AgentRunFailureSourceJob,
+		Reason:  controlv1alpha1.AgentRunFailureReasonHarnessFailed,
+		Message: message,
+	}
+	for _, condition := range job.Status.Conditions {
+		if condition.Type != batchv1.JobFailed {
+			continue
+		}
+		if reason := strings.TrimSpace(condition.Reason); reason != "" {
+			failure.Reason = controlv1alpha1.AgentRunFailureReason(reason)
+		} else if strings.Contains(strings.ToLower(condition.Message), "active deadline") {
+			failure.Reason = controlv1alpha1.AgentRunFailureReasonDeadlineExceeded
+		}
+		break
+	}
+	if runnerPod != nil {
+		for _, container := range runnerPod.Status.ContainerStatuses {
+			if container.Name != agentRunContainerName || container.State.Terminated == nil {
+				continue
+			}
+			failure.AgentContainerReason = strings.TrimSpace(container.State.Terminated.Reason)
+			exitCode := container.State.Terminated.ExitCode
+			failure.AgentContainerExitCode = &exitCode
+			if failure.Reason == controlv1alpha1.AgentRunFailureReasonHarnessFailed && failure.AgentContainerReason != "" {
+				failure.Source = controlv1alpha1.AgentRunFailureSourcePod
+				failure.Reason = controlv1alpha1.AgentRunFailureReason(failure.AgentContainerReason)
+			}
+			break
+		}
+	}
+	return failure
+}
+
+func agentRunReadyFailureReason(failure *controlv1alpha1.AgentRunFailureStatus) string {
+	if failure != nil && failure.Reason == controlv1alpha1.AgentRunFailureReasonDeadlineExceeded {
+		return string(controlv1alpha1.AgentRunFailureReasonDeadlineExceeded)
+	}
+	return string(controlv1alpha1.AgentRunFailureReasonHarnessFailed)
 }
 
 func agentRunReportHasDecision(report controlv1alpha1.AgentRunStatusReport) bool {
