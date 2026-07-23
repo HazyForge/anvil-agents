@@ -2,7 +2,7 @@
 
 Target 2:45–2:55. Record in English with clear narration. Do not include
 credentials, private repository content, personal data, copyrighted music, or
-third-party marks unless the entrant has actual permission to use them.
+third-party marks without permission.
 
 ## 0:00–0:20 — Problem and product
 
@@ -13,12 +13,12 @@ Show the README/architecture diagram and say:
 > observable Kubernetes Job with explicit policy, skills, resources, and
 > durable state.
 
-## 0:20–0:55 — What was built during the event
+## 0:20–0:55 — Project history
 
 Show `docs/build-week-2026.md` and a concise commit view. State that the embedded
 AgentRun foundation predated Build Week. Call out only the eligible extensions:
 standalone extraction, dependency severing, composition, OIDC read API, release
-automation, provider-neutral adverse evidence, and judge test.
+automation, provider-neutral adverse evidence, and public Kind test.
 
 ## 0:55–1:30 — GPT-5.6 product demo
 
@@ -30,7 +30,7 @@ live useful output and structured terminal status. Keep the verified model
 field and run identity visible. Do not show a token, Secret, private prompt, or
 unrelated cluster workload.
 
-## 1:30–2:05 — Free judge path
+## 1:30–2:05 — Public no-build path
 
 Run or show the final portion of `./hack/test-judge-kind.sh`. Explain that this
 separate path needs no credentials and builds nothing. Show the two immutable
@@ -52,9 +52,9 @@ keeping scheduling, resource limits, state, and evidence explicit.
 
 ## Recording gate
 
-- Total duration is under 3:00; judges need not watch longer.
+- Total duration is under 3:00.
 - Audio is intelligible and covers the project, Codex, and GPT-5.6.
 - The video is public on YouTube.
-- The shown revision matches the Devpost repository/tag link.
+- The shown revision matches the published repository/tag link.
 - The GPT-5.6 run actually succeeds; do not substitute a static model field.
 - No secrets, private URLs, copyrighted music, or unauthorized content appear.

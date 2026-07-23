@@ -1,4 +1,4 @@
-# Public Kind judge test
+# Public Kind release test
 
 This path validates the released Anvil Agents operator without building source,
 providing credentials, or consuming a model API. It installs the public v0.1.1
@@ -43,5 +43,12 @@ Use the explicit cleanup option when finished:
 
 This test proves installation, CRD reconciliation, composition resolution,
 isolated Job execution, structured terminal status, append-only runs, and PVC
-persistence. It intentionally does **not** claim to prove GPT-5.6 use; the
-submission video must separately show an authenticated Codex/GPT-5.6 run.
+persistence. It intentionally does **not** make an authenticated model call or
+claim to prove GPT-5.6 use.
+
+Successful output ends with `Public Kind judge test passed` and identifies the
+two runs plus `proof: phase=Succeeded backend=custom storage=retained`. If the
+test fails, leave the cluster running and inspect the printed kubeconfig,
+AgentRun, Job, Pod, and PVC. Common causes are an unavailable Docker daemon,
+blocked GHCR or Docker Hub access, or a conflicting cluster name; select a
+different name with `ANVIL_AGENTS_JUDGE_CLUSTER` before retrying.

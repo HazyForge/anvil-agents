@@ -1,27 +1,26 @@
-# OpenAI Build Week 2026 evidence ledger
+# OpenAI Build Week 2026 provenance ledger
 
 This document distinguishes the pre-existing foundation from work eligible for
-OpenAI Build Week judging. Repository creation alone is not treated as proof
+OpenAI Build Week review. Repository creation alone is not treated as proof
 that imported code was new.
 
 ## Official window and entry scope
 
 - Track: Developer Tools
-- Submission period: July 13, 2026 at 9:00 a.m. PDT through July 21, 2026 at
+- Event window: July 13, 2026 at 9:00 a.m. PDT through July 21, 2026 at
   5:00 p.m. PDT
 - Pre-event comparison baseline:
   `HazyForge/anvil-primaris@0f5849ae5ada9ac507e50535d0ab2b4485cd5207`
 - Standalone repository first commit:
   `0944cbbadfb4da40543064da2eff4592ca356fce`
-- Final submission tag and SHA: **must be added after the final scope is
-  selected and before Devpost submission**
+- Final event tag and SHA: **not recorded before the event closed**
 
-The binding requirements are the [official rules](https://openai.devpost.com/rules),
-not this checklist.
+This historical ledger records project provenance and evidence boundaries; it
+is not a current release checklist.
 
 ## Prior work
 
-Before the submission period, Anvil Primaris already contained an AgentRun
+Before the event window, Anvil Primaris already contained an AgentRun
 operator foundation: CRDs and reconciliation, profiles and schedules, PVC-backed
 state, adverse-event handling, archive/feedback concepts, and five runner
 adapters. The initial standalone commit copied and reorganized much of that
@@ -43,13 +42,13 @@ work.
 | Standalone Kubernetes AgentRun CLI | merge `7741792` (PR #12) | Added Kubernetes-authenticated append-only run creation, ownership-checked status/log diagnosis, tests, and operator documentation without importing Anvil Primaris APIs. |
 | PostgreSQL archive chart modes | merge `312c8ce` (PR #13) | Added external, standalone, and CloudNativePG archive modes with retained data-bearing resources, strict archive schema validation, chart tests, and migration/upsert integration coverage. |
 | First-class OpenCode harness | merge `a14b0f5` (PR #16) | Added the `openCode` backend, controller/chart/release wiring, a checksum-pinned non-root OpenCode 1.18.3 image, provider-native model selection, contract tests, and a real read-only repository-inspection smoke run. |
-| Submission compliance and no-build Kind proof | merge `e71728e` (PR #15) | Added the prior/new disclosure, Codex/GPT-5.6 collaboration account, judge guide, checksum-pinned non-root prerequisite installer, public-artifact test, video script, and checklist. |
+| Event provenance and no-build Kind proof | merge `e71728e` (PR #15) | Added the prior/new disclosure, Codex/GPT-5.6 collaboration account, checksum-pinned non-root prerequisite installer, public-artifact test, and video script. |
 
-Generated CRDs and copied files are not counted as independent innovation. Draft
-or unmerged branches remain excluded unless they are merged into the immutable
-submission tag and this ledger is updated. The additions listed above are now
-on `master`, but they are not part of release `v0.1.1`; claims about runnable
-post-v0.1.1 behavior require a matching final tag and published artifacts.
+Generated CRDs and copied files are not counted as independent innovation.
+Draft or unmerged branches were excluded from the event-period account. The
+additions listed above reached `master`, but they were not part of release
+`v0.1.1`; runnable post-v0.1.1 behavior requires a matching release tag and
+published artifacts.
 
 ## Codex and GPT-5.6 collaboration
 
@@ -58,27 +57,17 @@ The primary build thread was run through Codex with recorded model identifier
 cross-repository type dependencies, implemented and reviewed API/controller
 changes, regenerated CRDs, wrote tests and docs, built release automation,
 executed Kind validation, and investigated production/release failures. The
-entrant reviewed the diffs and retained authority for scope, security, product,
-release, and compatibility decisions.
+maintainer reviewed the diffs and retained authority for scope, security,
+product, release, and compatibility decisions.
 
-The required Codex Session ID remains **TODO** until `/feedback` is run in the
-original core thread and its exact returned ID is copied to Devpost.
+The event-specific Codex Session ID was not recorded before the event closed.
 
-The runtime exposes GPT-5.6 as an explicit Codex-harness path. It becomes a
-demonstrated meaningful product component only after the authenticated evidence
-below is recorded before submission:
-
-- AgentRun namespace/name: **TODO**
-- immutable manifest/revision: **TODO**
-- verified GPT-5.6 runtime model-ID evidence: **TODO**
-- useful output and structured terminal status: **TODO**
-- UTC execution time and video timestamp: **TODO**
-
-The credential-free Kind path is intentionally not accepted as GPT-5.6 proof.
+An authenticated GPT-5.6 AgentRun was not recorded before the event closed.
+The credential-free Kind path is intentionally not presented as GPT-5.6 proof.
 
 ## Human decisions
 
-The entrant, not Codex, made and approved these material decisions:
+The maintainer, not Codex, made and approved these material decisions:
 
 - make `anvil-agents` the true standalone runtime owner rather than a wrapper;
 - preserve `control.anvil.hazyforge.io/v1alpha1` for live owner-reference safety;
@@ -97,16 +86,14 @@ The entrant, not Codex, made and approved these material decisions:
 - The standalone repository creation date is not presented as the age of every
   line of code.
 - The no-credential Kind test does not exercise or prove GPT-5.6.
-- Unmerged branches and features absent from the selected immutable tag are not
-  part of the submission.
+- Unmerged branches and features absent from the published releases are not
+  part of the event-period claims.
 - Linux arm64, older Kubernetes versions, hostile multi-tenant execution, and
   one-run multi-node compute are not certified capabilities.
 - The read-only OIDC API cannot create or mutate AgentRuns.
 
-## Final evidence gate
+## Event closeout
 
-Before submitting, replace every TODO, merge only intended scope, create an
-immutable submission tag, publish a matching chart/controller release if any
-post-v0.1.1 runnable feature is claimed, rerun `make verify` and the no-build
-Kind test from that tag, and align the repository link, chart/images, demo,
-description, and claims to the same selected scope.
+The event closed without a recorded authenticated GPT-5.6 run, final event tag,
+or completed submission. Current release claims belong in the release notes and
+must be supported by matching source, chart, image, and verification evidence.
