@@ -31,7 +31,7 @@ export PATH="${HOME}/.local/bin:${PATH}"
 
 That script installs checksum-pinned Kind, kubectl, and Helm binaries. It checks
 but never installs or reconfigures the host's Docker Engine. Continue with the
-[public judge instructions](../JUDGING.md) for the digest-pinned release test.
+[digest-pinned public Kind test](../examples/judge-kind/README.md).
 
 ## Credential-Free Kind Run
 
