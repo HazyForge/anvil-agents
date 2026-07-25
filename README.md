@@ -31,45 +31,6 @@ The branded API group `control.anvil.hazyforge.io/v1alpha1` is retained as a
 stable API identity and for migration compatibility. Application and target
 references are opaque scope keys, not dependencies on other CRDs.
 
-## OpenAI Build Week 2026 Submission
-
-Anvil Agents is being prepared for entry in the **Developer Tools** track. It
-is a Kubernetes operator for running long-lived, resource-heavy Codex and other
-agent harnesses as isolated, observable Jobs with reusable policy, skills, and
-durable state.
-
-This repository was created during Build Week, but the embedded AgentRun
-runtime was not created from scratch. The disclosed pre-event baseline is
-`HazyForge/anvil-primaris@0f5849ae5ada9ac507e50535d0ab2b4485cd5207`.
-Only the standalone extraction and meaningful extensions made after July 13,
-2026 at 9:00 a.m. PDT are submitted for judging. See the
-[Build Week evidence ledger](docs/build-week-2026.md) for the exact boundary,
-commit evidence, non-claims, and final-submission gates.
-
-### Built with Codex and GPT-5.6
-
-The core implementation thread used Codex with the recorded model identifier
-`gpt-5.6-sol`. Codex accelerated repository extraction, dependency severing,
-controller and API work, generated CRDs, tests, security hardening and
-deny-by-default auth tests, release automation, and Kind validation. The
-runtime exposes an explicit GPT-5.6 Codex path: an `AgentRun` selects the model,
-the controller materializes the Job, and the runner performs the requested
-repository work. No successful runtime use is claimed until the final evidence
-ledger and narrated video contain a real authenticated run. The public Kind
-smoke test below intentionally uses no model or credentials.
-
-The entrant made the key product and engineering decisions: establish this
-repository as the standalone runtime owner; preserve the existing API group and
-append-only `AgentRun` contract; keep application references opaque and policy
-authority external; isolate the read-only OIDC API from controller and Secret
-authority; model one run as one Kubernetes Job; and require explicit profiles,
-skills, storage, security boundaries, and release verification.
-
-The entrant must run `/feedback` in the original core thread and copy the exact
-returned Session ID into Devpost before submission. The
-[submission checklist](docs/submission-checklist.md) keeps that and every other
-non-repository gate visible.
-
 ## Test It Without Rebuilding
 
 On Linux amd64 with Docker Engine running, install the pinned user-space tools
@@ -90,8 +51,9 @@ privileged host service. The judge script builds nothing and needs no API key.
 It creates a dedicated Kind cluster, installs the public v0.1.1 OCI chart with
 the controller pinned to its published digest, and proves two append-only
 `AgentRun` Jobs share durable PVC state while producing structured terminal
-status. See [Judging](JUDGING.md) for check-only mode, custom installation
-directories, expected output, inspection, troubleshooting, and cleanup.
+status. [Getting started](docs/getting-started.md) covers check-only mode,
+custom installation directories, expected output, inspection, troubleshooting,
+and cleanup.
 
 The validated release platform is Linux amd64, Kubernetes 1.30 or newer, and
 Helm 3.14 or newer. Arm64 images and older Kubernetes releases are not part of
@@ -246,8 +208,6 @@ audience, and explicit namespace authorization bindings are configured. See
 - [AgentRun API reference](docs/agent-run.md)
 - [Create and diagnose runs with anvil-agentctl](docs/cli.md)
 - [Migration from Anvil Primaris](docs/migration-from-anvil-primaris.md)
-- [OpenAI Build Week evidence and prior/new-work ledger](docs/build-week-2026.md)
-- [Judge test instructions](JUDGING.md)
 - [Third-party notices](THIRD_PARTY_NOTICES.md)
 
 Hazy Forge uses this same open-source runtime for its own agent system. The
