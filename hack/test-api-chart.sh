@@ -60,8 +60,8 @@ fi
 if grep -Eq '^kind: CustomResourceDefinition$' "${tmp_dir}/without-crds.yaml"; then
   fail "CRDs rendered while crds.install=false"
 fi
-[[ "$(grep -c 'helm.sh/resource-policy: keep' "${tmp_dir}/disabled.yaml")" -eq 11 ]] || fail "all eleven CRDs must be retained on Helm uninstall"
-[[ "$(grep -c 'argocd.argoproj.io/sync-options: Prune=false' "${tmp_dir}/disabled.yaml")" -eq 11 ]] || fail "all eleven CRDs must be retained during Argo ownership transfer"
+[[ "$(grep -c 'helm.sh/resource-policy: keep' "${tmp_dir}/disabled.yaml")" -eq 12 ]] || fail "all twelve CRDs must be retained on Helm uninstall"
+[[ "$(grep -c 'argocd.argoproj.io/sync-options: Prune=false' "${tmp_dir}/disabled.yaml")" -eq 12 ]] || fail "all twelve CRDs must be retained during Argo ownership transfer"
 for crd in agentharnessprofiles agentskillsets agenttoolsets adversesignals; do
   grep -Eq "name: ${crd}\.control\.anvil\.hazyforge\.io" "${tmp_dir}/disabled.yaml" || fail "${crd} CRD was not rendered"
 done
@@ -141,6 +141,38 @@ rules:
 EOF
 diff -u "${tmp_dir}/expected-rbac-rules.yaml" "${tmp_dir}/rbac-rules.yaml" >/dev/null ||
   fail "API RBAC differs from the exact read-only rule contract"
+
+# Composition library is opt-in; read expands get/list, write adds mutations.
+# Secrets and AgentRun mutation verbs must never appear.
+helm template "${release}" "${chart}" "${api_args[@]}" \
+  --set api.config.composition.readEnabled=true \
+  --set-string 'api.config.authorization.bindings[0].permissions[2]=anvil-agents:composition:read' \
+  --show-only templates/api-clusterrole.yaml >"${tmp_dir}/rbac-composition-read.yaml"
+grep -q 'agentskillsets' "${tmp_dir}/rbac-composition-read.yaml" || fail "composition read RBAC missing agentskillsets"
+grep -q 'agentrunprofiles' "${tmp_dir}/rbac-composition-read.yaml" || fail "composition read RBAC missing agentrunprofiles"
+if grep -Eq 'verbs:.*create| - create' "${tmp_dir}/rbac-composition-read.yaml"; then
+  fail "composition read RBAC must not grant create"
+fi
+if grep -q 'secrets' "${tmp_dir}/rbac-composition-read.yaml"; then
+  fail "API RBAC must never grant secrets"
+fi
+
+helm template "${release}" "${chart}" "${api_args[@]}" \
+  --set api.config.composition.readEnabled=true \
+  --set api.config.composition.writeEnabled=true \
+  --set-string 'api.config.authorization.bindings[0].permissions[2]=anvil-agents:composition:read' \
+  --set-string 'api.config.authorization.bindings[0].permissions[3]=anvil-agents:composition:write' \
+  --show-only templates/api-clusterrole.yaml >"${tmp_dir}/rbac-composition-write.yaml"
+grep -q ' - create' "${tmp_dir}/rbac-composition-write.yaml" || fail "composition write RBAC missing create"
+grep -q ' - delete' "${tmp_dir}/rbac-composition-write.yaml" || fail "composition write RBAC missing delete"
+if grep -q 'agentruns' "${tmp_dir}/rbac-composition-write.yaml" && grep -A6 'resources: \["agentruns"\]' "${tmp_dir}/rbac-composition-write.yaml" | grep -q create; then
+  fail "API RBAC must not grant AgentRun create"
+fi
+
+expect_template_failure composition-write-without-read \
+  --set api.config.composition.writeEnabled=true
+expect_template_failure composition-permission-without-flag \
+  --set-string 'api.config.authorization.bindings[0].permissions[2]=anvil-agents:composition:read'
 
 expect_template_failure service-port-mismatch --set api.service.port=9090
 expect_template_failure route-wildcard \

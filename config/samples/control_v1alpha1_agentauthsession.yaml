@@ -1,0 +1,17 @@
+apiVersion: control.anvil.hazyforge.io/v1alpha1
+kind: AgentAuthSession
+metadata:
+  name: codex-reauth-example
+  namespace: agents
+spec:
+  provider: codex
+  action: reauth
+  dataVolumeRef:
+    name: repository-review-home
+  stagingSecretRef:
+    name: codex-auth-staging-example
+  bootstrapSecretRef:
+    name: codex-credentials-seed
+  bootstrapSecretKey: CODEX_AUTH_JSON
+  seedID: seed-example-replace-me
+  timeoutSeconds: 300

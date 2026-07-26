@@ -35,6 +35,13 @@ type Backend interface {
 	GetJob(context.Context, string, string) (*batchv1.Job, error)
 	GetPod(context.Context, string, string) (*corev1.Pod, error)
 	ListEvents(context.Context, string, []types.UID) ([]corev1.Event, error)
+	GetDataVolume(context.Context, string, string) (*agentsv1alpha1.AgentDataVolume, error)
+	GetSecret(context.Context, string, string) (*corev1.Secret, error)
+	CreateSecret(context.Context, *corev1.Secret) error
+	DeleteSecret(context.Context, string, string) error
+	CreateAuthSession(context.Context, *agentsv1alpha1.AgentAuthSession) error
+	GetAuthSession(context.Context, string, string) (*agentsv1alpha1.AgentAuthSession, error)
+	ListAuthSessions(context.Context, string) (*agentsv1alpha1.AgentAuthSessionList, error)
 }
 
 type KubernetesBackend struct {
@@ -152,4 +159,57 @@ func (backend *KubernetesBackend) ListEvents(ctx context.Context, namespace stri
 		}
 	}
 	return events, nil
+}
+
+func (backend *KubernetesBackend) GetDataVolume(ctx context.Context, namespace, name string) (*agentsv1alpha1.AgentDataVolume, error) {
+	volume := &agentsv1alpha1.AgentDataVolume{}
+	if err := backend.runs.Get(ctx, client.ObjectKey{Namespace: namespace, Name: name}, volume); err != nil {
+		return nil, fmt.Errorf("get AgentDataVolume %s/%s: %w", namespace, name, err)
+	}
+	return volume, nil
+}
+
+func (backend *KubernetesBackend) GetSecret(ctx context.Context, namespace, name string) (*corev1.Secret, error) {
+	secret, err := backend.clientset.CoreV1().Secrets(namespace).Get(ctx, name, metav1.GetOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("get Secret %s/%s: %w", namespace, name, err)
+	}
+	return secret, nil
+}
+
+func (backend *KubernetesBackend) CreateSecret(ctx context.Context, secret *corev1.Secret) error {
+	if _, err := backend.clientset.CoreV1().Secrets(secret.Namespace).Create(ctx, secret, metav1.CreateOptions{}); err != nil {
+		return fmt.Errorf("create Secret %s/%s: %w", secret.Namespace, secret.Name, err)
+	}
+	return nil
+}
+
+func (backend *KubernetesBackend) DeleteSecret(ctx context.Context, namespace, name string) error {
+	if err := backend.clientset.CoreV1().Secrets(namespace).Delete(ctx, name, metav1.DeleteOptions{}); err != nil {
+		return fmt.Errorf("delete Secret %s/%s: %w", namespace, name, err)
+	}
+	return nil
+}
+
+func (backend *KubernetesBackend) CreateAuthSession(ctx context.Context, session *agentsv1alpha1.AgentAuthSession) error {
+	if err := backend.runs.Create(ctx, session); err != nil {
+		return fmt.Errorf("create AgentAuthSession: %w", err)
+	}
+	return nil
+}
+
+func (backend *KubernetesBackend) GetAuthSession(ctx context.Context, namespace, name string) (*agentsv1alpha1.AgentAuthSession, error) {
+	session := &agentsv1alpha1.AgentAuthSession{}
+	if err := backend.runs.Get(ctx, client.ObjectKey{Namespace: namespace, Name: name}, session); err != nil {
+		return nil, fmt.Errorf("get AgentAuthSession %s/%s: %w", namespace, name, err)
+	}
+	return session, nil
+}
+
+func (backend *KubernetesBackend) ListAuthSessions(ctx context.Context, namespace string) (*agentsv1alpha1.AgentAuthSessionList, error) {
+	list := &agentsv1alpha1.AgentAuthSessionList{}
+	if err := backend.runs.List(ctx, list, client.InNamespace(namespace)); err != nil {
+		return nil, fmt.Errorf("list AgentAuthSessions: %w", err)
+	}
+	return list, nil
 }

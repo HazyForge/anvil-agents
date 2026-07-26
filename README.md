@@ -69,12 +69,13 @@ the certified submission contract.
 - `AgentSchedule`: interval and manual run creation across named templates.
 - `AgentRunControl`: cluster-wide pause and concurrency policy by scope key.
 - `AgentDataVolume` and `VolumeProfile`: explicit durable PVC-backed state.
+- `AgentAuthSession`: operator-driven durable Codex auth reauth/logout sessions.
 - `AdverseSituation`: deduplicated event buffers with optional responders.
 - `AdverseSignal`: immutable, provider-neutral adverse evidence from any app.
 - `anvil-agents-api`: optional OIDC-protected summaries, live SSE logs, and the
   read-only **Anvil Agents Console** SPA at `/` (see `web/console/`).
-- `anvil-agentctl`: Kubernetes-authenticated creation and diagnosis of runs
-  without writing raw manifests.
+- `anvil-agentctl`: Kubernetes-authenticated creation and diagnosis of runs,
+  Codex durable-home reauth, and in-pod status reporting without raw manifests.
 - Collector-neutral Job and Pod labels for external log and telemetry
   pipelines.
 

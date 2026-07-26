@@ -1,6 +1,12 @@
 # Anvil Agents Console
 
-Read-only observer SPA for `anvil-agents-api` AgentRuns.
+Observer SPA for `anvil-agents-api` AgentRuns, plus an optional **composition
+library** for profiles, skill sets, tool sets, harness profiles, and volumes.
+
+GitOps remains the source of truth: the API and UI lock objects owned by Argo
+CD / Flux / Helm and any object not labeled
+`control.anvil.hazyforge.io/managed-by=anvil-agents-console`. AgentRuns stay
+append-only (no create/rerun from the console).
 
 ## Stack
 
@@ -78,6 +84,34 @@ api:
 
 Browser `fetch()` sends an `Origin` header even for same-host console calls.
 Omit the origin and API responses return `origin_denied`.
+
+## Composition library
+
+Enable on the API:
+
+```yaml
+api:
+  config:
+    composition:
+      readEnabled: true
+      writeEnabled: true   # opt-in; keep false for observe-only clusters
+    authorization:
+      bindings:
+        - roles: [operator]
+          permissions:
+            - anvil-agents:runs:read
+            - anvil-agents:runs:stream
+            - anvil-agents:composition:read
+            - anvil-agents:composition:write
+          namespaces: [hazy-trade]
+```
+
+UI routes (when `readEnabled`):
+
+- `/library` — kind hub
+- `/ns/:namespace/profiles` (and skill-sets, tool-sets, harness-profiles,
+  volume-profiles, data-volumes)
+- create/edit forms; GitOps-protected rows show lock badges and reject Save
 
 Local Vite dev (`http://127.0.0.1:5173`) proxies `/api` so the browser Origin
 is the Vite origin; either proxy-only (no cross-origin) or add the Vite origin

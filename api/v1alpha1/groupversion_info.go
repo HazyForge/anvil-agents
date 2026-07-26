@@ -21,6 +21,8 @@ func addKnownTypes(scheme *runtime.Scheme) error {
 		&AdverseSignalList{},
 		&AdverseSituation{},
 		&AdverseSituationList{},
+		&AgentAuthSession{},
+		&AgentAuthSessionList{},
 		&AgentDataVolume{},
 		&AgentDataVolumeList{},
 		&VolumeProfile{},

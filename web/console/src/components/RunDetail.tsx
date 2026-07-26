@@ -1,3 +1,4 @@
+import { Link } from "react-router-dom";
 import type { AgentRunView, ResolvedObjectRef } from "../api/types";
 import {
   formatDuration,
@@ -187,16 +188,34 @@ export function RunDetail({ run, token, onRunUpdate }: Props) {
               <dt>Resolved at</dt>
               <dd className="mono">{formatTime(composition.resolvedAt)}</dd>
               <dt>Profile</dt>
-              <dd className="mono">{refLabel(composition.profileRef)}</dd>
+              <dd className="mono">
+                {compositionRefLink(run.namespace, "profiles", composition.profileRef)}
+              </dd>
               <dt>Harness profile</dt>
-              <dd className="mono">{refLabel(composition.harnessProfileRef)}</dd>
+              <dd className="mono">
+                {compositionRefLink(run.namespace, "harness-profiles", composition.harnessProfileRef)}
+              </dd>
               <dt>Skill sets</dt>
               <dd className="mono">
-                {(composition.skillSetRefs ?? []).map(refLabel).join(", ") || "—"}
+                {(composition.skillSetRefs ?? []).length > 0
+                  ? (composition.skillSetRefs ?? []).map((ref, index) => (
+                      <span key={`${ref.name}-${index}`}>
+                        {index > 0 ? ", " : null}
+                        {compositionRefLink(run.namespace, "skill-sets", ref)}
+                      </span>
+                    ))
+                  : "—"}
               </dd>
               <dt>Tool sets</dt>
               <dd className="mono">
-                {(composition.toolSetRefs ?? []).map(refLabel).join(", ") || "—"}
+                {(composition.toolSetRefs ?? []).length > 0
+                  ? (composition.toolSetRefs ?? []).map((ref, index) => (
+                      <span key={`${ref.name}-${index}`}>
+                        {index > 0 ? ", " : null}
+                        {compositionRefLink(run.namespace, "tool-sets", ref)}
+                      </span>
+                    ))
+                  : "—"}
               </dd>
               <dt>Scope</dt>
               <dd>
@@ -233,11 +252,20 @@ export function RunDetail({ run, token, onRunUpdate }: Props) {
   );
 }
 
-function refLabel(ref?: ResolvedObjectRef): string {
+function compositionRefLink(
+  runNamespace: string,
+  kindRoute: string,
+  ref?: ResolvedObjectRef,
+): React.ReactNode {
   if (!ref?.name) {
     return "—";
   }
-  const ns = ref.namespace ? `${ref.namespace}/` : "";
+  const ns = ref.namespace || runNamespace;
   const digest = ref.digest ? `@${ref.digest.slice(0, 12)}` : "";
-  return `${ns}${ref.name}${digest}`;
+  const label = `${ref.namespace ? `${ref.namespace}/` : ""}${ref.name}${digest}`;
+  return (
+    <Link to={`/ns/${encodeURIComponent(ns)}/${kindRoute}/${encodeURIComponent(ref.name)}`}>
+      {label}
+    </Link>
+  );
 }

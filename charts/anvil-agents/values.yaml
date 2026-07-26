@@ -186,6 +186,13 @@ api:
       oidc:
         clientId: ""
         scopes: []
+    # Composition library (profiles, skill/tool sets, volumes, harness).
+    # GitOps-owned objects remain read-only even when writeEnabled is true;
+    # only console-managed objects (label managed-by=anvil-agents-console)
+    # can be created/updated/deleted through the API.
+    composition:
+      readEnabled: false
+      writeEnabled: false
     list:
       maxItems: 5000
     stream:

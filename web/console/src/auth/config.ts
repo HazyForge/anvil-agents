@@ -9,6 +9,10 @@ export type UIConfig = {
     audiences: string[];
     scopes: string[];
   };
+  composition: {
+    readEnabled: boolean;
+    writeEnabled: boolean;
+  };
 };
 
 let cached: UIConfig | null = null;
@@ -33,6 +37,7 @@ export async function loadUIConfig(force = false): Promise<UIConfig> {
     if (!body?.oidc?.issuer || !body?.oidc?.clientId) {
       throw new Error("ui-config missing oidc.issuer or oidc.clientId");
     }
+    const composition = (body as UIConfig).composition;
     cached = {
       productTitle: body.productTitle || "Anvil Agents Console",
       defaultNamespaces: Array.isArray(body.defaultNamespaces) ? body.defaultNamespaces : [],
@@ -44,6 +49,10 @@ export async function loadUIConfig(force = false): Promise<UIConfig> {
           Array.isArray(body.oidc.scopes) && body.oidc.scopes.length > 0
             ? body.oidc.scopes
             : ["openid", "profile", "email", "offline_access"],
+      },
+      composition: {
+        readEnabled: Boolean(composition?.readEnabled),
+        writeEnabled: Boolean(composition?.writeEnabled),
       },
     };
     return cached;

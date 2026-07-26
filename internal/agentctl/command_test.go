@@ -40,6 +40,14 @@ type fakeBackend struct {
 	events           []corev1.Event
 	eventsErr        error
 	eventUIDs        []types.UID
+	dataVolume       *agentsv1alpha1.AgentDataVolume
+	dataVolumeErr    error
+	secret           *corev1.Secret
+	secretErr        error
+	createdSecret    *corev1.Secret
+	authSession      *agentsv1alpha1.AgentAuthSession
+	authSessions     []agentsv1alpha1.AgentAuthSession
+	createAuthErr    error
 }
 
 func (backend *fakeBackend) DefaultNamespace() string { return backend.defaultNamespace }
@@ -98,6 +106,57 @@ func (backend *fakeBackend) GetPod(_ context.Context, _, _ string) (*corev1.Pod,
 func (backend *fakeBackend) ListEvents(_ context.Context, _ string, uids []types.UID) ([]corev1.Event, error) {
 	backend.eventUIDs = append([]types.UID(nil), uids...)
 	return append([]corev1.Event(nil), backend.events...), backend.eventsErr
+}
+
+func (backend *fakeBackend) GetDataVolume(_ context.Context, _, _ string) (*agentsv1alpha1.AgentDataVolume, error) {
+	if backend.dataVolumeErr != nil {
+		return nil, backend.dataVolumeErr
+	}
+	if backend.dataVolume == nil {
+		return nil, apierrors.NewNotFound(schema.GroupResource{Group: agentsv1alpha1.GroupVersion.Group, Resource: "agentdatavolumes"}, "missing")
+	}
+	return backend.dataVolume.DeepCopy(), nil
+}
+
+func (backend *fakeBackend) GetSecret(_ context.Context, _, _ string) (*corev1.Secret, error) {
+	if backend.secretErr != nil {
+		return nil, backend.secretErr
+	}
+	if backend.secret == nil {
+		return nil, apierrors.NewNotFound(schema.GroupResource{Resource: "secrets"}, "missing")
+	}
+	return backend.secret.DeepCopy(), nil
+}
+
+func (backend *fakeBackend) CreateSecret(_ context.Context, secret *corev1.Secret) error {
+	backend.createdSecret = secret.DeepCopy()
+	return nil
+}
+
+func (backend *fakeBackend) DeleteSecret(_ context.Context, _, _ string) error { return nil }
+
+func (backend *fakeBackend) CreateAuthSession(_ context.Context, session *agentsv1alpha1.AgentAuthSession) error {
+	if backend.createAuthErr != nil {
+		return backend.createAuthErr
+	}
+	backend.authSession = session.DeepCopy()
+	if session.Name == "" {
+		session.Name = session.GenerateName + "auth"
+	}
+	session.Status.Phase = agentsv1alpha1.AgentAuthSessionPhaseSucceeded
+	backend.authSession = session.DeepCopy()
+	return nil
+}
+
+func (backend *fakeBackend) GetAuthSession(_ context.Context, _, _ string) (*agentsv1alpha1.AgentAuthSession, error) {
+	if backend.authSession == nil {
+		return nil, apierrors.NewNotFound(schema.GroupResource{Group: agentsv1alpha1.GroupVersion.Group, Resource: "agentauthsessions"}, "missing")
+	}
+	return backend.authSession.DeepCopy(), nil
+}
+
+func (backend *fakeBackend) ListAuthSessions(_ context.Context, _ string) (*agentsv1alpha1.AgentAuthSessionList, error) {
+	return &agentsv1alpha1.AgentAuthSessionList{Items: append([]agentsv1alpha1.AgentAuthSession(nil), backend.authSessions...)}, nil
 }
 
 func TestRunCreateClientDryRunDoesNotLoadKubernetes(t *testing.T) {

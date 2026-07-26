@@ -2108,6 +2108,11 @@ func (r *AgentRunReconciler) resolveAgentRunDataVolumes(ctx context.Context, obj
 			message := firstNonEmpty(strings.TrimSpace(volume.Status.LastError), fmt.Sprintf("AgentDataVolume %s/%s is blocked.", namespace, name))
 			return nil, controlv1alpha1.AgentRunPhaseNeedsHuman, "DataVolumeBlocked", message, nil
 		}
+		if blocked, sessionName, err := AgentAuthSessionBlocksDataVolume(ctx, reader, namespace, name); err != nil {
+			return nil, "", "", "", fmt.Errorf("check AgentAuthSession reservation for %s/%s: %w", namespace, name, err)
+		} else if blocked {
+			return nil, controlv1alpha1.AgentRunPhasePending, "AuthSessionActive", fmt.Sprintf("Waiting for AgentAuthSession %s/%s to finish maintenance on AgentDataVolume %s.", namespace, sessionName, name), nil
+		}
 		claimName := agentDataVolumeClaimName(volume)
 		if volume.Status.ClaimRef != nil && strings.TrimSpace(volume.Status.ClaimRef.Name) != "" {
 			claimNamespace := firstNonEmpty(strings.TrimSpace(volume.Status.ClaimRef.Namespace), namespace)

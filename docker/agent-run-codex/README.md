@@ -22,9 +22,17 @@ goal mode, sandbox, and additional arguments. Credentials come from
 `spec.harness.execution.envSecretRefs`; non-secret values use `extraEnv`.
 
 The image includes Codex, Go, Helm, kubectl, gh, git, curl, jq, rg, Python,
-`anvil-agent-status`, `anvil-agent-feedback`, and `anvil-observability`. It does
-not bundle another control-plane CLI. Additional application tools belong in
-`spec.harness.tools` or an overlay image.
+`anvil-agentctl`, `anvil-agent-status`, `anvil-agent-feedback`, and
+`anvil-observability`. `anvil-agentctl self report` is the preferred in-pod
+status helper; the shell `anvil-agent-status` wrapper remains for compatibility.
+The binary does not grant Kubernetes authority by itself—operator auth commands
+still require the caller's kubeconfig RBAC. Additional application tools belong
+in `spec.harness.tools` or an overlay image.
+
+Durable Codex auth lives in `$CODEX_HOME/auth.json` on the attached data volume.
+`CODEX_AUTH_JSON` seeds that file only when it is missing or the operator changes
+the opaque seed id via `anvil-agentctl auth codex reauth`. A logout tombstone
+blocks reseeding until the next successful reauth.
 
 Repository cloning, tool setup, and GitHub authentication happen before Codex
 starts. Tokens are not printed. A missing repository or insufficient push
