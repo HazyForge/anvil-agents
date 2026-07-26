@@ -2897,6 +2897,34 @@ func TestAgentRunExternalSecretFreshnessRequiresAChangedRefreshTime(t *testing.T
 	}
 }
 
+func TestAgentRunExternalSecretAcceptsHealthyStableAfterGrace(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, time.July, 26, 12, 0, 30, 0, time.UTC)
+	requested := metav1.NewTime(now.Add(-agentRunExternalSecretHealthyAcceptAfter - time.Second))
+	previous := metav1.NewTime(now.Add(-2 * time.Minute))
+	entry := &controlv1alpha1.AgentRunExternalSecretRefreshStatus{
+		RequestedAt:         &requested,
+		PreviousRefreshTime: &previous,
+	}
+	if agentRunExternalSecretRefreshChanged(entry, previous.Time) {
+		t.Fatal("unchanged refresh time must not count as a post-request advance")
+	}
+	if !agentRunExternalSecretAcceptHealthyStable(entry, previous.Time, now) {
+		t.Fatal("Ready secrets with recent unchanged refreshTime must pass after the force-sync grace")
+	}
+	if agentRunExternalSecretAcceptHealthyStable(entry, previous.Time, requested.Time.Add(agentRunExternalSecretHealthyAcceptAfter/2)) {
+		t.Fatal("healthy stable acceptance must wait for the force-sync grace")
+	}
+	stale := now.Add(-agentRunExternalSecretHealthyMaxAge - time.Minute)
+	if agentRunExternalSecretAcceptHealthyStable(entry, stale, now) {
+		t.Fatal("stale refreshTime must not satisfy the healthy stable gate")
+	}
+	if !agentRunExternalSecretRefreshStale(stale, now) {
+		t.Fatal("refresh older than the healthy max age must be stale")
+	}
+}
+
 func TestAgentRunExternalSecretRefreshTimeoutIgnoresCompletedEntries(t *testing.T) {
 	t.Parallel()
 
@@ -3040,5 +3068,129 @@ func TestAgentRunExternalSecretFreshnessGatesJobCreationOnNewTargetRefresh(t *te
 	}
 	if got, want := status.ExternalSecretRefreshes[0].TargetSecret, "runtime-credential"; got != want {
 		t.Fatalf("target secret = %q, want %q", got, want)
+	}
+}
+
+func TestAgentRunExternalSecretFreshnessAcceptsHealthyUnchangedRefreshTime(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	scheme := runtime.NewScheme()
+	if err := corev1.AddToScheme(scheme); err != nil {
+		t.Fatalf("add core scheme: %v", err)
+	}
+	externalSecretGVK := schema.GroupVersionKind{Group: "external-secrets.io", Version: "v1", Kind: "ExternalSecret"}
+	scheme.AddKnownTypeWithName(externalSecretGVK, &unstructured.Unstructured{})
+	scheme.AddKnownTypeWithName(externalSecretGVK.GroupVersion().WithKind("ExternalSecretList"), &unstructured.UnstructuredList{})
+
+	// Unchanged refreshTime within the healthy max age. force-sync often no-ops
+	// status for static vault properties (e.g. production auditor tokens).
+	previousRefresh := time.Now().UTC().Add(-2 * time.Minute).Truncate(time.Second)
+	externalSecret := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": externalSecretGVK.GroupVersion().String(),
+		"kind":       externalSecretGVK.Kind,
+		"metadata":   map[string]any{"name": "auditor-auth", "namespace": "hazy-trade"},
+		"spec":       map[string]any{"target": map[string]any{"name": "auditor-auth"}},
+		"status": map[string]any{
+			"refreshTime": previousRefresh.Format(time.RFC3339),
+			"binding":     map[string]any{"name": "auditor-auth"},
+			"conditions":  []any{map[string]any{"type": "Ready", "status": "True"}},
+		},
+	}}
+	reconciler := &AgentRunReconciler{
+		Client: fake.NewClientBuilder().WithScheme(scheme).WithRuntimeObjects(
+			externalSecret,
+			&corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "auditor-auth", Namespace: "hazy-trade"}},
+		).Build(),
+		Scheme: scheme,
+	}
+	run := &controlv1alpha1.AgentRun{
+		ObjectMeta: metav1.ObjectMeta{Name: "stable-auditor", Namespace: "hazy-trade", UID: "run-uid"},
+		Spec: controlv1alpha1.AgentRunSpec{Harness: controlv1alpha1.AgentRunHarnessSpec{Execution: controlv1alpha1.AgentRunHarnessExecutionSpec{
+			EnvSecretRefs: []controlv1alpha1.NamespacedObjectReference{{Name: "auditor-auth"}},
+			ExternalSecretRefreshRefs: []controlv1alpha1.AgentRunExternalSecretRefreshRef{{
+				Name:            "auditor-auth",
+				TargetSecretRef: controlv1alpha1.NamespacedObjectReference{Name: "auditor-auth"},
+			}},
+		}}},
+	}
+	status := controlv1alpha1.AgentRunStatus{}
+	fresh, phase, reason, _, err := reconciler.ensureAgentRunExternalSecretFreshness(ctx, run, &status)
+	if err != nil || fresh || phase != controlv1alpha1.AgentRunPhasePending || reason != "ExternalSecretRefreshRequested" {
+		t.Fatalf("first preflight = fresh:%t phase:%q reason:%q err:%v", fresh, phase, reason, err)
+	}
+	if len(status.ExternalSecretRefreshes) != 1 {
+		t.Fatalf("refresh status = %#v, want one request entry", status.ExternalSecretRefreshes)
+	}
+
+	// Inside the force-sync grace: still Ready + same refreshTime → keep waiting.
+	fresh, phase, reason, _, err = reconciler.ensureAgentRunExternalSecretFreshness(ctx, run, &status)
+	if err != nil || fresh || phase != controlv1alpha1.AgentRunPhasePending || reason != "WaitingForExternalSecretRefresh" {
+		t.Fatalf("grace preflight = fresh:%t phase:%q reason:%q err:%v", fresh, phase, reason, err)
+	}
+
+	// Past grace with unchanged but recent refreshTime → accept healthy stable.
+	pastGrace := metav1.NewTime(time.Now().Add(-agentRunExternalSecretHealthyAcceptAfter - time.Second))
+	status.ExternalSecretRefreshes[0].RequestedAt = &pastGrace
+	fresh, phase, reason, message, err := reconciler.ensureAgentRunExternalSecretFreshness(ctx, run, &status)
+	if err != nil || !fresh || phase != "" || reason != "" || message != "" {
+		t.Fatalf("healthy stable preflight = fresh:%t phase:%q reason:%q message:%q err:%v", fresh, phase, reason, message, err)
+	}
+	if status.ExternalSecretRefreshes[0].RefreshedAt == nil {
+		t.Fatal("healthy stable acceptance must record RefreshedAt")
+	}
+}
+
+func TestAgentRunExternalSecretFreshnessStillTimesOutWhenStaleAndUnchanged(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	scheme := runtime.NewScheme()
+	if err := corev1.AddToScheme(scheme); err != nil {
+		t.Fatalf("add core scheme: %v", err)
+	}
+	externalSecretGVK := schema.GroupVersionKind{Group: "external-secrets.io", Version: "v1", Kind: "ExternalSecret"}
+	scheme.AddKnownTypeWithName(externalSecretGVK, &unstructured.Unstructured{})
+	scheme.AddKnownTypeWithName(externalSecretGVK.GroupVersion().WithKind("ExternalSecretList"), &unstructured.UnstructuredList{})
+
+	staleRefresh := time.Now().UTC().Add(-agentRunExternalSecretHealthyMaxAge - 5*time.Minute).Truncate(time.Second)
+	externalSecret := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": externalSecretGVK.GroupVersion().String(),
+		"kind":       externalSecretGVK.Kind,
+		"metadata":   map[string]any{"name": "stale-auth", "namespace": "hazy-trade"},
+		"spec":       map[string]any{"target": map[string]any{"name": "stale-auth"}},
+		"status": map[string]any{
+			"refreshTime": staleRefresh.Format(time.RFC3339),
+			"binding":     map[string]any{"name": "stale-auth"},
+			"conditions":  []any{map[string]any{"type": "Ready", "status": "True"}},
+		},
+	}}
+	reconciler := &AgentRunReconciler{
+		Client: fake.NewClientBuilder().WithScheme(scheme).WithRuntimeObjects(
+			externalSecret,
+			&corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "stale-auth", Namespace: "hazy-trade"}},
+		).Build(),
+		Scheme: scheme,
+	}
+	run := &controlv1alpha1.AgentRun{
+		ObjectMeta: metav1.ObjectMeta{Name: "stale-credentials", Namespace: "hazy-trade", UID: "run-uid"},
+		Spec: controlv1alpha1.AgentRunSpec{Harness: controlv1alpha1.AgentRunHarnessSpec{Execution: controlv1alpha1.AgentRunHarnessExecutionSpec{
+			EnvSecretRefs: []controlv1alpha1.NamespacedObjectReference{{Name: "stale-auth"}},
+			ExternalSecretRefreshRefs: []controlv1alpha1.AgentRunExternalSecretRefreshRef{{
+				Name:            "stale-auth",
+				TargetSecretRef: controlv1alpha1.NamespacedObjectReference{Name: "stale-auth"},
+			}},
+		}}},
+	}
+	status := controlv1alpha1.AgentRunStatus{}
+	fresh, phase, reason, _, err := reconciler.ensureAgentRunExternalSecretFreshness(ctx, run, &status)
+	if err != nil || fresh || phase != controlv1alpha1.AgentRunPhasePending || reason != "ExternalSecretRefreshRequested" {
+		t.Fatalf("first preflight = fresh:%t phase:%q reason:%q err:%v", fresh, phase, reason, err)
+	}
+	overdue := metav1.NewTime(time.Now().Add(-agentRunExternalSecretRefreshTimeout - time.Second))
+	status.ExternalSecretRefreshes[0].RequestedAt = &overdue
+	fresh, phase, reason, _, err = reconciler.ensureAgentRunExternalSecretFreshness(ctx, run, &status)
+	if err != nil || fresh || phase != controlv1alpha1.AgentRunPhaseFailed || reason != "ExternalSecretRefreshTimedOut" {
+		t.Fatalf("stale preflight = fresh:%t phase:%q reason:%q err:%v", fresh, phase, reason, err)
 	}
 }

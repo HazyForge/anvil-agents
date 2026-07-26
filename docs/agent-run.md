@@ -161,6 +161,11 @@ manual `extraRBACRules`. See
 Secrets referenced by `envSecretRefs` are projected into the Job with
 `envFrom`. They must be in the run namespace. An optional ExternalSecret
 preflight can request and verify a fresh target Secret before Job creation.
+The controller still annotates each listed ExternalSecret with `force-sync`,
+but it does not require `status.refreshTime` to advance on every run: after a
+short grace it accepts a Ready ExternalSecret whose target Secret exists and
+whose last `refreshTime` is recent enough (default 15m). That covers static
+vault properties that reconcile healthy without rewriting the refresh stamp.
 The chart grants ExternalSecret mutation only when
 `externalSecrets.enabled=true`.
 
