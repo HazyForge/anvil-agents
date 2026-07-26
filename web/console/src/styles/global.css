@@ -1025,3 +1025,165 @@ table.data-table tr.click-row:hover td {
 .ordered-ref-manual .input {
   flex: 1;
 }
+
+/* Composition component picker (cards instead of dropdowns) */
+.composition-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.composition-selected-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin-bottom: 0.35rem;
+  padding: 0.5rem 0.55rem;
+  border: 1px solid var(--border);
+  background: var(--bg-panel-2);
+  border-radius: var(--radius);
+}
+
+.composition-selected-order {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.composition-selected-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.2rem 0.35rem 0.2rem 0.5rem;
+  border: 1px solid var(--border-strong);
+  background: var(--bg-base);
+  border-radius: var(--radius);
+  font-size: 0.78rem;
+}
+
+.composition-pick-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(14.5rem, 1fr));
+  gap: 0.55rem;
+}
+
+.compose-pick-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  align-items: stretch;
+  text-align: left;
+  min-height: 7.5rem;
+  padding: 0.7rem 0.75rem;
+  border: 1px solid var(--border);
+  background: linear-gradient(180deg, var(--bg-panel-2) 0%, var(--bg-panel) 100%);
+  border-radius: var(--radius);
+  color: var(--text);
+  cursor: pointer;
+  transition:
+    border-color 0.12s ease,
+    box-shadow 0.12s ease,
+    background 0.12s ease;
+}
+
+.compose-pick-card:hover:not(:disabled) {
+  border-color: var(--border-strong);
+  background: var(--bg-hover);
+}
+
+.compose-pick-card:focus-visible {
+  outline: 1px solid var(--emerald);
+  outline-offset: 2px;
+}
+
+.compose-pick-card-selected {
+  border-color: var(--emerald-dim);
+  box-shadow: inset 0 0 0 1px rgba(61, 255, 168, 0.35);
+  background: linear-gradient(180deg, rgba(61, 255, 168, 0.08) 0%, var(--bg-panel) 100%);
+}
+
+.compose-pick-card-danger.compose-pick-card-selected {
+  border-color: var(--amber-dim);
+  box-shadow: inset 0 0 0 1px rgba(240, 180, 41, 0.35);
+}
+
+.compose-pick-card-disabled,
+.compose-pick-card:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+}
+
+.compose-pick-top {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.45rem;
+}
+
+.compose-pick-badge {
+  flex: 0 0 auto;
+  min-width: 1.35rem;
+  height: 1.35rem;
+  padding: 0 0.3rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--bg-void);
+  background: var(--emerald);
+  border-radius: var(--radius);
+  line-height: 1;
+}
+
+.compose-pick-badge-off {
+  color: var(--text-mute);
+  background: transparent;
+  border: 1px dashed var(--border-strong);
+}
+
+.compose-pick-card-selected .compose-pick-badge-off {
+  display: none;
+}
+
+.compose-pick-name {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--text);
+  word-break: break-word;
+  line-height: 1.3;
+}
+
+.compose-pick-card-selected .compose-pick-name {
+  color: var(--emerald);
+}
+
+.compose-pick-desc {
+  margin: 0;
+  flex: 1;
+  font-size: 0.74rem;
+  line-height: 1.35;
+  color: var(--text-dim);
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.compose-pick-desc-mute {
+  color: var(--text-mute);
+  font-style: italic;
+}
+
+.compose-pick-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.7rem;
+  color: var(--text-mute);
+  min-height: 1.25rem;
+}
