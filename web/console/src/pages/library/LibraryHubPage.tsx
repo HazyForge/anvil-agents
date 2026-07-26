@@ -15,6 +15,8 @@ export function LibraryHubPage({ namespace, writeEnabled }: Props) {
     );
   }
 
+  const kinds = COMPOSITION_KINDS.filter((kind) => kind.route !== "profiles");
+
   return (
     <div className="library-hub">
       <div className="page-header">
@@ -28,17 +30,22 @@ export function LibraryHubPage({ namespace, writeEnabled }: Props) {
         </div>
         <div className="chip-row">
           <span className="chip">{writeEnabled ? "write enabled" : "read only"}</span>
+          <Link className="btn btn-primary" to="/profiles">
+            Profiles as cards
+          </Link>
         </div>
       </div>
 
       <div className="banner banner-info">
-        Objects managed by Argo CD, Flux, or Helm are locked in the console. Only resources labeled{" "}
+        AgentRunProfiles are shown as cards on the{" "}
+        <Link to="/profiles">Profiles</Link> page (the composition CRD). Other kinds below are
+        supporting building blocks. GitOps-owned objects stay locked; only resources labeled{" "}
         <span className="mono">control.anvil.hazyforge.io/managed-by=anvil-agents-console</span> can
         be created or edited here.
       </div>
 
       <div className="library-grid">
-        {COMPOSITION_KINDS.map((kind) => (
+        {kinds.map((kind) => (
           <Link
             key={kind.segment}
             className={`library-card${kind.danger ? " library-card-danger" : ""}`}

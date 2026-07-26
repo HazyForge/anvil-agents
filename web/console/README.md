@@ -85,21 +85,16 @@ api:
 Browser `fetch()` sends an `Origin` header even for same-host console calls.
 Omit the origin and API responses return `origin_denied`.
 
-## Agent cards (frontend recipes)
+## Profiles (composition cards)
 
-Cards are **browser-only** recipes stored in `localStorage` (not Kubernetes
-objects). Each card assembles a profile name, optional harness/skill/tool
-sets, prompt, and intent, then can **Save & run** to create an append-only
-`AgentRun` via the API.
+`AgentRunProfile` is the composition CRD. The console shows profiles as cards:
 
-Routes:
+- `/profiles` — card grid for the active namespace
+- `/profiles/new` — create a console-managed profile
+- `/ns/:namespace/profiles/:name` — view/edit (GitOps profiles are read-only)
 
-- `/cards` — card grid for the active namespace
-- `/cards/new` / `/cards/:id` — editor + run
-
-Requires `api.config.runs.createEnabled=true` and OIDC permission
-`anvil-agents:runs:create` to launch. Composition pickers need
-`composition.readEnabled` + `anvil-agents:composition:read`.
+Requires `composition.readEnabled` + `anvil-agents:composition:read`. Create
+needs `composition.writeEnabled` + `anvil-agents:composition:write`.
 
 ## Composition library
 

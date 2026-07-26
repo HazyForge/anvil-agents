@@ -25,9 +25,10 @@ documentation.
   `AgentSkillSet`, `AgentToolSet`, `VolumeProfile`, and `AgentDataVolume`
   objects. Writes are denied for GitOps-owned objects and for any object that is
   not labeled `control.anvil.hazyforge.io/managed-by=anvil-agents-console` so
-  Git remains source of truth for fleet config. Console **agent cards** are a
-  frontend-only recipe store (localStorage), not a Kubernetes API. The API must
-  not acquire Secret access or policy-broker authority.
+  Git remains source of truth for fleet config. The console presents
+  `AgentRunProfile` objects as composition cards; other composition kinds live
+  under Library. The API must not acquire Secret access or policy-broker
+  authority.
 - OIDC configuration must remain provider-neutral and deny by default. Require
   an exact issuer, audience, explicit claim binding, namespace authorization,
   and exact CORS origins. Never accept access tokens in query strings or allow
