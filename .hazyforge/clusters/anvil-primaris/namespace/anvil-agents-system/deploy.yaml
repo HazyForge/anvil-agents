@@ -9,17 +9,17 @@ serviceAccount:
   name: anvil-agents
 image:
   # Controller/API image embeds Anvil Agents Console SPA (served at /).
-  reference: ghcr.io/hazyforge/anvil-agents@sha256:48456d377828711ab1537011c8dc99ab982b993378452b58cfbc71f7af4b3608
+  reference: ghcr.io/hazyforge/anvil-agents@sha256:8dd64485be025abc3994fa26346f44a5c879654b35bfef0a566e7a02f6436377
   pullPolicy: IfNotPresent
 imagePullSecrets:
   - name: ghcr-creds
 runnerImages:
-  codex: ghcr.io/hazyforge/anvil-agent-run-codex@sha256:519a005956b645b5c20f81891f0e09a23cab55e9603070a9ad2165dec8d798b8
-  openCode: ghcr.io/hazyforge/anvil-agent-run-opencode@sha256:0a4fdf5a4bbca787b8a273b2b420c6685ce287113e166c032a9d6a409e677cdf
-  hermesAgent: ghcr.io/hazyforge/anvil-agent-run-hermes@sha256:0e29149a631bfe42f1a13be35678556fac311ff3e4197df4344a6808916d16ed
-  openClaw: ghcr.io/hazyforge/anvil-agent-run-openclaw@sha256:76f809392ed25e7a65a54282304a1cd5aa732e9eb9caa9185e46a9b8ea0bbccf
-  grokBuild: ghcr.io/hazyforge/anvil-agent-run-grok-build@sha256:84d659f0f96645032714a10c0a942c11c3c5c36c112989cbcd7a15ded2919771
-  piAgent: ghcr.io/hazyforge/anvil-agent-run-pi@sha256:42b74ab7a932f9492dcc86535ae879074dc421525d786b63f93687377e0adeec
+  codex: ghcr.io/hazyforge/anvil-agent-run-codex@sha256:d2e12a7da81e6f9dbab6ca2b39660e6be387fe22ca456500396bc70211a6dd07
+  openCode: ghcr.io/hazyforge/anvil-agent-run-opencode@sha256:c0ce2dd789009579cf3db04cedd2e3157bddd8a7c78d9d689cec4e10a027ed72
+  hermesAgent: ghcr.io/hazyforge/anvil-agent-run-hermes@sha256:9e555d7bbda8cf4089913f74a82d9748d7e3f4a4430af3230426561c86cad2ca
+  openClaw: ghcr.io/hazyforge/anvil-agent-run-openclaw@sha256:6448f31c5cf0b654570b3ddbc96e5d5a570e6ded7ee132e0a750c38fd59642f6
+  grokBuild: ghcr.io/hazyforge/anvil-agent-run-grok-build@sha256:48f744181761dcb754160b311c733cb13256eb90bced4d9f3e405bedf7f8298b
+  piAgent: ghcr.io/hazyforge/anvil-agent-run-pi@sha256:47fb8544cd1c10956c3198d9d1cc6fc9fcdfe4f782f1fbf96c3acd15cfb4ba1d
 crds:
   install: true
 leaderElection: true
