@@ -107,6 +107,7 @@ func (server *Server) routes() http.Handler {
 	mux.HandleFunc("GET /readyz", server.handleReady)
 	mux.HandleFunc("GET /ui-config.json", server.handleUIConfig)
 	mux.Handle("GET /api/v1/namespaces/{namespace}/agent-runs", server.authenticate(http.HandlerFunc(server.handleListRuns)))
+	mux.Handle("POST /api/v1/namespaces/{namespace}/agent-runs", server.authenticate(http.HandlerFunc(server.handleCreateRun)))
 	mux.Handle("GET /api/v1/namespaces/{namespace}/agent-runs/{name}", server.authenticate(http.HandlerFunc(server.handleGetRun)))
 	mux.Handle("GET /api/v1/namespaces/{namespace}/agent-runs/{name}/events", server.authenticate(http.HandlerFunc(server.handleRunEvents)))
 	server.registerCompositionRoutes(mux)
@@ -148,6 +149,9 @@ func (server *Server) handleUIConfig(writer http.ResponseWriter, _ *http.Request
 		"composition": map[string]any{
 			"readEnabled":  server.config.Composition.ReadEnabled,
 			"writeEnabled": server.config.Composition.WriteEnabled,
+		},
+		"runs": map[string]any{
+			"createEnabled": server.config.Runs.CreateEnabled,
 		},
 	})
 }

@@ -8,6 +8,8 @@ import { AuthCallbackPage } from "./pages/AuthCallbackPage";
 import { LibraryHubPage } from "./pages/library/LibraryHubPage";
 import { CompositionListPage } from "./pages/library/CompositionListPage";
 import { CompositionEditorPage } from "./pages/library/CompositionEditorPage";
+import { CardsPage } from "./pages/cards/CardsPage";
+import { CardEditorPage } from "./pages/cards/CardEditorPage";
 import { loadUIConfig } from "./auth/config";
 import { ensureAccessToken, logout } from "./auth/oidc";
 import { clearLegacyToken, loadSession } from "./auth/session";
@@ -29,6 +31,7 @@ export default function App() {
   const [authError, setAuthError] = useState<string | null>(null);
   const [compositionRead, setCompositionRead] = useState(false);
   const [compositionWrite, setCompositionWrite] = useState(false);
+  const [runsCreate, setRunsCreate] = useState(false);
   const location = useLocation();
 
   useEffect(() => {
@@ -43,6 +46,7 @@ export default function App() {
         setProductTitle(config.productTitle);
         setCompositionRead(config.composition.readEnabled);
         setCompositionWrite(config.composition.writeEnabled);
+        setRunsCreate(config.runs.createEnabled);
         if (config.defaultNamespaces.length > 0) {
           setNamespaces((prev) => {
             const next = uniqueNamespaces([...config.defaultNamespaces, ...prev]);
@@ -150,11 +154,13 @@ export default function App() {
                 <div className="brand">
                   <div className="brand-title">{productTitle}</div>
                   <div className="brand-sub">
-                    {compositionWrite
-                      ? "Operator · composition (GitOps protected)"
-                      : compositionRead
-                        ? "Observer · library read"
-                        : "Observer · runs only"}
+                    {runsCreate
+                      ? "Operator · cards + runs"
+                      : compositionWrite
+                        ? "Operator · composition (GitOps protected)"
+                        : compositionRead
+                          ? "Observer · library read"
+                          : "Observer · runs only"}
                   </div>
                 </div>
                 <nav className="top-nav" aria-label="Primary">
@@ -163,6 +169,12 @@ export default function App() {
                     to="/"
                   >
                     Runs
+                  </Link>
+                  <Link
+                    className={`top-nav-link${location.pathname.startsWith("/cards") ? " active" : ""}`}
+                    to="/cards"
+                  >
+                    Cards
                   </Link>
                   {compositionRead ? (
                     <Link
@@ -192,6 +204,21 @@ export default function App() {
                   <Route
                     path="/ns/:namespace/runs/:name"
                     element={<RunPage token={token} onViewNamespace={onViewNamespace} />}
+                  />
+                  <Route
+                    path="/cards"
+                    element={<CardsPage namespace={activeNamespace} runsCreateEnabled={runsCreate} />}
+                  />
+                  <Route
+                    path="/cards/:id"
+                    element={
+                      <CardEditorPage
+                        token={token}
+                        namespace={activeNamespace}
+                        compositionReadEnabled={compositionRead}
+                        runsCreateEnabled={runsCreate}
+                      />
+                    }
                   />
                   {compositionRead ? (
                     <>

@@ -128,7 +128,9 @@ cat >"${tmp_dir}/expected-rbac-rules.yaml" <<'EOF'
 rules:
   - apiGroups: ["control.anvil.hazyforge.io"]
     resources: ["agentruns"]
-    verbs: ["get", "list"]
+    verbs:
+      - get
+      - list
   - apiGroups: [""]
     resources: ["pods"]
     verbs: ["get"]
@@ -173,6 +175,15 @@ expect_template_failure composition-write-without-read \
   --set api.config.composition.writeEnabled=true
 expect_template_failure composition-permission-without-flag \
   --set-string 'api.config.authorization.bindings[0].permissions[2]=anvil-agents:composition:read'
+expect_template_failure runs-create-permission-without-flag \
+  --set-string 'api.config.authorization.bindings[0].permissions[2]=anvil-agents:runs:create'
+
+helm template "${release}" "${chart}" "${api_args[@]}" \
+  --set api.config.runs.createEnabled=true \
+  --set-string 'api.config.authorization.bindings[0].permissions[2]=anvil-agents:runs:create' \
+  --show-only templates/api-clusterrole.yaml >"${tmp_dir}/rbac-runs-create.yaml"
+grep -A6 'resources:' "${tmp_dir}/rbac-runs-create.yaml" | grep -q 'agentruns' || fail "runs create RBAC missing agentruns"
+grep -q ' - create' "${tmp_dir}/rbac-runs-create.yaml" || fail "runs create RBAC missing create verb"
 
 expect_template_failure service-port-mismatch --set api.service.port=9090
 expect_template_failure route-wildcard \
