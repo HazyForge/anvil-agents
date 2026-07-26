@@ -9,7 +9,7 @@ serviceAccount:
   name: anvil-agents
 image:
   # Controller/API image embeds Anvil Agents Console SPA (served at /).
-  reference: ghcr.io/hazyforge/anvil-agents@sha256:bc936b5957d2df3abab77bcba12584440943d25bbf523346e6a1393c196cda2c
+  reference: ghcr.io/hazyforge/anvil-agents@sha256:b138221ec966681b9dc3809408aa8decf256d88a666aaf66858ae568c90e9ed6
   pullPolicy: IfNotPresent
 imagePullSecrets:
   - name: ghcr-creds
@@ -73,6 +73,14 @@ api:
       # Exact browser Origin for the console + API host (deny-by-default).
       allowedOrigins:
         - https://agents.anvil.hazyforge.io
+    ui:
+      productTitle: Anvil Agents Console
+      defaultNamespaces:
+        - hazy-trade
+        - anvilhub
+      oidc:
+        # ZITADEL User-Agent app "Anvil Agents Console" on project Anvil Primaris.
+        clientId: "383499920822362966"
   httpRoute:
     enabled: true
     parentRefs:

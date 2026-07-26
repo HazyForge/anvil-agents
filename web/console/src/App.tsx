@@ -1,10 +1,13 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 import { NamespaceSwitcher } from "./components/NamespaceSwitcher";
-import { TokenGate } from "./components/TokenGate";
+import { LoginGate } from "./components/LoginGate";
 import { BoardPage } from "./pages/BoardPage";
 import { RunPage } from "./pages/RunPage";
-import { clearToken, loadToken, saveToken } from "./auth/token";
+import { AuthCallbackPage } from "./pages/AuthCallbackPage";
+import { loadUIConfig } from "./auth/config";
+import { ensureAccessToken, logout } from "./auth/oidc";
+import { clearLegacyToken, loadSession } from "./auth/session";
 import {
   loadActiveNamespace,
   loadNamespaces,
@@ -14,20 +17,72 @@ import {
 } from "./state/namespaces";
 
 export default function App() {
-  const [token, setToken] = useState(() => loadToken());
+  const [token, setToken] = useState(() => loadSession()?.accessToken ?? "");
   const [namespaces, setNamespaces] = useState(() => loadNamespaces());
   const [activeNamespace, setActiveNamespace] = useState(() =>
     loadActiveNamespace(loadNamespaces()),
   );
+  const [productTitle, setProductTitle] = useState("Anvil Agents Console");
+  const [authError, setAuthError] = useState<string | null>(null);
 
-  const handleToken = useCallback((value: string) => {
-    saveToken(value);
-    setToken(value.trim());
+  useEffect(() => {
+    clearLegacyToken();
+    let cancelled = false;
+    void (async () => {
+      try {
+        const config = await loadUIConfig();
+        if (cancelled) {
+          return;
+        }
+        setProductTitle(config.productTitle);
+        if (config.defaultNamespaces.length > 0) {
+          setNamespaces((prev) => {
+            const next = uniqueNamespaces([...config.defaultNamespaces, ...prev]);
+            saveNamespaces(next);
+            return next;
+          });
+        }
+        const access = await ensureAccessToken();
+        if (!cancelled && access) {
+          setToken(access);
+        } else if (!cancelled && !access) {
+          setToken("");
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setAuthError(err instanceof Error ? err.message : String(err));
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Quiet refresh while the console is open.
+  useEffect(() => {
+    if (!token) {
+      return;
+    }
+    const id = window.setInterval(() => {
+      void ensureAccessToken().then((access) => {
+        if (!access) {
+          setToken("");
+          return;
+        }
+        setToken(access);
+      });
+    }, 60_000);
+    return () => window.clearInterval(id);
+  }, [token]);
+
+  const handleAuthenticated = useCallback((accessToken: string) => {
+    setToken(accessToken);
+    setAuthError(null);
   }, []);
 
   const handleLogout = useCallback(() => {
-    clearToken();
-    setToken("");
+    void logout();
   }, []);
 
   const onSelectNamespace = useCallback((ns: string) => {
@@ -73,40 +128,48 @@ export default function App() {
 
   const authed = useMemo(() => Boolean(token.trim()), [token]);
 
-  if (!authed) {
-    return <TokenGate initialToken={token} onSubmit={handleToken} />;
-  }
-
   return (
-    <div className="app-shell">
-      <header className="topbar">
-        <div className="brand">
-          <div className="brand-title">Anvil Agents Console</div>
-          <div className="brand-sub">Observer · no mutations</div>
-        </div>
-        <NamespaceSwitcher
-          namespaces={namespaces}
-          active={activeNamespace}
-          onSelect={onSelectNamespace}
-          onAdd={onAddNamespace}
-          onRemove={onRemoveNamespace}
-        />
-        <div className="topbar-actions">
-          <button type="button" className="btn btn-danger" onClick={handleLogout}>
-            Clear token
-          </button>
-        </div>
-      </header>
-      <main className="main">
-        <Routes>
-          <Route path="/" element={<BoardPage token={token} namespace={activeNamespace} />} />
-          <Route
-            path="/ns/:namespace/runs/:name"
-            element={<RunPage token={token} onViewNamespace={onViewNamespace} />}
-          />
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
-      </main>
-    </div>
+    <Routes>
+      <Route path="/auth/callback" element={<AuthCallbackPage onAuthenticated={handleAuthenticated} />} />
+      <Route
+        path="*"
+        element={
+          !authed ? (
+            <LoginGate error={authError} />
+          ) : (
+            <div className="app-shell">
+              <header className="topbar">
+                <div className="brand">
+                  <div className="brand-title">{productTitle}</div>
+                  <div className="brand-sub">Observer · no mutations</div>
+                </div>
+                <NamespaceSwitcher
+                  namespaces={namespaces}
+                  active={activeNamespace}
+                  onSelect={onSelectNamespace}
+                  onAdd={onAddNamespace}
+                  onRemove={onRemoveNamespace}
+                />
+                <div className="topbar-actions">
+                  <button type="button" className="btn btn-danger" onClick={handleLogout}>
+                    Sign out
+                  </button>
+                </div>
+              </header>
+              <main className="main">
+                <Routes>
+                  <Route path="/" element={<BoardPage token={token} namespace={activeNamespace} />} />
+                  <Route
+                    path="/ns/:namespace/runs/:name"
+                    element={<RunPage token={token} onViewNamespace={onViewNamespace} />}
+                  />
+                  <Route path="*" element={<Navigate to="/" replace />} />
+                </Routes>
+              </main>
+            </div>
+          )
+        }
+      />
+    </Routes>
   );
 }

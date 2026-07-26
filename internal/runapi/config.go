@@ -27,13 +27,28 @@ type Config struct {
 	UI            UIConfig            `json:"ui"`
 }
 
-// UIConfig controls optional console static asset serving overrides.
+// UIConfig controls console static serving and public browser OIDC settings.
 // By default the API serves the embedded Vite build (or in-tree stub).
+// OIDC client fields are non-secret SPA configuration only.
 type UIConfig struct {
 	// StaticDir, when set, serves console assets from this filesystem path
 	// instead of the embedded dist. Useful for local iteration without
 	// recompiling the API binary after `make console-build`.
 	StaticDir string `json:"staticDir"`
+	// ProductTitle is shown in the console chrome and ui-config.json.
+	ProductTitle string `json:"productTitle"`
+	// DefaultNamespaces seeds the namespace switcher for operators.
+	DefaultNamespaces []string `json:"defaultNamespaces"`
+	// OIDC holds public Authorization Code + PKCE client settings.
+	OIDC UIOIDCConfig `json:"oidc"`
+}
+
+// UIOIDCConfig is served to the browser as non-secret OIDC client config.
+type UIOIDCConfig struct {
+	// ClientID is the public SPA / user-agent OIDC client id.
+	ClientID string `json:"clientId"`
+	// Scopes are requested during authorization. Empty uses console defaults.
+	Scopes []string `json:"scopes"`
 }
 
 type ListConfig struct {

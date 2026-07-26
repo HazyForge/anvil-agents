@@ -222,9 +222,11 @@ controller/API image plus six runner images. `make docker-build` or
 
 The same `anvil-agents-api` process serves the read-only **Anvil Agents Console**
 SPA at `/` (API under `/api/v1/...`, probes at `/healthz` and `/readyz`). Phase 1
-auth is a manually pasted bearer token stored in browser `sessionStorage`. The
-console uses authenticated `fetch()` for SSE; it never places tokens in query
-strings and never lets the client choose arbitrary Pods or containers.
+auth uses OIDC Authorization Code + PKCE. Public client settings come from
+`GET /ui-config.json` (`api.config.ui.oidc.clientId` plus the API issuer and
+audiences). Access tokens stay in browser `sessionStorage`. The console uses
+authenticated `fetch()` for SSE; it never places tokens in query strings and
+never lets the client choose arbitrary Pods or containers.
 
 Browser calls send an `Origin` header. Configure
 `api.config.cors.allowedOrigins` with the exact console origin (for example

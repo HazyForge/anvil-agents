@@ -179,6 +179,13 @@ api:
       bindings: []
     cors:
       allowedOrigins: []
+    ui:
+      productTitle: Anvil Agents Console
+      defaultNamespaces: []
+      # Public SPA OIDC client id (Authorization Code + PKCE, no secret).
+      oidc:
+        clientId: ""
+        scopes: []
     list:
       maxItems: 5000
     stream:

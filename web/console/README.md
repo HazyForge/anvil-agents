@@ -7,11 +7,12 @@ Read-only observer SPA for `anvil-agents-api` AgentRuns.
 - Vite + React + TypeScript
 - Served at `/` by `anvil-agents-api` (API remains under `/api/v1/...`)
 
-## Auth (Phase 1)
+## Auth (OIDC PKCE)
 
-Paste a bearer JWT access token. The token is stored in **sessionStorage**
-(tab-scoped; cleared when the tab closes). Tokens are never placed in query
-strings. OIDC Authorization Code + PKCE is Phase 3.
+Browser sign-in uses **OIDC Authorization Code + PKCE** against the issuer
+from `GET /ui-config.json` (no client secret). Access and refresh tokens are
+stored in **sessionStorage** for the tab only. After the callback, `code` /
+`state` are removed from the URL; tokens are never left in query strings.
 
 ## Local development
 

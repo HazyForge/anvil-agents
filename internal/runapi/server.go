@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/url"
 	"sort"
 	"strconv"
 	"strings"
@@ -98,6 +99,7 @@ func (server *Server) routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", server.handleHealth)
 	mux.HandleFunc("GET /readyz", server.handleReady)
+	mux.HandleFunc("GET /ui-config.json", server.handleUIConfig)
 	mux.Handle("GET /api/v1/namespaces/{namespace}/agent-runs", server.authenticate(http.HandlerFunc(server.handleListRuns)))
 	mux.Handle("GET /api/v1/namespaces/{namespace}/agent-runs/{name}", server.authenticate(http.HandlerFunc(server.handleGetRun)))
 	mux.Handle("GET /api/v1/namespaces/{namespace}/agent-runs/{name}/events", server.authenticate(http.HandlerFunc(server.handleRunEvents)))
@@ -105,6 +107,38 @@ func (server *Server) routes() http.Handler {
 	// probe routes take precedence in Go 1.22+ ServeMux.
 	mux.HandleFunc("/", server.handleUI)
 	return server.securityHeaders(server.cors(mux))
+}
+
+// handleUIConfig serves non-secret browser configuration for the console SPA.
+func (server *Server) handleUIConfig(writer http.ResponseWriter, _ *http.Request) {
+	scopes := append([]string(nil), server.config.UI.OIDC.Scopes...)
+	if len(scopes) == 0 {
+		scopes = []string{"openid", "profile", "email", "offline_access"}
+		for _, audience := range server.config.OIDC.Audiences {
+			audience = strings.TrimSpace(audience)
+			if audience == "" {
+				continue
+			}
+			// ZITADEL: request the project as an access-token audience so the
+			// API resource server can validate JWT aud against the project id.
+			scopes = append(scopes, "urn:zitadel:iam:org:project:id:"+audience+":aud")
+		}
+	}
+	namespaces := append([]string(nil), server.config.UI.DefaultNamespaces...)
+	title := strings.TrimSpace(server.config.UI.ProductTitle)
+	if title == "" {
+		title = "Anvil Agents Console"
+	}
+	writeJSON(writer, http.StatusOK, map[string]any{
+		"productTitle":      title,
+		"defaultNamespaces": namespaces,
+		"oidc": map[string]any{
+			"issuer":    server.config.OIDC.Issuer,
+			"clientId":  strings.TrimSpace(server.config.UI.OIDC.ClientID),
+			"audiences": append([]string(nil), server.config.OIDC.Audiences...),
+			"scopes":    scopes,
+		},
+	})
 }
 
 func (server *Server) handleHealth(writer http.ResponseWriter, _ *http.Request) {
@@ -237,7 +271,12 @@ func (server *Server) securityHeaders(next http.Handler) http.Handler {
 			// API and probes remain non-executable; they return JSON only.
 			writer.Header().Set("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'")
 		} else {
-			// Console SPA: same-origin scripts/styles/fonts and API connect.
+			// Console SPA: same-origin assets/API plus OIDC issuer for discovery
+			// and token exchange (Authorization Code + PKCE).
+			connect := []string{"'self'"}
+			if issuerOrigin := oidcIssuerOrigin(server.config.OIDC.Issuer); issuerOrigin != "" {
+				connect = append(connect, issuerOrigin)
+			}
 			writer.Header().Set("Content-Security-Policy", strings.Join([]string{
 				"default-src 'self'",
 				"base-uri 'self'",
@@ -247,7 +286,7 @@ func (server *Server) securityHeaders(next http.Handler) http.Handler {
 				"style-src 'self' 'unsafe-inline'",
 				"font-src 'self'",
 				"script-src 'self'",
-				"connect-src 'self'",
+				"connect-src " + strings.Join(connect, " "),
 			}, "; "))
 		}
 		writer.Header().Set("Referrer-Policy", "no-referrer")
@@ -291,6 +330,17 @@ func (server *Server) cors(next http.Handler) http.Handler {
 func corsOriginAllowed(origin string, allowed map[string]struct{}) bool {
 	_, ok := allowed[origin]
 	return ok
+}
+
+func oidcIssuerOrigin(issuer string) string {
+	parsed, err := url.Parse(strings.TrimSpace(issuer))
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return ""
+	}
+	if parsed.Scheme != "https" && parsed.Scheme != "http" {
+		return ""
+	}
+	return parsed.Scheme + "://" + parsed.Host
 }
 
 func bearerToken(headers []string) (string, bool) {

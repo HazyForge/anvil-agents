@@ -103,7 +103,7 @@ func cleanUIPath(raw string) string {
 
 func isReservedUIPath(raw string) bool {
 	cleaned := path.Clean("/" + strings.TrimSpace(raw))
-	if cleaned == "/healthz" || cleaned == "/readyz" {
+	if cleaned == "/healthz" || cleaned == "/readyz" || cleaned == "/ui-config.json" {
 		return true
 	}
 	return strings.HasPrefix(cleaned, "/api/") || cleaned == "/api"
@@ -111,7 +111,7 @@ func isReservedUIPath(raw string) bool {
 
 func isAPIOrProbePath(raw string) bool {
 	cleaned := path.Clean("/" + strings.TrimSpace(raw))
-	if cleaned == "/healthz" || cleaned == "/readyz" {
+	if cleaned == "/healthz" || cleaned == "/readyz" || cleaned == "/ui-config.json" {
 		return true
 	}
 	return strings.HasPrefix(cleaned, "/api/") || cleaned == "/api"

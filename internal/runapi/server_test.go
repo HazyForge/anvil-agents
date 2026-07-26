@@ -354,6 +354,36 @@ func TestStreamLimiterEnforcesGlobalAndPerSubjectCaps(t *testing.T) {
 	}
 }
 
+func TestUIConfigExposesPublicOIDCSettings(t *testing.T) {
+	server := testServer(t, nil, staticAuthenticator{ready: true}, staticLogSource{})
+	server.config.UI.ProductTitle = "Anvil Agents Console"
+	server.config.UI.DefaultNamespaces = []string{"hazy-trade"}
+	server.config.UI.OIDC.ClientID = "console-client"
+	server.config.OIDC.Issuer = "https://issuer.example"
+	server.config.OIDC.Audiences = []string{"anvil-agents"}
+	request := httptest.NewRequest(http.MethodGet, "/ui-config.json", nil)
+	response := httptest.NewRecorder()
+	server.routes().ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected ui-config 200, got %d %s", response.Code, response.Body.String())
+	}
+	body := response.Body.String()
+	for _, want := range []string{
+		`"productTitle":"Anvil Agents Console"`,
+		`"clientId":"console-client"`,
+		`"issuer":"https://issuer.example"`,
+		`urn:zitadel:iam:org:project:id:anvil-agents:aud`,
+		`"hazy-trade"`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("ui-config missing %q in %s", want, body)
+		}
+	}
+	if csp := response.Header().Get("Content-Security-Policy"); !strings.Contains(csp, "default-src 'none'") {
+		t.Fatalf("expected API CSP for ui-config, got %q", csp)
+	}
+}
+
 func TestCORSRequiresExactConfiguredOrigin(t *testing.T) {
 	server := testServer(t, nil, staticAuthenticator{ready: true}, staticLogSource{})
 	request := httptest.NewRequest(http.MethodOptions, "/api/v1/namespaces/agents/agent-runs", nil)
