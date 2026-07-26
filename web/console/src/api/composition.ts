@@ -70,7 +70,14 @@ export async function createComposition(
   token: string,
   namespace: string,
   segment: CompositionPathSegment,
-  doc: { metadata: { name: string; labels?: Record<string, string> }; spec: Record<string, unknown> },
+  doc: {
+    metadata: {
+      name: string;
+      labels?: Record<string, string>;
+      annotations?: Record<string, string>;
+    };
+    spec: Record<string, unknown>;
+  },
 ): Promise<CompositionDocument> {
   const response = await apiFetch(basePath(namespace, segment), token, {
     method: "POST",

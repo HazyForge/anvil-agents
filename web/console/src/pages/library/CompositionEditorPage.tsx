@@ -11,6 +11,12 @@ import {
   compositionKindByRoute,
   type CompositionDocument,
 } from "../../api/types.composition";
+import { IconPicker } from "../../components/IconPicker";
+import {
+  getIconUrl,
+  getScreenshotUrl,
+  mergePresentationAnnotations,
+} from "../../utils/icons";
 
 interface Props {
   token: string;
@@ -44,6 +50,8 @@ export function CompositionEditorPage({ token, namespace: activeNamespace, write
   const [doc, setDoc] = useState<CompositionDocument | null>(null);
   const [name, setName] = useState("");
   const [specText, setSpecText] = useState("{}");
+  const [icon, setIcon] = useState("");
+  const [screenshot, setScreenshot] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
   const [loading, setLoading] = useState(!isCreate);
@@ -55,6 +63,8 @@ export function CompositionEditorPage({ token, namespace: activeNamespace, write
       if (kind) {
         setSpecText(JSON.stringify(emptySpecByKind[kind.kind] ?? {}, null, 2));
       }
+      setIcon("");
+      setScreenshot("");
       setLoading(false);
       return;
     }
@@ -66,6 +76,8 @@ export function CompositionEditorPage({ token, namespace: activeNamespace, write
         setDoc(loaded);
         setName(loaded.metadata.name);
         setSpecText(JSON.stringify(loaded.spec ?? {}, null, 2));
+        setIcon(getIconUrl(loaded.metadata.annotations));
+        setScreenshot(getScreenshotUrl(loaded.metadata.annotations));
         setLoading(false);
       })
       .catch((err: unknown) => {
@@ -109,6 +121,11 @@ export function CompositionEditorPage({ token, namespace: activeNamespace, write
       setError(`Invalid JSON spec: ${err instanceof Error ? err.message : String(err)}`);
       return;
     }
+    const annotations = mergePresentationAnnotations(
+      doc?.metadata.annotations,
+      icon,
+      screenshot,
+    );
     if (isCreate) {
       const createName = name.trim();
       if (!createName) {
@@ -118,7 +135,7 @@ export function CompositionEditorPage({ token, namespace: activeNamespace, write
       setSaving(true);
       try {
         const created = await createComposition(token, namespace, kind.segment, {
-          metadata: { name: createName },
+          metadata: { name: createName, annotations },
           spec,
         });
         navigate(
@@ -143,12 +160,14 @@ export function CompositionEditorPage({ token, namespace: activeNamespace, write
           name: doc.metadata.name,
           resourceVersion: doc.metadata.resourceVersion,
           labels: doc.metadata.labels,
-          annotations: doc.metadata.annotations,
+          annotations: annotations ?? {},
         },
         spec,
       });
       setDoc(updated);
       setSpecText(JSON.stringify(updated.spec ?? {}, null, 2));
+      setIcon(getIconUrl(updated.metadata.annotations));
+      setScreenshot(getScreenshotUrl(updated.metadata.annotations));
       setInfo("Saved");
     } catch (err) {
       setError(err instanceof APIError ? err.message : String(err));
@@ -231,6 +250,16 @@ export function CompositionEditorPage({ token, namespace: activeNamespace, write
                 placeholder="dns-1123 name"
               />
             </label>
+
+            <IconPicker
+              label={`${kind.title.replace(/\.$/, "")} icon`}
+              help="Same robot pack and custom URLs as profiles. Stored as ui.anvil.hazyforge.io/icon (+ optional screenshot)."
+              icon={icon}
+              screenshot={screenshot}
+              disabled={!writable}
+              onIconChange={setIcon}
+              onScreenshotChange={setScreenshot}
+            />
 
             <label className="field">
               <span className="label">Spec (JSON)</span>
