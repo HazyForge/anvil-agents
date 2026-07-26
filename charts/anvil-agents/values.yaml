@@ -193,6 +193,9 @@ api:
     composition:
       readEnabled: false
       writeEnabled: false
+    # Append-only AgentRun create for console agent cards.
+    runs:
+      createEnabled: false
     list:
       maxItems: 5000
     stream:

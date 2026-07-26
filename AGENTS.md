@@ -18,14 +18,16 @@ documentation.
   reconcilers at the same time.
 - Keep the optional OIDC-facing AgentRun API in a separate process and
   ServiceAccount from the controller. It may read AgentRuns and their verified
-  Job, Pod, and `agent` container logs. Opt-in composition library endpoints may
-  get/list (and, when `composition.writeEnabled=true`, create/update/delete)
-  `AgentRunProfile`, `AgentHarnessProfile`, `AgentSkillSet`, `AgentToolSet`,
-  `VolumeProfile`, and `AgentDataVolume` objects. Writes are denied for GitOps-
-  owned objects and for any object that is not labeled
-  `control.anvil.hazyforge.io/managed-by=anvil-agents-console` so Git remains
-  source of truth for fleet config. The API must not acquire Secret access,
-  AgentRun mutation verbs, or policy-broker authority.
+  Job, Pod, and `agent` container logs. When `runs.createEnabled=true` it may
+  create append-only AgentRuns (never update existing runs). Opt-in composition
+  library endpoints may get/list (and, when `composition.writeEnabled=true`,
+  create/update/delete) `AgentRunProfile`, `AgentHarnessProfile`,
+  `AgentSkillSet`, `AgentToolSet`, `VolumeProfile`, and `AgentDataVolume`
+  objects. Writes are denied for GitOps-owned objects and for any object that is
+  not labeled `control.anvil.hazyforge.io/managed-by=anvil-agents-console` so
+  Git remains source of truth for fleet config. Console **agent cards** are a
+  frontend-only recipe store (localStorage), not a Kubernetes API. The API must
+  not acquire Secret access or policy-broker authority.
 - OIDC configuration must remain provider-neutral and deny by default. Require
   an exact issuer, audience, explicit claim binding, namespace authorization,
   and exact CORS origins. Never accept access tokens in query strings or allow

@@ -55,6 +55,14 @@ api:
       issuer: https://hazyforge1-azsbgb.us1.zitadel.cloud
       audiences:
         - "376124473528572432"
+    composition:
+      # Browse cluster profiles/skills/tools for card pickers.
+      readEnabled: true
+      # Keep GitOps objects immutable; console-managed CRs only if write is needed later.
+      writeEnabled: false
+    runs:
+      # Append-only AgentRun create from browser agent cards.
+      createEnabled: true
     authorization:
       roleClaims: []
       roleObjectClaims:
@@ -66,6 +74,8 @@ api:
           permissions:
             - anvil-agents:runs:read
             - anvil-agents:runs:stream
+            - anvil-agents:runs:create
+            - anvil-agents:composition:read
           namespaces:
             - anvilhub
             - hazy-trade

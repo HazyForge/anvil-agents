@@ -15,6 +15,7 @@ import (
 const (
 	PermissionRunsRead         = "anvil-agents:runs:read"
 	PermissionRunsStream       = "anvil-agents:runs:stream"
+	PermissionRunsCreate       = "anvil-agents:runs:create"
 	PermissionCompositionRead  = "anvil-agents:composition:read"
 	PermissionCompositionWrite = "anvil-agents:composition:write"
 )
@@ -23,6 +24,7 @@ const (
 var knownPermissions = map[string]struct{}{
 	PermissionRunsRead:         {},
 	PermissionRunsStream:       {},
+	PermissionRunsCreate:       {},
 	PermissionCompositionRead:  {},
 	PermissionCompositionWrite: {},
 }
@@ -37,6 +39,14 @@ type Config struct {
 	UI            UIConfig            `json:"ui"`
 	// Composition gates library read/write endpoints. Write remains opt-in.
 	Composition CompositionConfig `json:"composition"`
+	// Runs gates append-only AgentRun create from the console/API.
+	Runs RunsConfig `json:"runs"`
+}
+
+// RunsConfig controls AgentRun mutation endpoints. Creates remain append-only.
+type RunsConfig struct {
+	// CreateEnabled serves POST /agent-runs when true.
+	CreateEnabled bool `json:"createEnabled"`
 }
 
 // CompositionConfig controls composition library endpoints. GitOps remains the
@@ -270,6 +280,9 @@ func (config Config) Validate() error {
 				if permission == PermissionCompositionWrite && !config.Composition.WriteEnabled {
 					return fmt.Errorf("authorization %s grants %s but composition.writeEnabled is false", name, permission)
 				}
+			}
+			if permission == PermissionRunsCreate && !config.Runs.CreateEnabled {
+				return fmt.Errorf("authorization %s grants %s but runs.createEnabled is false", name, permission)
 			}
 		}
 		if len(binding.Namespaces) == 0 && !binding.NamespacesFromClaim {
