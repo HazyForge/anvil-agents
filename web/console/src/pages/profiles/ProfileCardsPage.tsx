@@ -11,32 +11,32 @@ interface Props {
   writeEnabled: boolean;
 }
 
+function refNames(spec: Record<string, unknown>, key: "skillSets" | "toolSets"): string[] {
+  const block = spec[key];
+  if (typeof block !== "object" || !block) {
+    return [];
+  }
+  return ((block as { refs?: { name?: string }[] }).refs ?? [])
+    .map((ref) => String(ref.name ?? "").trim())
+    .filter(Boolean);
+}
+
 function profileSummary(doc: CompositionDocument): string {
   const spec = doc.spec ?? {};
   const harness =
     typeof spec.harnessProfileRef === "object" && spec.harnessProfileRef
       ? String((spec.harnessProfileRef as { name?: string }).name ?? "")
       : "";
-  const skillSets =
-    typeof spec.skillSets === "object" && spec.skillSets
-      ? ((spec.skillSets as { refs?: { name?: string }[] }).refs ?? [])
-          .map((ref) => ref.name)
-          .filter(Boolean)
-      : [];
-  const toolSets =
-    typeof spec.toolSets === "object" && spec.toolSets
-      ? ((spec.toolSets as { refs?: { name?: string }[] }).refs ?? [])
-          .map((ref) => ref.name)
-          .filter(Boolean)
-      : [];
+  const skillSets = refNames(spec, "skillSets");
+  const toolSets = refNames(spec, "toolSets");
   const intent =
     typeof spec.harness === "object" && spec.harness
       ? String((spec.harness as { intent?: string }).intent ?? "")
       : "";
   const bits = [
     harness ? `harness:${harness}` : null,
-    skillSets.length ? `skills:${skillSets.length}` : null,
-    toolSets.length ? `tools:${toolSets.length}` : null,
+    skillSets.length ? `skills:${skillSets.join(",")}` : null,
+    toolSets.length ? `tools:${toolSets.join(",")}` : null,
     intent ? `intent:${intent}` : null,
   ].filter(Boolean);
   return bits.join(" · ") || "profile";
