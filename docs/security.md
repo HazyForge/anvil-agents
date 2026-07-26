@@ -42,6 +42,13 @@ is backfilled by the controller; new executions record both immediately.
 Structured CLI views escape terminal control characters; the explicit
 `run logs` stream remains raw.
 
+Codex auth maintenance uses append-only `AgentAuthSession` objects. The CLI
+creates a short-lived staging Secret and session; the controller creates one
+fixed maintenance Job with `automountServiceAccountToken: false`, no caller-
+selected image/command/mount, and credential env that is never logged. Bootstrap
+Secret updates refuse ExternalSecret-managed targets. Untrusted AgentRuns may
+call `self report` only and never create auth sessions or mutate Secrets.
+
 Creating an `AdverseSignal` is incident-trigger authority for enabled
 `AdverseSituation` responders in that namespace. A write-only reporter role
 should grant only `create` on signals. Grant `get`, `list`, and `watch` through
@@ -91,19 +98,43 @@ labels and excludes common local credential files from its Docker context.
 Review custom Dockerfiles and any explicit cache export before using a shared
 or remote builder.
 
-## Public Read API
+## Public API
 
-The optional API has a separate read-only ServiceAccount. It validates signed
-JWT access tokens using exact OIDC issuer and audience values, then applies
-explicit permissions and namespace grants. Provider-neutral defaults read
+The optional API has a separate ServiceAccount from the controller. It validates
+signed JWT access tokens using exact OIDC issuer and audience values, then
+applies explicit permissions and namespace grants. Provider-neutral defaults read
 top-level `roles`, `groups`, `scope`/`scp`, and
 `anvil_agents_namespaces`. Provider-specific object claims, such as ZITADEL
 project-role maps, must be explicitly configured.
 
+Permissions:
+
+| Permission | Capability |
+| --- | --- |
+| `anvil-agents:runs:read` | List/get sanitized AgentRun views |
+| `anvil-agents:runs:stream` | Live log/status streams (with read) |
+| `anvil-agents:composition:read` | List/get composition CRs (when `composition.readEnabled`) |
+| `anvil-agents:composition:write` | Create/update/delete **console-managed** composition CRs (when `composition.writeEnabled`) |
+
+Composition kinds: `AgentRunProfile`, `AgentHarnessProfile`, `AgentSkillSet`,
+`AgentToolSet`, `VolumeProfile`, `AgentDataVolume`.
+
+**GitOps is source of truth.** Even with composition write enabled, the API
+refuses to update or delete objects that:
+
+1. carry well-known GitOps ownership markers (Argo CD, Flux, Helm), or
+2. lack the label `control.anvil.hazyforge.io/managed-by=anvil-agents-console`.
+
+Console creates always stamp that label and strip client-supplied GitOps
+markers. Granting `composition:write` is still code-execution authority for
+console-managed objects (tool setup scripts, harness image/SA/Secret *refs*).
+The API never grants Secret data access and never mutates AgentRuns.
+
 The API still has cluster-wide read access to AgentRuns, Jobs, Pods, and logs,
 so compromise can expose workload output. Its resolved-composition view
 contains object identities, opaque application/target names, and digests, not
-Secret values or skill contents.
+Secret values. Composition list/get responses include full specs for authorized
+namespaces so operators can edit console-managed objects.
 Terminate TLS at a trusted Gateway, apply rate limits and NetworkPolicy, and
 avoid logging secrets in agent output.
 

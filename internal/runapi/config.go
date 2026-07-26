@@ -13,9 +13,19 @@ import (
 )
 
 const (
-	PermissionRunsRead   = "anvil-agents:runs:read"
-	PermissionRunsStream = "anvil-agents:runs:stream"
+	PermissionRunsRead         = "anvil-agents:runs:read"
+	PermissionRunsStream       = "anvil-agents:runs:stream"
+	PermissionCompositionRead  = "anvil-agents:composition:read"
+	PermissionCompositionWrite = "anvil-agents:composition:write"
 )
+
+// knownPermissions is the closed set of OIDC permissions the API accepts.
+var knownPermissions = map[string]struct{}{
+	PermissionRunsRead:         {},
+	PermissionRunsStream:       {},
+	PermissionCompositionRead:  {},
+	PermissionCompositionWrite: {},
+}
 
 type Config struct {
 	BindAddress   string              `json:"bindAddress"`
@@ -25,6 +35,19 @@ type Config struct {
 	List          ListConfig          `json:"list"`
 	Stream        StreamConfig        `json:"stream"`
 	UI            UIConfig            `json:"ui"`
+	// Composition gates library read/write endpoints. Write remains opt-in.
+	Composition CompositionConfig `json:"composition"`
+}
+
+// CompositionConfig controls composition library endpoints. GitOps remains the
+// source of truth for objects that are not console-managed; see management
+// evaluation in composition_management.go.
+type CompositionConfig struct {
+	// ReadEnabled serves GET list/detail for composition CRDs when true.
+	ReadEnabled bool `json:"readEnabled"`
+	// WriteEnabled serves POST/PUT/DELETE for console-managed composition
+	// objects when true. Requires ReadEnabled.
+	WriteEnabled bool `json:"writeEnabled"`
 }
 
 // UIConfig controls console static serving and public browser OIDC settings.
@@ -237,8 +260,16 @@ func (config Config) Validate() error {
 			return fmt.Errorf("authorization %s must grant at least one permission", name)
 		}
 		for _, permission := range binding.Permissions {
-			if permission != PermissionRunsRead && permission != PermissionRunsStream {
+			if _, ok := knownPermissions[permission]; !ok {
 				return fmt.Errorf("authorization %s grants unsupported permission %q", name, permission)
+			}
+			if permission == PermissionCompositionRead || permission == PermissionCompositionWrite {
+				if !config.Composition.ReadEnabled && permission == PermissionCompositionRead {
+					return fmt.Errorf("authorization %s grants %s but composition.readEnabled is false", name, permission)
+				}
+				if permission == PermissionCompositionWrite && !config.Composition.WriteEnabled {
+					return fmt.Errorf("authorization %s grants %s but composition.writeEnabled is false", name, permission)
+				}
 			}
 		}
 		if len(binding.Namespaces) == 0 && !binding.NamespacesFromClaim {
@@ -271,6 +302,9 @@ func (config Config) Validate() error {
 	}
 	if config.Stream.MaxConnections < 1 || config.Stream.MaxConnectionsPerSubject < 1 || config.Stream.MaxConnectionsPerSubject > config.Stream.MaxConnections {
 		return fmt.Errorf("stream connection limits are invalid")
+	}
+	if config.Composition.WriteEnabled && !config.Composition.ReadEnabled {
+		return fmt.Errorf("composition.writeEnabled requires composition.readEnabled")
 	}
 	return nil
 }

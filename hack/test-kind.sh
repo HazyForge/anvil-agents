@@ -53,6 +53,7 @@ helm --kube-context "${kube_context}" uninstall anvil-agents --namespace anvil-a
 expected_crds=(
 	adversesignals.control.anvil.hazyforge.io
 	adversesituations.control.anvil.hazyforge.io
+	agentauthsessions.control.anvil.hazyforge.io
 	agentdatavolumes.control.anvil.hazyforge.io
 	agentharnessprofiles.control.anvil.hazyforge.io
 	agentruncontrols.control.anvil.hazyforge.io

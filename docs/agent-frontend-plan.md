@@ -33,7 +33,7 @@ Decisions refined 2026-07-26:
 | Attention queue (Phase 2) | Prioritize `Failed` + non-empty `error` first (not NeedsHuman-only) |
 | Verification sample | Live `hazy-trade` namespace on anvil-primaris |
 | Schedules/profiles UI | Not in Phase 1; runs only (source refs still shown on runs) |
-| Mutations | Never in this console; policy plane stays external |
+| Mutations | AgentRun mutations never in this console; composition library may edit **console-managed** objects only (GitOps remains source of truth) |
 
 ## Current Backend Foundation
 
@@ -330,9 +330,9 @@ If the board needs them without detail fetches:
 Pod-log streams are not a complete historical archive. Durable replay should
 later use Loki or the archive strategy.
 
-## Non-Goals For The First Version
+## Non-Goals For Run Control
 
-The console must not add mutation controls.
+The console must not add AgentRun control mutations.
 
 Do not include:
 
@@ -343,7 +343,13 @@ Do not include:
 - repository mutation controls
 - policy-broker decisions
 - Secret or credential inspection
-- schedule/profile management UI (Phase 1+)
+- schedule management UI
+- overriding GitOps-owned composition objects
+
+Composition library edits are allowed only for objects stamped
+`control.anvil.hazyforge.io/managed-by=anvil-agents-console`. GitOps-owned
+profiles, skills, tools, volumes, and harnesses stay read-only so Git remains
+source of truth.
 
 Reason: this repository keeps manager authorization, repository mutation, and
 product delivery policy outside the controller/API boundary. Future action

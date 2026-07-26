@@ -11,11 +11,16 @@ WORKDIR /src
 
 COPY go.mod go.sum ./
 RUN --mount=type=cache,target=/go/pkg/mod go mod download
+COPY api/ ./api/
+COPY internal/ ./internal/
 COPY cmd/anvil-agent-feedback/ ./cmd/anvil-agent-feedback/
+COPY cmd/anvil-agentctl/ ./cmd/anvil-agentctl/
 COPY lib/agentfeedback/ ./lib/agentfeedback/
 RUN --mount=type=cache,target=/root/.cache/go-build \
 	CGO_ENABLED=0 GOOS="${TARGETOS}" GOARCH="${TARGETARCH}" \
-	go build -trimpath -ldflags="-s -w" -o /out/anvil-agent-feedback ./cmd/anvil-agent-feedback
+	go build -trimpath -ldflags="-s -w" -o /out/anvil-agent-feedback ./cmd/anvil-agent-feedback \
+	&& CGO_ENABLED=0 GOOS="${TARGETOS}" GOARCH="${TARGETARCH}" \
+	go build -trimpath -ldflags="-s -w" -o /out/anvil-agentctl ./cmd/anvil-agentctl
 
 FROM ${HERMES_AGENT_IMAGE}
 
@@ -67,12 +72,14 @@ COPY docker/agent-run-common/repository-checkout.sh /opt/anvil-agent-run/lib/rep
 COPY docker/agent-run-hermes/entrypoint.sh /usr/local/bin/anvil-agent-run-hermes
 COPY docker/agent-run-hermes/anvil-hermes-query /usr/local/bin/anvil-hermes-query
 COPY --from=agent-feedback-builder /out/anvil-agent-feedback /usr/local/bin/anvil-agent-feedback
+COPY --from=agent-feedback-builder /out/anvil-agentctl /usr/local/bin/anvil-agentctl
 
 RUN chmod 0755 /usr/local/bin/anvil-agent-run-hermes \
 	&& chmod 0755 /usr/local/bin/anvil-hermes-query \
 	&& chmod 0755 /usr/local/bin/anvil-agent-status \
 	&& chmod 0755 /usr/local/bin/anvil-observability \
 	&& chmod 0755 /usr/local/bin/anvil-agent-feedback \
+	&& chmod 0755 /usr/local/bin/anvil-agentctl \
 	&& chmod 0644 /opt/anvil-agent-run/lib/github-auth.sh /opt/anvil-agent-run/lib/repository-checkout.sh \
 	&& anvil-hermes-query --help >/dev/null \
 	&& chmod 0644 /opt/anvil-agent-run/AGENTS.md \

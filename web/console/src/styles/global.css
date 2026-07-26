@@ -668,3 +668,229 @@ table.runs .intent-cell {
   font-size: 0.72rem;
   color: var(--text-dim);
 }
+
+/* Composition library */
+.top-nav {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.top-nav-link {
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-mute);
+  padding: 0.35rem 0.55rem;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  text-decoration: none;
+}
+
+.top-nav-link:hover {
+  color: var(--text);
+  text-decoration: none;
+  border-color: var(--border);
+}
+
+.top-nav-link.active {
+  color: var(--emerald);
+  border-color: rgba(61, 255, 168, 0.35);
+  background: rgba(61, 255, 168, 0.08);
+}
+
+.page-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: flex-start;
+  margin-bottom: 0.85rem;
+  flex-wrap: wrap;
+}
+
+.page-title {
+  margin: 0.15rem 0 0.2rem;
+  font-size: 1.05rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--text);
+}
+
+.page-sub {
+  margin: 0;
+  color: var(--text-mute);
+  font-size: 0.78rem;
+}
+
+.breadcrumb {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  align-items: center;
+  font-size: 0.68rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-mute);
+}
+
+.chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  align-items: center;
+}
+
+.library-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(16rem, 1fr));
+  gap: 0.75rem;
+}
+
+.library-card {
+  display: block;
+  border: 1px solid var(--border);
+  background: var(--bg-panel);
+  border-radius: var(--radius);
+  padding: 0.85rem;
+  text-decoration: none;
+  color: inherit;
+  min-height: 7.5rem;
+}
+
+.library-card:hover {
+  border-color: var(--emerald-dim);
+  background: var(--bg-hover);
+  text-decoration: none;
+}
+
+.library-card-danger {
+  border-color: rgba(240, 180, 41, 0.25);
+}
+
+.library-card-title {
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--emerald);
+  margin-bottom: 0.45rem;
+}
+
+.library-card-body {
+  color: var(--text-dim);
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+
+.library-card-warn {
+  margin-top: 0.65rem;
+  font-size: 0.65rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--amber);
+}
+
+.banner-info {
+  border-color: rgba(106, 169, 255, 0.35);
+  color: #b7d2ff;
+  background: rgba(40, 70, 120, 0.18);
+}
+
+.banner-ok {
+  border-color: rgba(61, 255, 168, 0.35);
+  color: #b7ffe0;
+  background: rgba(26, 158, 104, 0.12);
+}
+
+.banner-lock {
+  border-color: rgba(143, 163, 153, 0.4);
+  color: var(--text-dim);
+  background: rgba(20, 28, 24, 0.8);
+}
+
+.chip-ok {
+  border-color: rgba(61, 255, 168, 0.35);
+  color: var(--emerald);
+}
+
+.chip-lock {
+  border-color: rgba(240, 180, 41, 0.35);
+  color: var(--amber);
+}
+
+.chip-mute {
+  color: var(--text-mute);
+}
+
+.filters-bar {
+  display: flex;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+table.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.78rem;
+}
+
+table.data-table th {
+  text-align: left;
+  font-size: 0.65rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-mute);
+  padding: 0.45rem 0.55rem;
+  border-bottom: 1px solid var(--border);
+  background: #121a16;
+}
+
+table.data-table td {
+  padding: 0.45rem 0.55rem;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+
+table.data-table tr.click-row {
+  cursor: pointer;
+}
+
+table.data-table tr.click-row:hover td {
+  background: var(--bg-hover);
+}
+
+.editor-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+
+.textarea-spec {
+  min-height: 22rem;
+  font-size: 0.78rem;
+  line-height: 1.45;
+}
+
+.editor-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.danger-zone {
+  margin-top: 0.5rem;
+  padding-top: 0.85rem;
+  border-top: 1px dashed var(--red-dim);
+}
+
+.text-mute {
+  color: var(--text-mute);
+  font-size: 0.78rem;
+}
+
+.mono {
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+}

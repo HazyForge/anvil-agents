@@ -3,6 +3,8 @@
 `anvil-agentctl` is the standalone command-line client for Anvil Agents. Its
 name is intentionally distinct from Anvil Primaris `anvilctl`: it imports only
 the APIs in this repository and does not require Anvil Primaris or Anvil Hub.
+Built-in runner images ship the same binary for in-pod status reporting; binary
+presence grants no Kubernetes authority.
 
 The first client transport talks directly to Kubernetes using the caller's
 normal kubeconfig loading rules and RBAC. Build it from a checkout with:
@@ -11,7 +13,7 @@ normal kubeconfig loading rules and RBAC. Build it from a checkout with:
 go build -o ./anvil-agentctl ./cmd/anvil-agentctl
 ```
 
-Set `KUBECONFIG` normally, or put global overrides before `run`:
+Set `KUBECONFIG` normally, or put global overrides before the command:
 
 ```bash
 anvil-agentctl --kubeconfig ./cluster.yaml --context agents-prod run list -A
@@ -30,6 +32,13 @@ The caller needs only the Kubernetes verbs used by each command:
 | `run get` | `get` on the selected `agentrun` |
 | `run logs` | `get` on the run, referenced Job and Pod, plus `get` on `pods/log` |
 | `run debug` | `get` on the run, referenced Job and Pod, plus `list` on Events |
+| `auth codex\|openai diagnose` | `get` on secrets and agentdatavolumes; `list` on agentauthsessions |
+| `auth codex\|openai reauth` | `create` staging secrets and agentauthsessions; `get` on volumes/secrets/sessions |
+| `auth codex\|openai logout` | `create`/`get` agentauthsessions; `get` agentdatavolumes |
+| `auth grok\|xai diagnose` | same as codex diagnose for xAI/Grok durable homes |
+| `auth grok\|xai reauth` | same as codex reauth; staging key is `GROK_AUTH_JSON` |
+| `auth grok\|xai logout` | same as codex logout for Grok durable homes |
+| `self report` | none (writes local status JSONL / pod log only) |
 
 ## Create An Append-Only Run
 
@@ -152,3 +161,97 @@ Table, summary, and debug views escape terminal control characters from
 untrusted status and Event text. `run logs` deliberately preserves the raw log
 stream; redirect or inspect it in a non-terminal parser when the runner is not
 trusted.
+
+## Provider Auth Maintenance (OpenAI Codex and xAI Grok)
+
+Durable provider homes keep OAuth `auth.json` on an `AgentDataVolume` PVC. The
+runner only seeds from the bootstrap Secret when the file is missing or the
+operator deliberately changes the opaque seed id. Refreshing a Secret alone does
+not overwrite a stale durable login, which is why manager Jobs can keep dying
+with 401 after an ExternalSecret or vault update.
+
+| Provider CLI | Aliases | Staging / seed key | Durable path on the volume |
+| --- | --- | --- | --- |
+| `auth codex` | `openai` | `CODEX_AUTH_JSON` + `CODEX_AUTH_SEED_ID` | `$CODEX_HOME/auth.json` (usually `/codex-home/auth.json`) |
+| `auth grok` | `xai`, `grokBuild` | `GROK_AUTH_JSON` + `GROK_AUTH_SEED_ID` | `$GROK_HOME/auth.json` under the Grok home (usually `/opt/anvil/grok-build/.grok/auth.json`) |
+
+### OpenAI Codex
+
+```bash
+codex login --device-auth
+
+anvil-agentctl auth codex diagnose \
+  -n agents \
+  --data-volume hazy-trade-codex-home \
+  --bootstrap-secret codex-credentials-seed \
+  --auth-file ~/.codex/auth.json
+
+anvil-agentctl auth codex reauth \
+  -n agents \
+  --data-volume hazy-trade-codex-home \
+  --bootstrap-secret codex-credentials-seed \
+  --auth-file ~/.codex/auth.json
+```
+
+### xAI Grok Build
+
+```bash
+# Complete local Grok / xAI OAuth so ~/.grok/auth.json is fresh.
+anvil-agentctl auth grok diagnose \
+  -n agents \
+  --data-volume hazy-trade-grok-home \
+  --bootstrap-secret grok-credentials-seed \
+  --auth-file ~/.grok/auth.json
+
+anvil-agentctl auth xai reauth \
+  -n agents \
+  --data-volume hazy-trade-grok-home \
+  --bootstrap-secret grok-credentials-seed \
+  --auth-file ~/.grok/auth.json
+```
+
+For pure **apiKey** mode, mount `XAI_API_KEY` (Grok/Pi/OpenClaw) or provider keys
+through `envSecretRefs`. Durable OAuth reauth is only required when the harness
+uses the durable `auth.json` home. Diagnose still reports whether an API key key
+is present on the bootstrap Secret.
+
+`reauth` refuses bootstrap Secrets that look ExternalSecret-managed so the CLI
+does not race ESO. Point `--bootstrap-secret` at a CLI-owned seed Secret, or
+omit it and only rewrite the durable home. Credential bytes never appear in the
+`AgentAuthSession` spec, status, or CLI args.
+
+Logout clears durable `auth.json`, writes a logout tombstone that blocks secret
+reseeding, and does not claim remote session revocation:
+
+```bash
+anvil-agentctl auth codex logout \
+  -n agents \
+  --data-volume hazy-trade-codex-home \
+  --confirm-volume hazy-trade-codex-home
+
+anvil-agentctl auth grok logout \
+  -n agents \
+  --data-volume hazy-trade-grok-home \
+  --confirm-volume hazy-trade-grok-home
+```
+
+While a non-terminal `AgentAuthSession` targets a volume, new AgentRuns that
+mount it stay Pending with reason `AuthSessionActive`. Sessions never kill
+active Jobs.
+
+Exit code `3` means diagnose finished and found an unhealthy state. Exit code
+`2` is usage; `1` is operational failure.
+
+## In-Pod Status Reporting
+
+Inside a runner Job the same binary can record structured status without any
+kubeconfig:
+
+```bash
+anvil-agentctl self report progress --stage tool-setup --summary "Tools ready."
+anvil-agentctl self report needsHuman --stage harness-auth --summary "Re-auth required."
+```
+
+This writes the existing JSONL status file and `ANVIL_AGENT_RUN_STATUS_JSON=`
+log lines. It never patches `AgentRun/status`. The historical
+`anvil-agent-status` shell wrapper remains for compatibility.

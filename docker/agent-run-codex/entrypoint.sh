@@ -38,13 +38,58 @@ if [[ "${github_host}" != "github.com" ]]; then
 	export GH_HOST="${github_host}"
 fi
 
-if [[ -n "${CODEX_AUTH_JSON:-}" ]]; then
-	mkdir -p "${CODEX_HOME:-/codex-home}"
-	if [[ ! -f "${CODEX_HOME:-/codex-home}/auth.json" ]]; then
-		umask 077
-		printf '%s' "${CODEX_AUTH_JSON}" > "${CODEX_HOME:-/codex-home}/auth.json"
+seed_codex_auth_home() {
+	local codex_home="${CODEX_HOME:-/codex-home}"
+	local auth_file="${codex_home}/auth.json"
+	local seed_file="${codex_home}/.anvil-codex-auth-seed-id"
+	local logout_file="${codex_home}/.anvil-codex-auth-logged-out"
+	local seed_id="${ANVIL_CODEX_AUTH_SEED_ID:-${CODEX_AUTH_SEED_ID:-}}"
+	local existing_seed=""
+
+	mkdir -p "${codex_home}"
+
+	# Explicit operator logout tombstone blocks all secret reseeding until reauth.
+	if [[ -f "${logout_file}" ]]; then
+		echo "ANVIL_CODEX_AUTH_LOGGED_OUT home=${codex_home}"
+		unset CODEX_AUTH_JSON CODEX_AUTH_SEED_ID ANVIL_CODEX_AUTH_SEED_ID || true
+		return 0
 	fi
-fi
+
+	if [[ -z "${CODEX_AUTH_JSON:-}" ]]; then
+		return 0
+	fi
+
+	if [[ -f "${seed_file}" ]]; then
+		existing_seed="$(tr -d '[:space:]' < "${seed_file}" || true)"
+	fi
+
+	# Durable auth.json is authoritative. Reseed only when missing, or when the
+	# operator deliberately changes the opaque seed id after reauth.
+	if [[ -f "${auth_file}" ]]; then
+		if [[ -z "${seed_id}" || -z "${existing_seed}" || "${seed_id}" == "${existing_seed}" ]]; then
+			unset CODEX_AUTH_JSON CODEX_AUTH_SEED_ID ANVIL_CODEX_AUTH_SEED_ID || true
+			return 0
+		fi
+		echo "ANVIL_CODEX_AUTH_RESEED reason=seed-id-changed home=${codex_home}"
+	else
+		echo "ANVIL_CODEX_AUTH_SEED reason=missing-auth-json home=${codex_home}"
+	fi
+
+	umask 077
+	local tmp_file
+	tmp_file="$(mktemp "${codex_home}/.auth.json.XXXXXX")"
+	printf '%s' "${CODEX_AUTH_JSON}" > "${tmp_file}"
+	chmod 600 "${tmp_file}"
+	mv "${tmp_file}" "${auth_file}"
+	if [[ -n "${seed_id}" ]]; then
+		printf '%s\n' "${seed_id}" > "${seed_file}"
+		chmod 600 "${seed_file}" >/dev/null 2>&1 || true
+	fi
+	# Drop credential env before repository setup, tools, prompts, or Codex.
+	unset CODEX_AUTH_JSON CODEX_AUTH_SEED_ID ANVIL_CODEX_AUTH_SEED_ID || true
+}
+
+seed_codex_auth_home
 
 mkdir -p "${workdir}"
 cd "${workdir}"

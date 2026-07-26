@@ -57,6 +57,11 @@ func Main(ctx context.Context, args []string, in io.Reader, out, errOut io.Write
 		if errors.Is(err, pflag.ErrHelp) {
 			return 0
 		}
+		var diagnosed *diagnosedUnhealthyError
+		if errors.As(err, &diagnosed) {
+			fmt.Fprintf(errOut, "error: %s\n", terminalSafe(err.Error()))
+			return authExitDiagnosedUnhealthy
+		}
 		fmt.Fprintf(errOut, "error: %s\n", terminalSafe(err.Error()))
 		var usage *usageError
 		if errors.As(err, &usage) {
@@ -96,39 +101,50 @@ func (app App) Run(ctx context.Context, args []string) error {
 		writeRootUsage(app.Err)
 		return &usageError{message: "a command is required"}
 	}
-	if remaining[0] != "run" {
-		writeRootUsage(app.Err)
-		return &usageError{message: fmt.Sprintf("unknown command %q", remaining[0])}
-	}
-	if len(remaining) < 2 {
-		writeRunUsage(app.Err)
-		return &usageError{message: "a run command is required"}
-	}
-
-	switch remaining[1] {
-	case "create":
-		return app.runCreate(ctx, options, remaining[2:])
-	case "list":
-		return app.runList(ctx, options, remaining[2:])
-	case "get":
-		return app.runGet(ctx, options, remaining[2:])
-	case "logs":
-		return app.runLogs(ctx, options, remaining[2:])
-	case "debug":
-		return app.runDebug(ctx, options, remaining[2:])
+	switch remaining[0] {
+	case "run":
+		if len(remaining) < 2 {
+			writeRunUsage(app.Err)
+			return &usageError{message: "a run command is required"}
+		}
+		switch remaining[1] {
+		case "create":
+			return app.runCreate(ctx, options, remaining[2:])
+		case "list":
+			return app.runList(ctx, options, remaining[2:])
+		case "get":
+			return app.runGet(ctx, options, remaining[2:])
+		case "logs":
+			return app.runLogs(ctx, options, remaining[2:])
+		case "debug":
+			return app.runDebug(ctx, options, remaining[2:])
+		case "help":
+			writeRunUsage(app.Out)
+			return nil
+		default:
+			writeRunUsage(app.Err)
+			return &usageError{message: fmt.Sprintf("unknown run command %q", remaining[1])}
+		}
+	case "auth":
+		return app.runAuth(ctx, options, remaining[1:])
+	case "self":
+		return app.runSelf(remaining[1:])
 	case "help":
-		writeRunUsage(app.Out)
+		writeRootUsage(app.Out)
 		return nil
 	default:
-		writeRunUsage(app.Err)
-		return &usageError{message: fmt.Sprintf("unknown run command %q", remaining[1])}
+		writeRootUsage(app.Err)
+		return &usageError{message: fmt.Sprintf("unknown command %q", remaining[0])}
 	}
 }
 
 func writeRootUsage(writer io.Writer) {
-	fmt.Fprintln(writer, "Usage: anvil-agentctl [--kubeconfig PATH] [--context NAME] run COMMAND")
+	fmt.Fprintln(writer, "Usage: anvil-agentctl [--kubeconfig PATH] [--context NAME] COMMAND")
 	fmt.Fprintln(writer, "")
+	fmt.Fprintln(writer, "Commands: run, auth, self")
 	writeRunUsage(writer)
+	writeAuthUsage(writer)
+	writeSelfUsage(writer)
 }
 
 func writeRunUsage(writer io.Writer) {

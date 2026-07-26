@@ -52,9 +52,9 @@ is pinned to `kind-anvil-agents` (or the selected
 cluster available for inspection.
 
 `make kind-e2e` first uses a disposable cluster to upgrade a portable seven-CRD
-legacy-object baseline to the eleven-CRD composition and signal API without losing
+legacy-object baseline to the twelve-CRD composition and signal API without losing
 existing objects. It then runs the current execution, validates every sample with
-server-side dry-run, uninstalls the chart, proves all eleven CRDs plus the run,
+server-side dry-run, uninstalls the chart, proves all twelve CRDs plus the run,
 profiles, skill set, tool set, data volume, and PVC were retained, and reinstalls the
 controller. A second run then executes through the retained composition and
 storage objects. The quickstart also asserts the resolved harness, skill-set,

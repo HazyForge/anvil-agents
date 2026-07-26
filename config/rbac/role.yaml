@@ -4,7 +4,7 @@ metadata:
   name: anvil-agents-manager-role
 rules:
   - apiGroups: ["control.anvil.hazyforge.io"]
-    resources: ["adversesituations", "agentdatavolumes", "agentruncontrols", "agentruns", "agentschedules"]
+    resources: ["adversesituations", "agentauthsessions", "agentdatavolumes", "agentruncontrols", "agentruns", "agentschedules"]
     verbs: ["create", "delete", "get", "list", "patch", "update", "watch"]
   - apiGroups: ["control.anvil.hazyforge.io"]
     resources: ["agentharnessprofiles", "agentrunprofiles", "agentskillsets", "agenttoolsets", "volumeprofiles"]
@@ -13,6 +13,7 @@ rules:
     resources:
       - adversesituations/status
       - adversesignals/status
+      - agentauthsessions/status
       - agentdatavolumes/status
       - agentruncontrols/status
       - agentruns/status
@@ -28,6 +29,7 @@ rules:
   - apiGroups: ["control.anvil.hazyforge.io"]
     resources:
       - adversesituations/finalizers
+      - agentauthsessions/finalizers
       - agentdatavolumes/finalizers
       - agentruns/finalizers
       - agentschedules/finalizers
@@ -43,7 +45,7 @@ rules:
     verbs: ["get"]
   - apiGroups: [""]
     resources: ["secrets"]
-    verbs: ["get"]
+    verbs: ["create", "delete", "get", "list", "patch", "update", "watch"]
   - apiGroups: [""]
     resources: ["events"]
     verbs: ["create", "patch"]

@@ -34,6 +34,57 @@ truthy() {
 	esac
 }
 
+seed_grok_auth_home() {
+	local grok_home="${GROK_HOME:-${grok_build_home}/.grok}"
+	local auth_file="${grok_home}/auth.json"
+	local seed_file="${grok_build_home}/.anvil-grok-auth-seed-id"
+	local logout_file="${grok_build_home}/.anvil-grok-auth-logged-out"
+	local seed_id="${ANVIL_GROK_AUTH_SEED_ID:-${GROK_AUTH_SEED_ID:-}}"
+	local existing_seed=""
+
+	mkdir -p "${grok_home}"
+
+	if [[ -f "${logout_file}" ]]; then
+		echo "ANVIL_GROK_AUTH_LOGGED_OUT home=${grok_build_home}"
+		unset GROK_AUTH_JSON GROK_AUTH_SEED_ID ANVIL_GROK_AUTH_SEED_ID || true
+		return 0
+	fi
+
+	if [[ -z "${GROK_AUTH_JSON:-}" ]]; then
+		return 0
+	fi
+
+	if [[ -f "${seed_file}" ]]; then
+		existing_seed="$(tr -d '[:space:]' < "${seed_file}" || true)"
+	fi
+
+	# Durable OAuth auth.json is authoritative. Reseed only when missing, or when
+	# the operator deliberately changes the opaque seed id after reauth.
+	if [[ -f "${auth_file}" ]]; then
+		if [[ -z "${seed_id}" || -z "${existing_seed}" || "${seed_id}" == "${existing_seed}" ]]; then
+			unset GROK_AUTH_JSON GROK_AUTH_SEED_ID ANVIL_GROK_AUTH_SEED_ID || true
+			return 0
+		fi
+		echo "ANVIL_GROK_AUTH_RESEED reason=seed-id-changed home=${grok_build_home}"
+	else
+		echo "ANVIL_GROK_AUTH_SEED reason=missing-auth-json home=${grok_build_home}"
+	fi
+
+	umask 077
+	local tmp_file
+	tmp_file="$(mktemp "${grok_home}/.auth.json.XXXXXX")"
+	printf '%s' "${GROK_AUTH_JSON}" > "${tmp_file}"
+	chmod 600 "${tmp_file}"
+	mv "${tmp_file}" "${auth_file}"
+	if [[ -n "${seed_id}" ]]; then
+		printf '%s\n' "${seed_id}" > "${seed_file}"
+		chmod 600 "${seed_file}" >/dev/null 2>&1 || true
+	fi
+	unset GROK_AUTH_JSON GROK_AUTH_SEED_ID ANVIL_GROK_AUTH_SEED_ID || true
+}
+
+seed_grok_auth_home
+
 anvil_configure_github_auth
 
 cd "${workdir}"

@@ -34,10 +34,13 @@ type Server struct {
 	authenticator AccessTokenAuthenticator
 	authorizer    Authorizer
 	runs          client.Reader
-	logs          AgentRunLogSource
-	log           logr.Logger
-	httpServer    *http.Server
-	limiter       *streamLimiter
+	// writes is optional. Composition POST/PUT/DELETE require a client.Client.
+	// When nil, write endpoints report composition_write_disabled.
+	writes     client.Client
+	logs       AgentRunLogSource
+	log        logr.Logger
+	httpServer *http.Server
+	limiter    *streamLimiter
 }
 
 func NewServer(config Config, authenticator AccessTokenAuthenticator, runs client.Reader, logs AgentRunLogSource, log logr.Logger) (*Server, error) {
@@ -55,6 +58,9 @@ func NewServer(config Config, authenticator AccessTokenAuthenticator, runs clien
 		logs:          logs,
 		log:           log,
 		limiter:       newStreamLimiter(config.Stream.MaxConnections, config.Stream.MaxConnectionsPerSubject),
+	}
+	if writeClient, ok := runs.(client.Client); ok {
+		server.writes = writeClient
 	}
 	server.httpServer = &http.Server{
 		Addr:              config.BindAddress,
@@ -103,6 +109,7 @@ func (server *Server) routes() http.Handler {
 	mux.Handle("GET /api/v1/namespaces/{namespace}/agent-runs", server.authenticate(http.HandlerFunc(server.handleListRuns)))
 	mux.Handle("GET /api/v1/namespaces/{namespace}/agent-runs/{name}", server.authenticate(http.HandlerFunc(server.handleGetRun)))
 	mux.Handle("GET /api/v1/namespaces/{namespace}/agent-runs/{name}/events", server.authenticate(http.HandlerFunc(server.handleRunEvents)))
+	server.registerCompositionRoutes(mux)
 	// Console SPA at / with client-route fallback. More specific /api and
 	// probe routes take precedence in Go 1.22+ ServeMux.
 	mux.HandleFunc("/", server.handleUI)
@@ -137,6 +144,10 @@ func (server *Server) handleUIConfig(writer http.ResponseWriter, _ *http.Request
 			"clientId":  strings.TrimSpace(server.config.UI.OIDC.ClientID),
 			"audiences": append([]string(nil), server.config.OIDC.Audiences...),
 			"scopes":    scopes,
+		},
+		"composition": map[string]any{
+			"readEnabled":  server.config.Composition.ReadEnabled,
+			"writeEnabled": server.config.Composition.WriteEnabled,
 		},
 	})
 }
@@ -313,8 +324,8 @@ func (server *Server) cors(next http.Handler) http.Handler {
 				return
 			}
 			writer.Header().Set("Access-Control-Allow-Origin", origin)
-			writer.Header().Set("Access-Control-Allow-Headers", "Authorization, Last-Event-ID")
-			writer.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
+			writer.Header().Set("Access-Control-Allow-Headers", "Authorization, Last-Event-ID, Content-Type")
+			writer.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 			writer.Header().Set("Access-Control-Max-Age", "600")
 			writer.Header().Add("Vary", "Origin")
 		}

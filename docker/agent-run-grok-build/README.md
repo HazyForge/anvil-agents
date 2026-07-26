@@ -13,7 +13,12 @@ provider, authentication mode, effort, service tier, profile, command, and
 additional arguments. Durable state defaults to `/opt/anvil/grok-build` and
 should be backed by a dedicated AgentDataVolume when persistence is required.
 
-The image includes Grok, Go, Helm, kubectl, gh, git, rg, the status helper,
-feedback helper, and observability helper. It does not bundle another control
-plane or knowledge-base client. Credentials come from run-selected Secrets;
-the adapter does not initiate OAuth consent inside the Job.
+The image includes Grok, Go, Helm, kubectl, gh, git, rg, `anvil-agentctl`, the
+status helper, feedback helper, and observability helper. It does not initiate
+OAuth consent inside the Job. Credentials come from run-selected Secrets:
+
+- **apiKey mode**: mount `XAI_API_KEY`.
+- **oauth mode**: durable `$GROK_HOME/auth.json` under the AgentDataVolume home
+  (default `/opt/anvil/grok-build/.grok/auth.json`). Operators re-seed with
+  `anvil-agentctl auth grok reauth --auth-file ~/.grok/auth.json`.
+  `GROK_AUTH_JSON` only seeds when auth is missing or the seed id changes.
