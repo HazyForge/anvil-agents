@@ -34,10 +34,13 @@ spec:
 {{ toYaml . | indent 4 }}
   {{- end }}
   rules:
+    # Entire hostname is the AgentRun API + Anvil Agents Console SPA.
+    # /api/v1, /healthz, /readyz, /assets/*, and SPA client routes all share
+    # this Service; the process route table keeps API and UI boundaries.
     - matches:
         - path:
             type: PathPrefix
-            value: /api/v1
+            value: /
       backendRefs:
         - name: {{ include "anvil-agents.apiFullname" . }}
           port: {{ .Values.api.service.port }}

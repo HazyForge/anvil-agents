@@ -24,6 +24,16 @@ type Config struct {
 	CORS          CORSConfig          `json:"cors"`
 	List          ListConfig          `json:"list"`
 	Stream        StreamConfig        `json:"stream"`
+	UI            UIConfig            `json:"ui"`
+}
+
+// UIConfig controls optional console static asset serving overrides.
+// By default the API serves the embedded Vite build (or in-tree stub).
+type UIConfig struct {
+	// StaticDir, when set, serves console assets from this filesystem path
+	// instead of the embedded dist. Useful for local iteration without
+	// recompiling the API binary after `make console-build`.
+	StaticDir string `json:"staticDir"`
 }
 
 type ListConfig struct {
@@ -152,6 +162,7 @@ func LoadConfig(path string) (Config, error) {
 
 func (config *Config) normalize() {
 	config.BindAddress = strings.TrimSpace(config.BindAddress)
+	config.UI.StaticDir = strings.TrimSpace(config.UI.StaticDir)
 	config.OIDC.Issuer = strings.TrimSpace(config.OIDC.Issuer)
 	config.OIDC.Audiences = uniqueStrings(config.OIDC.Audiences, false)
 	config.OIDC.AllowedSigningAlgorithms = uniqueStrings(config.OIDC.AllowedSigningAlgorithms, false)

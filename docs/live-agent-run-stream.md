@@ -172,8 +172,10 @@ api:
 Configure the Gateway listener certificate, allowed route namespaces, idle
 timeout, and any external rate limiting outside this chart. The listener idle
 timeout must exceed `stream.heartbeatInterval`. CORS origins are exact browser
-origins; wildcard and pattern origins are rejected. CORS is not an
-authorization mechanism.
+origins; wildcard, pattern, and same-host fallbacks are rejected. List every
+browser Origin that must call the API (including the console host when the SPA
+is served from this process, for example `https://agents.example.com`). CORS is
+not an authorization mechanism.
 
 Tail, duration, byte, and line limits apply to each stream. Connection totals
 are enforced by each API replica; use Gateway-level rate and connection limits
@@ -215,6 +217,24 @@ The API binary is included in the existing `anvil-agents` controller image;
 it does not have a separate image. The complete release has seven images: the
 controller/API image plus six runner images. `make docker-build` or
 `hack/build-images.sh --component controller` rebuilds both binaries together.
+
+## Anvil Agents Console
+
+The same `anvil-agents-api` process serves the read-only **Anvil Agents Console**
+SPA at `/` (API under `/api/v1/...`, probes at `/healthz` and `/readyz`). Phase 1
+auth is a manually pasted bearer token stored in browser `sessionStorage`. The
+console uses authenticated `fetch()` for SSE; it never places tokens in query
+strings and never lets the client choose arbitrary Pods or containers.
+
+Browser calls send an `Origin` header. Configure
+`api.config.cors.allowedOrigins` with the exact console origin (for example
+`https://agents.example.com`) so the SPA is not denied by the deny-by-default
+CORS allowlist. Host-only matching is not used.
+
+Build the SPA with `make console-build` (or the Docker Node stage).
+`make verify` runs `console-typecheck`. Production images embed Vite output under
+`internal/runapi/consolefs/dist`. See `web/console/README.md` and
+`docs/agent-frontend-plan.md`.
 
 ## Operational boundary
 

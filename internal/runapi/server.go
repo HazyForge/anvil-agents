@@ -101,6 +101,9 @@ func (server *Server) routes() http.Handler {
 	mux.Handle("GET /api/v1/namespaces/{namespace}/agent-runs", server.authenticate(http.HandlerFunc(server.handleListRuns)))
 	mux.Handle("GET /api/v1/namespaces/{namespace}/agent-runs/{name}", server.authenticate(http.HandlerFunc(server.handleGetRun)))
 	mux.Handle("GET /api/v1/namespaces/{namespace}/agent-runs/{name}/events", server.authenticate(http.HandlerFunc(server.handleRunEvents)))
+	// Console SPA at / with client-route fallback. More specific /api and
+	// probe routes take precedence in Go 1.22+ ServeMux.
+	mux.HandleFunc("/", server.handleUI)
 	return server.securityHeaders(server.cors(mux))
 }
 
@@ -230,7 +233,23 @@ func (server *Server) authenticate(next http.Handler) http.Handler {
 func (server *Server) securityHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		writer.Header().Set("Cache-Control", "no-store")
-		writer.Header().Set("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'")
+		if isAPIOrProbePath(request.URL.Path) {
+			// API and probes remain non-executable; they return JSON only.
+			writer.Header().Set("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'")
+		} else {
+			// Console SPA: same-origin scripts/styles/fonts and API connect.
+			writer.Header().Set("Content-Security-Policy", strings.Join([]string{
+				"default-src 'self'",
+				"base-uri 'self'",
+				"object-src 'none'",
+				"frame-ancestors 'none'",
+				"img-src 'self' data:",
+				"style-src 'self' 'unsafe-inline'",
+				"font-src 'self'",
+				"script-src 'self'",
+				"connect-src 'self'",
+			}, "; "))
+		}
 		writer.Header().Set("Referrer-Policy", "no-referrer")
 		writer.Header().Set("X-Content-Type-Options", "nosniff")
 		next.ServeHTTP(writer, request)
@@ -245,7 +264,12 @@ func (server *Server) cors(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		origin := strings.TrimSpace(request.Header.Get("Origin"))
 		if origin != "" {
-			if _, ok := allowed[origin]; !ok {
+			// Exact configured origins only. Same-origin SPA requests still send
+			// Origin; list the console origin in cors.allowedOrigins (deny by
+			// default). Host-equality fallbacks are intentionally not used —
+			// they weaken the documented exact-origin allowlist and treat
+			// request Host / http vs https as interchangeable.
+			if !corsOriginAllowed(origin, allowed) {
 				writeAPIError(writer, http.StatusForbidden, "origin_denied", "request origin is not allowed")
 				return
 			}
@@ -261,6 +285,12 @@ func (server *Server) cors(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(writer, request)
 	})
+}
+
+// corsOriginAllowed accepts only exact configured browser origins.
+func corsOriginAllowed(origin string, allowed map[string]struct{}) bool {
+	_, ok := allowed[origin]
+	return ok
 }
 
 func bearerToken(headers []string) (string, bool) {

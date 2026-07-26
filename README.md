@@ -71,7 +71,8 @@ the certified submission contract.
 - `AgentDataVolume` and `VolumeProfile`: explicit durable PVC-backed state.
 - `AdverseSituation`: deduplicated event buffers with optional responders.
 - `AdverseSignal`: immutable, provider-neutral adverse evidence from any app.
-- `anvil-agents-api`: optional OIDC-protected summaries and live SSE logs.
+- `anvil-agents-api`: optional OIDC-protected summaries, live SSE logs, and the
+  read-only **Anvil Agents Console** SPA at `/` (see `web/console/`).
 - `anvil-agentctl`: Kubernetes-authenticated creation and diagnosis of runs
   without writing raw manifests.
 - Collector-neutral Job and Pod labels for external log and telemetry

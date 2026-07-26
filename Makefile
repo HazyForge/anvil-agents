@@ -9,7 +9,7 @@ RELEASE_REPO ?= HazyForge/anvil-agents
 RELEASE_DEPLOY_VALUES ?= .hazyforge/clusters/anvil-primaris/namespace/anvil-agents-system/deploy.yaml
 RELEASE_IMAGE_LOCK ?= $(RELEASE_OUTPUT)/images-$(VERSION).lock.tsv
 
-.PHONY: generate manifests test verify verify-runner-contract build docker-build images image-checks helm-lint archive-postgres-integration chart-package release-tag release-tag-push release-local release-publish release-github release-local-all release-pin-deploy judge-prerequisites judge-kind-e2e kind-upgrade-e2e kind-e2e
+.PHONY: generate manifests test verify verify-runner-contract build console-build console-typecheck console-embed console-embed-restore docker-build images image-checks helm-lint archive-postgres-integration chart-package release-tag release-tag-push release-local release-publish release-github release-local-all release-pin-deploy judge-prerequisites judge-kind-e2e kind-upgrade-e2e kind-e2e
 
 generate:
 	$(CONTROLLER_GEN) object paths=./api/...
@@ -30,6 +30,28 @@ test:
 
 build:
 	go build ./cmd/anvil-agents ./cmd/anvil-agents-api ./cmd/anvil-agent-feedback ./cmd/anvil-agentctl
+
+# Build the Anvil Agents Console SPA into web/console/dist.
+console-build:
+	cd web/console && npm ci && npm run build
+
+console-typecheck:
+	cd web/console && npm ci && npm run typecheck
+
+# Copy built SPA assets into the go:embed tree used by anvil-agents-api.
+# Docker multi-stage builds do this automatically; use this for local binaries.
+# WARNING: replaces committed stub files under internal/runapi/consolefs/dist.
+# Restore the stub before committing with `make console-embed-restore`.
+console-embed: console-build
+	rm -rf internal/runapi/consolefs/dist
+	mkdir -p internal/runapi/consolefs/dist
+	cp -a web/console/dist/. internal/runapi/consolefs/dist/
+
+# Restore the in-tree stub SPA so local console-embed output is not committed.
+console-embed-restore:
+	rm -rf internal/runapi/consolefs/dist
+	mkdir -p internal/runapi/consolefs/dist
+	cp -a internal/runapi/consolefs/stub/. internal/runapi/consolefs/dist/
 
 docker-build:
 	ANVIL_AGENTS_IMAGE_PREFIX="$(IMAGE_PREFIX)" ANVIL_AGENTS_IMAGE_TAG="$(IMAGE_TAG)" \
@@ -193,5 +215,5 @@ verify-runner-contract:
 		rg -q 'agent-run-common/repository-checkout.sh' "$$dockerfile"; \
 	done
 
-verify: manifests test build helm-lint verify-runner-contract
+verify: manifests test build helm-lint verify-runner-contract console-typecheck
 	@test -z "$$(rg -l 'github.com/hazyforge/anvil-primaris|github.com/hazyforge/anvil-primaris/lib/go/anvilhub' --glob '*.go' .)"

@@ -8,7 +8,8 @@ replicaCount: 1
 serviceAccount:
   name: anvil-agents
 image:
-  reference: ghcr.io/hazyforge/anvil-agents@sha256:71b8d440b3ed81d65da6521b707a558bcef8fed31df7ddbc60a5ede2461070bd
+  # Controller/API image embeds Anvil Agents Console SPA (served at /).
+  reference: ghcr.io/hazyforge/anvil-agents@sha256:bc936b5957d2df3abab77bcba12584440943d25bbf523346e6a1393c196cda2c
   pullPolicy: IfNotPresent
 imagePullSecrets:
   - name: ghcr-creds
@@ -68,6 +69,10 @@ api:
           namespaces:
             - anvilhub
             - hazy-trade
+    cors:
+      # Exact browser Origin for the console + API host (deny-by-default).
+      allowedOrigins:
+        - https://agents.anvil.hazyforge.io
   httpRoute:
     enabled: true
     parentRefs:

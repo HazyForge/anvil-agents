@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Anvil Agents Console</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        font-family: ui-sans-serif, system-ui, sans-serif;
+        background: #0a0f0d;
+        color: #c8d6cf;
+      }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+        padding: 2rem;
+      }
+      main {
+        max-width: 36rem;
+        border: 1px solid #1c2a24;
+        background: #0f1613;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin: 0 0 0.75rem;
+        font-size: 1rem;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: #7dffa3;
+      }
+      p {
+        margin: 0;
+        line-height: 1.5;
+        color: #9aada3;
+        font-size: 0.95rem;
+      }
+      code {
+        color: #e6fff0;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Anvil Agents Console</h1>
+      <p>
+        Console assets are not built into this binary. Build the SPA with
+        <code>make console-build</code> (or the Docker multi-stage image) so the
+        Vite output is embedded under <code>internal/runapi/consolefs/dist</code>.
+      </p>
+    </main>
+  </body>
+</html>

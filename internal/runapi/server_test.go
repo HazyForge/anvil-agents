@@ -6,6 +6,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -360,6 +362,158 @@ func TestCORSRequiresExactConfiguredOrigin(t *testing.T) {
 	server.routes().ServeHTTP(response, request)
 	if response.Code != http.StatusForbidden {
 		t.Fatalf("expected origin denial, got %d", response.Code)
+	}
+}
+
+func TestCORSAllowsExactConfiguredOrigin(t *testing.T) {
+	server := testServer(t, nil, staticAuthenticator{ready: true}, staticLogSource{})
+	server.config.CORS.AllowedOrigins = []string{"https://agents.example.com"}
+	request := httptest.NewRequest(http.MethodOptions, "/api/v1/namespaces/agents/agent-runs", nil)
+	request.Host = "agents.example.com"
+	request.Header.Set("Origin", "https://agents.example.com")
+	response := httptest.NewRecorder()
+	server.routes().ServeHTTP(response, request)
+	if response.Code != http.StatusNoContent {
+		t.Fatalf("expected exact configured origin allow, got %d %s", response.Code, response.Body.String())
+	}
+	if response.Header().Get("Access-Control-Allow-Origin") != "https://agents.example.com" {
+		t.Fatalf("missing ACAO header: %#v", response.Header())
+	}
+}
+
+func TestCORSRejectsSameHostWithoutConfiguredOrigin(t *testing.T) {
+	server := testServer(t, nil, staticAuthenticator{ready: true}, staticLogSource{})
+	request := httptest.NewRequest(http.MethodOptions, "/api/v1/namespaces/agents/agent-runs", nil)
+	request.Host = "agents.example.com"
+	request.Header.Set("Origin", "https://agents.example.com")
+	response := httptest.NewRecorder()
+	server.routes().ServeHTTP(response, request)
+	if response.Code != http.StatusForbidden {
+		t.Fatalf("expected unconfigured same-host origin denial, got %d %s", response.Code, response.Body.String())
+	}
+}
+
+func TestCORSRejectsSchemeMismatchedSameHostOrigin(t *testing.T) {
+	server := testServer(t, nil, staticAuthenticator{ready: true}, staticLogSource{})
+	server.config.CORS.AllowedOrigins = []string{"https://agents.example.com"}
+	request := httptest.NewRequest(http.MethodOptions, "/api/v1/namespaces/agents/agent-runs", nil)
+	request.Host = "agents.example.com"
+	request.Header.Set("Origin", "http://agents.example.com")
+	response := httptest.NewRecorder()
+	server.routes().ServeHTTP(response, request)
+	if response.Code != http.StatusForbidden {
+		t.Fatalf("expected http/https scheme mismatch denial, got %d %s", response.Code, response.Body.String())
+	}
+}
+
+func TestConsoleIndexIsServedAtRoot(t *testing.T) {
+	server := testServer(t, nil, staticAuthenticator{ready: true}, staticLogSource{})
+	request := httptest.NewRequest(http.MethodGet, "/", nil)
+	response := httptest.NewRecorder()
+	server.routes().ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected console index, got %d %s", response.Code, response.Body.String())
+	}
+	if !strings.Contains(response.Body.String(), "Anvil Agents Console") {
+		t.Fatalf("unexpected console body: %s", response.Body.String())
+	}
+	if csp := response.Header().Get("Content-Security-Policy"); !strings.Contains(csp, "script-src 'self'") {
+		t.Fatalf("expected SPA CSP, got %q", csp)
+	}
+}
+
+func TestConsoleSPAFallbackServesIndex(t *testing.T) {
+	server := testServer(t, nil, staticAuthenticator{ready: true}, staticLogSource{})
+	request := httptest.NewRequest(http.MethodGet, "/ns/hazy-trade/runs/run-1", nil)
+	response := httptest.NewRecorder()
+	server.routes().ServeHTTP(response, request)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), "Anvil Agents Console") {
+		t.Fatalf("expected SPA fallback index, got %d %s", response.Code, response.Body.String())
+	}
+}
+
+func TestConsoleDoesNotCaptureAPIOrProbes(t *testing.T) {
+	server := testServer(t, nil, staticAuthenticator{ready: true}, staticLogSource{})
+	request := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+	response := httptest.NewRecorder()
+	server.routes().ServeHTTP(response, request)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"ok":true`) {
+		t.Fatalf("healthz captured by UI: %d %s", response.Code, response.Body.String())
+	}
+	if csp := response.Header().Get("Content-Security-Policy"); csp != "default-src 'none'; frame-ancestors 'none'" {
+		t.Fatalf("expected API CSP on probes, got %q", csp)
+	}
+}
+
+func TestUnregisteredAPIPathsDoNotServeSPA(t *testing.T) {
+	server := testServer(t, nil, staticAuthenticator{ready: true}, staticLogSource{})
+	cases := []struct {
+		path       string
+		wantStatus int
+		wantBody   string
+		wantCSP    string
+	}{
+		{
+			path:       "/api",
+			wantStatus: http.StatusNotFound,
+			wantBody:   "not_found",
+			wantCSP:    "default-src 'none'; frame-ancestors 'none'",
+		},
+		{
+			path:       "/api/v1/unknown",
+			wantStatus: http.StatusNotFound,
+			wantBody:   "not_found",
+			wantCSP:    "default-src 'none'; frame-ancestors 'none'",
+		},
+		{
+			path:       "/api/v1/namespaces/agents/nope",
+			wantStatus: http.StatusNotFound,
+			wantBody:   "not_found",
+			wantCSP:    "default-src 'none'; frame-ancestors 'none'",
+		},
+	}
+	for _, tc := range cases {
+		request := httptest.NewRequest(http.MethodGet, tc.path, nil)
+		response := httptest.NewRecorder()
+		server.routes().ServeHTTP(response, request)
+		if response.Code != tc.wantStatus {
+			t.Fatalf("%s: status %d, want %d body=%s", tc.path, response.Code, tc.wantStatus, response.Body.String())
+		}
+		if strings.Contains(response.Body.String(), "<!doctype html") || strings.Contains(response.Body.String(), "<html") {
+			t.Fatalf("%s: SPA HTML leaked for unregistered API path: %s", tc.path, response.Body.String())
+		}
+		if !strings.Contains(response.Body.String(), tc.wantBody) {
+			t.Fatalf("%s: body %q missing %q", tc.path, response.Body.String(), tc.wantBody)
+		}
+		if csp := response.Header().Get("Content-Security-Policy"); csp != tc.wantCSP {
+			t.Fatalf("%s: CSP %q, want %q", tc.path, csp, tc.wantCSP)
+		}
+	}
+}
+
+func TestConsoleStaticDirOverride(t *testing.T) {
+	dir := t.TempDir()
+	index := filepath.Join(dir, "index.html")
+	if err := os.WriteFile(index, []byte("<!doctype html><title>override-console</title>"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	server := testServer(t, nil, staticAuthenticator{ready: true}, staticLogSource{})
+	server.config.UI.StaticDir = dir
+	request := httptest.NewRequest(http.MethodGet, "/", nil)
+	response := httptest.NewRecorder()
+	server.routes().ServeHTTP(response, request)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), "override-console") {
+		t.Fatalf("expected staticDir override, got %d %s", response.Code, response.Body.String())
+	}
+}
+
+func TestConsoleMissingAssetWithExtensionIsNotFound(t *testing.T) {
+	server := testServer(t, nil, staticAuthenticator{ready: true}, staticLogSource{})
+	request := httptest.NewRequest(http.MethodGet, "/assets/missing.js", nil)
+	response := httptest.NewRecorder()
+	server.routes().ServeHTTP(response, request)
+	if response.Code != http.StatusNotFound {
+		t.Fatalf("expected 404 for missing asset, got %d %s", response.Code, response.Body.String())
 	}
 }
 

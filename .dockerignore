@@ -18,3 +18,7 @@ tmp
 anvil-agents
 anvil-agents-api
 anvil-agent-feedback
+# Frontend build artifacts — image stage runs npm ci itself.
+web/console/node_modules
+web/console/dist
+web/console/*.tsbuildinfo
