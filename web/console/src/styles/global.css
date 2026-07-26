@@ -957,3 +957,71 @@ table.data-table tr.click-row:hover td {
     grid-template-columns: 1fr;
   }
 }
+
+/* Ordered multi-ref lists (skill/tool sets on profiles) */
+.field-help {
+  margin: 0 0 0.35rem;
+  font-size: 0.72rem;
+  color: var(--text-mute);
+}
+
+.ordered-ref-empty {
+  font-size: 0.78rem;
+  color: var(--text-mute);
+  padding: 0.4rem 0.5rem;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+  margin-bottom: 0.45rem;
+}
+
+.ordered-ref-items {
+  list-style: none;
+  margin: 0 0 0.5rem;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.ordered-ref-item {
+  display: grid;
+  grid-template-columns: 1.5rem 1fr auto;
+  gap: 0.45rem;
+  align-items: center;
+  padding: 0.35rem 0.45rem;
+  border: 1px solid var(--border);
+  background: var(--bg-panel-2);
+  border-radius: var(--radius);
+}
+
+.ordered-ref-index {
+  color: var(--text-mute);
+  font-size: 0.72rem;
+}
+
+.ordered-ref-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ordered-ref-actions {
+  display: flex;
+  gap: 0.25rem;
+  flex-wrap: wrap;
+}
+
+.ordered-ref-add {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.ordered-ref-manual {
+  display: flex;
+  gap: 0.4rem;
+}
+
+.ordered-ref-manual .input {
+  flex: 1;
+}

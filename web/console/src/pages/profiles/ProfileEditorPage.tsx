@@ -9,6 +9,7 @@ import {
   updateComposition,
 } from "../../api/composition";
 import type { CompositionDocument } from "../../api/types.composition";
+import { OrderedRefList } from "../../components/OrderedRefList";
 
 interface Props {
   token: string;
@@ -20,8 +21,8 @@ interface ProfileForm {
   name: string;
   description: string;
   harnessProfileName: string;
-  skillSetNames: string;
-  toolSetNames: string;
+  skillSetNames: string[];
+  toolSetNames: string[];
   intent: string;
   systemPrompt: string;
   applicationName: string;
@@ -32,19 +33,26 @@ function emptyForm(): ProfileForm {
     name: "",
     description: "",
     harnessProfileName: "",
-    skillSetNames: "",
-    toolSetNames: "",
+    skillSetNames: [],
+    toolSetNames: [],
     intent: "",
     systemPrompt: "",
     applicationName: "",
   };
 }
 
-function splitCSV(value: string): string[] {
-  return value
-    .split(/[,\n]/)
-    .map((part) => part.trim())
-    .filter(Boolean);
+function uniqueNames(names: string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const raw of names) {
+    const name = raw.trim();
+    if (!name || seen.has(name)) {
+      continue;
+    }
+    seen.add(name);
+    out.push(name);
+  }
+  return out;
 }
 
 function formFromDoc(doc: CompositionDocument): ProfileForm {
@@ -60,13 +68,13 @@ function formFromDoc(doc: CompositionDocument): ProfileForm {
   const skillRefs =
     typeof spec.skillSets === "object" && spec.skillSets
       ? ((spec.skillSets as { refs?: { name?: string }[] }).refs ?? [])
-          .map((ref) => ref.name)
+          .map((ref) => String(ref.name ?? "").trim())
           .filter(Boolean)
       : [];
   const toolRefs =
     typeof spec.toolSets === "object" && spec.toolSets
       ? ((spec.toolSets as { refs?: { name?: string }[] }).refs ?? [])
-          .map((ref) => ref.name)
+          .map((ref) => String(ref.name ?? "").trim())
           .filter(Boolean)
       : [];
   const scope =
@@ -77,8 +85,8 @@ function formFromDoc(doc: CompositionDocument): ProfileForm {
     name: doc.metadata.name,
     description: String(spec.description ?? ""),
     harnessProfileName: harnessRef,
-    skillSetNames: skillRefs.join(", "),
-    toolSetNames: toolRefs.join(", "),
+    skillSetNames: uniqueNames(skillRefs),
+    toolSetNames: uniqueNames(toolRefs),
     intent: String(harness.intent ?? ""),
     systemPrompt: String(harness.systemPrompt ?? ""),
     applicationName: String(scope.applicationRef?.name ?? ""),
@@ -86,8 +94,8 @@ function formFromDoc(doc: CompositionDocument): ProfileForm {
 }
 
 function buildSpec(form: ProfileForm): Record<string, unknown> {
-  const skillNames = splitCSV(form.skillSetNames);
-  const toolNames = splitCSV(form.toolSetNames);
+  const skillNames = uniqueNames(form.skillSetNames);
+  const toolNames = uniqueNames(form.toolSetNames);
   const harness: Record<string, unknown> = {};
   if (form.intent) {
     harness.intent = form.intent;
@@ -237,20 +245,37 @@ export function ProfileEditorPage({ token, namespace: activeNamespace, writeEnab
     }
     setSaving(true);
     try {
-      // Preserve advanced fields not shown in the form by merging onto existing spec.
-      const mergedSpec = {
+      const mergedSpec: Record<string, unknown> = {
         ...(doc.spec ?? {}),
         ...spec,
       };
-      // Clear composition keys when emptied in the form.
       if (!form.harnessProfileName.trim()) {
         delete mergedSpec.harnessProfileRef;
       }
-      if (!splitCSV(form.skillSetNames).length) {
+      if (form.skillSetNames.length === 0) {
         delete mergedSpec.skillSets;
       }
-      if (!splitCSV(form.toolSetNames).length) {
+      if (form.toolSetNames.length === 0) {
         delete mergedSpec.toolSets;
+      }
+      // Keep existing harness fields (backend/image/etc) while applying intent/systemPrompt.
+      if (typeof doc.spec?.harness === "object" && doc.spec.harness) {
+        const prior = doc.spec.harness as Record<string, unknown>;
+        const nextHarness = {
+          ...prior,
+          ...((spec.harness as Record<string, unknown> | undefined) ?? {}),
+        };
+        if (!form.intent) {
+          delete nextHarness.intent;
+        }
+        if (!form.systemPrompt.trim()) {
+          delete nextHarness.systemPrompt;
+        }
+        if (Object.keys(nextHarness).length > 0) {
+          mergedSpec.harness = nextHarness;
+        } else {
+          delete mergedSpec.harness;
+        }
       }
       const updated = await updateComposition(
         token,
@@ -269,7 +294,9 @@ export function ProfileEditorPage({ token, namespace: activeNamespace, writeEnab
       );
       setDoc(updated);
       setForm(formFromDoc(updated));
-      setInfo("Profile saved");
+      setInfo(
+        `Profile saved · ${updated.spec && Array.isArray((updated.spec as { skillSets?: { refs?: unknown[] } }).skillSets?.refs) ? (updated.spec as { skillSets: { refs: unknown[] } }).skillSets.refs.length : form.skillSetNames.length} skill set(s), ${form.toolSetNames.length} tool set(s)`,
+      );
     } catch (err) {
       setError(err instanceof APIError ? err.message : String(err));
     } finally {
@@ -306,7 +333,7 @@ export function ProfileEditorPage({ token, namespace: activeNamespace, writeEnab
           <p className="page-sub">
             Namespace <span className="mono">{namespace}</span>
             {" · "}
-            composition CRD
+            composition CRD · multiple skill/tool sets supported
           </p>
         </div>
         <div className="chip-row">
@@ -378,36 +405,27 @@ export function ProfileEditorPage({ token, namespace: activeNamespace, writeEnab
                 ))}
               </datalist>
             </label>
-            <label className="field">
-              <span className="label">Skill sets (comma-separated, ordered)</span>
-              <input
-                className="input mono"
-                list="profile-skills"
-                value={form.skillSetNames}
-                disabled={!writable}
-                onChange={(event) => update("skillSetNames", event.target.value)}
-              />
-              <datalist id="profile-skills">
-                {skillSets.map((name) => (
-                  <option key={name} value={name} />
-                ))}
-              </datalist>
-            </label>
-            <label className="field">
-              <span className="label">Tool sets (comma-separated, ordered)</span>
-              <input
-                className="input mono"
-                list="profile-tools"
-                value={form.toolSetNames}
-                disabled={!writable}
-                onChange={(event) => update("toolSetNames", event.target.value)}
-              />
-              <datalist id="profile-tools">
-                {toolSets.map((name) => (
-                  <option key={name} value={name} />
-                ))}
-              </datalist>
-            </label>
+
+            <OrderedRefList
+              label="Skill sets (ordered, multiple allowed)"
+              help="Applied in list order. Later sets can override same-named skills."
+              value={form.skillSetNames}
+              options={skillSets}
+              disabled={!writable}
+              placeholder="AgentSkillSet name"
+              onChange={(next) => update("skillSetNames", next)}
+            />
+
+            <OrderedRefList
+              label="Tool sets (ordered, multiple allowed)"
+              help="Applied in list order after skill-set tools. Independent of skill packs."
+              value={form.toolSetNames}
+              options={toolSets}
+              disabled={!writable}
+              placeholder="AgentToolSet name"
+              onChange={(next) => update("toolSetNames", next)}
+            />
+
             <div className="field-row">
               <label className="field">
                 <span className="label">Intent</span>
