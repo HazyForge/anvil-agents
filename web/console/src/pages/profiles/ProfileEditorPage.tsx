@@ -9,12 +9,44 @@ import {
   updateComposition,
 } from "../../api/composition";
 import type { CompositionDocument } from "../../api/types.composition";
-import { OrderedRefList } from "../../components/OrderedRefList";
+import {
+  CompositionCardPicker,
+  optionsFromDocs,
+} from "../../components/CompositionCardPicker";
 
 interface Props {
   token: string;
   namespace: string;
   writeEnabled: boolean;
+}
+
+function arrayLen(spec: Record<string, unknown>, key: string): number {
+  const value = spec[key];
+  return Array.isArray(value) ? value.length : 0;
+}
+
+function harnessMeta(doc: CompositionDocument): string | undefined {
+  const backend = doc.spec?.backend;
+  if (typeof backend === "object" && backend && "kind" in backend) {
+    const kind = String((backend as { kind?: string }).kind ?? "").trim();
+    return kind ? `backend: ${kind}` : undefined;
+  }
+  return undefined;
+}
+
+function skillSetMeta(doc: CompositionDocument): string | undefined {
+  const skills = arrayLen(doc.spec ?? {}, "skills");
+  const tools = arrayLen(doc.spec ?? {}, "tools");
+  const bits = [
+    skills ? `${skills} skill${skills === 1 ? "" : "s"}` : null,
+    tools ? `${tools} embedded tool${tools === 1 ? "" : "s"}` : null,
+  ].filter(Boolean);
+  return bits.length ? bits.join(" · ") : undefined;
+}
+
+function toolSetMeta(doc: CompositionDocument): string | undefined {
+  const tools = arrayLen(doc.spec ?? {}, "tools");
+  return tools ? `${tools} tool${tools === 1 ? "" : "s"}` : undefined;
 }
 
 interface ProfileForm {
@@ -144,9 +176,9 @@ export function ProfileEditorPage({ token, namespace: activeNamespace, writeEnab
   const [loading, setLoading] = useState(!isCreate);
   const [saving, setSaving] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState("");
-  const [harnesses, setHarnesses] = useState<string[]>([]);
-  const [skillSets, setSkillSets] = useState<string[]>([]);
-  const [toolSets, setToolSets] = useState<string[]>([]);
+  const [harnessDocs, setHarnessDocs] = useState<CompositionDocument[]>([]);
+  const [skillSetDocs, setSkillSetDocs] = useState<CompositionDocument[]>([]);
+  const [toolSetDocs, setToolSetDocs] = useState<CompositionDocument[]>([]);
 
   useEffect(() => {
     if (!namespace || !token) {
@@ -159,15 +191,28 @@ export function ProfileEditorPage({ token, namespace: activeNamespace, writeEnab
       listComposition(token, namespace, "agent-tool-sets", 200, controller.signal),
     ])
       .then(([h, s, t]) => {
-        setHarnesses(h.map((item) => item.metadata.name));
-        setSkillSets(s.map((item) => item.metadata.name));
-        setToolSets(t.map((item) => item.metadata.name));
+        setHarnessDocs(h);
+        setSkillSetDocs(s);
+        setToolSetDocs(t);
       })
       .catch(() => {
-        // free-text still works
+        // card grid will show empty; selected names still render as orphan cards
       });
     return () => controller.abort();
   }, [token, namespace]);
+
+  const harnessOptions = useMemo(
+    () => optionsFromDocs(harnessDocs, harnessMeta),
+    [harnessDocs],
+  );
+  const skillSetOptions = useMemo(
+    () => optionsFromDocs(skillSetDocs, skillSetMeta),
+    [skillSetDocs],
+  );
+  const toolSetOptions = useMemo(
+    () => optionsFromDocs(toolSetDocs, toolSetMeta),
+    [toolSetDocs],
+  );
 
   useEffect(() => {
     if (isCreate) {
@@ -333,7 +378,7 @@ export function ProfileEditorPage({ token, namespace: activeNamespace, writeEnab
           <p className="page-sub">
             Namespace <span className="mono">{namespace}</span>
             {" · "}
-            composition CRD · multiple skill/tool sets supported
+            compose by picking harness / skill / tool cards
           </p>
         </div>
         <div className="chip-row">
@@ -389,40 +434,37 @@ export function ProfileEditorPage({ token, namespace: activeNamespace, writeEnab
                 onChange={(event) => update("description", event.target.value)}
               />
             </label>
-            <label className="field">
-              <span className="label">Harness profile</span>
-              <input
-                className="input mono"
-                list="profile-harnesses"
-                value={form.harnessProfileName}
-                disabled={!writable}
-                onChange={(event) => update("harnessProfileName", event.target.value)}
-                placeholder="optional AgentHarnessProfile name"
-              />
-              <datalist id="profile-harnesses">
-                {harnesses.map((name) => (
-                  <option key={name} value={name} />
-                ))}
-              </datalist>
-            </label>
-
-            <OrderedRefList
-              label="Skill sets (ordered, multiple allowed)"
-              help="Applied in list order. Later sets can override same-named skills."
-              value={form.skillSetNames}
-              options={skillSets}
+            <CompositionCardPicker
+              mode="single"
+              label="Harness profile"
+              help="Pick one AgentHarnessProfile card (runtime image, identity, placement)."
+              options={harnessOptions}
+              value={form.harnessProfileName}
               disabled={!writable}
-              placeholder="AgentSkillSet name"
+              emptyLabel="No harness profiles in this namespace."
+              allowClear
+              onChange={(next) => update("harnessProfileName", next)}
+            />
+
+            <CompositionCardPicker
+              mode="multi"
+              label="Skill sets"
+              help="Click cards to compose instruction packs. Order matters — later sets can override same-named skills."
+              options={skillSetOptions}
+              value={form.skillSetNames}
+              disabled={!writable}
+              emptyLabel="No skill sets in this namespace."
               onChange={(next) => update("skillSetNames", next)}
             />
 
-            <OrderedRefList
-              label="Tool sets (ordered, multiple allowed)"
-              help="Applied in list order after skill-set tools. Independent of skill packs."
+            <CompositionCardPicker
+              mode="multi"
+              label="Tool sets"
+              help="Click cards to attach code-execution tool packs. Applied in list order after skill-set tools."
+              options={toolSetOptions}
               value={form.toolSetNames}
-              options={toolSets}
               disabled={!writable}
-              placeholder="AgentToolSet name"
+              emptyLabel="No tool sets in this namespace."
               onChange={(next) => update("toolSetNames", next)}
             />
 
