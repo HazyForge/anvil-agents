@@ -3,6 +3,8 @@ import { Link, useNavigate } from "react-router-dom";
 import { APIError } from "../../api/client";
 import { listComposition } from "../../api/composition";
 import type { CompositionDocument } from "../../api/types.composition";
+import { CompositionAvatar } from "../../components/IconPicker";
+import { getIconUrl, getScreenshotUrl, resolveIconSrc } from "../../utils/icons";
 import { formatTime } from "../../utils/format";
 
 interface Props {
@@ -123,9 +125,11 @@ export function ProfileCardsPage({ token, namespace, writeEnabled }: Props) {
       </div>
 
       <div className="banner banner-info">
-        Profiles are the cluster composition objects. GitOps-owned profiles are read-only here;
-        console-created profiles are labeled{" "}
-        <span className="mono">control.anvil.hazyforge.io/managed-by=anvil-agents-console</span>.
+        Assign robot avatars (or any image URL) when editing a profile. Presentation is stored in
+        annotations{" "}
+        <span className="mono">ui.anvil.hazyforge.io/icon</span> and{" "}
+        <span className="mono">ui.anvil.hazyforge.io/screenshot</span>. GitOps-owned profiles stay
+        read-only here.
       </div>
 
       <div className="filters-bar">
@@ -150,41 +154,49 @@ export function ProfileCardsPage({ token, namespace, writeEnabled }: Props) {
       ) : null}
 
       {!loading && filtered.length > 0 ? (
-        <div className="card-grid">
+        <div className="card-grid card-grid-profiles">
           {filtered.map((doc) => {
             const description = String(doc.spec?.description ?? "").trim();
+            const icon = getIconUrl(doc.metadata.annotations);
+            const screenshot = resolveIconSrc(getScreenshotUrl(doc.metadata.annotations));
+            const open = () =>
+              navigate(
+                `/ns/${encodeURIComponent(namespace)}/profiles/${encodeURIComponent(doc.metadata.name)}`,
+              );
             return (
               <article
                 key={doc.metadata.uid || doc.metadata.name}
-                className="agent-card"
+                className="agent-card agent-card-lg"
                 role="button"
                 tabIndex={0}
-                onClick={() =>
-                  navigate(
-                    `/ns/${encodeURIComponent(namespace)}/profiles/${encodeURIComponent(doc.metadata.name)}`,
-                  )
-                }
+                onClick={open}
                 onKeyDown={(event) => {
                   if (event.key === "Enter" || event.key === " ") {
                     event.preventDefault();
-                    navigate(
-                      `/ns/${encodeURIComponent(namespace)}/profiles/${encodeURIComponent(doc.metadata.name)}`,
-                    );
+                    open();
                   }
                 }}
               >
-                <header className="agent-card-header">
-                  <h2 className="agent-card-title mono">{doc.metadata.name}</h2>
-                  <div className="chip-row">
-                    {doc.management.writable ? (
-                      <span className="chip chip-ok">console</span>
-                    ) : doc.management.reason === "gitops_protected" ? (
-                      <span className="chip chip-lock">
-                        gitops · {doc.management.managedBy || "protected"}
-                      </span>
-                    ) : (
-                      <span className="chip chip-mute">locked</span>
-                    )}
+                {screenshot ? (
+                  <div className="agent-card-banner">
+                    <img src={screenshot} alt="" className="agent-card-banner-img" />
+                  </div>
+                ) : null}
+                <header className="agent-card-header agent-card-header-with-avatar">
+                  <CompositionAvatar icon={icon} name={doc.metadata.name} size="lg" />
+                  <div className="agent-card-heading">
+                    <h2 className="agent-card-title mono">{doc.metadata.name}</h2>
+                    <div className="chip-row">
+                      {doc.management.writable ? (
+                        <span className="chip chip-ok">console</span>
+                      ) : doc.management.reason === "gitops_protected" ? (
+                        <span className="chip chip-lock">
+                          gitops · {doc.management.managedBy || "protected"}
+                        </span>
+                      ) : (
+                        <span className="chip chip-mute">locked</span>
+                      )}
+                    </div>
                   </div>
                 </header>
                 <p className="agent-card-desc">{description || "No description."}</p>
@@ -216,7 +228,7 @@ export function ProfileCardsPage({ token, namespace, writeEnabled }: Props) {
 
       <p className="page-sub" style={{ marginTop: "1rem" }}>
         Other composition kinds (harness, skills, tools, volumes) live under{" "}
-        <Link to="/library">Library</Link>.
+        <Link to="/library">Library</Link> — they support the same icon / screenshot annotations.
       </p>
     </div>
   );

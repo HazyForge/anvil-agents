@@ -6,6 +6,8 @@ import {
   compositionKindByRoute,
   type CompositionDocument,
 } from "../../api/types.composition";
+import { CompositionAvatar } from "../../components/IconPicker";
+import { getIconUrl, getScreenshotUrl, resolveIconSrc } from "../../utils/icons";
 import { formatTime } from "../../utils/format";
 
 interface Props {
@@ -90,6 +92,8 @@ export function CompositionListPage({ token, namespace: activeNamespace, writeEn
           <h1 className="page-title">{kind.title}</h1>
           <p className="page-sub">
             Namespace <span className="mono">{namespace}</span>
+            {" · "}
+            icons via <span className="mono">ui.anvil.hazyforge.io/icon</span>
           </p>
         </div>
         <div className="chip-row">
@@ -122,52 +126,64 @@ export function CompositionListPage({ token, namespace: activeNamespace, writeEn
       {error ? <div className="banner banner-error">{error}</div> : null}
       {loading ? <div className="empty">Loading {kind.plural}…</div> : null}
 
-      {!loading && !error ? (
+      {!loading && !error && filtered.length === 0 ? (
         <div className="panel">
-          <div className="table-wrap">
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th>Name</th>
-                  <th>Description</th>
-                  <th>Management</th>
-                  <th>Generation</th>
-                  <th>Created</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filtered.length === 0 ? (
-                  <tr>
-                    <td colSpan={5} className="empty">
-                      No {kind.plural} in this namespace.
-                    </td>
-                  </tr>
-                ) : (
-                  filtered.map((item) => (
-                    <tr
-                      key={item.metadata.uid || item.metadata.name}
-                      className="click-row"
-                      onClick={() =>
-                        navigate(
-                          `/ns/${encodeURIComponent(namespace)}/${kind.route}/${encodeURIComponent(item.metadata.name)}`,
-                        )
-                      }
-                    >
-                      <td className="mono">{item.metadata.name}</td>
-                      <td>{String(item.spec?.description ?? "—")}</td>
-                      <td>
-                        <ManagementChip doc={item} />
-                      </td>
-                      <td className="mono">{item.metadata.generation ?? "—"}</td>
-                      <td className="mono">
-                        {formatTime(item.metadata.creationTimestamp)}
-                      </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
+          <div className="panel-body empty">No {kind.plural} in this namespace.</div>
+        </div>
+      ) : null}
+
+      {!loading && !error && filtered.length > 0 ? (
+        <div className="card-grid card-grid-library">
+          {filtered.map((item) => {
+            const description = String(item.spec?.description ?? "").trim();
+            const icon = getIconUrl(item.metadata.annotations);
+            const screenshot = resolveIconSrc(getScreenshotUrl(item.metadata.annotations));
+            const open = () =>
+              navigate(
+                `/ns/${encodeURIComponent(namespace)}/${kind.route}/${encodeURIComponent(item.metadata.name)}`,
+              );
+            return (
+              <article
+                key={item.metadata.uid || item.metadata.name}
+                className="agent-card agent-card-library"
+                role="button"
+                tabIndex={0}
+                onClick={open}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    open();
+                  }
+                }}
+              >
+                {screenshot ? (
+                  <div className="agent-card-banner">
+                    <img src={screenshot} alt="" className="agent-card-banner-img" />
+                  </div>
+                ) : null}
+                <header className="agent-card-header agent-card-header-with-avatar">
+                  <CompositionAvatar icon={icon} name={item.metadata.name} size="md" />
+                  <div className="agent-card-heading">
+                    <h2 className="agent-card-title mono">{item.metadata.name}</h2>
+                    <ManagementChip doc={item} />
+                  </div>
+                </header>
+                <p className="agent-card-desc">{description || "No description."}</p>
+                <div className="agent-card-meta">
+                  gen {item.metadata.generation ?? "—"} · {formatTime(item.metadata.creationTimestamp)}
+                </div>
+                <footer className="agent-card-actions">
+                  <Link
+                    className="btn btn-primary"
+                    to={`/ns/${encodeURIComponent(namespace)}/${kind.route}/${encodeURIComponent(item.metadata.name)}`}
+                    onClick={(event) => event.stopPropagation()}
+                  >
+                    Open
+                  </Link>
+                </footer>
+              </article>
+            );
+          })}
         </div>
       ) : null}
     </div>

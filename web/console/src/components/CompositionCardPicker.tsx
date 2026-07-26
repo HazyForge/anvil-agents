@@ -1,4 +1,5 @@
 import type { CompositionDocument } from "../api/types.composition";
+import { getIconUrl, resolveIconSrc } from "../utils/icons";
 
 export interface CompositionOption {
   name: string;
@@ -6,6 +7,7 @@ export interface CompositionOption {
   meta?: string;
   managedBy?: string;
   danger?: boolean;
+  icon?: string;
 }
 
 interface BaseProps {
@@ -38,6 +40,7 @@ function optionFromDoc(doc: CompositionDocument, meta?: string): CompositionOpti
     meta,
     managedBy: doc.management.managedBy,
     danger: doc.management.reason === "gitops_protected" ? false : undefined,
+    icon: getIconUrl(doc.metadata.annotations) || undefined,
   };
 }
 
@@ -158,6 +161,7 @@ export function CompositionCardPicker(props: Props) {
           {orderedOptions.map((opt) => {
             const isSelected = selectedSet.has(opt.name);
             const order = isSelected ? selected.indexOf(opt.name) + 1 : 0;
+            const iconSrc = resolveIconSrc(opt.icon);
             return (
               <button
                 key={opt.name}
@@ -179,6 +183,7 @@ export function CompositionCardPicker(props: Props) {
                   ) : (
                     <span className="compose-pick-badge compose-pick-badge-off">+</span>
                   )}
+                  {iconSrc ? <img src={iconSrc} alt="" className="compose-pick-icon" /> : null}
                   <span className="compose-pick-name mono">{opt.name}</span>
                 </div>
                 {opt.description ? (

@@ -13,6 +13,12 @@ import {
   CompositionCardPicker,
   optionsFromDocs,
 } from "../../components/CompositionCardPicker";
+import { IconPicker } from "../../components/IconPicker";
+import {
+  getIconUrl,
+  getScreenshotUrl,
+  mergePresentationAnnotations,
+} from "../../utils/icons";
 
 interface Props {
   token: string;
@@ -52,6 +58,8 @@ function toolSetMeta(doc: CompositionDocument): string | undefined {
 interface ProfileForm {
   name: string;
   description: string;
+  icon: string;
+  screenshot: string;
   harnessProfileName: string;
   skillSetNames: string[];
   toolSetNames: string[];
@@ -64,6 +72,8 @@ function emptyForm(): ProfileForm {
   return {
     name: "",
     description: "",
+    icon: "",
+    screenshot: "",
     harnessProfileName: "",
     skillSetNames: [],
     toolSetNames: [],
@@ -116,6 +126,8 @@ function formFromDoc(doc: CompositionDocument): ProfileForm {
   return {
     name: doc.metadata.name,
     description: String(spec.description ?? ""),
+    icon: getIconUrl(doc.metadata.annotations),
+    screenshot: getScreenshotUrl(doc.metadata.annotations),
     harnessProfileName: harnessRef,
     skillSetNames: uniqueNames(skillRefs),
     toolSetNames: uniqueNames(toolRefs),
@@ -261,6 +273,11 @@ export function ProfileEditorPage({ token, namespace: activeNamespace, writeEnab
     setError(null);
     setInfo(null);
     const spec = buildSpec(form);
+    const annotations = mergePresentationAnnotations(
+      doc?.metadata.annotations,
+      form.icon,
+      form.screenshot,
+    );
     if (isCreate) {
       const name = form.name.trim();
       if (!name) {
@@ -270,7 +287,7 @@ export function ProfileEditorPage({ token, namespace: activeNamespace, writeEnab
       setSaving(true);
       try {
         const created = await createComposition(token, namespace, "agent-run-profiles", {
-          metadata: { name },
+          metadata: { name, annotations },
           spec,
         });
         navigate(
@@ -332,7 +349,7 @@ export function ProfileEditorPage({ token, namespace: activeNamespace, writeEnab
             name: doc.metadata.name,
             resourceVersion: doc.metadata.resourceVersion,
             labels: doc.metadata.labels,
-            annotations: doc.metadata.annotations,
+            annotations: annotations ?? {},
           },
           spec: mergedSpec,
         },
@@ -434,6 +451,17 @@ export function ProfileEditorPage({ token, namespace: activeNamespace, writeEnab
                 onChange={(event) => update("description", event.target.value)}
               />
             </label>
+
+            <IconPicker
+              label="Profile avatar / icon"
+              help="Assign a robot avatar or any image URL. Stored on the CR as ui.anvil.hazyforge.io/icon (screenshot banner optional)."
+              icon={form.icon}
+              screenshot={form.screenshot}
+              disabled={!writable}
+              onIconChange={(next) => update("icon", next)}
+              onScreenshotChange={(next) => update("screenshot", next)}
+            />
+
             <CompositionCardPicker
               mode="single"
               label="Harness profile"

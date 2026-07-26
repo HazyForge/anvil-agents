@@ -895,11 +895,21 @@ table.data-table tr.click-row:hover td {
   font-size: 0.78rem;
 }
 
-/* Agent cards (frontend recipes) */
+/* Agent / composition cards */
 .card-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(17rem, 1fr));
   gap: 0.75rem;
+}
+
+.card-grid-profiles {
+  grid-template-columns: repeat(auto-fill, minmax(22rem, 1fr));
+  gap: 1rem;
+}
+
+.card-grid-library {
+  grid-template-columns: repeat(auto-fill, minmax(18rem, 1fr));
+  gap: 0.85rem;
 }
 
 .agent-card {
@@ -911,6 +921,89 @@ table.data-table tr.click-row:hover td {
   flex-direction: column;
   gap: 0.45rem;
   min-height: 12rem;
+  cursor: pointer;
+  transition:
+    border-color 0.12s ease,
+    box-shadow 0.12s ease;
+  overflow: hidden;
+}
+
+.agent-card:hover {
+  border-color: var(--border-strong);
+  box-shadow: 0 0 0 1px rgba(61, 255, 168, 0.12);
+}
+
+.agent-card-lg {
+  min-height: 16.5rem;
+  padding: 0;
+  gap: 0;
+}
+
+.agent-card-lg > :not(.agent-card-banner) {
+  margin-left: 1rem;
+  margin-right: 1rem;
+}
+
+.agent-card-lg > .agent-card-header {
+  margin-top: 0.95rem;
+}
+
+.agent-card-lg > .agent-card-desc,
+.agent-card-lg > .agent-card-meta,
+.agent-card-lg > .agent-card-actions {
+  margin-top: 0.55rem;
+}
+
+.agent-card-lg > .agent-card-actions {
+  margin-bottom: 0.95rem;
+}
+
+.agent-card-lg .agent-card-desc {
+  font-size: 0.88rem;
+  line-height: 1.45;
+  min-height: 2.6rem;
+}
+
+.agent-card-lg .agent-card-title {
+  font-size: 1.1rem;
+}
+
+.agent-card-library {
+  min-height: 13rem;
+  padding: 0;
+  gap: 0;
+}
+
+.agent-card-library > :not(.agent-card-banner) {
+  margin-left: 0.85rem;
+  margin-right: 0.85rem;
+}
+
+.agent-card-library > .agent-card-header {
+  margin-top: 0.8rem;
+}
+
+.agent-card-library > .agent-card-actions {
+  margin-bottom: 0.8rem;
+}
+
+.agent-card-banner {
+  margin: 0;
+  height: 7.5rem;
+  overflow: hidden;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-base);
+}
+
+.agent-card-lg .agent-card-banner {
+  height: 9rem;
+}
+
+.agent-card-banner-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
 }
 
 .agent-card-header {
@@ -919,12 +1012,27 @@ table.data-table tr.click-row:hover td {
   gap: 0.35rem;
 }
 
+.agent-card-header-with-avatar {
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 0.75rem;
+}
+
+.agent-card-heading {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  min-width: 0;
+  flex: 1;
+}
+
 .agent-card-title {
   margin: 0;
   font-size: 0.95rem;
   font-weight: 600;
   color: var(--emerald);
   letter-spacing: 0.02em;
+  word-break: break-word;
 }
 
 .agent-card-desc {
@@ -933,6 +1041,10 @@ table.data-table tr.click-row:hover td {
   font-size: 0.8rem;
   line-height: 1.4;
   flex: 1;
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 
 .agent-card-meta {
@@ -944,6 +1056,170 @@ table.data-table tr.click-row:hover td {
   display: flex;
   gap: 0.4rem;
   margin-top: 0.35rem;
+}
+
+/* Avatars / icons */
+.composition-avatar {
+  flex: 0 0 auto;
+  object-fit: cover;
+  border-radius: var(--radius);
+  border: 1px solid var(--border-strong);
+  background: var(--bg-base);
+  display: block;
+}
+
+.composition-avatar-sm {
+  width: 1.75rem;
+  height: 1.75rem;
+}
+
+.composition-avatar-md {
+  width: 2.75rem;
+  height: 2.75rem;
+}
+
+.composition-avatar-lg {
+  width: 4rem;
+  height: 4rem;
+}
+
+.composition-avatar-fallback {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-mono);
+  font-weight: 600;
+  font-size: 0.75rem;
+  color: var(--emerald);
+  background: linear-gradient(145deg, rgba(61, 255, 168, 0.12), var(--bg-panel-2));
+}
+
+.composition-avatar-lg.composition-avatar-fallback {
+  font-size: 1rem;
+}
+
+.icon-picker {
+  gap: 0.45rem;
+}
+
+.icon-picker-preview-row {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+  margin-bottom: 0.45rem;
+}
+
+.icon-preview-tile {
+  width: 4.5rem;
+  height: 4.5rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-base);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  flex: 0 0 auto;
+}
+
+.icon-preview-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.icon-preview-placeholder {
+  font-size: 0.7rem;
+  color: var(--text-mute);
+  text-align: center;
+  padding: 0.25rem;
+}
+
+.icon-picker-preview-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  min-width: 0;
+  flex: 1;
+}
+
+.avatar-pick-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(5.5rem, 1fr));
+  gap: 0.45rem;
+}
+
+.avatar-pick-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.35rem;
+  border: 1px solid var(--border);
+  background: var(--bg-panel-2);
+  border-radius: var(--radius);
+  color: var(--text-dim);
+  cursor: pointer;
+  transition: border-color 0.12s ease, box-shadow 0.12s ease;
+}
+
+.avatar-pick-btn:hover:not(:disabled) {
+  border-color: var(--border-strong);
+  background: var(--bg-hover);
+}
+
+.avatar-pick-btn-selected {
+  border-color: var(--emerald-dim);
+  box-shadow: inset 0 0 0 1px rgba(61, 255, 168, 0.4);
+  color: var(--emerald);
+}
+
+.avatar-pick-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.avatar-pick-img {
+  width: 100%;
+  aspect-ratio: 1;
+  object-fit: cover;
+  border-radius: var(--radius);
+  display: block;
+}
+
+.avatar-pick-label {
+  font-size: 0.65rem;
+  line-height: 1.2;
+  text-align: center;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.screenshot-preview {
+  margin-top: 0.45rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  max-height: 9rem;
+  background: var(--bg-base);
+}
+
+.screenshot-preview-img {
+  width: 100%;
+  max-height: 9rem;
+  object-fit: cover;
+  display: block;
+}
+
+.compose-pick-icon {
+  width: 1.5rem;
+  height: 1.5rem;
+  border-radius: var(--radius);
+  object-fit: cover;
+  border: 1px solid var(--border);
+  flex: 0 0 auto;
 }
 
 .field-row {
