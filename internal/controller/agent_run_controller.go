@@ -38,7 +38,15 @@ const (
 	agentRunPollInterval                            = 10 * time.Second
 	agentRunExternalSecretRefreshPollInterval       = 2 * time.Second
 	agentRunExternalSecretRefreshTimeout            = 2 * time.Minute
-	agentRunReady                                   = "Ready"
+	// agentRunExternalSecretHealthyMaxAge is how recent status.refreshTime may
+	// be for a Ready ExternalSecret to satisfy preflight when force-sync does
+	// not advance refreshTime (common when the provider value is unchanged).
+	agentRunExternalSecretHealthyMaxAge = 15 * time.Minute
+	// agentRunExternalSecretHealthyAcceptAfter is a short grace after the
+	// force-sync request so ESO can attempt a provider reconcile before the
+	// controller accepts an already-healthy stable secret.
+	agentRunExternalSecretHealthyAcceptAfter = 10 * time.Second
+	agentRunReady                            = "Ready"
 	agentRunDefaultCodexImage                       = "anvil-agent-run-codex:dev"
 	agentRunDefaultOpenCodeImage                    = "anvil-agent-run-opencode:dev"
 	agentRunDefaultHermesAgentImage                 = "anvil-agent-run-hermes:dev"
@@ -1065,27 +1073,47 @@ func (r *AgentRunReconciler) ensureAgentRunExternalSecretFreshness(ctx context.C
 			status.ExternalSecretRefreshes = append(status.ExternalSecretRefreshes, entry)
 			return false, controlv1alpha1.AgentRunPhasePending, "ExternalSecretRefreshRequested", fmt.Sprintf("Requested a fresh provider reconciliation for ExternalSecret %s/%s before creating the AgentRun Job.", namespace, name), nil
 		}
+
+		ready, readyMessage := agentRunExternalSecretReady(externalSecret)
+		refreshTime, hasRefreshTime := agentRunExternalSecretRefreshTime(externalSecret)
+		secret := &corev1.Secret{}
+		secretErr := reader.Get(ctx, client.ObjectKey{Name: targetSecret, Namespace: namespace}, secret)
+		secretExists := secretErr == nil
+		if secretErr != nil && !apierrors.IsNotFound(secretErr) {
+			return false, "", "", "", fmt.Errorf("get ExternalSecret target Secret %s/%s: %w", namespace, targetSecret, secretErr)
+		}
+
+		// Prefer a post-request refreshTime advance. Also accept a Ready
+		// ExternalSecret whose target Secret exists and whose last provider
+		// refresh is recent enough when force-sync does not change
+		// refreshTime (static vault values often no-op the status stamp).
+		if ready && secretExists && hasRefreshTime {
+			if agentRunExternalSecretRefreshChanged(entry, refreshTime) ||
+				agentRunExternalSecretAcceptHealthyStable(entry, refreshTime, time.Now()) {
+				observedAt := metav1.NewTime(refreshTime)
+				entry.RefreshedAt = &observedAt
+				continue
+			}
+		}
+
 		if agentRunExternalSecretRefreshTimedOut(entry) {
 			return false, controlv1alpha1.AgentRunPhaseFailed, "ExternalSecretRefreshTimedOut", fmt.Sprintf("ExternalSecret %s/%s did not report a fresh target Secret within %s.", namespace, name, agentRunExternalSecretRefreshTimeout), nil
 		}
-
-		ready, readyMessage := agentRunExternalSecretReady(externalSecret)
 		if !ready {
 			return false, controlv1alpha1.AgentRunPhasePending, "WaitingForExternalSecretRefresh", fmt.Sprintf("Waiting for ExternalSecret %s/%s to finish its provider reconciliation%s.", namespace, name, agentRunExternalSecretRefreshDetail(readyMessage)), nil
 		}
-		refreshTime, ok := agentRunExternalSecretRefreshTime(externalSecret)
-		if !ok || !agentRunExternalSecretRefreshChanged(entry, refreshTime) {
+		if !secretExists {
+			return false, controlv1alpha1.AgentRunPhasePending, "WaitingForExternalSecretTarget", fmt.Sprintf("Waiting for ExternalSecret %s/%s to create target Secret %s/%s.", namespace, name, namespace, targetSecret), nil
+		}
+		if !hasRefreshTime {
 			return false, controlv1alpha1.AgentRunPhasePending, "WaitingForExternalSecretRefresh", fmt.Sprintf("Waiting for ExternalSecret %s/%s to report a refresh after the AgentRun request.", namespace, name), nil
 		}
-		secret := &corev1.Secret{}
-		if err := reader.Get(ctx, client.ObjectKey{Name: targetSecret, Namespace: namespace}, secret); err != nil {
-			if apierrors.IsNotFound(err) {
-				return false, controlv1alpha1.AgentRunPhasePending, "WaitingForExternalSecretTarget", fmt.Sprintf("Waiting for ExternalSecret %s/%s to create target Secret %s/%s.", namespace, name, namespace, targetSecret), nil
-			}
-			return false, "", "", "", fmt.Errorf("get ExternalSecret target Secret %s/%s: %w", namespace, targetSecret, err)
+		if agentRunExternalSecretRefreshStale(refreshTime, time.Now()) {
+			return false, controlv1alpha1.AgentRunPhasePending, "WaitingForExternalSecretRefresh", fmt.Sprintf("Waiting for ExternalSecret %s/%s to refresh; last Ready refreshTime is older than %s.", namespace, name, agentRunExternalSecretHealthyMaxAge), nil
 		}
-		observedAt := metav1.NewTime(refreshTime)
-		entry.RefreshedAt = &observedAt
+		// Ready + target present + recent refreshTime, but still inside the
+		// short force-sync grace window.
+		return false, controlv1alpha1.AgentRunPhasePending, "WaitingForExternalSecretRefresh", fmt.Sprintf("Waiting for ExternalSecret %s/%s to report a refresh after the AgentRun request.", namespace, name), nil
 	}
 
 	return true, "", "", "", nil
@@ -1113,6 +1141,29 @@ func agentRunExternalSecretRefreshChanged(entry *controlv1alpha1.AgentRunExterna
 		return refreshTime.After(entry.PreviousRefreshTime.Time)
 	}
 	return entry.RequestedAt != nil && !refreshTime.Before(entry.RequestedAt.Time.Truncate(time.Second))
+}
+
+// agentRunExternalSecretRefreshStale reports whether status.refreshTime is too
+// old to trust as a healthy synced credential for a new AgentRun Job.
+func agentRunExternalSecretRefreshStale(refreshTime, now time.Time) bool {
+	if refreshTime.IsZero() || now.IsZero() {
+		return true
+	}
+	return now.Sub(refreshTime) > agentRunExternalSecretHealthyMaxAge
+}
+
+// agentRunExternalSecretAcceptHealthyStable allows preflight to proceed when
+// ESO remains Ready with a recent refreshTime and target Secret even if
+// force-sync did not advance refreshTime. A short grace after the request
+// still prefers a true post-request refresh when ESO can produce one quickly.
+func agentRunExternalSecretAcceptHealthyStable(entry *controlv1alpha1.AgentRunExternalSecretRefreshStatus, refreshTime, now time.Time) bool {
+	if entry == nil || entry.RequestedAt == nil || refreshTime.IsZero() {
+		return false
+	}
+	if agentRunExternalSecretRefreshStale(refreshTime, now) {
+		return false
+	}
+	return !now.Before(entry.RequestedAt.Time.Add(agentRunExternalSecretHealthyAcceptAfter))
 }
 
 func agentRunExternalSecretRefreshDetail(message string) string {
