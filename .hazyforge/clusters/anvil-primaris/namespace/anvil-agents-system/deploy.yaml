@@ -56,12 +56,12 @@ api:
       audiences:
         - "376124473528572432"
     composition:
-      # Browse cluster profiles/skills/tools for card pickers.
+      # Browse + create console-managed composition CRs (AgentRunProfiles, etc.).
+      # GitOps-owned objects remain immutable via managed-by / Argo markers.
       readEnabled: true
-      # Keep GitOps objects immutable; console-managed CRs only if write is needed later.
-      writeEnabled: false
+      writeEnabled: true
     runs:
-      # Append-only AgentRun create from browser agent cards.
+      # Append-only AgentRun create remains available for future run launch UI.
       createEnabled: true
     authorization:
       roleClaims: []
@@ -76,6 +76,7 @@ api:
             - anvil-agents:runs:stream
             - anvil-agents:runs:create
             - anvil-agents:composition:read
+            - anvil-agents:composition:write
           namespaces:
             - anvilhub
             - hazy-trade
