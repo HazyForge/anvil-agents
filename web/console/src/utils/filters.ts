@@ -62,6 +62,7 @@ export function filterRuns(runs: AgentRunView[], filters: RunFilters): AgentRunV
       run.application,
       run.applicationTarget,
       run.backend,
+      run.model,
       run.phase,
       sourceLabel(run),
       latestReportSummary(run),

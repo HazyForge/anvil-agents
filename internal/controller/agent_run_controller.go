@@ -215,6 +215,7 @@ func (r *AgentRunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 			return ctrl.Result{}, err
 		}
 		status.Backend = string(agentRunBackendKind(effective))
+		status.Model = agentRunBackendModel(effective)
 		status.Intent = string(agentRunIntent(effective))
 		status.Image = r.agentRunImage(effective)
 		if phase != "" {
@@ -259,6 +260,7 @@ func (r *AgentRunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		}
 	} else {
 		status.Backend = firstNonEmpty(status.Backend, agentRunJobEnvValue(job, "ANVIL_AGENT_RUN_BACKEND"))
+		status.Model = firstNonEmpty(status.Model, agentRunModelFromJob(job))
 		status.Intent = firstNonEmpty(status.Intent, agentRunJobEnvValue(job, "ANVIL_AGENT_RUN_INTENT"))
 		status.Image = firstNonEmpty(agentRunJobContainerImage(job), status.Image)
 	}
@@ -3267,6 +3269,63 @@ func agentRunBackendKind(obj *controlv1alpha1.AgentRun) controlv1alpha1.AgentRun
 		return controlv1alpha1.AgentRunHarnessBackendCodex
 	}
 	return kind
+}
+
+// agentRunBackendModel returns the resolved model string for the effective
+// harness backend, or empty when the adapter uses its default / has no model.
+func agentRunBackendModel(obj *controlv1alpha1.AgentRun) string {
+	if obj == nil {
+		return ""
+	}
+	backend := obj.Spec.Harness.Backend
+	switch agentRunBackendKind(obj) {
+	case controlv1alpha1.AgentRunHarnessBackendCodex:
+		if backend.Codex != nil {
+			return strings.TrimSpace(backend.Codex.Model)
+		}
+	case controlv1alpha1.AgentRunHarnessBackendOpenCode:
+		if backend.OpenCode != nil {
+			return strings.TrimSpace(backend.OpenCode.Model)
+		}
+	case controlv1alpha1.AgentRunHarnessBackendHermesAgent:
+		if backend.HermesAgent != nil {
+			return strings.TrimSpace(backend.HermesAgent.Model)
+		}
+	case controlv1alpha1.AgentRunHarnessBackendOpenClaw:
+		if backend.OpenClaw != nil {
+			return strings.TrimSpace(backend.OpenClaw.Model)
+		}
+	case controlv1alpha1.AgentRunHarnessBackendGrokBuild:
+		if backend.GrokBuild != nil {
+			return strings.TrimSpace(backend.GrokBuild.Model)
+		}
+	case controlv1alpha1.AgentRunHarnessBackendPiAgent:
+		if backend.PiAgent != nil {
+			return strings.TrimSpace(backend.PiAgent.Model)
+		}
+	}
+	return ""
+}
+
+// agentRunModelFromJob recovers a model id from Job env when status.model was
+// never recorded (pre-status.model controller versions).
+func agentRunModelFromJob(job *batchv1.Job) string {
+	if job == nil {
+		return ""
+	}
+	for _, key := range []string{
+		"ANVIL_CODEX_MODEL",
+		"ANVIL_OPENCODE_MODEL",
+		"ANVIL_HERMES_MODEL",
+		"ANVIL_OPENCLAW_MODEL",
+		"ANVIL_GROK_BUILD_MODEL",
+		"ANVIL_PI_MODEL",
+	} {
+		if value := strings.TrimSpace(agentRunJobEnvValue(job, key)); value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func agentRunModelProvider(obj *controlv1alpha1.AgentRun) controlv1alpha1.AgentRunModelProvider {

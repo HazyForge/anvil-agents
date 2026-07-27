@@ -20,6 +20,7 @@ type AgentRunView struct {
 	CreatedAt           time.Time                                         `json:"createdAt"`
 	Phase               agentsv1alpha1.AgentRunPhase                      `json:"phase,omitempty"`
 	Backend             string                                            `json:"backend,omitempty"`
+	Model               string                                            `json:"model,omitempty"`
 	Intent              string                                            `json:"intent,omitempty"`
 	Source              AgentRunSourceView                                `json:"source"`
 	Application         string                                            `json:"application,omitempty"`
@@ -57,6 +58,7 @@ func NewAgentRunView(run *agentsv1alpha1.AgentRun, includeOutput bool) AgentRunV
 		CreatedAt:       run.CreationTimestamp.Time,
 		Phase:           run.Status.Phase,
 		Backend:         run.Status.Backend,
+		Model:           firstNonEmpty(run.Status.Model, agentRunSpecModel(run)),
 		Intent:          run.Status.Intent,
 		Source: AgentRunSourceView{
 			APIVersion: run.Spec.SourceRef.APIVersion,
@@ -112,4 +114,40 @@ func agentRunTerminal(phase agentsv1alpha1.AgentRunPhase) bool {
 	return phase == agentsv1alpha1.AgentRunPhaseSucceeded ||
 		phase == agentsv1alpha1.AgentRunPhaseFailed ||
 		phase == agentsv1alpha1.AgentRunPhaseNeedsHuman
+}
+
+// agentRunSpecModel falls back to the run's inline harness model when status
+// was written before status.model existed (profile-only models stay empty).
+func agentRunSpecModel(run *agentsv1alpha1.AgentRun) string {
+	if run == nil {
+		return ""
+	}
+	backend := run.Spec.Harness.Backend
+	switch backend.Kind {
+	case agentsv1alpha1.AgentRunHarnessBackendCodex, "":
+		if backend.Codex != nil {
+			return backend.Codex.Model
+		}
+	case agentsv1alpha1.AgentRunHarnessBackendOpenCode:
+		if backend.OpenCode != nil {
+			return backend.OpenCode.Model
+		}
+	case agentsv1alpha1.AgentRunHarnessBackendHermesAgent:
+		if backend.HermesAgent != nil {
+			return backend.HermesAgent.Model
+		}
+	case agentsv1alpha1.AgentRunHarnessBackendOpenClaw:
+		if backend.OpenClaw != nil {
+			return backend.OpenClaw.Model
+		}
+	case agentsv1alpha1.AgentRunHarnessBackendGrokBuild:
+		if backend.GrokBuild != nil {
+			return backend.GrokBuild.Model
+		}
+	case agentsv1alpha1.AgentRunHarnessBackendPiAgent:
+		if backend.PiAgent != nil {
+			return backend.PiAgent.Model
+		}
+	}
+	return ""
 }

@@ -9176,6 +9176,9 @@ spec:
     - jsonPath: .status.backend
       name: Backend
       type: string
+    - jsonPath: .status.model
+      name: Model
+      type: string
     - jsonPath: .spec.sourceRef.name
       name: Source
       type: string
@@ -12097,6 +12100,12 @@ spec:
               jobSpecDigest:
                 type: string
               jobUID:
+                type: string
+              model:
+                description: |-
+                  Model is the resolved backend model id/profile (for example gpt-5.5 or
+                  grok-4.5) from the effective harness after composition. Empty when the
+                  backend uses its runner default or does not select a model.
                 type: string
               observedGeneration:
                 format: int64

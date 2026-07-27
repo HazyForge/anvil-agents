@@ -80,6 +80,8 @@ export interface AgentRunView {
   createdAt: string;
   phase?: AgentRunPhase;
   backend?: string;
+  /** Resolved backend model id (e.g. gpt-5.5, grok-4.5). */
+  model?: string;
   intent?: string;
   source: AgentRunSourceView;
   application?: string;

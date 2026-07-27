@@ -8,6 +8,44 @@ import (
 	agentsv1alpha1 "github.com/hazyforge/anvil-agents/api/v1alpha1"
 )
 
+func TestAgentRunViewIncludesModel(t *testing.T) {
+	t.Parallel()
+
+	run := &agentsv1alpha1.AgentRun{
+		ObjectMeta: metav1.ObjectMeta{Name: "review", Namespace: "agents"},
+		Status: agentsv1alpha1.AgentRunStatus{
+			Backend: "codex",
+			Model:   "gpt-5.5",
+		},
+	}
+	view := NewAgentRunView(run, false)
+	if view.Model != "gpt-5.5" {
+		t.Fatalf("model = %q, want gpt-5.5", view.Model)
+	}
+	if view.Backend != "codex" {
+		t.Fatalf("backend = %q", view.Backend)
+	}
+
+	// Fallback to inline harness model when status.model is empty (legacy runs).
+	legacy := &agentsv1alpha1.AgentRun{
+		ObjectMeta: metav1.ObjectMeta{Name: "legacy", Namespace: "agents"},
+		Spec: agentsv1alpha1.AgentRunSpec{
+			Harness: agentsv1alpha1.AgentRunHarnessSpec{
+				Backend: agentsv1alpha1.AgentRunHarnessBackendSpec{
+					Kind: agentsv1alpha1.AgentRunHarnessBackendGrokBuild,
+					GrokBuild: &agentsv1alpha1.AgentRunGrokBuildBackendSpec{
+						Model: "grok-4.5",
+					},
+				},
+			},
+		},
+	}
+	legacyView := NewAgentRunView(legacy, false)
+	if legacyView.Model != "grok-4.5" {
+		t.Fatalf("spec model fallback = %q, want grok-4.5", legacyView.Model)
+	}
+}
+
 func TestAgentRunViewIncludesSanitizedResolvedComposition(t *testing.T) {
 	t.Parallel()
 
