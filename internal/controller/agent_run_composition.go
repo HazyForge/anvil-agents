@@ -92,7 +92,13 @@ func agentRunResolvedScopeStatus(scope controlv1alpha1.AgentRunScopeSpec) *contr
 	if scope.ApplicationTargetRef != nil {
 		status.ApplicationTarget = strings.TrimSpace(scope.ApplicationTargetRef.Name)
 	}
-	if status.Application == "" && status.ApplicationTarget == "" {
+	if repo := normalizeAgentRunRepository(scope.Repository); repo != nil {
+		status.Repository = repo.Name
+		status.RepositoryRef = repo.Ref
+		status.DestinationBranch = repo.DestinationBranch
+		status.AllowedBranches = append([]string(nil), repo.AllowedBranches...)
+	}
+	if status.Application == "" && status.ApplicationTarget == "" && status.Repository == "" && status.RepositoryRef == "" && status.DestinationBranch == "" && len(status.AllowedBranches) == 0 {
 		return nil
 	}
 	return status

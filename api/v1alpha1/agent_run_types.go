@@ -98,6 +98,42 @@ type AgentRunScopeSpec struct {
 	// ResourceKinds optionally calls out important resource kinds to inspect.
 	// +optional
 	ResourceKinds []string `json:"resourceKinds,omitempty"`
+	// Repository scopes git checkout and branch policy for this run. When set,
+	// the controller injects ANVIL_AGENT_RUN_REPOSITORY* environment variables
+	// used by runner images to clone and check out work. Branch fields restrict
+	// which refs the agent may treat as workspace heads and PR bases.
+	// +optional
+	Repository *AgentRunRepositorySpec `json:"repository,omitempty"`
+}
+
+// AgentRunRepositorySpec describes the git repository and branch policy for a
+// run. DestinationBranch is the integration/PR base. AllowedBranches limits
+// which branches the agent may check out, analyze as heads, or push to.
+// Empty AllowedBranches with DestinationBranch set means only that branch is
+// in scope. Empty AllowedBranches and empty DestinationBranch preserves legacy
+// unrestricted ref behavior via Ref or harness extraEnv.
+type AgentRunRepositorySpec struct {
+	// Name is the owner/name repository identity, for example HazyForge/hazy-trade.
+	// +optional
+	Name string `json:"name,omitempty"`
+	// URL is the clone URL. Empty defaults to https://github.com/<name>.git when
+	// Name is set.
+	// +optional
+	URL string `json:"url,omitempty"`
+	// Ref is the workspace checkout ref (branch, tag, or commit). Empty defaults
+	// to DestinationBranch when that field is set.
+	// +optional
+	Ref string `json:"ref,omitempty"`
+	// DestinationBranch is the only allowed pull-request base / integration
+	// branch for this agent. Agents must open PRs targeting this branch when set.
+	// +optional
+	DestinationBranch string `json:"destinationBranch,omitempty"`
+	// AllowedBranches restricts which remote branches the agent may check out,
+	// analyze as heads, or push feature work from. Empty means only
+	// DestinationBranch (when set) or unrestricted (legacy).
+	// +optional
+	// +listType=set
+	AllowedBranches []string `json:"allowedBranches,omitempty"`
 }
 
 type AgentRunDocsPolicy string
@@ -880,8 +916,12 @@ type AgentRunResolvedObjectReferenceStatus struct {
 // AgentRunResolvedScopeStatus records the opaque workload names inherited by
 // the effective run without copying a mutable profile or any runtime fields.
 type AgentRunResolvedScopeStatus struct {
-	Application       string `json:"application,omitempty"`
-	ApplicationTarget string `json:"applicationTarget,omitempty"`
+	Application         string   `json:"application,omitempty"`
+	ApplicationTarget   string   `json:"applicationTarget,omitempty"`
+	Repository          string   `json:"repository,omitempty"`
+	RepositoryRef       string   `json:"repositoryRef,omitempty"`
+	DestinationBranch   string   `json:"destinationBranch,omitempty"`
+	AllowedBranches     []string `json:"allowedBranches,omitempty"`
 }
 
 // AgentRunResolvedCompositionStatus records the reusable inputs accepted for a

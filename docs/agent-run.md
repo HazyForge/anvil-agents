@@ -194,6 +194,21 @@ deprecated external-mode alias. Set `archive.terminalRetention` only after a
 real archive row is verified. See [PostgreSQL Archive](archive.md) for the mode,
 credential, upgrade, backup, and uninstall contracts.
 
+## Creating a workable agent
+
+For a practical checklist covering ToolSets, skills, branch scope, schedules,
+human-comms hotline, and a first smoke run, see
+[Creating a Workable Agent End to End](creating-a-workable-agent.md).
+
+Repository and branch policy live on `spec.scope.repository` (profile or run):
+
+- `destinationBranch` — only allowed PR base / integration branch
+- `allowedBranches` — heads the agent may analyze or use
+- `ref` — workspace checkout (defaults to `destinationBranch`)
+
+The controller injects `ANVIL_AGENT_RUN_REPOSITORY*`,
+`ANVIL_AGENT_RUN_DESTINATION_BRANCH`, and `ANVIL_AGENT_RUN_ALLOWED_BRANCHES`.
+
 ## Installation
 
 Install the CRDs and controller with Helm:
