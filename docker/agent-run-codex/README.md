@@ -22,7 +22,8 @@ goal mode, sandbox, and additional arguments. Credentials come from
 `spec.harness.execution.envSecretRefs`; non-secret values use `extraEnv`.
 
 The image includes Codex, Go, Helm, kubectl, gh, git, curl, jq, rg, Python,
-`anvil-agentctl`, `anvil-agent-status`, `anvil-agent-feedback`, and
+`anvil-agentctl`, `anvil-agent-status`, `anvil-hotline` (compat:
+`anvil-agent-feedback`), and
 `anvil-observability`. `anvil-agentctl self report` is the preferred in-pod
 status helper; the shell `anvil-agent-status` wrapper remains for compatibility.
 The binary does not grant Kubernetes authority by itself—operator auth commands

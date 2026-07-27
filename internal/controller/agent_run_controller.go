@@ -1491,13 +1491,31 @@ func (r *AgentRunReconciler) agentRunEnv(obj *controlv1alpha1.AgentRun, dataVolu
 		{Name: "ANVIL_AGENT_RUN_STATUS_FILE", Value: agentRunStatusFile},
 		{Name: "ANVIL_AGENT_RUN_STATUS_LOG_PREFIX", Value: agentRunStatusLinePrefix},
 		{Name: "ANVIL_AGENT_RUN_STATUS_TOOL", Value: "anvil-agent-status"},
-		{Name: "ANVIL_AGENT_FEEDBACK_TOOL", Value: "anvil-agent-feedback"},
+		{Name: "ANVIL_AGENT_FEEDBACK_TOOL", Value: "anvil-hotline"},
+		{Name: "ANVIL_HOTLINE_TOOL", Value: "anvil-hotline"},
 		{Name: "ANVIL_AGENT_RUN_PLATFORM_REPOSITORY", Value: platform.Repository},
 		{Name: "ANVIL_AGENT_RUN_PLATFORM_REPOSITORY_URL", Value: platform.RepositoryURL},
 		{Name: "ANVIL_AGENT_RUN_PLATFORM_DOCS", Value: strings.Join(platform.DocsPaths, ",")},
 	}
 	if obj.Spec.Harness.Execution.TimeoutSeconds > 0 {
 		env = append(env, corev1.EnvVar{Name: "ANVIL_AGENT_RUN_TIMEOUT_SECONDS", Value: strconv.Itoa(obj.Spec.Harness.Execution.TimeoutSeconds)})
+	}
+	if repo := normalizeAgentRunRepository(obj.Spec.Scope.Repository); repo != nil {
+		if repo.Name != "" {
+			env = append(env, corev1.EnvVar{Name: "ANVIL_AGENT_RUN_REPOSITORY", Value: repo.Name})
+		}
+		if repo.URL != "" {
+			env = append(env, corev1.EnvVar{Name: "ANVIL_AGENT_RUN_REPOSITORY_URL", Value: repo.URL})
+		}
+		if repo.Ref != "" {
+			env = append(env, corev1.EnvVar{Name: "ANVIL_AGENT_RUN_REPOSITORY_REF", Value: repo.Ref})
+		}
+		if repo.DestinationBranch != "" {
+			env = append(env, corev1.EnvVar{Name: "ANVIL_AGENT_RUN_DESTINATION_BRANCH", Value: repo.DestinationBranch})
+		}
+		if len(repo.AllowedBranches) > 0 {
+			env = append(env, corev1.EnvVar{Name: "ANVIL_AGENT_RUN_ALLOWED_BRANCHES", Value: strings.Join(repo.AllowedBranches, ",")})
+		}
 	}
 	if obj.Spec.Harness.Execution.SpiffeWorkloadAPI.Enabled {
 		env = append(env,
@@ -2322,6 +2340,61 @@ func agentRunMergeScope(profile, run controlv1alpha1.AgentRunScopeSpec) controlv
 	}
 	out.Namespaces = appendUniqueStrings(out.Namespaces, run.Namespaces...)
 	out.ResourceKinds = appendUniqueStrings(out.ResourceKinds, run.ResourceKinds...)
+	out.Repository = agentRunMergeRepository(profile.Repository, run.Repository)
+	return out
+}
+
+func agentRunMergeRepository(profile, run *controlv1alpha1.AgentRunRepositorySpec) *controlv1alpha1.AgentRunRepositorySpec {
+	if profile == nil && run == nil {
+		return nil
+	}
+	out := &controlv1alpha1.AgentRunRepositorySpec{}
+	if profile != nil {
+		out = profile.DeepCopy()
+	}
+	if run == nil {
+		return normalizeAgentRunRepository(out)
+	}
+	if strings.TrimSpace(run.Name) != "" {
+		out.Name = run.Name
+	}
+	if strings.TrimSpace(run.URL) != "" {
+		out.URL = run.URL
+	}
+	if strings.TrimSpace(run.Ref) != "" {
+		out.Ref = run.Ref
+	}
+	if strings.TrimSpace(run.DestinationBranch) != "" {
+		out.DestinationBranch = run.DestinationBranch
+	}
+	if len(run.AllowedBranches) > 0 {
+		out.AllowedBranches = appendUniqueStrings(nil, run.AllowedBranches...)
+	}
+	return normalizeAgentRunRepository(out)
+}
+
+func normalizeAgentRunRepository(repo *controlv1alpha1.AgentRunRepositorySpec) *controlv1alpha1.AgentRunRepositorySpec {
+	if repo == nil {
+		return nil
+	}
+	out := repo.DeepCopy()
+	out.Name = strings.TrimSpace(out.Name)
+	out.URL = strings.TrimSpace(out.URL)
+	out.Ref = strings.TrimSpace(out.Ref)
+	out.DestinationBranch = strings.TrimSpace(out.DestinationBranch)
+	out.AllowedBranches = appendUniqueStrings(nil, out.AllowedBranches...)
+	if out.URL == "" && out.Name != "" {
+		out.URL = "https://github.com/" + out.Name + ".git"
+	}
+	if out.Ref == "" && out.DestinationBranch != "" {
+		out.Ref = out.DestinationBranch
+	}
+	if out.DestinationBranch != "" {
+		out.AllowedBranches = appendUniqueStrings(out.AllowedBranches, out.DestinationBranch)
+	}
+	if out.Name == "" && out.URL == "" && out.Ref == "" && out.DestinationBranch == "" && len(out.AllowedBranches) == 0 {
+		return nil
+	}
 	return out
 }
 

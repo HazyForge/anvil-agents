@@ -2634,6 +2634,42 @@ spec:
                             items:
                               type: string
                             type: array
+                          repository:
+                            description: |-
+                              Repository scopes git checkout and branch policy for this run. When set,
+                              the controller injects ANVIL_AGENT_RUN_REPOSITORY* environment variables
+                              used by runner images to clone and check out work. Branch fields restrict
+                              which refs the agent may treat as workspace heads and PR bases.
+                            properties:
+                              allowedBranches:
+                                description: |-
+                                  AllowedBranches restricts which remote branches the agent may check out,
+                                  analyze as heads, or push feature work from. Empty means only
+                                  DestinationBranch (when set) or unrestricted (legacy).
+                                items:
+                                  type: string
+                                type: array
+                                x-kubernetes-list-type: set
+                              destinationBranch:
+                                description: |-
+                                  DestinationBranch is the only allowed pull-request base / integration
+                                  branch for this agent. Agents must open PRs targeting this branch when set.
+                                type: string
+                              name:
+                                description: Name is the owner/name repository identity,
+                                  for example HazyForge/hazy-trade.
+                                type: string
+                              ref:
+                                description: |-
+                                  Ref is the workspace checkout ref (branch, tag, or commit). Empty defaults
+                                  to DestinationBranch when that field is set.
+                                type: string
+                              url:
+                                description: |-
+                                  URL is the clone URL. Empty defaults to https://github.com/<name>.git when
+                                  Name is set.
+                                type: string
+                            type: object
                           resourceKinds:
                             description: ResourceKinds optionally calls out important
                               resource kinds to inspect.

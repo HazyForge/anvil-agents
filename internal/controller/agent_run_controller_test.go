@@ -432,7 +432,7 @@ func TestAgentRunProfileResolvesEffectiveSpec(t *testing.T) {
 				}},
 				Subagents: []controlv1alpha1.AgentRunSubagentSpec{{
 					Name:         "github-issue-hygiene",
-					ToolNames:    []string{"gh", "anvil-agent-feedback"},
+					ToolNames:    []string{"gh", "anvil-hotline"},
 					SystemPrompt: "Close stale tickets only when current evidence proves they are resolved.",
 				}},
 				Tools: []controlv1alpha1.AgentRunToolSpec{{
@@ -1337,7 +1337,8 @@ func TestAgentRunJobInjectsStatusToolEnv(t *testing.T) {
 		"ANVIL_AGENT_RUN_STATUS_FILE":             agentRunStatusFile,
 		"ANVIL_AGENT_RUN_STATUS_LOG_PREFIX":       agentRunStatusLinePrefix,
 		"ANVIL_AGENT_RUN_STATUS_TOOL":             "anvil-agent-status",
-		"ANVIL_AGENT_FEEDBACK_TOOL":               "anvil-agent-feedback",
+		"ANVIL_AGENT_FEEDBACK_TOOL":               "anvil-hotline",
+		"ANVIL_HOTLINE_TOOL":                      "anvil-hotline",
 		"ANVIL_AGENT_RUN_PLATFORM_REPOSITORY":     agentRunPlatformRepository,
 		"ANVIL_AGENT_RUN_PLATFORM_REPOSITORY_URL": agentRunPlatformRepositoryURL,
 		"CUSTOM_SETTING":                          "enabled",
@@ -3192,5 +3193,80 @@ func TestAgentRunExternalSecretFreshnessStillTimesOutWhenStaleAndUnchanged(t *te
 	fresh, phase, reason, _, err = reconciler.ensureAgentRunExternalSecretFreshness(ctx, run, &status)
 	if err != nil || fresh || phase != controlv1alpha1.AgentRunPhaseFailed || reason != "ExternalSecretRefreshTimedOut" {
 		t.Fatalf("stale preflight = fresh:%t phase:%q reason:%q err:%v", fresh, phase, reason, err)
+	}
+}
+
+func TestAgentRunJobInjectsRepositoryBranchScope(t *testing.T) {
+	t.Parallel()
+
+	run := &controlv1alpha1.AgentRun{
+		ObjectMeta: metav1.ObjectMeta{Name: "docs-steward", Namespace: "hazy-trade"},
+		Spec: controlv1alpha1.AgentRunSpec{
+			SourceRef: controlv1alpha1.AgentRunSourceRef{Kind: "AgentSchedule", Name: "docs-steward-daily"},
+			Scope: controlv1alpha1.AgentRunScopeSpec{
+				ApplicationRef: &controlv1alpha1.ApplicationReferenceSpec{Name: "hazy-trade"},
+				Repository: &controlv1alpha1.AgentRunRepositorySpec{
+					Name:              "HazyForge/hazy-trade",
+					DestinationBranch: "master",
+					AllowedBranches:   []string{"master", "release/stable"},
+				},
+			},
+			Harness: controlv1alpha1.AgentRunHarnessSpec{
+				Intent: controlv1alpha1.AgentRunIntentProposeChange,
+				Backend: controlv1alpha1.AgentRunHarnessBackendSpec{
+					Kind: controlv1alpha1.AgentRunHarnessBackendCodex,
+				},
+			},
+		},
+	}
+
+	job := agentRunJob(run, "docs-steward-harness", "docs-steward-context", nil)
+	env := map[string]string{}
+	for _, item := range job.Spec.Template.Spec.Containers[0].Env {
+		env[item.Name] = item.Value
+	}
+	if got, want := env["ANVIL_AGENT_RUN_REPOSITORY"], "HazyForge/hazy-trade"; got != want {
+		t.Fatalf("repository = %q, want %q", got, want)
+	}
+	if got, want := env["ANVIL_AGENT_RUN_REPOSITORY_URL"], "https://github.com/HazyForge/hazy-trade.git"; got != want {
+		t.Fatalf("repository url = %q, want %q", got, want)
+	}
+	if got, want := env["ANVIL_AGENT_RUN_REPOSITORY_REF"], "master"; got != want {
+		t.Fatalf("repository ref = %q, want %q", got, want)
+	}
+	if got, want := env["ANVIL_AGENT_RUN_DESTINATION_BRANCH"], "master"; got != want {
+		t.Fatalf("destination branch = %q, want %q", got, want)
+	}
+	if got, want := env["ANVIL_AGENT_RUN_ALLOWED_BRANCHES"], "master,release/stable"; got != want {
+		t.Fatalf("allowed branches = %q, want %q", got, want)
+	}
+}
+
+func TestAgentRunMergeRepositoryRunOverridesProfile(t *testing.T) {
+	t.Parallel()
+
+	merged := agentRunMergeRepository(
+		&controlv1alpha1.AgentRunRepositorySpec{
+			Name:              "HazyForge/hazy-trade",
+			DestinationBranch: "master",
+			AllowedBranches:   []string{"master"},
+		},
+		&controlv1alpha1.AgentRunRepositorySpec{
+			Ref:               "feature/docs-align",
+			AllowedBranches:   []string{"feature/docs-align", "master"},
+			DestinationBranch: "master",
+		},
+	)
+	if merged == nil {
+		t.Fatal("expected merged repository")
+	}
+	if got, want := merged.Name, "HazyForge/hazy-trade"; got != want {
+		t.Fatalf("name = %q, want %q", got, want)
+	}
+	if got, want := merged.Ref, "feature/docs-align"; got != want {
+		t.Fatalf("ref = %q, want %q", got, want)
+	}
+	if got, want := strings.Join(merged.AllowedBranches, ","), "feature/docs-align,master"; got != want {
+		t.Fatalf("allowed = %q, want %q", got, want)
 	}
 }

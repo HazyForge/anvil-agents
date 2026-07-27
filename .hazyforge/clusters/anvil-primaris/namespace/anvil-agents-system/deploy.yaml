@@ -9,7 +9,7 @@ serviceAccount:
   name: anvil-agents
 image:
   # Controller/API image embeds Anvil Agents Console SPA (served at /).
-  reference: ghcr.io/hazyforge/anvil-agents@sha256:50e168f066012151c373ef6fd0784f054f9917fb794956eb472aa04234763f77
+  reference: ghcr.io/hazyforge/anvil-agents@sha256:de90d149478361f584c9ae23528c975cc50e511ab46559607dfa8caf41b07a8b
   pullPolicy: IfNotPresent
 imagePullSecrets:
   - name: ghcr-creds

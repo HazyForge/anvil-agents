@@ -9,17 +9,22 @@ ARG TARGETARCH=amd64
 
 WORKDIR /src
 
+# anvil-hotline is owned by github.com/hazyforge/anvil-hotline (public).
+ARG ANVIL_HOTLINE_VERSION=v0.1.0
+RUN --mount=type=cache,target=/go/pkg/mod \
+	--mount=type=cache,target=/root/.cache/go-build \
+	mkdir -p /out \
+	&& CGO_ENABLED=0 GOOS="${TARGETOS}" GOARCH="${TARGETARCH}" \
+		GOBIN=/out go install "github.com/hazyforge/anvil-hotline/cmd/anvil-hotline@${ANVIL_HOTLINE_VERSION}" \
+	&& cp /out/anvil-hotline /out/anvil-agent-feedback
+
 COPY go.mod go.sum ./
 RUN --mount=type=cache,target=/go/pkg/mod go mod download
 COPY api/ ./api/
 COPY internal/ ./internal/
-COPY cmd/anvil-agent-feedback/ ./cmd/anvil-agent-feedback/
 COPY cmd/anvil-agentctl/ ./cmd/anvil-agentctl/
-COPY lib/agentfeedback/ ./lib/agentfeedback/
 RUN --mount=type=cache,target=/root/.cache/go-build \
 	CGO_ENABLED=0 GOOS="${TARGETOS}" GOARCH="${TARGETARCH}" \
-	go build -trimpath -ldflags="-s -w" -o /out/anvil-agent-feedback ./cmd/anvil-agent-feedback \
-	&& CGO_ENABLED=0 GOOS="${TARGETOS}" GOARCH="${TARGETARCH}" \
 	go build -trimpath -ldflags="-s -w" -o /out/anvil-agentctl ./cmd/anvil-agentctl
 
 FROM node:24-bookworm-slim
@@ -72,12 +77,14 @@ COPY docker/agent-run-codex/anvil-observability /usr/local/bin/anvil-observabili
 COPY docker/agent-run-common/github-auth.sh /opt/anvil-agent-run/lib/github-auth.sh
 COPY docker/agent-run-common/repository-checkout.sh /opt/anvil-agent-run/lib/repository-checkout.sh
 COPY docker/agent-run-pi/entrypoint.sh /usr/local/bin/anvil-agent-run-pi
+COPY --from=agent-feedback-builder /out/anvil-hotline /usr/local/bin/anvil-hotline
 COPY --from=agent-feedback-builder /out/anvil-agent-feedback /usr/local/bin/anvil-agent-feedback
 COPY --from=agent-feedback-builder /out/anvil-agentctl /usr/local/bin/anvil-agentctl
 
 RUN chmod 0755 /usr/local/bin/anvil-agent-run-pi \
 	&& chmod 0755 /usr/local/bin/anvil-agent-status \
 	&& chmod 0755 /usr/local/bin/anvil-observability \
+	&& chmod 0755 /usr/local/bin/anvil-hotline \
 	&& chmod 0755 /usr/local/bin/anvil-agent-feedback \
 	&& chmod 0755 /usr/local/bin/anvil-agentctl \
 	&& chmod 0644 /opt/anvil-agent-run/lib/github-auth.sh /opt/anvil-agent-run/lib/repository-checkout.sh \
@@ -93,7 +100,8 @@ ENV ANVIL_AGENT_RUN_STATUS_FILE=/tmp/anvil-agent-run-status/status.jsonl
 ENV ANVIL_AGENT_RUN_STATUS_LOG_PREFIX=ANVIL_AGENT_RUN_STATUS_JSON=
 ENV ANVIL_AGENT_RUN_STATUS_TOOL=anvil-agent-status
 ENV ANVIL_AGENT_RUN_SKILLS_DIR=/opt/anvil-agent-run/skills
-ENV ANVIL_AGENT_FEEDBACK_TOOL=anvil-agent-feedback
+ENV ANVIL_AGENT_FEEDBACK_TOOL=anvil-hotline
+ENV ANVIL_HOTLINE_TOOL=anvil-hotline
 ENV ANVIL_OBSERVABILITY_TOOL=anvil-observability
 
 USER ${AGENT_UID}:${AGENT_GID}

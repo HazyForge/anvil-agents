@@ -29,7 +29,7 @@ test:
 	go test ./...
 
 build:
-	go build ./cmd/anvil-agents ./cmd/anvil-agents-api ./cmd/anvil-agent-feedback ./cmd/anvil-agentctl
+	go build ./cmd/anvil-agents ./cmd/anvil-agents-api ./cmd/anvil-agentctl
 
 # Build the Anvil Agents Console SPA into web/console/dist.
 console-build:
