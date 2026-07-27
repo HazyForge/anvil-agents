@@ -904,6 +904,11 @@ type AgentRunStatus struct {
 	Conditions              []metav1.Condition                    `json:"conditions,omitempty"`
 	Phase                   AgentRunPhase                         `json:"phase,omitempty"`
 	Backend                 string                                `json:"backend,omitempty"`
+	// Model is the resolved backend model id/profile (for example gpt-5.5 or
+	// grok-4.5) from the effective harness after composition. Empty when the
+	// backend uses its runner default or does not select a model.
+	// +optional
+	Model                   string                                `json:"model,omitempty"`
 	Intent                  string                                `json:"intent,omitempty"`
 	Image                   string                                `json:"image,omitempty"`
 	PlannedJobRef           *NamespacedObjectReference            `json:"plannedJobRef,omitempty"`
@@ -936,6 +941,7 @@ type AgentRunStatus struct {
 // +kubebuilder:resource:path=agentruns,scope=Namespaced,shortName=agrun
 // +kubebuilder:printcolumn:name="Phase",type="string",JSONPath=".status.phase"
 // +kubebuilder:printcolumn:name="Backend",type="string",JSONPath=".status.backend"
+// +kubebuilder:printcolumn:name="Model",type="string",JSONPath=".status.model"
 // +kubebuilder:printcolumn:name="Source",type="string",JSONPath=".spec.sourceRef.name"
 // +kubebuilder:printcolumn:name="Reason",type="string",JSONPath=".spec.trigger.reason"
 type AgentRun struct {

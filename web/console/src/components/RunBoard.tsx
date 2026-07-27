@@ -38,6 +38,11 @@ export function RunBoard({ runs, namespace, emptyHint }: Props) {
                 <PhaseBadge phase={run.phase} />
                 <span className="chip chip-mute">AgentRun</span>
                 {run.backend ? <span className="chip mono">{run.backend}</span> : null}
+                {run.model ? (
+                  <span className="chip mono" title="Model">
+                    {run.model}
+                  </span>
+                ) : null}
               </div>
               <h2 className="agent-card-title mono">
                 <Link to={href}>{run.name}</Link>
@@ -48,6 +53,7 @@ export function RunBoard({ runs, namespace, emptyHint }: Props) {
             </p>
             <div className="agent-card-meta mono">
               {[
+                run.model ? `model:${run.model}` : null,
                 run.intent || null,
                 run.application || null,
                 run.applicationTarget || null,

@@ -37,6 +37,8 @@ export function RunDetail({ run, token, onRunUpdate }: Props) {
             <dd className="mono">{run.namespace}</dd>
             <dt>Backend</dt>
             <dd>{run.backend || "—"}</dd>
+            <dt>Model</dt>
+            <dd className="mono">{run.model || "—"}</dd>
             <dt>Intent</dt>
             <dd>{run.intent || "—"}</dd>
             <dt>Application</dt>
