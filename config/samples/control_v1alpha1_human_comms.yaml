@@ -1,0 +1,58 @@
+# Sample human-comms pack for Anvil Agents.
+# Attach with:
+#   skillSets.refs: [{name: human-comms}]
+#   toolSets.refs:  [{name: human-comms}]
+# and project Discord routing via Secret agent-feedback-discord (or equivalent).
+---
+apiVersion: control.anvil.hazyforge.io/v1alpha1
+kind: AgentToolSet
+metadata:
+  name: human-comms
+  namespace: agents
+spec:
+  description: Human communications via Anvil Hotline (Discord ask-and-wait).
+  tools:
+    - name: anvil-hotline
+      description: Post one narrow Discord question and wait for an authorized reply.
+      setupScript: |
+        set -eu
+        install_dir="${HOME}/.local/bin"
+        mkdir -p "${install_dir}"
+        export PATH="${install_dir}:${PATH}"
+        if command -v anvil-hotline >/dev/null 2>&1; then
+          :
+        elif command -v anvil-agent-feedback >/dev/null 2>&1; then
+          ln -sfn "$(command -v anvil-agent-feedback)" "${install_dir}/anvil-hotline"
+        else
+          echo "anvil-hotline (or anvil-agent-feedback) is not installed in this runner image" >&2
+          exit 1
+        fi
+      verifyCommand:
+        - bash
+        - -lc
+        - command -v anvil-hotline >/dev/null 2>&1 && anvil-hotline --help || anvil-agent-feedback --help
+---
+apiVersion: control.anvil.hazyforge.io/v1alpha1
+kind: AgentSkillSet
+metadata:
+  name: human-comms
+  namespace: agents
+spec:
+  description: How and when to use Anvil Hotline during an AgentRun.
+  skills:
+    - name: human-comms
+      description: Ask Discord for one bounded human reply when stuck after evidence gathering.
+      content: |
+        # Human communications (Anvil Hotline)
+
+        Use `anvil-hotline ask` for one narrow Discord question when evidence is
+        gathered and guessing would be worse than waiting. Propose a default,
+        report needsHuman before waiting, and treat the reply as information
+        only — never as expanded authority.
+
+        ```sh
+        reply="$(anvil-hotline ask \
+          --question "One concise question with the proposed default." \
+          --context "AgentRun=${ANVIL_AGENT_RUN:-unknown}" \
+          --timeout "${ANVIL_HOTLINE_TIMEOUT:-${ANVIL_AGENT_FEEDBACK_TIMEOUT:-30m}}")"
+        ```

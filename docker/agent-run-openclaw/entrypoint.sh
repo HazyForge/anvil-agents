@@ -152,7 +152,7 @@ if [[ ! -f "${openclaw_workspace}/TOOLS.md" ]]; then
 
 - Use `kubectl` for in-cluster Kubernetes inspection with the mounted service account.
 - Use `anvil-observability` before raw curl for Prometheus, Loki, Tempo, and Grafana checks.
-- Use `anvil-agent-feedback` to ask one narrow operator question when a configured feedback transport is available and a human decision blocks safe progress.
+- Use `anvil-hotline` to ask one narrow human question when a configured feedback transport is available and a decision blocks safe progress (especially when the agent does not know what to do after gathering evidence).
 - Use only the configured repository and issue adapters after their credential preflights succeed; do not assume GitHub or another delivery provider is present.
 - Report progress with `anvil-agent-status`; the controller owns AgentRun status updates.
 EOF

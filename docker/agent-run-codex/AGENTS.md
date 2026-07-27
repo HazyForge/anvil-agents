@@ -20,7 +20,7 @@ the run exists and what it may do.
   escalate privileges.
 - A mounted tool is not authorization to use it outside the declared scope.
 - If evidence or authority is ambiguous, record `needsHuman` and ask one narrow
-  question with `anvil-agent-feedback` when it is configured.
+  question with `anvil-hotline` when it is configured.
 
 ## Evidence
 

@@ -432,7 +432,7 @@ func TestAgentRunProfileResolvesEffectiveSpec(t *testing.T) {
 				}},
 				Subagents: []controlv1alpha1.AgentRunSubagentSpec{{
 					Name:         "github-issue-hygiene",
-					ToolNames:    []string{"gh", "anvil-agent-feedback"},
+					ToolNames:    []string{"gh", "anvil-hotline"},
 					SystemPrompt: "Close stale tickets only when current evidence proves they are resolved.",
 				}},
 				Tools: []controlv1alpha1.AgentRunToolSpec{{
@@ -1337,7 +1337,8 @@ func TestAgentRunJobInjectsStatusToolEnv(t *testing.T) {
 		"ANVIL_AGENT_RUN_STATUS_FILE":             agentRunStatusFile,
 		"ANVIL_AGENT_RUN_STATUS_LOG_PREFIX":       agentRunStatusLinePrefix,
 		"ANVIL_AGENT_RUN_STATUS_TOOL":             "anvil-agent-status",
-		"ANVIL_AGENT_FEEDBACK_TOOL":               "anvil-agent-feedback",
+		"ANVIL_AGENT_FEEDBACK_TOOL":               "anvil-hotline",
+		"ANVIL_HOTLINE_TOOL":                      "anvil-hotline",
 		"ANVIL_AGENT_RUN_PLATFORM_REPOSITORY":     agentRunPlatformRepository,
 		"ANVIL_AGENT_RUN_PLATFORM_REPOSITORY_URL": agentRunPlatformRepositoryURL,
 		"CUSTOM_SETTING":                          "enabled",
