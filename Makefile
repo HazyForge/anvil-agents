@@ -9,7 +9,7 @@ RELEASE_REPO ?= HazyForge/anvil-agents
 RELEASE_DEPLOY_VALUES ?= .hazyforge/clusters/anvil-primaris/namespace/anvil-agents-system/deploy.yaml
 RELEASE_IMAGE_LOCK ?= $(RELEASE_OUTPUT)/images-$(VERSION).lock.tsv
 
-.PHONY: generate manifests test verify verify-runner-contract build console-build console-typecheck console-embed console-embed-restore docker-build images image-checks helm-lint archive-postgres-integration chart-package release-tag release-tag-push release-local release-publish release-github release-local-all release-pin-deploy judge-prerequisites judge-kind-e2e kind-upgrade-e2e kind-e2e
+.PHONY: generate manifests test verify verify-runner-contract build console-build console-typecheck console-embed console-embed-restore docker-build images image-checks helm-lint archive-postgres-integration chart-package release-tag release-tag-push release-local release-publish release-github release-local-all release-pin-deploy release-primaris release-primaris-fast release-primaris-hot deploy-primaris judge-prerequisites judge-kind-e2e kind-upgrade-e2e kind-e2e
 
 generate:
 	$(CONTROLLER_GEN) object paths=./api/...
@@ -113,6 +113,35 @@ release-pin-deploy:
 		--image-lock "$(RELEASE_IMAGE_LOCK)" \
 		--values "$(RELEASE_DEPLOY_VALUES)"
 
+# Local Docker → Anvil Primaris (no GitHub Actions). See docs/release-primaris.md.
+# full: VERSION=vX.Y.Z make release-primaris
+# fast: VERSION=vX.Y.Z make release-primaris-fast
+# hot:  make release-primaris-hot   (controller only; allow dirty; deploys)
+# apply: make deploy-primaris
+release-primaris:
+	./hack/release-primaris.sh --mode full --version "$${VERSION:?set VERSION, for example v0.1.14}" \
+		--prefix "$(REGISTRY_PREFIX)" \
+		$(if $(filter true,$(RELEASE_SKIP_VERIFICATION)),--skip-verification,) \
+		$(if $(filter true,$(RELEASE_DEPLOY)),--deploy,) \
+		$(if $(filter true,$(RELEASE_GITHUB)),--github,)
+
+release-primaris-fast:
+	./hack/release-primaris.sh --mode fast --version "$${VERSION:?set VERSION, for example v0.1.14}" \
+		--prefix "$(REGISTRY_PREFIX)" \
+		$(if $(filter true,$(RELEASE_DEPLOY)),--deploy,) \
+		$(if $(filter true,$(RELEASE_GITHUB)),--github,)
+
+release-primaris-hot:
+	./hack/release-primaris.sh --mode hot --prefix "$(REGISTRY_PREFIX)" \
+		--component "$(or $(COMPONENT),controller)" \
+		--allow-dirty \
+		$(if $(filter false,$(RELEASE_DEPLOY)),--no-deploy,)
+
+deploy-primaris:
+	./hack/deploy-primaris.sh --manifests \
+		--values "$(RELEASE_DEPLOY_VALUES)" \
+		$(if $(KUBE_CONTEXT),--context $(KUBE_CONTEXT),)
+
 judge-prerequisites:
 	./hack/install-judge-prerequisites.sh
 
@@ -136,6 +165,9 @@ verify-runner-contract:
 	@bash -n hack/create-github-release.sh
 	@bash -n hack/pin-deploy-values-from-lock.sh
 	@bash -n hack/local-release_test.sh
+	@bash -n hack/deploy-primaris.sh
+	@bash -n hack/release-primaris.sh
+	@bash -n hack/release-primaris_test.sh
 	@bash -n hack/test-api-chart.sh
 	@bash -n hack/test-archive-chart.sh
 	@bash -n hack/test-archive-postgres.sh
@@ -157,6 +189,8 @@ verify-runner-contract:
 	@hack/ensure-release-tag.sh --help >/dev/null
 	@hack/create-github-release.sh --help >/dev/null
 	@hack/pin-deploy-values-from-lock.sh --help >/dev/null
+	@hack/deploy-primaris.sh --help >/dev/null
+	@hack/release-primaris.sh --help >/dev/null
 	@hack/package-chart.sh --help >/dev/null
 	@hack/package-chart_test.sh
 	@hack/install-judge-prerequisites.sh --help >/dev/null
@@ -193,6 +227,7 @@ verify-runner-contract:
 	@hack/publish-images_test.sh
 	@hack/publish-release_test.sh
 	@hack/local-release_test.sh
+	@hack/release-primaris_test.sh
 	@hack/test-kind-upgrade-cleanup.sh
 	@hack/test-runner-repository-checkout.sh
 	@hack/test-opencode-runner.sh

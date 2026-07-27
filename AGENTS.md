@@ -43,3 +43,16 @@ CI, and release workflows keep one image/component mapping. Run
 `bash -n hack/stream-agent-run.sh` after changing the live-stream helper, and
 render the chart with both `api.enabled=false` and a complete enabled API
 configuration.
+
+## Local release to Anvil Primaris
+
+GitHub Actions is never required. Prefer local Docker Buildx:
+
+- `make release-primaris-hot` — controller-only build/push, pin Primaris
+  `deploy.yaml`, helm-deploy chart+CRDs (fast console/API loops).
+- `VERSION=vX.Y.Z make release-primaris-fast` — seven-image publish without Kind
+  e2e, pin Primaris digests (add `RELEASE_DEPLOY=true` for live apply).
+- `VERSION=vX.Y.Z make release-primaris` — full gates including Kind e2e.
+- `make deploy-primaris` — apply local chart + current Primaris overlay only.
+
+Details: `docs/release-primaris.md`.
