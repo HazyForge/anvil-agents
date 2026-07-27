@@ -1384,6 +1384,37 @@ table.data-table tr.click-row:hover td {
   letter-spacing: 0.02em;
 }
 
+.guided-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+
+.form-entry-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.form-entry-card {
+  border: 1px solid var(--border);
+  background: linear-gradient(180deg, var(--bg-panel-2) 0%, var(--bg-panel) 100%);
+  border-radius: var(--radius);
+  padding: 0.75rem 0.85rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+
+.form-entry-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  color: var(--text-mute);
+  font-size: 0.78rem;
+}
+
 .checkbox-field {
   gap: 0.4rem;
 }
