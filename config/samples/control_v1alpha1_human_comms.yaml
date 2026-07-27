@@ -1,17 +1,45 @@
-# Sample human-comms skill pack for Anvil Agents.
+# Sample human-comms pack for Anvil Agents.
 #
-# ToolSets install tools at runtime. Skills teach when/how to use capabilities,
-# including binaries already on the runner image.
+# ToolSets install tools at runtime. Skills teach when/how to use them
+# (and may also reference image-baked commands).
 #
-# anvil-hotline ships in runner images (github.com/hazyforge/anvil-hotline), so
-# this sample is an AgentSkillSet only — not an AgentToolSet.
-#
-# Attach:
+# Attach both:
 #   skillSets:
-#     refs:
-#       - name: human-comms
+#     refs: [{name: human-comms}]
+#   toolSets:
+#     refs: [{name: human-comms}]
 #
 # Project Discord routing via Secret agent-feedback-discord (or equivalent).
+---
+apiVersion: control.anvil.hazyforge.io/v1alpha1
+kind: AgentToolSet
+metadata:
+  name: human-comms
+  namespace: agents
+spec:
+  description: Runtime install of anvil-hotline (github.com/hazyforge/anvil-hotline).
+  tools:
+    - name: anvil-hotline
+      description: Install Anvil Hotline CLI for Discord ask-and-wait.
+      setupScript: |
+        set -eu
+        install_dir="${HOME}/.local/bin"
+        mkdir -p "${install_dir}"
+        export PATH="${install_dir}:${PATH}"
+        if command -v go >/dev/null 2>&1; then
+          GOBIN="${install_dir}" CGO_ENABLED=0 go install github.com/hazyforge/anvil-hotline/cmd/anvil-hotline@v0.1.0
+        elif [ -x /usr/local/bin/anvil-hotline ]; then
+          ln -sfn /usr/local/bin/anvil-hotline "${install_dir}/anvil-hotline"
+        elif [ -x /usr/local/bin/anvil-agent-feedback ]; then
+          ln -sfn /usr/local/bin/anvil-agent-feedback "${install_dir}/anvil-hotline"
+        else
+          echo "cannot install anvil-hotline" >&2
+          exit 1
+        fi
+      verifyCommand:
+        - bash
+        - -lc
+        - export PATH="${HOME}/.local/bin:${PATH}"; command -v anvil-hotline && anvil-hotline --help
 ---
 apiVersion: control.anvil.hazyforge.io/v1alpha1
 kind: AgentSkillSet
@@ -19,20 +47,17 @@ metadata:
   name: human-comms
   namespace: agents
 spec:
-  description: >-
-    Human communications via Anvil Hotline — when and how to use the image-baked
-    anvil-hotline binary for Discord ask-and-wait.
+  description: When and how to use anvil-hotline after the human-comms ToolSet installs it.
   skills:
     - name: human-comms
-      description: Ask Discord for one bounded human reply using image-baked anvil-hotline.
+      description: Ask Discord for one bounded human reply using anvil-hotline.
       content: |
         # Human communications (Anvil Hotline)
 
-        `anvil-hotline` is already on the runner image. Do not install it at
-        runtime. Use it for one narrow Discord question when evidence is
-        gathered and guessing would be worse than waiting. Propose a default,
-        report needsHuman before waiting, and treat the reply as information
-        only — never as expanded authority.
+        The human-comms ToolSet installs `anvil-hotline`. Use it for one narrow
+        Discord question when evidence is gathered and guessing would be worse
+        than waiting. Propose a default, report needsHuman before waiting, and
+        treat the reply as information only.
 
         ```sh
         reply="$(anvil-hotline ask \
@@ -40,5 +65,3 @@ spec:
           --context "AgentRun=${ANVIL_AGENT_RUN:-unknown}" \
           --timeout "${ANVIL_HOTLINE_TIMEOUT:-${ANVIL_AGENT_FEEDBACK_TIMEOUT:-30m}}")"
         ```
-
-        Older images may expose the compatibility name `anvil-agent-feedback`.
