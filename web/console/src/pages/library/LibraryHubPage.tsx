@@ -1,5 +1,6 @@
 import { Link } from "react-router-dom";
 import { COMPOSITION_KINDS } from "../../api/types.composition";
+import { CRD_AS_CARD_HELP, CRD_AS_CARD_MANTRA } from "../../design/mantra";
 
 interface Props {
   namespace: string;
@@ -25,21 +26,21 @@ export function LibraryHubPage({ namespace, writeEnabled }: Props) {
           <p className="page-sub">
             Namespace <span className="mono">{namespace}</span>
             {" · "}
-            GitOps remains source of truth for cluster-owned objects
+            every composition CRD is a card
           </p>
         </div>
         <div className="chip-row">
           <span className="chip">{writeEnabled ? "write enabled" : "read only"}</span>
           <Link className="btn btn-primary" to="/profiles">
-            Profiles as cards
+            Profile cards
           </Link>
         </div>
       </div>
 
       <div className="banner banner-info">
-        AgentRunProfiles are shown as cards on the{" "}
-        <Link to="/profiles">Profiles</Link> page (the composition CRD). Other kinds below are
-        supporting building blocks. GitOps-owned objects stay locked; only resources labeled{" "}
+        <strong>{CRD_AS_CARD_MANTRA}</strong> {CRD_AS_CARD_HELP}{" "}
+        <Link to="/profiles">AgentRunProfiles</Link> and the kinds below are all CRDs. GitOps-owned
+        objects stay locked; only resources labeled{" "}
         <span className="mono">control.anvil.hazyforge.io/managed-by=anvil-agents-console</span> can
         be created or edited here.
       </div>
@@ -52,6 +53,7 @@ export function LibraryHubPage({ namespace, writeEnabled }: Props) {
             to={`/ns/${encodeURIComponent(namespace)}/${kind.route}`}
           >
             <div className="library-card-title">{kind.title}</div>
+            <div className="library-card-kind mono">{kind.kind}</div>
             <div className="library-card-body">{kind.description}</div>
             {kind.danger ? <div className="library-card-warn">Elevated authority</div> : null}
           </Link>

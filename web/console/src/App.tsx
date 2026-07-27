@@ -31,6 +31,8 @@ export default function App() {
   const [authError, setAuthError] = useState<string | null>(null);
   const [compositionRead, setCompositionRead] = useState(false);
   const [compositionWrite, setCompositionWrite] = useState(false);
+  /** Avoid catch-all redirect until /api/v1/ui-config finishes — deep links like /harness-profiles/new must not bounce to /. */
+  const [configReady, setConfigReady] = useState(false);
   const location = useLocation();
 
   useEffect(() => {
@@ -61,6 +63,10 @@ export default function App() {
       } catch (err) {
         if (!cancelled) {
           setAuthError(err instanceof Error ? err.message : String(err));
+        }
+      } finally {
+        if (!cancelled) {
+          setConfigReady(true);
         }
       }
     })();
@@ -276,7 +282,11 @@ export default function App() {
                     </>
                   ) : null}
                   <Route path="/cards/*" element={<Navigate to="/profiles" replace />} />
-                  <Route path="*" element={<Navigate to="/" replace />} />
+                  {!configReady ? (
+                    <Route path="*" element={<div className="empty">Loading console…</div>} />
+                  ) : (
+                    <Route path="*" element={<Navigate to="/" replace />} />
+                  )}
                 </Routes>
               </main>
             </div>

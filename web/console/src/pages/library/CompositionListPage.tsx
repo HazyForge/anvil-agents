@@ -2,13 +2,11 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { APIError } from "../../api/client";
 import { listComposition } from "../../api/composition";
-import {
-  compositionKindByRoute,
-  type CompositionDocument,
-} from "../../api/types.composition";
-import { CompositionAvatar } from "../../components/IconPicker";
-import { getIconUrl, getScreenshotUrl, resolveIconSrc } from "../../utils/icons";
-import { formatTime } from "../../utils/format";
+import { compositionKindByRoute } from "../../api/types.composition";
+import { CompositionResourceCard } from "../../components/CompositionResourceCard";
+import { CRD_AS_CARD_HELP, CRD_AS_CARD_MANTRA } from "../../design/mantra";
+import { compositionCardSummary } from "../../utils/compositionSummary";
+import type { CompositionDocument } from "../../api/types.composition";
 
 interface Props {
   token: string;
@@ -55,9 +53,11 @@ export function CompositionListPage({ token, namespace: activeNamespace, writeEn
     }
     return items.filter((item) => {
       const description = String(item.spec?.description ?? "").toLowerCase();
+      const summary = compositionCardSummary(item).toLowerCase();
       return (
         item.metadata.name.toLowerCase().includes(q) ||
         description.includes(q) ||
+        summary.includes(q) ||
         item.management.managedBy?.toLowerCase().includes(q) ||
         item.management.reason.toLowerCase().includes(q)
       );
@@ -93,7 +93,7 @@ export function CompositionListPage({ token, namespace: activeNamespace, writeEn
           <p className="page-sub">
             Namespace <span className="mono">{namespace}</span>
             {" · "}
-            icons via <span className="mono">ui.anvil.hazyforge.io/icon</span>
+            {kind.kind} CRDs as cards
           </p>
         </div>
         <div className="chip-row">
@@ -111,16 +111,16 @@ export function CompositionListPage({ token, namespace: activeNamespace, writeEn
         </div>
       </div>
 
-      {kind.route === "harness-profiles" ? (
-        <div className="banner banner-info">
-          <strong>Harness profiles</strong> are the runtime machine for an AgentRun: which backend
-          CLI runs (Codex, OpenCode, Grok Build, …), container image, ServiceAccount, credential
-          Secrets, durable data volumes, CPU/memory, and timeout. They do{" "}
-          <em>not</em> define the agent&apos;s role — skills, tools, and intent live on{" "}
-          <Link to="/profiles">Run profiles</Link>. Create uses a guided form (backend cards +
-          fields), not raw JSON.
-        </div>
-      ) : null}
+      <div className="banner banner-info">
+        <strong>{CRD_AS_CARD_MANTRA}</strong> {CRD_AS_CARD_HELP}
+        {kind.route === "harness-profiles" ? (
+          <>
+            {" "}
+            Harness profiles are the <em>runtime machine</em> (backend, SA, secrets, volumes) —
+            role/skills stay on <Link to="/profiles">run profiles</Link>.
+          </>
+        ) : null}
+      </div>
 
       <div className="filters-bar">
         <label className="field" style={{ minWidth: "16rem", flex: 1 }}>
@@ -129,7 +129,7 @@ export function CompositionListPage({ token, namespace: activeNamespace, writeEn
             className="input"
             value={query}
             onChange={(event) => setQuery(event.target.value)}
-            placeholder="name, description, managed-by"
+            placeholder="name, description, summary, managed-by"
           />
         </label>
       </div>
@@ -145,76 +145,21 @@ export function CompositionListPage({ token, namespace: activeNamespace, writeEn
 
       {!loading && !error && filtered.length > 0 ? (
         <div className="card-grid card-grid-library">
-          {filtered.map((item) => {
-            const description = String(item.spec?.description ?? "").trim();
-            const icon = getIconUrl(item.metadata.annotations);
-            const screenshot = resolveIconSrc(getScreenshotUrl(item.metadata.annotations));
-            const open = () =>
-              navigate(
-                `/ns/${encodeURIComponent(namespace)}/${kind.route}/${encodeURIComponent(item.metadata.name)}`,
-              );
-            return (
-              <article
-                key={item.metadata.uid || item.metadata.name}
-                className="agent-card agent-card-library"
-                role="button"
-                tabIndex={0}
-                onClick={open}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter" || event.key === " ") {
-                    event.preventDefault();
-                    open();
-                  }
-                }}
-              >
-                {screenshot ? (
-                  <div className="agent-card-banner">
-                    <img src={screenshot} alt="" className="agent-card-banner-img" />
-                  </div>
-                ) : null}
-                <header className="agent-card-header agent-card-header-with-avatar">
-                  <CompositionAvatar icon={icon} name={item.metadata.name} size="md" />
-                  <div className="agent-card-heading">
-                    <h2 className="agent-card-title mono">{item.metadata.name}</h2>
-                    <ManagementChip doc={item} />
-                  </div>
-                </header>
-                <p className="agent-card-desc">{description || "No description."}</p>
-                <div className="agent-card-meta">
-                  gen {item.metadata.generation ?? "—"} · {formatTime(item.metadata.creationTimestamp)}
-                </div>
-                <footer className="agent-card-actions">
-                  <Link
-                    className="btn btn-primary"
-                    to={`/ns/${encodeURIComponent(namespace)}/${kind.route}/${encodeURIComponent(item.metadata.name)}`}
-                    onClick={(event) => event.stopPropagation()}
-                  >
-                    Open
-                  </Link>
-                </footer>
-              </article>
-            );
-          })}
+          {filtered.map((item) => (
+            <CompositionResourceCard
+              key={item.metadata.uid || item.metadata.name}
+              doc={item}
+              kindRoute={kind.route}
+              namespace={namespace}
+              onOpen={() =>
+                navigate(
+                  `/ns/${encodeURIComponent(namespace)}/${kind.route}/${encodeURIComponent(item.metadata.name)}`,
+                )
+              }
+            />
+          ))}
         </div>
       ) : null}
     </div>
-  );
-}
-
-function ManagementChip({ doc }: { doc: CompositionDocument }) {
-  if (doc.management.writable) {
-    return <span className="chip chip-ok">console</span>;
-  }
-  if (doc.management.reason === "gitops_protected") {
-    return (
-      <span className="chip chip-lock" title="GitOps source of truth">
-        gitops · {doc.management.managedBy || "protected"}
-      </span>
-    );
-  }
-  return (
-    <span className="chip chip-mute" title="Not console-managed">
-      locked · {doc.management.managedBy || "unmanaged"}
-    </span>
   );
 }

@@ -3,45 +3,14 @@ import { Link, useNavigate } from "react-router-dom";
 import { APIError } from "../../api/client";
 import { listComposition } from "../../api/composition";
 import type { CompositionDocument } from "../../api/types.composition";
-import { CompositionAvatar } from "../../components/IconPicker";
-import { getIconUrl, getScreenshotUrl, resolveIconSrc } from "../../utils/icons";
-import { formatTime } from "../../utils/format";
+import { CompositionResourceCard } from "../../components/CompositionResourceCard";
+import { CRD_AS_CARD_HELP, CRD_AS_CARD_MANTRA } from "../../design/mantra";
+import { compositionCardSummary } from "../../utils/compositionSummary";
 
 interface Props {
   token: string;
   namespace: string;
   writeEnabled: boolean;
-}
-
-function refNames(spec: Record<string, unknown>, key: "skillSets" | "toolSets"): string[] {
-  const block = spec[key];
-  if (typeof block !== "object" || !block) {
-    return [];
-  }
-  return ((block as { refs?: { name?: string }[] }).refs ?? [])
-    .map((ref) => String(ref.name ?? "").trim())
-    .filter(Boolean);
-}
-
-function profileSummary(doc: CompositionDocument): string {
-  const spec = doc.spec ?? {};
-  const harness =
-    typeof spec.harnessProfileRef === "object" && spec.harnessProfileRef
-      ? String((spec.harnessProfileRef as { name?: string }).name ?? "")
-      : "";
-  const skillSets = refNames(spec, "skillSets");
-  const toolSets = refNames(spec, "toolSets");
-  const intent =
-    typeof spec.harness === "object" && spec.harness
-      ? String((spec.harness as { intent?: string }).intent ?? "")
-      : "";
-  const bits = [
-    harness ? `harness:${harness}` : null,
-    skillSets.length ? `skills:${skillSets.join(",")}` : null,
-    toolSets.length ? `tools:${toolSets.join(",")}` : null,
-    intent ? `intent:${intent}` : null,
-  ].filter(Boolean);
-  return bits.join(" · ") || "profile";
 }
 
 export function ProfileCardsPage({ token, namespace, writeEnabled }: Props) {
@@ -85,7 +54,7 @@ export function ProfileCardsPage({ token, namespace, writeEnabled }: Props) {
       return (
         doc.metadata.name.toLowerCase().includes(q) ||
         description.includes(q) ||
-        profileSummary(doc).toLowerCase().includes(q) ||
+        compositionCardSummary(doc).toLowerCase().includes(q) ||
         (doc.management.managedBy ?? "").toLowerCase().includes(q)
       );
     });
@@ -105,8 +74,7 @@ export function ProfileCardsPage({ token, namespace, writeEnabled }: Props) {
         <div>
           <h1 className="page-title">Profiles</h1>
           <p className="page-sub">
-            AgentRunProfiles compose harness, skill sets, tool sets, and policy for namespace{" "}
-            <span className="mono">{namespace}</span>
+            AgentRunProfile CRDs for namespace <span className="mono">{namespace}</span>
           </p>
         </div>
         <div className="chip-row">
@@ -125,11 +93,9 @@ export function ProfileCardsPage({ token, namespace, writeEnabled }: Props) {
       </div>
 
       <div className="banner banner-info">
-        Assign robot avatars (or any image URL) when editing a profile. Presentation is stored in
-        annotations{" "}
-        <span className="mono">ui.anvil.hazyforge.io/icon</span> and{" "}
-        <span className="mono">ui.anvil.hazyforge.io/screenshot</span>. GitOps-owned profiles stay
-        read-only here.
+        <strong>{CRD_AS_CARD_MANTRA}</strong> {CRD_AS_CARD_HELP} Assign avatars via{" "}
+        <span className="mono">ui.anvil.hazyforge.io/icon</span>. GitOps-owned profiles stay
+        read-only.
       </div>
 
       <div className="filters-bar">
@@ -155,80 +121,28 @@ export function ProfileCardsPage({ token, namespace, writeEnabled }: Props) {
 
       {!loading && filtered.length > 0 ? (
         <div className="card-grid card-grid-profiles">
-          {filtered.map((doc) => {
-            const description = String(doc.spec?.description ?? "").trim();
-            const icon = getIconUrl(doc.metadata.annotations);
-            const screenshot = resolveIconSrc(getScreenshotUrl(doc.metadata.annotations));
-            const open = () =>
-              navigate(
-                `/ns/${encodeURIComponent(namespace)}/profiles/${encodeURIComponent(doc.metadata.name)}`,
-              );
-            return (
-              <article
-                key={doc.metadata.uid || doc.metadata.name}
-                className="agent-card agent-card-lg"
-                role="button"
-                tabIndex={0}
-                onClick={open}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter" || event.key === " ") {
-                    event.preventDefault();
-                    open();
-                  }
-                }}
-              >
-                {screenshot ? (
-                  <div className="agent-card-banner">
-                    <img src={screenshot} alt="" className="agent-card-banner-img" />
-                  </div>
-                ) : null}
-                <header className="agent-card-header agent-card-header-with-avatar">
-                  <CompositionAvatar icon={icon} name={doc.metadata.name} size="lg" />
-                  <div className="agent-card-heading">
-                    <h2 className="agent-card-title mono">{doc.metadata.name}</h2>
-                    <div className="chip-row">
-                      {doc.management.writable ? (
-                        <span className="chip chip-ok">console</span>
-                      ) : doc.management.reason === "gitops_protected" ? (
-                        <span className="chip chip-lock">
-                          gitops · {doc.management.managedBy || "protected"}
-                        </span>
-                      ) : (
-                        <span className="chip chip-mute">locked</span>
-                      )}
-                    </div>
-                  </div>
-                </header>
-                <p className="agent-card-desc">{description || "No description."}</p>
-                <div className="agent-card-meta mono">{profileSummary(doc)}</div>
-                <div className="agent-card-meta">
-                  gen {doc.metadata.generation ?? "—"} · {formatTime(doc.metadata.creationTimestamp)}
-                </div>
-                <footer className="agent-card-actions">
-                  <Link
-                    className="btn btn-primary"
-                    to={`/ns/${encodeURIComponent(namespace)}/profiles/${encodeURIComponent(doc.metadata.name)}`}
-                    onClick={(event) => event.stopPropagation()}
-                  >
-                    Open
-                  </Link>
-                  <Link
-                    className="btn"
-                    to={`/ns/${encodeURIComponent(namespace)}/profiles/${encodeURIComponent(doc.metadata.name)}`}
-                    onClick={(event) => event.stopPropagation()}
-                  >
-                    {doc.management.writable && writeEnabled ? "Edit" : "View"}
-                  </Link>
-                </footer>
-              </article>
-            );
-          })}
+          {filtered.map((doc) => (
+            <CompositionResourceCard
+              key={doc.metadata.uid || doc.metadata.name}
+              doc={doc}
+              kindRoute="profiles"
+              namespace={namespace}
+              size="lg"
+              primaryLabel="Open"
+              secondaryLabel={doc.management.writable && writeEnabled ? "Edit" : "View"}
+              onOpen={() =>
+                navigate(
+                  `/ns/${encodeURIComponent(namespace)}/profiles/${encodeURIComponent(doc.metadata.name)}`,
+                )
+              }
+            />
+          ))}
         </div>
       ) : null}
 
       <p className="page-sub" style={{ marginTop: "1rem" }}>
-        Other composition kinds (harness, skills, tools, volumes) live under{" "}
-        <Link to="/library">Library</Link> — they support the same icon / screenshot annotations.
+        Supporting CRDs (harness, skills, tools, volumes) are also cards under{" "}
+        <Link to="/library">Library</Link>.
       </p>
     </div>
   );

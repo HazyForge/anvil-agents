@@ -15,6 +15,7 @@ interface Props {
   emptyHint?: string;
 }
 
+/** AgentRun is a CRD — browse as cards, not a dense spreadsheet. */
 export function RunBoard({ runs, namespace, emptyHint }: Props) {
   if (runs.length === 0) {
     return (
@@ -25,74 +26,67 @@ export function RunBoard({ runs, namespace, emptyHint }: Props) {
   }
 
   return (
-    <div className="table-wrap">
-      <table className="runs">
-        <thead>
-          <tr>
-            <th>Phase</th>
-            <th>Name</th>
-            <th>Intent</th>
-            <th>Backend</th>
-            <th>App / Target</th>
-            <th>Source</th>
-            <th>Created</th>
-            <th>Started</th>
-            <th>Completed</th>
-            <th>Duration</th>
-            <th>PR</th>
-            <th>Report</th>
-            <th>Error</th>
-          </tr>
-        </thead>
-        <tbody>
-          {runs.map((run) => {
-            const report = latestReportSummary(run);
-            const error = shortError(run.error);
-            return (
-              <tr key={`${run.namespace}/${run.name}/${run.uid}`}>
-                <td>
-                  <PhaseBadge phase={run.phase} />
-                </td>
-                <td className="mono">
-                  <Link to={`/ns/${encodeURIComponent(run.namespace)}/runs/${encodeURIComponent(run.name)}`}>
-                    {run.name}
-                  </Link>
-                </td>
-                <td className="intent-cell" title={run.intent}>
-                  {run.intent || <span className="muted">—</span>}
-                </td>
-                <td>{run.backend || "—"}</td>
-                <td>
-                  <div>{run.application || "—"}</div>
-                  <div className="muted">{run.applicationTarget || "—"}</div>
-                </td>
-                <td className="mono" title={sourceLabel(run)}>
-                  {sourceLabel(run)}
-                </td>
-                <td className="mono muted">{formatTime(run.createdAt)}</td>
-                <td className="mono muted">{formatTime(run.startedAt)}</td>
-                <td className="mono muted">{formatTime(run.completedAt)}</td>
-                <td className="mono">{formatDuration(run)}</td>
-                <td>
-                  {run.pullRequestURL ? (
-                    <a href={run.pullRequestURL} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}>
-                      PR
-                    </a>
-                  ) : (
-                    <span className="muted">—</span>
-                  )}
-                </td>
-                <td className="intent-cell" title={report}>
-                  {report || <span className="muted">—</span>}
-                </td>
-                <td className="error-cell" title={run.error}>
-                  {error || <span className="muted">—</span>}
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
+    <div className="card-grid card-grid-runs">
+      {runs.map((run) => {
+        const report = latestReportSummary(run);
+        const error = shortError(run.error);
+        const href = `/ns/${encodeURIComponent(run.namespace)}/runs/${encodeURIComponent(run.name)}`;
+        return (
+          <article key={`${run.namespace}/${run.name}/${run.uid}`} className="agent-card run-card">
+            <header className="agent-card-header">
+              <div className="chip-row">
+                <PhaseBadge phase={run.phase} />
+                <span className="chip chip-mute">AgentRun</span>
+                {run.backend ? <span className="chip mono">{run.backend}</span> : null}
+              </div>
+              <h2 className="agent-card-title mono">
+                <Link to={href}>{run.name}</Link>
+              </h2>
+            </header>
+            <p className="agent-card-desc">
+              {report || error || run.intent || "No report summary yet."}
+            </p>
+            <div className="agent-card-meta mono">
+              {[
+                run.intent || null,
+                run.application || null,
+                run.applicationTarget || null,
+                sourceLabel(run) || null,
+              ]
+                .filter(Boolean)
+                .join(" · ")}
+            </div>
+            <div className="agent-card-meta">
+              created {formatTime(run.createdAt)}
+              {run.startedAt ? ` · started ${formatTime(run.startedAt)}` : ""}
+              {run.completedAt ? ` · done ${formatTime(run.completedAt)}` : ""}
+              {" · "}
+              {formatDuration(run)}
+            </div>
+            {error ? (
+              <div className="run-card-error" title={run.error}>
+                {error}
+              </div>
+            ) : null}
+            <footer className="agent-card-actions">
+              <Link className="btn btn-primary" to={href}>
+                Open
+              </Link>
+              {run.pullRequestURL ? (
+                <a
+                  className="btn"
+                  href={run.pullRequestURL}
+                  target="_blank"
+                  rel="noreferrer"
+                  onClick={(event) => event.stopPropagation()}
+                >
+                  PR
+                </a>
+              ) : null}
+            </footer>
+          </article>
+        );
+      })}
     </div>
   );
 }
