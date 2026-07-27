@@ -76,7 +76,8 @@ export const COMPOSITION_KINDS: CompositionKindInfo[] = [
     title: "Harness profiles",
     plural: "harness profiles",
     route: "harness-profiles",
-    description: "Backend image, identity, credentials refs, and placement",
+    description:
+      "Runtime machine for AgentRuns: pick backend (Codex/OpenCode/Grok/…), identity, secrets, volumes, resources",
     danger: true,
   },
   {

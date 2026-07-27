@@ -5,18 +5,27 @@ import {
   createComposition,
   deleteComposition,
   getComposition,
+  listComposition,
   updateComposition,
 } from "../../api/composition";
 import {
   compositionKindByRoute,
   type CompositionDocument,
 } from "../../api/types.composition";
+import { HarnessProfileForm } from "../../components/HarnessProfileForm";
 import { IconPicker } from "../../components/IconPicker";
 import {
   getIconUrl,
   getScreenshotUrl,
   mergePresentationAnnotations,
 } from "../../utils/icons";
+import {
+  buildHarnessSpec,
+  emptyHarnessForm,
+  formFromHarnessSpec,
+  validateHarnessForm,
+  type HarnessForm,
+} from "./harnessForm";
 
 interface Props {
   token: string;
@@ -40,16 +49,40 @@ const emptySpecByKind: Record<string, Record<string, unknown>> = {
   AgentDataVolume: { agentName: "", notes: "" },
 };
 
+const KIND_INTRO: Record<string, { title: string; body: string }> = {
+  AgentSkillSet: {
+    title: "What is an AgentSkillSet?",
+    body: "Backend-neutral instruction packs and personas. Skills teach agents how to think and when to use tools — they should not carry images, Secrets, or ServiceAccounts.",
+  },
+  AgentToolSet: {
+    title: "What is an AgentToolSet?",
+    body: "Setup scripts and verify contracts for tools the agent can run. This is code-execution authority; keep setup scripts pinned and credentials in harness secret refs.",
+  },
+  VolumeProfile: {
+    title: "What is a VolumeProfile?",
+    body: "A reusable durable storage shape (sizes, mount paths, purposes) that AgentDataVolumes can instantiate.",
+  },
+  AgentDataVolume: {
+    title: "What is an AgentDataVolume?",
+    body: "A concrete PVC-backed agent home (sessions, OAuth, caches). Attach it from a harness profile's data volume refs.",
+  },
+};
+
 export function CompositionEditorPage({ token, namespace: activeNamespace, writeEnabled }: Props) {
   const { kind: kindRoute = "", name: nameParam = "", namespace: routeNamespace = "" } = useParams();
   const namespace = routeNamespace || activeNamespace;
   const navigate = useNavigate();
   const kind = compositionKindByRoute(kindRoute);
   const isCreate = nameParam === "new" || !nameParam;
+  // Match both kind metadata and the URL segment so a routing glitch cannot fall back to JSON-only.
+  const isHarness =
+    kind?.kind === "AgentHarnessProfile" || kindRoute === "harness-profiles";
 
   const [doc, setDoc] = useState<CompositionDocument | null>(null);
   const [name, setName] = useState("");
   const [specText, setSpecText] = useState("{}");
+  const [harnessForm, setHarnessForm] = useState<HarnessForm>(emptyHarnessForm);
+  const [showAdvancedJson, setShowAdvancedJson] = useState(false);
   const [icon, setIcon] = useState("");
   const [screenshot, setScreenshot] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -57,11 +90,27 @@ export function CompositionEditorPage({ token, namespace: activeNamespace, write
   const [loading, setLoading] = useState(!isCreate);
   const [saving, setSaving] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState("");
+  const [dataVolumeNames, setDataVolumeNames] = useState<string[]>([]);
+
+  useEffect(() => {
+    if (!kind || !namespace || !isHarness || !token) {
+      return;
+    }
+    const controller = new AbortController();
+    void listComposition(token, namespace, "agent-data-volumes", 200, controller.signal)
+      .then((docs) => setDataVolumeNames(docs.map((item) => item.metadata.name)))
+      .catch(() => setDataVolumeNames([]));
+    return () => controller.abort();
+  }, [token, namespace, kind, isHarness]);
 
   useEffect(() => {
     if (!kind || !namespace || isCreate) {
       if (kind) {
         setSpecText(JSON.stringify(emptySpecByKind[kind.kind] ?? {}, null, 2));
+        if (kind.kind === "AgentHarnessProfile") {
+          setHarnessForm(emptyHarnessForm());
+          setShowAdvancedJson(false);
+        }
       }
       setIcon("");
       setScreenshot("");
@@ -75,7 +124,12 @@ export function CompositionEditorPage({ token, namespace: activeNamespace, write
       .then((loaded) => {
         setDoc(loaded);
         setName(loaded.metadata.name);
-        setSpecText(JSON.stringify(loaded.spec ?? {}, null, 2));
+        const spec = loaded.spec ?? {};
+        setSpecText(JSON.stringify(spec, null, 2));
+        if (kind.kind === "AgentHarnessProfile") {
+          setHarnessForm(formFromHarnessSpec(spec, loaded.metadata.name));
+          setShowAdvancedJson(false);
+        }
         setIcon(getIconUrl(loaded.metadata.annotations));
         setScreenshot(getScreenshotUrl(loaded.metadata.annotations));
         setLoading(false);
@@ -100,6 +154,17 @@ export function CompositionEditorPage({ token, namespace: activeNamespace, write
     return Boolean(doc?.management.writable);
   }, [writeEnabled, isCreate, doc]);
 
+  const harnessPreview = useMemo(() => {
+    if (!isHarness) {
+      return "";
+    }
+    try {
+      return JSON.stringify(buildHarnessSpec(harnessForm), null, 2);
+    } catch {
+      return "{}";
+    }
+  }, [isHarness, harnessForm]);
+
   if (!kind) {
     return (
       <div className="panel">
@@ -108,26 +173,47 @@ export function CompositionEditorPage({ token, namespace: activeNamespace, write
     );
   }
 
+  function updateHarness<K extends keyof HarnessForm>(key: K, value: HarnessForm[K]) {
+    setHarnessForm((prev) => ({ ...prev, [key]: value }));
+  }
+
+  function resolveSpec(): { ok: true; spec: Record<string, unknown> } | { ok: false; error: string } {
+    if (isHarness && !showAdvancedJson) {
+      const validation = validateHarnessForm(harnessForm, isCreate);
+      if (validation) {
+        return { ok: false, error: validation };
+      }
+      return { ok: true, spec: buildHarnessSpec(harnessForm) };
+    }
+    try {
+      return { ok: true, spec: JSON.parse(specText) as Record<string, unknown> };
+    } catch (err) {
+      return {
+        ok: false,
+        error: `Invalid JSON spec: ${err instanceof Error ? err.message : String(err)}`,
+      };
+    }
+  }
+
   async function onSave() {
     if (!kind) {
       return;
     }
     setError(null);
     setInfo(null);
-    let spec: Record<string, unknown>;
-    try {
-      spec = JSON.parse(specText) as Record<string, unknown>;
-    } catch (err) {
-      setError(`Invalid JSON spec: ${err instanceof Error ? err.message : String(err)}`);
+    const resolved = resolveSpec();
+    if (!resolved.ok) {
+      setError(resolved.error);
       return;
     }
+    const { spec } = resolved;
     const annotations = mergePresentationAnnotations(
       doc?.metadata.annotations,
       icon,
       screenshot,
     );
     if (isCreate) {
-      const createName = name.trim();
+      const createName = (isHarness ? harnessForm.name : name).trim();
       if (!createName) {
         setError("Name is required");
         return;
@@ -166,6 +252,9 @@ export function CompositionEditorPage({ token, namespace: activeNamespace, write
       });
       setDoc(updated);
       setSpecText(JSON.stringify(updated.spec ?? {}, null, 2));
+      if (isHarness) {
+        setHarnessForm(formFromHarnessSpec(updated.spec ?? {}, updated.metadata.name));
+      }
       setIcon(getIconUrl(updated.metadata.annotations));
       setScreenshot(getScreenshotUrl(updated.metadata.annotations));
       setInfo("Saved");
@@ -192,6 +281,8 @@ export function CompositionEditorPage({ token, namespace: activeNamespace, write
     }
   }
 
+  const intro = KIND_INTRO[kind.kind];
+
   return (
     <div className="library-editor">
       <div className="page-header">
@@ -203,9 +294,16 @@ export function CompositionEditorPage({ token, namespace: activeNamespace, write
             <span>/</span>
             <span>{isCreate ? "new" : nameParam}</span>
           </div>
-          <h1 className="page-title">{isCreate ? `New ${kind.kind}` : nameParam}</h1>
+          <h1 className="page-title">
+            {isCreate
+              ? isHarness
+                ? "New harness profile"
+                : `New ${kind.kind}`
+              : nameParam}
+          </h1>
           <p className="page-sub">
             Namespace <span className="mono">{namespace}</span>
+            {isHarness ? " · runtime machine for AgentRuns" : null}
           </p>
         </div>
       </div>
@@ -234,47 +332,136 @@ export function CompositionEditorPage({ token, namespace: activeNamespace, write
       {!loading ? (
         <div className="panel">
           <div className="panel-header">
-            <h2 className="panel-title">{writable ? "Edit" : "View"}</h2>
+            <h2 className="panel-title">
+              {isHarness
+                ? writable
+                  ? isCreate
+                    ? "Compose harness"
+                    : "Edit harness"
+                  : "View harness"
+                : writable
+                  ? "Edit"
+                  : "View"}
+            </h2>
             {!isCreate && doc ? (
               <span className="chip mono">rv {doc.metadata.resourceVersion}</span>
             ) : null}
           </div>
           <div className="panel-body editor-form">
-            <label className="field">
-              <span className="label">Name</span>
-              <input
-                className="input mono"
-                value={isCreate ? name : nameParam}
-                disabled={!isCreate}
-                onChange={(event) => setName(event.target.value)}
-                placeholder="dns-1123 name"
-              />
-            </label>
+            {intro && !isHarness ? (
+              <section className="explain-panel">
+                <h3 className="explain-title">{intro.title}</h3>
+                <p className="explain-body">{intro.body}</p>
+              </section>
+            ) : null}
 
-            <IconPicker
-              label={`${kind.title.replace(/\.$/, "")} icon`}
-              help="Same robot pack and custom URLs as profiles. Stored as ui.anvil.hazyforge.io/icon (+ optional screenshot)."
-              icon={icon}
-              screenshot={screenshot}
-              disabled={!writable}
-              onIconChange={setIcon}
-              onScreenshotChange={setScreenshot}
-            />
+            {isHarness ? (
+              <>
+                <HarnessProfileForm
+                  form={harnessForm}
+                  disabled={!writable}
+                  isCreate={isCreate}
+                  dataVolumeNames={dataVolumeNames}
+                  onChange={updateHarness}
+                />
+                <IconPicker
+                  label="Harness icon"
+                  help="Optional avatar for library cards and profile composition picker."
+                  icon={icon}
+                  screenshot={screenshot}
+                  disabled={!writable}
+                  onIconChange={setIcon}
+                  onScreenshotChange={setScreenshot}
+                />
+                <div className="advanced-json">
+                  <button
+                    type="button"
+                    className="btn btn-ghost"
+                    onClick={() => {
+                      if (!showAdvancedJson) {
+                        setSpecText(harnessPreview || "{}");
+                      } else {
+                        try {
+                          const parsed = JSON.parse(specText) as Record<string, unknown>;
+                          setHarnessForm(
+                            formFromHarnessSpec(parsed, isCreate ? harnessForm.name : nameParam),
+                          );
+                        } catch {
+                          // keep form as-is if JSON invalid
+                        }
+                      }
+                      setShowAdvancedJson((prev) => !prev);
+                    }}
+                  >
+                    {showAdvancedJson ? "Back to guided form" : "Advanced: edit raw JSON"}
+                  </button>
+                  {showAdvancedJson ? (
+                    <label className="field" style={{ marginTop: "0.5rem" }}>
+                      <span className="label">Spec (JSON)</span>
+                      <textarea
+                        className="textarea textarea-spec"
+                        value={specText}
+                        disabled={!writable}
+                        onChange={(event) => setSpecText(event.target.value)}
+                        spellCheck={false}
+                      />
+                    </label>
+                  ) : (
+                    <details className="spec-preview">
+                      <summary className="text-mute">Preview generated spec</summary>
+                      <pre className="spec-preview-pre mono">{harnessPreview}</pre>
+                    </details>
+                  )}
+                </div>
+              </>
+            ) : (
+              <>
+                <label className="field">
+                  <span className="label">Name</span>
+                  <input
+                    className="input mono"
+                    value={isCreate ? name : nameParam}
+                    disabled={!isCreate}
+                    onChange={(event) => setName(event.target.value)}
+                    placeholder="dns-1123 name"
+                  />
+                </label>
 
-            <label className="field">
-              <span className="label">Spec (JSON)</span>
-              <textarea
-                className="textarea textarea-spec"
-                value={specText}
-                disabled={!writable}
-                onChange={(event) => setSpecText(event.target.value)}
-                spellCheck={false}
-              />
-            </label>
+                <IconPicker
+                  label={`${kind.title.replace(/\.$/, "")} icon`}
+                  help="Same robot pack and custom URLs as profiles. Stored as ui.anvil.hazyforge.io/icon (+ optional screenshot)."
+                  icon={icon}
+                  screenshot={screenshot}
+                  disabled={!writable}
+                  onIconChange={setIcon}
+                  onScreenshotChange={setScreenshot}
+                />
+
+                <label className="field">
+                  <span className="label">Spec (JSON)</span>
+                  <p className="field-help">
+                    Guided forms for skill sets, tool sets, and volumes are next. Until then, edit
+                    the CRD shape as JSON.
+                  </p>
+                  <textarea
+                    className="textarea textarea-spec"
+                    value={specText}
+                    disabled={!writable}
+                    onChange={(event) => setSpecText(event.target.value)}
+                    spellCheck={false}
+                  />
+                </label>
+              </>
+            )}
 
             <div className="editor-actions">
               {writable ? (
-                <button type="button" className="btn btn-primary" disabled={saving} onClick={() => void onSave()}>
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  disabled={saving}
+                  onClick={() => void onSave()}
+                >
                   {saving ? "Saving…" : isCreate ? "Create" : "Save"}
                 </button>
               ) : (

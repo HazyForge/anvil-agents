@@ -111,6 +111,17 @@ export function CompositionListPage({ token, namespace: activeNamespace, writeEn
         </div>
       </div>
 
+      {kind.route === "harness-profiles" ? (
+        <div className="banner banner-info">
+          <strong>Harness profiles</strong> are the runtime machine for an AgentRun: which backend
+          CLI runs (Codex, OpenCode, Grok Build, …), container image, ServiceAccount, credential
+          Secrets, durable data volumes, CPU/memory, and timeout. They do{" "}
+          <em>not</em> define the agent&apos;s role — skills, tools, and intent live on{" "}
+          <Link to="/profiles">Run profiles</Link>. Create uses a guided form (backend cards +
+          fields), not raw JSON.
+        </div>
+      ) : null}
+
       <div className="filters-bar">
         <label className="field" style={{ minWidth: "16rem", flex: 1 }}>
           <span className="label">Search</span>
