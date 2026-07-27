@@ -12,14 +12,25 @@ import {
   compositionKindByRoute,
   type CompositionDocument,
 } from "../../api/types.composition";
+import { DataVolumeForm } from "../../components/DataVolumeForm";
 import { HarnessProfileForm } from "../../components/HarnessProfileForm";
 import { IconPicker } from "../../components/IconPicker";
 import { RelatedAuthSessionCards } from "../../components/RelatedAuthSessionCards";
+import { SkillSetForm } from "../../components/SkillSetForm";
+import { ToolSetForm } from "../../components/ToolSetForm";
+import { VolumeProfileForm } from "../../components/VolumeProfileForm";
 import {
   getIconUrl,
   getScreenshotUrl,
   mergePresentationAnnotations,
 } from "../../utils/icons";
+import {
+  buildDataVolumeSpec,
+  emptyDataVolumeForm,
+  formFromDataVolumeSpec,
+  validateDataVolumeForm,
+  type DataVolumeForm as DataVolumeFormModel,
+} from "./dataVolumeForm";
 import {
   buildHarnessSpec,
   emptyHarnessForm,
@@ -27,6 +38,27 @@ import {
   validateHarnessForm,
   type HarnessForm,
 } from "./harnessForm";
+import {
+  buildSkillSetSpec,
+  emptySkillSetForm,
+  formFromSkillSetSpec,
+  validateSkillSetForm,
+  type SkillSetForm as SkillSetFormModel,
+} from "./skillSetForm";
+import {
+  buildToolSetSpec,
+  emptyToolSetForm,
+  formFromToolSetSpec,
+  validateToolSetForm,
+  type ToolSetForm as ToolSetFormModel,
+} from "./toolSetForm";
+import {
+  buildVolumeProfileSpec,
+  emptyVolumeProfileForm,
+  formFromVolumeProfileSpec,
+  validateVolumeProfileForm,
+  type VolumeProfileForm as VolumeProfileFormModel,
+} from "./volumeProfileForm";
 
 interface Props {
   token: string;
@@ -34,39 +66,41 @@ interface Props {
   writeEnabled: boolean;
 }
 
-const emptySpecByKind: Record<string, Record<string, unknown>> = {
-  AgentSkillSet: { description: "", skills: [] },
-  AgentToolSet: { description: "", tools: [] },
-  AgentRunProfile: { description: "" },
-  AgentHarnessProfile: {
-    description: "",
-    backend: { kind: "codex" },
-    execution: {},
-  },
-  VolumeProfile: {
-    description: "",
-    volumes: [{ name: "home", purpose: "agent-home", mountPath: "/agent-home" }],
-  },
-  AgentDataVolume: { agentName: "", notes: "" },
-};
+type GuidedKind =
+  | "AgentHarnessProfile"
+  | "AgentDataVolume"
+  | "VolumeProfile"
+  | "AgentSkillSet"
+  | "AgentToolSet";
 
-const KIND_INTRO: Record<string, { title: string; body: string }> = {
-  AgentSkillSet: {
-    title: "What is an AgentSkillSet?",
-    body: "Backend-neutral instruction packs and personas. Skills teach agents how to think and when to use tools — they should not carry images, Secrets, or ServiceAccounts.",
-  },
-  AgentToolSet: {
-    title: "What is an AgentToolSet?",
-    body: "Setup scripts and verify contracts for tools the agent can run. This is code-execution authority; keep setup scripts pinned and credentials in harness secret refs.",
-  },
-  VolumeProfile: {
-    title: "What is a VolumeProfile?",
-    body: "A reusable durable storage shape (sizes, mount paths, purposes) that AgentDataVolumes can instantiate.",
-  },
-  AgentDataVolume: {
-    title: "What is an AgentDataVolume?",
-    body: "A concrete PVC-backed agent home (sessions, OAuth, caches). Attach it from a harness profile's data volume refs.",
-  },
+function guidedKindFrom(
+  kindName: string | undefined,
+  kindRoute: string,
+): GuidedKind | null {
+  if (kindName === "AgentHarnessProfile" || kindRoute === "harness-profiles") {
+    return "AgentHarnessProfile";
+  }
+  if (kindName === "AgentDataVolume" || kindRoute === "data-volumes") {
+    return "AgentDataVolume";
+  }
+  if (kindName === "VolumeProfile" || kindRoute === "volume-profiles") {
+    return "VolumeProfile";
+  }
+  if (kindName === "AgentSkillSet" || kindRoute === "skill-sets") {
+    return "AgentSkillSet";
+  }
+  if (kindName === "AgentToolSet" || kindRoute === "tool-sets") {
+    return "AgentToolSet";
+  }
+  return null;
+}
+
+const CREATE_TITLES: Record<GuidedKind, string> = {
+  AgentHarnessProfile: "New harness profile",
+  AgentDataVolume: "New data volume",
+  VolumeProfile: "New volume profile",
+  AgentSkillSet: "New skill set",
+  AgentToolSet: "New tool set",
 };
 
 export function CompositionEditorPage({ token, namespace: activeNamespace, writeEnabled }: Props) {
@@ -75,18 +109,25 @@ export function CompositionEditorPage({ token, namespace: activeNamespace, write
   const navigate = useNavigate();
   const kind = compositionKindByRoute(kindRoute);
   const isCreate = nameParam === "new" || !nameParam;
-  // Match both kind metadata and the URL segment so a routing glitch cannot fall back to JSON-only.
-  const isHarness =
-    kind?.kind === "AgentHarnessProfile" || kindRoute === "harness-profiles";
+  const guided = guidedKindFrom(kind?.kind, kindRoute);
+  const isHarness = guided === "AgentHarnessProfile";
+  const isDataVolume = guided === "AgentDataVolume";
+  const isVolumeProfile = guided === "VolumeProfile";
+  const isSkillSet = guided === "AgentSkillSet";
+  const isToolSet = guided === "AgentToolSet";
   const isAuthSession =
     kind?.kind === "AgentAuthSession" || kindRoute === "auth-sessions";
-  const isDataVolume =
-    kind?.kind === "AgentDataVolume" || kindRoute === "data-volumes";
+  const isGuided = guided !== null;
 
   const [doc, setDoc] = useState<CompositionDocument | null>(null);
   const [name, setName] = useState("");
   const [specText, setSpecText] = useState("{}");
   const [harnessForm, setHarnessForm] = useState<HarnessForm>(emptyHarnessForm);
+  const [dataVolumeForm, setDataVolumeForm] = useState<DataVolumeFormModel>(emptyDataVolumeForm);
+  const [volumeProfileForm, setVolumeProfileForm] =
+    useState<VolumeProfileFormModel>(emptyVolumeProfileForm);
+  const [skillSetForm, setSkillSetForm] = useState<SkillSetFormModel>(emptySkillSetForm);
+  const [toolSetForm, setToolSetForm] = useState<ToolSetFormModel>(emptyToolSetForm);
   const [showAdvancedJson, setShowAdvancedJson] = useState(false);
   const [icon, setIcon] = useState("");
   const [screenshot, setScreenshot] = useState("");
@@ -96,25 +137,52 @@ export function CompositionEditorPage({ token, namespace: activeNamespace, write
   const [saving, setSaving] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState("");
   const [dataVolumeNames, setDataVolumeNames] = useState<string[]>([]);
+  const [volumeProfileNames, setVolumeProfileNames] = useState<string[]>([]);
 
   useEffect(() => {
-    if (!kind || !namespace || !isHarness || !token) {
+    if (!kind || !namespace || !token) {
+      return;
+    }
+    if (!isHarness && !isDataVolume) {
       return;
     }
     const controller = new AbortController();
-    void listComposition(token, namespace, "agent-data-volumes", 200, controller.signal)
-      .then((docs) => setDataVolumeNames(docs.map((item) => item.metadata.name)))
-      .catch(() => setDataVolumeNames([]));
+    if (isHarness) {
+      void listComposition(token, namespace, "agent-data-volumes", 200, controller.signal)
+        .then((docs) => setDataVolumeNames(docs.map((item) => item.metadata.name)))
+        .catch(() => setDataVolumeNames([]));
+    }
+    if (isDataVolume) {
+      void listComposition(token, namespace, "volume-profiles", 200, controller.signal)
+        .then((docs) => setVolumeProfileNames(docs.map((item) => item.metadata.name)))
+        .catch(() => setVolumeProfileNames([]));
+    }
     return () => controller.abort();
-  }, [token, namespace, kind, isHarness]);
+  }, [token, namespace, kind, isHarness, isDataVolume]);
 
   useEffect(() => {
     if (!kind || !namespace || isCreate) {
       if (kind) {
-        setSpecText(JSON.stringify(emptySpecByKind[kind.kind] ?? {}, null, 2));
+        setShowAdvancedJson(false);
+        setName("");
+        setHarnessForm(emptyHarnessForm());
+        setDataVolumeForm(emptyDataVolumeForm());
+        setVolumeProfileForm(emptyVolumeProfileForm());
+        setSkillSetForm(emptySkillSetForm());
+        setToolSetForm(emptyToolSetForm());
+        // Seed advanced JSON from empty guided builders so toggle stays consistent.
         if (kind.kind === "AgentHarnessProfile") {
-          setHarnessForm(emptyHarnessForm());
-          setShowAdvancedJson(false);
+          setSpecText(JSON.stringify(buildHarnessSpec(emptyHarnessForm()), null, 2));
+        } else if (kind.kind === "AgentDataVolume") {
+          setSpecText(JSON.stringify(buildDataVolumeSpec(emptyDataVolumeForm()), null, 2));
+        } else if (kind.kind === "VolumeProfile") {
+          setSpecText(JSON.stringify(buildVolumeProfileSpec(emptyVolumeProfileForm()), null, 2));
+        } else if (kind.kind === "AgentSkillSet") {
+          setSpecText(JSON.stringify(buildSkillSetSpec(emptySkillSetForm()), null, 2));
+        } else if (kind.kind === "AgentToolSet") {
+          setSpecText(JSON.stringify(buildToolSetSpec(emptyToolSetForm()), null, 2));
+        } else {
+          setSpecText("{}");
         }
       }
       setIcon("");
@@ -131,9 +199,17 @@ export function CompositionEditorPage({ token, namespace: activeNamespace, write
         setName(loaded.metadata.name);
         const spec = loaded.spec ?? {};
         setSpecText(JSON.stringify(spec, null, 2));
+        setShowAdvancedJson(false);
         if (kind.kind === "AgentHarnessProfile") {
           setHarnessForm(formFromHarnessSpec(spec, loaded.metadata.name));
-          setShowAdvancedJson(false);
+        } else if (kind.kind === "AgentDataVolume") {
+          setDataVolumeForm(formFromDataVolumeSpec(spec, loaded.metadata.name));
+        } else if (kind.kind === "VolumeProfile") {
+          setVolumeProfileForm(formFromVolumeProfileSpec(spec, loaded.metadata.name));
+        } else if (kind.kind === "AgentSkillSet") {
+          setSkillSetForm(formFromSkillSetSpec(spec, loaded.metadata.name));
+        } else if (kind.kind === "AgentToolSet") {
+          setToolSetForm(formFromToolSetSpec(spec, loaded.metadata.name));
         }
         setIcon(getIconUrl(loaded.metadata.annotations));
         setScreenshot(getScreenshotUrl(loaded.metadata.annotations));
@@ -159,16 +235,37 @@ export function CompositionEditorPage({ token, namespace: activeNamespace, write
     return Boolean(doc?.management.writable);
   }, [writeEnabled, isCreate, doc]);
 
-  const harnessPreview = useMemo(() => {
-    if (!isHarness) {
+  const guidedPreview = useMemo(() => {
+    if (!guided || showAdvancedJson) {
       return "";
     }
     try {
-      return JSON.stringify(buildHarnessSpec(harnessForm), null, 2);
+      switch (guided) {
+        case "AgentHarnessProfile":
+          return JSON.stringify(buildHarnessSpec(harnessForm), null, 2);
+        case "AgentDataVolume":
+          return JSON.stringify(buildDataVolumeSpec(dataVolumeForm), null, 2);
+        case "VolumeProfile":
+          return JSON.stringify(buildVolumeProfileSpec(volumeProfileForm), null, 2);
+        case "AgentSkillSet":
+          return JSON.stringify(buildSkillSetSpec(skillSetForm), null, 2);
+        case "AgentToolSet":
+          return JSON.stringify(buildToolSetSpec(toolSetForm), null, 2);
+        default:
+          return "";
+      }
     } catch {
       return "{}";
     }
-  }, [isHarness, harnessForm]);
+  }, [
+    guided,
+    showAdvancedJson,
+    harnessForm,
+    dataVolumeForm,
+    volumeProfileForm,
+    skillSetForm,
+    toolSetForm,
+  ]);
 
   if (!kind) {
     return (
@@ -182,13 +279,94 @@ export function CompositionEditorPage({ token, namespace: activeNamespace, write
     setHarnessForm((prev) => ({ ...prev, [key]: value }));
   }
 
+  function updateDataVolume<K extends keyof DataVolumeFormModel>(
+    key: K,
+    value: DataVolumeFormModel[K],
+  ) {
+    setDataVolumeForm((prev) => ({ ...prev, [key]: value }));
+  }
+
+  function updateVolumeProfile<K extends keyof VolumeProfileFormModel>(
+    key: K,
+    value: VolumeProfileFormModel[K],
+  ) {
+    setVolumeProfileForm((prev) => ({ ...prev, [key]: value }));
+  }
+
+  function updateSkillSet<K extends keyof SkillSetFormModel>(
+    key: K,
+    value: SkillSetFormModel[K],
+  ) {
+    setSkillSetForm((prev) => ({ ...prev, [key]: value }));
+  }
+
+  function updateToolSet<K extends keyof ToolSetFormModel>(
+    key: K,
+    value: ToolSetFormModel[K],
+  ) {
+    setToolSetForm((prev) => ({ ...prev, [key]: value }));
+  }
+
+  function createNameFromForms(): string {
+    if (isHarness) {
+      return harnessForm.name.trim();
+    }
+    if (isDataVolume) {
+      return dataVolumeForm.name.trim();
+    }
+    if (isVolumeProfile) {
+      return volumeProfileForm.name.trim();
+    }
+    if (isSkillSet) {
+      return skillSetForm.name.trim();
+    }
+    if (isToolSet) {
+      return toolSetForm.name.trim();
+    }
+    return name.trim();
+  }
+
   function resolveSpec(): { ok: true; spec: Record<string, unknown> } | { ok: false; error: string } {
-    if (isHarness && !showAdvancedJson) {
-      const validation = validateHarnessForm(harnessForm, isCreate);
-      if (validation) {
-        return { ok: false, error: validation };
+    if (isGuided && !showAdvancedJson) {
+      switch (guided) {
+        case "AgentHarnessProfile": {
+          const validation = validateHarnessForm(harnessForm, isCreate);
+          if (validation) {
+            return { ok: false, error: validation };
+          }
+          return { ok: true, spec: buildHarnessSpec(harnessForm) };
+        }
+        case "AgentDataVolume": {
+          const validation = validateDataVolumeForm(dataVolumeForm, isCreate);
+          if (validation) {
+            return { ok: false, error: validation };
+          }
+          return { ok: true, spec: buildDataVolumeSpec(dataVolumeForm) };
+        }
+        case "VolumeProfile": {
+          const validation = validateVolumeProfileForm(volumeProfileForm, isCreate);
+          if (validation) {
+            return { ok: false, error: validation };
+          }
+          return { ok: true, spec: buildVolumeProfileSpec(volumeProfileForm) };
+        }
+        case "AgentSkillSet": {
+          const validation = validateSkillSetForm(skillSetForm, isCreate);
+          if (validation) {
+            return { ok: false, error: validation };
+          }
+          return { ok: true, spec: buildSkillSetSpec(skillSetForm) };
+        }
+        case "AgentToolSet": {
+          const validation = validateToolSetForm(toolSetForm, isCreate);
+          if (validation) {
+            return { ok: false, error: validation };
+          }
+          return { ok: true, spec: buildToolSetSpec(toolSetForm) };
+        }
+        default:
+          break;
       }
-      return { ok: true, spec: buildHarnessSpec(harnessForm) };
     }
     try {
       return { ok: true, spec: JSON.parse(specText) as Record<string, unknown> };
@@ -197,6 +375,20 @@ export function CompositionEditorPage({ token, namespace: activeNamespace, write
         ok: false,
         error: `Invalid JSON spec: ${err instanceof Error ? err.message : String(err)}`,
       };
+    }
+  }
+
+  function applySpecToForms(spec: Record<string, unknown>, resourceName: string) {
+    if (isHarness) {
+      setHarnessForm(formFromHarnessSpec(spec, resourceName));
+    } else if (isDataVolume) {
+      setDataVolumeForm(formFromDataVolumeSpec(spec, resourceName));
+    } else if (isVolumeProfile) {
+      setVolumeProfileForm(formFromVolumeProfileSpec(spec, resourceName));
+    } else if (isSkillSet) {
+      setSkillSetForm(formFromSkillSetSpec(spec, resourceName));
+    } else if (isToolSet) {
+      setToolSetForm(formFromToolSetSpec(spec, resourceName));
     }
   }
 
@@ -218,7 +410,7 @@ export function CompositionEditorPage({ token, namespace: activeNamespace, write
       screenshot,
     );
     if (isCreate) {
-      const createName = (isHarness ? harnessForm.name : name).trim();
+      const createName = createNameFromForms();
       if (!createName) {
         setError("Name is required");
         return;
@@ -257,9 +449,7 @@ export function CompositionEditorPage({ token, namespace: activeNamespace, write
       });
       setDoc(updated);
       setSpecText(JSON.stringify(updated.spec ?? {}, null, 2));
-      if (isHarness) {
-        setHarnessForm(formFromHarnessSpec(updated.spec ?? {}, updated.metadata.name));
-      }
+      applySpecToForms(updated.spec ?? {}, updated.metadata.name);
       setIcon(getIconUrl(updated.metadata.annotations));
       setScreenshot(getScreenshotUrl(updated.metadata.annotations));
       setInfo("Saved");
@@ -286,7 +476,30 @@ export function CompositionEditorPage({ token, namespace: activeNamespace, write
     }
   }
 
-  const intro = KIND_INTRO[kind.kind];
+  function toggleAdvancedJson() {
+    if (!showAdvancedJson) {
+      setSpecText(guidedPreview || "{}");
+    } else {
+      try {
+        const parsed = JSON.parse(specText) as Record<string, unknown>;
+        const resourceName = isCreate ? createNameFromForms() : nameParam;
+        applySpecToForms(parsed, resourceName);
+      } catch {
+        // keep form as-is if JSON invalid
+      }
+    }
+    setShowAdvancedJson((prev) => !prev);
+  }
+
+  const panelTitle = isGuided
+    ? writable
+      ? isCreate
+        ? `Compose ${kind.plural.replace(/s$/, "")}`
+        : `Edit ${kind.plural.replace(/s$/, "")}`
+      : `View ${kind.plural.replace(/s$/, "")}`
+    : writable
+      ? "Edit"
+      : "View";
 
   return (
     <div className="library-editor">
@@ -301,14 +514,19 @@ export function CompositionEditorPage({ token, namespace: activeNamespace, write
           </div>
           <h1 className="page-title">
             {isCreate
-              ? isHarness
-                ? "New harness profile"
+              ? guided
+                ? CREATE_TITLES[guided]
                 : `New ${kind.kind}`
               : nameParam}
           </h1>
           <p className="page-sub">
             Namespace <span className="mono">{namespace}</span>
             {isHarness ? " · runtime machine for AgentRuns" : null}
+            {isDataVolume ? " · durable PVC home" : null}
+            {isVolumeProfile ? " · reusable storage shape" : null}
+            {isSkillSet ? " · instruction packs" : null}
+            {isToolSet ? " · setup / verify tools" : null}
+            {isAuthSession ? " · append-only auth maintenance" : null}
           </p>
         </div>
       </div>
@@ -337,146 +555,37 @@ export function CompositionEditorPage({ token, namespace: activeNamespace, write
       {!loading ? (
         <div className="panel">
           <div className="panel-header">
-            <h2 className="panel-title">
-              {isHarness
-                ? writable
-                  ? isCreate
-                    ? "Compose harness"
-                    : "Edit harness"
-                  : "View harness"
-                : writable
-                  ? "Edit"
-                  : "View"}
-            </h2>
+            <h2 className="panel-title">{panelTitle}</h2>
             {!isCreate && doc ? (
               <span className="chip mono">rv {doc.metadata.resourceVersion}</span>
             ) : null}
           </div>
           <div className="panel-body editor-form">
-            {intro && !isHarness ? (
-              <section className="explain-panel">
-                <h3 className="explain-title">{intro.title}</h3>
-                <p className="explain-body">{intro.body}</p>
-              </section>
-            ) : null}
-
-            {isHarness ? (
+            {isAuthSession ? (
               <>
-                <HarnessProfileForm
-                  form={harnessForm}
-                  disabled={!writable}
-                  isCreate={isCreate}
-                  dataVolumeNames={dataVolumeNames}
-                  token={token}
-                  namespace={namespace}
-                  onChange={updateHarness}
-                />
-                <IconPicker
-                  label="Harness icon"
-                  help="Optional avatar for library cards and profile composition picker."
-                  icon={icon}
-                  screenshot={screenshot}
-                  disabled={!writable}
-                  onIconChange={setIcon}
-                  onScreenshotChange={setScreenshot}
-                />
-                <div className="advanced-json">
-                  <button
-                    type="button"
-                    className="btn btn-ghost"
-                    onClick={() => {
-                      if (!showAdvancedJson) {
-                        setSpecText(harnessPreview || "{}");
-                      } else {
-                        try {
-                          const parsed = JSON.parse(specText) as Record<string, unknown>;
-                          setHarnessForm(
-                            formFromHarnessSpec(parsed, isCreate ? harnessForm.name : nameParam),
-                          );
-                        } catch {
-                          // keep form as-is if JSON invalid
-                        }
-                      }
-                      setShowAdvancedJson((prev) => !prev);
-                    }}
-                  >
-                    {showAdvancedJson ? "Back to guided form" : "Advanced: edit raw JSON"}
-                  </button>
-                  {showAdvancedJson ? (
-                    <label className="field" style={{ marginTop: "0.5rem" }}>
-                      <span className="label">Spec (JSON)</span>
-                      <textarea
-                        className="textarea textarea-spec"
-                        value={specText}
-                        disabled={!writable}
-                        onChange={(event) => setSpecText(event.target.value)}
-                        spellCheck={false}
-                      />
-                    </label>
-                  ) : (
-                    <details className="spec-preview">
-                      <summary className="text-mute">Preview generated spec</summary>
-                      <pre className="spec-preview-pre mono">{harnessPreview}</pre>
-                    </details>
-                  )}
-                </div>
-              </>
-            ) : (
-              <>
-                {isAuthSession ? (
-                  <section className="explain-panel">
-                    <h3 className="explain-title">AgentAuthSession (append-only)</h3>
-                    <p className="explain-body">
-                      Reauth/logout maintenance for a durable home. Specs are immutable. Create
-                      sessions with{" "}
-                      <span className="mono">anvil-agentctl auth codex|grok reauth|logout</span>.
-                      While phase is non-terminal, AgentRuns mounting the target data volume stay{" "}
-                      <span className="mono">Pending</span> (
-                      <span className="mono">AuthSessionActive</span>).
-                    </p>
-                  </section>
-                ) : null}
+                <section className="explain-panel">
+                  <h3 className="explain-title">AgentAuthSession (append-only)</h3>
+                  <p className="explain-body">
+                    Reauth/logout maintenance for a durable home. Specs are immutable. Create
+                    sessions with{" "}
+                    <span className="mono">anvil-agentctl auth codex|grok reauth|logout</span>.
+                    While phase is non-terminal, AgentRuns mounting the target data volume stay{" "}
+                    <span className="mono">Pending</span> (
+                    <span className="mono">AuthSessionActive</span>).
+                  </p>
+                </section>
 
                 <label className="field">
                   <span className="label">Name</span>
-                  <input
-                    className="input mono"
-                    value={isCreate ? name : nameParam}
-                    disabled={!isCreate || isAuthSession}
-                    onChange={(event) => setName(event.target.value)}
-                    placeholder="dns-1123 name"
-                  />
+                  <input className="input mono" value={nameParam} disabled />
                 </label>
 
-                {!isAuthSession ? (
-                  <IconPicker
-                    label={`${kind.title.replace(/\.$/, "")} icon`}
-                    help="Same robot pack and custom URLs as profiles. Stored as ui.anvil.hazyforge.io/icon (+ optional screenshot)."
-                    icon={icon}
-                    screenshot={screenshot}
-                    disabled={!writable}
-                    onIconChange={setIcon}
-                    onScreenshotChange={setScreenshot}
-                  />
-                ) : null}
-
-                {isDataVolume && !isCreate ? (
-                  <RelatedAuthSessionCards
-                    token={token}
-                    namespace={namespace}
-                    dataVolumeNames={[nameParam]}
-                    title="Auth sessions for this data volume"
-                  />
-                ) : null}
-
-                {isAuthSession && doc ? (
+                {doc ? (
                   <div className="chip-row" style={{ marginBottom: "0.5rem" }}>
                     <span className="chip chip-mute">AgentAuthSession</span>
                     <span className="chip mono">{String(doc.spec?.provider ?? "")}</span>
                     <span className="chip mono">{String(doc.spec?.action ?? "")}</span>
-                    <span className="chip">
-                      {String(doc.status?.phase ?? "Pending")}
-                    </span>
+                    <span className="chip">{String(doc.status?.phase ?? "Pending")}</span>
                     {typeof doc.spec?.dataVolumeRef === "object" &&
                     doc.spec.dataVolumeRef &&
                     "name" in (doc.spec.dataVolumeRef as object) ? (
@@ -491,22 +600,181 @@ export function CompositionEditorPage({ token, namespace: activeNamespace, write
                 ) : null}
 
                 <label className="field">
-                  <span className="label">
-                    {isAuthSession ? "Spec + status (read-only JSON)" : "Spec (JSON)"}
-                  </span>
+                  <span className="label">Spec + status (read-only JSON)</span>
                   <p className="field-help">
-                    {isAuthSession
-                      ? "Append-only. Use anvil-agentctl for reauth/logout."
-                      : "Guided forms for skill sets, tool sets, and volumes are next. Until then, edit the CRD shape as JSON."}
+                    Append-only. Use anvil-agentctl for reauth/logout.
                   </p>
                   <textarea
                     className="textarea textarea-spec"
                     value={
-                      isAuthSession && doc
+                      doc
                         ? JSON.stringify({ spec: doc.spec, status: doc.status }, null, 2)
                         : specText
                     }
-                    disabled={!writable || isAuthSession}
+                    disabled
+                    spellCheck={false}
+                  />
+                </label>
+              </>
+            ) : isGuided ? (
+              <>
+                {!showAdvancedJson ? (
+                  <>
+                    {isHarness ? (
+                      <HarnessProfileForm
+                        form={harnessForm}
+                        disabled={!writable}
+                        isCreate={isCreate}
+                        dataVolumeNames={dataVolumeNames}
+                        token={token}
+                        namespace={namespace}
+                        onChange={updateHarness}
+                      />
+                    ) : null}
+                    {isDataVolume ? (
+                      <DataVolumeForm
+                        form={dataVolumeForm}
+                        disabled={!writable}
+                        isCreate={isCreate}
+                        volumeProfileNames={volumeProfileNames}
+                        onChange={updateDataVolume}
+                        onReplace={setDataVolumeForm}
+                      />
+                    ) : null}
+                    {isVolumeProfile ? (
+                      <VolumeProfileForm
+                        form={volumeProfileForm}
+                        disabled={!writable}
+                        isCreate={isCreate}
+                        onChange={updateVolumeProfile}
+                      />
+                    ) : null}
+                    {isSkillSet ? (
+                      <SkillSetForm
+                        form={skillSetForm}
+                        disabled={!writable}
+                        isCreate={isCreate}
+                        onChange={updateSkillSet}
+                      />
+                    ) : null}
+                    {isToolSet ? (
+                      <ToolSetForm
+                        form={toolSetForm}
+                        disabled={!writable}
+                        isCreate={isCreate}
+                        onChange={updateToolSet}
+                      />
+                    ) : null}
+
+                    {isDataVolume && !isCreate ? (
+                      <RelatedAuthSessionCards
+                        token={token}
+                        namespace={namespace}
+                        dataVolumeNames={[nameParam]}
+                        title="Auth sessions for this data volume"
+                      />
+                    ) : null}
+
+                    <IconPicker
+                      label={`${kind.title.replace(/\.$/, "")} icon`}
+                      help="Optional avatar for library cards and composition pickers."
+                      icon={icon}
+                      screenshot={screenshot}
+                      disabled={!writable}
+                      onIconChange={setIcon}
+                      onScreenshotChange={setScreenshot}
+                    />
+                  </>
+                ) : (
+                  <>
+                    {isCreate ? (
+                      <label className="field">
+                        <span className="label">Name</span>
+                        <input
+                          className="input mono"
+                          value={createNameFromForms()}
+                          disabled={!writable}
+                          onChange={(event) => {
+                            const value = event.target.value;
+                            if (isHarness) {
+                              updateHarness("name", value);
+                            } else if (isDataVolume) {
+                              updateDataVolume("name", value);
+                            } else if (isVolumeProfile) {
+                              updateVolumeProfile("name", value);
+                            } else if (isSkillSet) {
+                              updateSkillSet("name", value);
+                            } else if (isToolSet) {
+                              updateToolSet("name", value);
+                            } else {
+                              setName(value);
+                            }
+                          }}
+                          placeholder="dns-1123 name"
+                        />
+                      </label>
+                    ) : null}
+                    <IconPicker
+                      label={`${kind.title.replace(/\.$/, "")} icon`}
+                      help="Optional avatar for library cards and composition pickers."
+                      icon={icon}
+                      screenshot={screenshot}
+                      disabled={!writable}
+                      onIconChange={setIcon}
+                      onScreenshotChange={setScreenshot}
+                    />
+                    <label className="field">
+                      <span className="label">Spec (JSON)</span>
+                      <textarea
+                        className="textarea textarea-spec"
+                        value={specText}
+                        disabled={!writable}
+                        onChange={(event) => setSpecText(event.target.value)}
+                        spellCheck={false}
+                      />
+                    </label>
+                  </>
+                )}
+
+                <div className="advanced-json">
+                  <button type="button" className="btn btn-ghost" onClick={toggleAdvancedJson}>
+                    {showAdvancedJson ? "Back to guided form" : "Advanced: edit raw JSON"}
+                  </button>
+                  {!showAdvancedJson ? (
+                    <details className="spec-preview">
+                      <summary className="text-mute">Preview generated spec</summary>
+                      <pre className="spec-preview-pre mono">{guidedPreview}</pre>
+                    </details>
+                  ) : null}
+                </div>
+              </>
+            ) : (
+              <>
+                <label className="field">
+                  <span className="label">Name</span>
+                  <input
+                    className="input mono"
+                    value={isCreate ? name : nameParam}
+                    disabled={!isCreate}
+                    onChange={(event) => setName(event.target.value)}
+                    placeholder="dns-1123 name"
+                  />
+                </label>
+                <IconPicker
+                  label={`${kind.title.replace(/\.$/, "")} icon`}
+                  help="Optional avatar for library cards."
+                  icon={icon}
+                  screenshot={screenshot}
+                  disabled={!writable}
+                  onIconChange={setIcon}
+                  onScreenshotChange={setScreenshot}
+                />
+                <label className="field">
+                  <span className="label">Spec (JSON)</span>
+                  <textarea
+                    className="textarea textarea-spec"
+                    value={specText}
+                    disabled={!writable}
                     onChange={(event) => setSpecText(event.target.value)}
                     spellCheck={false}
                   />
