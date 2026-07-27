@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -230,6 +231,48 @@ func TestCompositionWriteDisabled(t *testing.T) {
 	// Without write permission (composition write disabled strips write from bindings), expect 404.
 	if response.Code != http.StatusNotFound {
 		t.Fatalf("expected not found without write grant, got %d %s", response.Code, response.Body.String())
+	}
+}
+
+func TestCompositionAuthSessionAppendOnly(t *testing.T) {
+	session := &agentsv1alpha1.AgentAuthSession{
+		TypeMeta: metav1.TypeMeta{APIVersion: agentsv1alpha1.GroupVersion.String(), Kind: "AgentAuthSession"},
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "grok-reauth-home",
+			Namespace: "agents",
+		},
+		Spec: agentsv1alpha1.AgentAuthSessionSpec{
+			Provider: agentsv1alpha1.AgentAuthSessionProviderGrokBuild,
+			Action:   agentsv1alpha1.AgentAuthSessionActionReauth,
+			DataVolumeRef: corev1.LocalObjectReference{Name: "home"},
+			StagingSecretRef: &corev1.LocalObjectReference{Name: "staging"},
+			SeedID: "seed-1",
+		},
+		Status: agentsv1alpha1.AgentAuthSessionStatus{Phase: agentsv1alpha1.AgentAuthSessionPhaseRunning},
+	}
+	server := compositionTestServer(t, true, true, session)
+
+	listReq := httptest.NewRequest(http.MethodGet, "/api/v1/namespaces/agents/agent-auth-sessions", nil)
+	listReq.Header.Set("Authorization", "Bearer valid")
+	listRes := httptest.NewRecorder()
+	server.routes().ServeHTTP(listRes, listReq)
+	if listRes.Code != http.StatusOK {
+		t.Fatalf("list status = %d %s", listRes.Code, listRes.Body.String())
+	}
+	if !strings.Contains(listRes.Body.String(), `"AgentAuthSession"`) || !strings.Contains(listRes.Body.String(), "grok-reauth-home") {
+		t.Fatalf("list body missing session: %s", listRes.Body.String())
+	}
+
+	body := `{"metadata":{"name":"x"},"spec":{"provider":"grokBuild","action":"logout","dataVolumeRef":{"name":"home"}}}`
+	createReq := httptest.NewRequest(http.MethodPost, "/api/v1/namespaces/agents/agent-auth-sessions", bytes.NewBufferString(body))
+	createReq.Header.Set("Authorization", "Bearer valid")
+	createRes := httptest.NewRecorder()
+	server.routes().ServeHTTP(createRes, createReq)
+	if createRes.Code != http.StatusForbidden {
+		t.Fatalf("create expected forbidden, got %d %s", createRes.Code, createRes.Body.String())
+	}
+	if !strings.Contains(createRes.Body.String(), "append_only") {
+		t.Fatalf("expected append_only code, got %s", createRes.Body.String())
 	}
 }
 

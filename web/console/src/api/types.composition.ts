@@ -4,7 +4,8 @@ export type CompositionPathSegment =
   | "agent-skill-sets"
   | "agent-tool-sets"
   | "volume-profiles"
-  | "agent-data-volumes";
+  | "agent-data-volumes"
+  | "agent-auth-sessions";
 
 export type CompositionKindName =
   | "AgentRunProfile"
@@ -12,7 +13,8 @@ export type CompositionKindName =
   | "AgentSkillSet"
   | "AgentToolSet"
   | "VolumeProfile"
-  | "AgentDataVolume";
+  | "AgentDataVolume"
+  | "AgentAuthSession";
 
 export type CompositionManagementReason =
   | "console_managed"
@@ -59,6 +61,8 @@ export interface CompositionKindInfo {
   route: string;
   description: string;
   danger?: boolean;
+  /** Append-only CRs: browse as cards; create via operator CLI, not console write. */
+  appendOnly?: boolean;
 }
 
 export const COMPOSITION_KINDS: CompositionKindInfo[] = [
@@ -111,7 +115,18 @@ export const COMPOSITION_KINDS: CompositionKindInfo[] = [
     title: "Data volumes",
     plural: "data volumes",
     route: "data-volumes",
-    description: "Concrete agent homes and PVC ownership",
+    description: "Concrete agent homes and PVC ownership — durable auth targets",
+  },
+  {
+    segment: "agent-auth-sessions",
+    kind: "AgentAuthSession",
+    title: "Auth sessions",
+    plural: "auth sessions",
+    route: "auth-sessions",
+    description:
+      "Append-only reauth/logout maintenance on data volumes (blocks AgentRuns while active)",
+    danger: true,
+    appendOnly: true,
   },
 ];
 

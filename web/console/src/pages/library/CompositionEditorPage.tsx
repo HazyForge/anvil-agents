@@ -14,6 +14,7 @@ import {
 } from "../../api/types.composition";
 import { HarnessProfileForm } from "../../components/HarnessProfileForm";
 import { IconPicker } from "../../components/IconPicker";
+import { RelatedAuthSessionCards } from "../../components/RelatedAuthSessionCards";
 import {
   getIconUrl,
   getScreenshotUrl,
@@ -77,6 +78,10 @@ export function CompositionEditorPage({ token, namespace: activeNamespace, write
   // Match both kind metadata and the URL segment so a routing glitch cannot fall back to JSON-only.
   const isHarness =
     kind?.kind === "AgentHarnessProfile" || kindRoute === "harness-profiles";
+  const isAuthSession =
+    kind?.kind === "AgentAuthSession" || kindRoute === "auth-sessions";
+  const isDataVolume =
+    kind?.kind === "AgentDataVolume" || kindRoute === "data-volumes";
 
   const [doc, setDoc] = useState<CompositionDocument | null>(null);
   const [name, setName] = useState("");
@@ -362,6 +367,8 @@ export function CompositionEditorPage({ token, namespace: activeNamespace, write
                   disabled={!writable}
                   isCreate={isCreate}
                   dataVolumeNames={dataVolumeNames}
+                  token={token}
+                  namespace={namespace}
                   onChange={updateHarness}
                 />
                 <IconPicker
@@ -416,37 +423,90 @@ export function CompositionEditorPage({ token, namespace: activeNamespace, write
               </>
             ) : (
               <>
+                {isAuthSession ? (
+                  <section className="explain-panel">
+                    <h3 className="explain-title">AgentAuthSession (append-only)</h3>
+                    <p className="explain-body">
+                      Reauth/logout maintenance for a durable home. Specs are immutable. Create
+                      sessions with{" "}
+                      <span className="mono">anvil-agentctl auth codex|grok reauth|logout</span>.
+                      While phase is non-terminal, AgentRuns mounting the target data volume stay{" "}
+                      <span className="mono">Pending</span> (
+                      <span className="mono">AuthSessionActive</span>).
+                    </p>
+                  </section>
+                ) : null}
+
                 <label className="field">
                   <span className="label">Name</span>
                   <input
                     className="input mono"
                     value={isCreate ? name : nameParam}
-                    disabled={!isCreate}
+                    disabled={!isCreate || isAuthSession}
                     onChange={(event) => setName(event.target.value)}
                     placeholder="dns-1123 name"
                   />
                 </label>
 
-                <IconPicker
-                  label={`${kind.title.replace(/\.$/, "")} icon`}
-                  help="Same robot pack and custom URLs as profiles. Stored as ui.anvil.hazyforge.io/icon (+ optional screenshot)."
-                  icon={icon}
-                  screenshot={screenshot}
-                  disabled={!writable}
-                  onIconChange={setIcon}
-                  onScreenshotChange={setScreenshot}
-                />
+                {!isAuthSession ? (
+                  <IconPicker
+                    label={`${kind.title.replace(/\.$/, "")} icon`}
+                    help="Same robot pack and custom URLs as profiles. Stored as ui.anvil.hazyforge.io/icon (+ optional screenshot)."
+                    icon={icon}
+                    screenshot={screenshot}
+                    disabled={!writable}
+                    onIconChange={setIcon}
+                    onScreenshotChange={setScreenshot}
+                  />
+                ) : null}
+
+                {isDataVolume && !isCreate ? (
+                  <RelatedAuthSessionCards
+                    token={token}
+                    namespace={namespace}
+                    dataVolumeNames={[nameParam]}
+                    title="Auth sessions for this data volume"
+                  />
+                ) : null}
+
+                {isAuthSession && doc ? (
+                  <div className="chip-row" style={{ marginBottom: "0.5rem" }}>
+                    <span className="chip chip-mute">AgentAuthSession</span>
+                    <span className="chip mono">{String(doc.spec?.provider ?? "")}</span>
+                    <span className="chip mono">{String(doc.spec?.action ?? "")}</span>
+                    <span className="chip">
+                      {String(doc.status?.phase ?? "Pending")}
+                    </span>
+                    {typeof doc.spec?.dataVolumeRef === "object" &&
+                    doc.spec.dataVolumeRef &&
+                    "name" in (doc.spec.dataVolumeRef as object) ? (
+                      <Link
+                        className="chip"
+                        to={`/ns/${encodeURIComponent(namespace)}/data-volumes/${encodeURIComponent(String((doc.spec.dataVolumeRef as { name?: string }).name ?? ""))}`}
+                      >
+                        vol:{(doc.spec.dataVolumeRef as { name?: string }).name}
+                      </Link>
+                    ) : null}
+                  </div>
+                ) : null}
 
                 <label className="field">
-                  <span className="label">Spec (JSON)</span>
+                  <span className="label">
+                    {isAuthSession ? "Spec + status (read-only JSON)" : "Spec (JSON)"}
+                  </span>
                   <p className="field-help">
-                    Guided forms for skill sets, tool sets, and volumes are next. Until then, edit
-                    the CRD shape as JSON.
+                    {isAuthSession
+                      ? "Append-only. Use anvil-agentctl for reauth/logout."
+                      : "Guided forms for skill sets, tool sets, and volumes are next. Until then, edit the CRD shape as JSON."}
                   </p>
                   <textarea
                     className="textarea textarea-spec"
-                    value={specText}
-                    disabled={!writable}
+                    value={
+                      isAuthSession && doc
+                        ? JSON.stringify({ spec: doc.spec, status: doc.status }, null, 2)
+                        : specText
+                    }
+                    disabled={!writable || isAuthSession}
                     onChange={(event) => setSpecText(event.target.value)}
                     spellCheck={false}
                   />
@@ -455,7 +515,7 @@ export function CompositionEditorPage({ token, namespace: activeNamespace, write
             )}
 
             <div className="editor-actions">
-              {writable ? (
+              {writable && !isAuthSession ? (
                 <button
                   type="button"
                   className="btn btn-primary"
@@ -466,14 +526,16 @@ export function CompositionEditorPage({ token, namespace: activeNamespace, write
                 </button>
               ) : (
                 <span className="text-mute">
-                  {writeEnabled
-                    ? "Read-only · GitOps / non-console object"
-                    : "Composition write is disabled on this API"}
+                  {isAuthSession
+                    ? "Append-only · create with anvil-agentctl auth"
+                    : writeEnabled
+                      ? "Read-only · GitOps / non-console object"
+                      : "Composition write is disabled on this API"}
                 </span>
               )}
             </div>
 
-            {!isCreate && writable ? (
+            {!isCreate && writable && !isAuthSession ? (
               <div className="danger-zone">
                 <div className="label">Delete</div>
                 <p className="page-sub">
