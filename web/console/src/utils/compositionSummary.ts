@@ -78,7 +78,38 @@ export function compositionCardSummary(doc: CompositionDocument): string {
         [agent || null, backend || null, size || null].filter(Boolean).join(" · ") || "data volume"
       );
     }
+    case "AgentAuthSession": {
+      const provider = String(spec.provider ?? "");
+      const action = String(spec.action ?? "");
+      const volume =
+        typeof spec.dataVolumeRef === "object" && spec.dataVolumeRef
+          ? String((spec.dataVolumeRef as { name?: string }).name ?? "")
+          : "";
+      const phase = String(doc.status?.phase ?? "Pending");
+      return (
+        [provider || null, action || null, volume ? `vol:${volume}` : null, `phase:${phase}`]
+          .filter(Boolean)
+          .join(" · ") || "auth session"
+      );
+    }
     default:
       return String(spec.description ?? "").trim() || kind;
   }
+}
+
+/** True when status.phase is a non-terminal AgentAuthSession phase. */
+export function authSessionIsActive(doc: CompositionDocument): boolean {
+  if (doc.kind !== "AgentAuthSession") {
+    return false;
+  }
+  const phase = String(doc.status?.phase ?? "Pending");
+  return phase !== "Succeeded" && phase !== "Failed";
+}
+
+export function authSessionVolumeName(doc: CompositionDocument): string {
+  const ref = doc.spec?.dataVolumeRef;
+  if (typeof ref === "object" && ref && "name" in ref) {
+    return String((ref as { name?: string }).name ?? "").trim();
+  }
+  return "";
 }

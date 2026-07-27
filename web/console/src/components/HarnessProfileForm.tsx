@@ -4,6 +4,7 @@ import {
   type HarnessForm,
   type HarnessBackendKind,
 } from "../pages/library/harnessForm";
+import { RelatedAuthSessionCards } from "./RelatedAuthSessionCards";
 import { StringChipList } from "./StringChipList";
 
 interface Props {
@@ -11,6 +12,9 @@ interface Props {
   disabled?: boolean;
   isCreate: boolean;
   dataVolumeNames: string[];
+  /** When set, show AgentAuthSession cards for the selected durable homes. */
+  token?: string;
+  namespace?: string;
   onChange: <K extends keyof HarnessForm>(key: K, value: HarnessForm[K]) => void;
 }
 
@@ -19,6 +23,8 @@ export function HarnessProfileForm({
   disabled,
   isCreate,
   dataVolumeNames,
+  token,
+  namespace,
   onChange,
 }: Props) {
   const kindMeta = useMemo(
@@ -309,13 +315,22 @@ export function HarnessProfileForm({
 
       <StringChipList
         label="Data volumes (durable homes)"
-        help="AgentDataVolume names for sessions, OAuth homes, caches."
+        help="AgentDataVolume names for sessions, OAuth homes, caches. Auth sessions that target these volumes appear as cards below."
         value={form.dataVolumeNames}
         disabled={disabled}
         suggestions={dataVolumeNames}
         placeholder="e.g. my-agent-grok-home"
         onChange={(next) => onChange("dataVolumeNames", next)}
       />
+
+      {token && namespace ? (
+        <RelatedAuthSessionCards
+          token={token}
+          namespace={namespace}
+          dataVolumeNames={form.dataVolumeNames}
+          title="Auth sessions for selected data volumes"
+        />
+      ) : null}
 
       <StringChipList
         label="Image pull secrets"
