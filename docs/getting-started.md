@@ -140,6 +140,23 @@ package, pass that same file to `package-chart.sh --image-lock` together with
 `--source-revision "$(git rev-parse 'vX.Y.Z^{commit}')"`. The package command
 rejects lock metadata that does not match the expected version-tag commit.
 
+### Anvil Primaris first-party cutovers
+
+For the Hazy Forge Primaris overlay (digest pins + CRD install + optional live
+Helm apply), prefer the local Docker path in
+[Release to Primaris](release-primaris.md):
+
+```bash
+# Console/controller iteration → build, pin, helm deploy (no Actions, no Kind):
+make release-primaris-hot
+
+# Versioned release, pin Primaris deploy.yaml (commit for Argo):
+VERSION=v0.1.14 make release-primaris-fast
+
+# Apply current pins + CRDs from the local chart:
+make deploy-primaris
+```
+
 ## Add A Real Harness
 
 1. Create a dedicated agent namespace.
