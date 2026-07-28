@@ -23,7 +23,7 @@ jobs:
         run: make manifests
       - name: Verify generated files
         run: git diff --exit-code
-      - uses: azure/setup-helm@v4
+      - uses: azure/setup-helm@v5
       - name: Lint chart
         run: make helm-lint
       - name: Build controller image
@@ -55,7 +55,7 @@ jobs:
         with:
           go-version: 1.25.5
           cache: true
-      - uses: azure/setup-helm@v4
+      - uses: azure/setup-helm@v5
       - uses: azure/setup-kubectl@v4
       - name: Install Kind test tools
         run: |
