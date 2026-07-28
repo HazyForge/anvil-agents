@@ -1,0 +1,70 @@
+apiVersion: control.anvil.hazyforge.io/v1alpha1
+kind: AgentRunProfile
+metadata:
+  name: hazy-sites-grok45-site-healer
+  namespace: anvil-agents-system
+  labels:
+    app.kubernetes.io/name: hazy-sites-site-healer
+    app.kubernetes.io/part-of: hazy-sites-agents
+    control.anvil.hazyforge.io/ownership: gitops
+  annotations:
+    ui.anvil.hazyforge.io/icon: /avatars/robot-03.jpg
+spec:
+  description: Grok 4.5 site healer for transient outages across hazy-sites apps.
+  scope:
+    summary: Keep public Hazy Forge sites available by fixing reversible pod and rollout failures.
+    applicationRef:
+      name: hazy-sites
+  harnessProfileRef:
+    name: hazy-sites-grok45-site-healer
+  skillSets:
+    refs:
+      - name: hazy-sites-site-healing
+  toolSets:
+    refs:
+      - name: hazy-sites-ops-tools
+  harness:
+    intent: proposeChange
+    backend:
+      grokBuild:
+        reasoningEffort: medium
+    systemPrompt: |
+      You are the hazy-sites site healer on Grok 4.5. Use site-health first,
+      then kubectl evidence, then only bounded reversible restarts. Prefer
+      report-only when the fix is unclear or destructive. Never touch Secrets
+      data, PVCs, namespaces, or Argo Applications.
+---
+apiVersion: control.anvil.hazyforge.io/v1alpha1
+kind: AgentRunProfile
+metadata:
+  name: hazy-sites-grok45-security-scanner
+  namespace: anvil-agents-system
+  labels:
+    app.kubernetes.io/name: hazy-sites-security-scanner
+    app.kubernetes.io/part-of: hazy-sites-agents
+    control.anvil.hazyforge.io/ownership: gitops
+  annotations:
+    ui.anvil.hazyforge.io/icon: /avatars/robot-08.jpg
+spec:
+  description: Grok 4.5 read-only security scanner for hazy-sites cluster posture.
+  scope:
+    summary: Continuously assess security posture of site workloads and cluster RBAC.
+    applicationRef:
+      name: hazy-sites
+  harnessProfileRef:
+    name: hazy-sites-grok45-security-scanner
+  skillSets:
+    refs:
+      - name: hazy-sites-security-scan
+  toolSets:
+    refs:
+      - name: hazy-sites-ops-tools
+  harness:
+    intent: observe
+    backend:
+      grokBuild:
+        reasoningEffort: medium
+    systemPrompt: |
+      You are the hazy-sites security scanner on Grok 4.5. Read-only only.
+      Run security-inventory, prioritize Critical/High findings, and produce a
+      remediation-oriented report. Do not mutate the cluster.

@@ -1,0 +1,289 @@
+# Four Grok 4.5 improvement scouts: inspect anvil-agents, file one GitHub issue each.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: hazy-sites-improvement-scout
+  namespace: anvil-agents-system
+  labels:
+    app.kubernetes.io/name: hazy-sites-improvement-scout
+    app.kubernetes.io/part-of: hazy-sites-agents
+automountServiceAccountToken: false
+---
+apiVersion: control.anvil.hazyforge.io/v1alpha1
+kind: AgentSkillSet
+metadata:
+  name: hazy-sites-improvement-scout
+  namespace: anvil-agents-system
+  labels:
+    app.kubernetes.io/part-of: hazy-sites-agents
+    control.anvil.hazyforge.io/ownership: gitops
+spec:
+  description: Evidence-first improvement scouting with one GitHub issue per run.
+  skills:
+    - name: improvement-issue-policy
+      description: Find one bounded improvement and open exactly one issue.
+      content: |
+        You are a read-only improvement scout for the checked-out repository
+        HazyForge/anvil-agents. Do not modify files, open PRs, merge, or push.
+
+        Required workflow:
+        1. Inspect the domain assigned in the run prompt using repository
+           evidence (docs, code, tests, charts, hack scripts).
+        2. Search existing open issues with `gh issue list --repo HazyForge/anvil-agents --state open --limit 30`
+           so you do not duplicate an active ticket.
+        3. Select exactly ONE high-value, bounded improvement with concrete paths
+           and why it matters.
+        4. Create exactly one GitHub issue with `gh issue create` in
+           HazyForge/anvil-agents. Title must start with `[scout/<domain>]`.
+           Body must include: problem, evidence (paths/commands), proposed
+           acceptance criteria, and risk if ignored.
+        5. Print the created issue URL and number clearly in the final summary.
+
+        Never create more than one issue. Never close issues. If no improvement
+        is justified after evidence review, fail the run with a clear reason
+        rather than inventing filler.
+---
+apiVersion: control.anvil.hazyforge.io/v1alpha1
+kind: AgentHarnessProfile
+metadata:
+  name: hazy-sites-grok45-improvement-scout
+  namespace: anvil-agents-system
+  labels:
+    app.kubernetes.io/name: hazy-sites-improvement-scout
+    app.kubernetes.io/part-of: hazy-sites-agents
+    control.anvil.hazyforge.io/ownership: gitops
+  annotations:
+    control.anvil.hazyforge.io/auth-data-volume: hazy-sites-grok-home
+    control.anvil.hazyforge.io/auth-mode: oauth
+    control.anvil.hazyforge.io/auth-provider: grokBuild
+    ui.anvil.hazyforge.io/icon: /avatars/robot-05.jpg
+spec:
+  description: Grok 4.5 improvement scout with GitHub issue triage credentials.
+  backend:
+    kind: grokBuild
+    modelProvider: xai
+    providerAuthMode: oauth
+    grokBuild:
+      model: grok-4.5
+      reasoningEffort: medium
+  execution:
+    serviceAccountName: hazy-sites-improvement-scout
+    workdir: /workspace
+    imagePullSecrets:
+      - name: ghcr-creds
+    dataVolumeRefs:
+      - name: hazy-sites-grok-home
+    envSecretRefs:
+      - name: hazy-sites-grok-auth-seed
+      - name: hazy-sites-github-token
+    extraEnv:
+      - name: ANVIL_GROK_BUILD_CHECK
+        value: "false"
+      - name: ANVIL_AGENT_RUN_REPOSITORY
+        value: HazyForge/anvil-agents
+      - name: ANVIL_AGENT_RUN_REPOSITORY_URL
+        value: https://github.com/HazyForge/anvil-agents.git
+      - name: ANVIL_AGENT_RUN_REPOSITORY_REF
+        value: master
+      - name: ANVIL_AGENT_RUN_GITHUB_REPOSITORY
+        value: HazyForge/anvil-agents
+    resources:
+      requests:
+        cpu: 50m
+        memory: 768Mi
+        ephemeral-storage: 1Gi
+      limits:
+        cpu: "2"
+        memory: 3Gi
+        ephemeral-storage: 4Gi
+    podSecurityContext:
+      runAsNonRoot: true
+      runAsUser: 10001
+      runAsGroup: 10001
+      fsGroup: 10001
+      seccompProfile:
+        type: RuntimeDefault
+    securityContext:
+      allowPrivilegeEscalation: false
+      capabilities:
+        drop: [ALL]
+      runAsNonRoot: true
+    timeoutSeconds: 2400
+    ttlSecondsAfterFinished: 86400
+---
+apiVersion: control.anvil.hazyforge.io/v1alpha1
+kind: AgentRunProfile
+metadata:
+  name: hazy-sites-grok45-scout-docs
+  namespace: anvil-agents-system
+  labels:
+    app.kubernetes.io/part-of: hazy-sites-agents
+    control.anvil.hazyforge.io/ownership: gitops
+    hazy-sites.agents.domain: docs
+spec:
+  description: Grok 4.5 scout for docs/API clarity improvements (one issue).
+  scope:
+    summary: Find one documentation or API-clarity improvement in anvil-agents.
+    applicationRef:
+      name: hazy-sites
+    repository:
+      name: HazyForge/anvil-agents
+      url: https://github.com/HazyForge/anvil-agents.git
+      ref: master
+      destinationBranch: master
+      allowedBranches: [master]
+  harnessProfileRef:
+    name: hazy-sites-grok45-improvement-scout
+  skillSets:
+    refs:
+      - name: hazy-sites-improvement-scout
+  docs:
+    policy: Review
+    paths: [README.md, docs, AGENTS.md]
+  issueTracking:
+    provider: github
+    repository: HazyForge/anvil-agents
+    updatePolicy: Triage
+    searchQuery: repo:HazyForge/anvil-agents is:issue is:open scout docs
+  harness:
+    intent: observe
+    backend:
+      grokBuild:
+        reasoningEffort: medium
+    systemPrompt: |
+      Domain=docs. Focus on docs/, README, AGENTS.md, and public user guidance.
+      Open exactly one evidence-backed GitHub issue with title prefix [scout/docs].
+---
+apiVersion: control.anvil.hazyforge.io/v1alpha1
+kind: AgentRunProfile
+metadata:
+  name: hazy-sites-grok45-scout-runtime
+  namespace: anvil-agents-system
+  labels:
+    app.kubernetes.io/part-of: hazy-sites-agents
+    control.anvil.hazyforge.io/ownership: gitops
+    hazy-sites.agents.domain: runtime
+spec:
+  description: Grok 4.5 scout for controller/runtime reliability improvements (one issue).
+  scope:
+    summary: Find one controller or runner reliability improvement in anvil-agents.
+    applicationRef:
+      name: hazy-sites
+    repository:
+      name: HazyForge/anvil-agents
+      url: https://github.com/HazyForge/anvil-agents.git
+      ref: master
+      destinationBranch: master
+      allowedBranches: [master]
+  harnessProfileRef:
+    name: hazy-sites-grok45-improvement-scout
+  skillSets:
+    refs:
+      - name: hazy-sites-improvement-scout
+  docs:
+    policy: Review
+    paths: [docs, internal/controller, docker]
+    runtimePaths: [api, internal, docker, cmd]
+  issueTracking:
+    provider: github
+    repository: HazyForge/anvil-agents
+    updatePolicy: Triage
+    searchQuery: repo:HazyForge/anvil-agents is:issue is:open scout runtime controller
+  harness:
+    intent: observe
+    backend:
+      grokBuild:
+        reasoningEffort: medium
+    systemPrompt: |
+      Domain=runtime. Focus on internal/controller, runner entrypoints, and
+      reliability edges. Open exactly one evidence-backed GitHub issue with
+      title prefix [scout/runtime].
+---
+apiVersion: control.anvil.hazyforge.io/v1alpha1
+kind: AgentRunProfile
+metadata:
+  name: hazy-sites-grok45-scout-security
+  namespace: anvil-agents-system
+  labels:
+    app.kubernetes.io/part-of: hazy-sites-agents
+    control.anvil.hazyforge.io/ownership: gitops
+    hazy-sites.agents.domain: security
+spec:
+  description: Grok 4.5 scout for security hardening improvements (one issue).
+  scope:
+    summary: Find one security hardening improvement in anvil-agents.
+    applicationRef:
+      name: hazy-sites
+    repository:
+      name: HazyForge/anvil-agents
+      url: https://github.com/HazyForge/anvil-agents.git
+      ref: master
+      destinationBranch: master
+      allowedBranches: [master]
+  harnessProfileRef:
+    name: hazy-sites-grok45-improvement-scout
+  skillSets:
+    refs:
+      - name: hazy-sites-improvement-scout
+  docs:
+    policy: Review
+    paths: [docs/security.md, docs/security-and-release.md, SECURITY.md, charts]
+    runtimePaths: [internal/runapi, internal/controller, charts]
+  issueTracking:
+    provider: github
+    repository: HazyForge/anvil-agents
+    updatePolicy: Triage
+    searchQuery: repo:HazyForge/anvil-agents is:issue is:open scout security
+  harness:
+    intent: observe
+    backend:
+      grokBuild:
+        reasoningEffort: medium
+    systemPrompt: |
+      Domain=security. Focus on authn/z, secret handling, RBAC, runner
+      boundaries, and supply-chain docs/tests. Open exactly one evidence-backed
+      GitHub issue with title prefix [scout/security].
+---
+apiVersion: control.anvil.hazyforge.io/v1alpha1
+kind: AgentRunProfile
+metadata:
+  name: hazy-sites-grok45-scout-ops
+  namespace: anvil-agents-system
+  labels:
+    app.kubernetes.io/part-of: hazy-sites-agents
+    control.anvil.hazyforge.io/ownership: gitops
+    hazy-sites.agents.domain: ops
+spec:
+  description: Grok 4.5 scout for chart/ops/GitOps improvements (one issue).
+  scope:
+    summary: Find one chart, release, or GitOps operational improvement in anvil-agents.
+    applicationRef:
+      name: hazy-sites
+    repository:
+      name: HazyForge/anvil-agents
+      url: https://github.com/HazyForge/anvil-agents.git
+      ref: master
+      destinationBranch: master
+      allowedBranches: [master]
+  harnessProfileRef:
+    name: hazy-sites-grok45-improvement-scout
+  skillSets:
+    refs:
+      - name: hazy-sites-improvement-scout
+  docs:
+    policy: Review
+    paths: [charts, hack, docs/operations.md, docs/release-primaris.md, .hazyforge]
+  issueTracking:
+    provider: github
+    repository: HazyForge/anvil-agents
+    updatePolicy: Triage
+    searchQuery: repo:HazyForge/anvil-agents is:issue is:open scout ops chart release
+  harness:
+    intent: observe
+    backend:
+      grokBuild:
+        reasoningEffort: medium
+    systemPrompt: |
+      Domain=ops. Focus on Helm chart, release scripts, GitOps overlays, and
+      operational docs. Open exactly one evidence-backed GitHub issue with
+      title prefix [scout/ops].

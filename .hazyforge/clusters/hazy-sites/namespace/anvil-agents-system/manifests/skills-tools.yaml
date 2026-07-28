@@ -1,0 +1,161 @@
+apiVersion: control.anvil.hazyforge.io/v1alpha1
+kind: AgentSkillSet
+metadata:
+  name: hazy-sites-site-healing
+  namespace: anvil-agents-system
+  labels:
+    app.kubernetes.io/part-of: hazy-sites-agents
+    control.anvil.hazyforge.io/ownership: gitops
+spec:
+  description: Bounded recovery playbook for transient site outages on hazy-sites.
+  skills:
+    - name: site-heal-policy
+      description: Diagnose and fix only transient, reversible site issues.
+      content: |
+        You operate on the live hazy-sites Kubernetes cluster via in-cluster
+        kubectl using the mounted ServiceAccount. Cluster name is
+        $HAZY_SITES_CLUSTER. Focus on namespaces listed in
+        $HAZY_SITES_NAMESPACES plus any related system namespaces needed for
+        evidence (gateway, cert-manager, monitoring, argocd).
+
+        Goals:
+        1. Detect sites that are down or degraded (CrashLoopBackOff, ImagePullBackOff,
+           Pending, 0 ready replicas, failed certificates, bad HTTPRoutes, Argo
+           OutOfSync/Degraded when relevant).
+        2. Prefer the least invasive reversible fix:
+           - delete a single crashlooping Pod so its controller recreates it
+           - `kubectl rollout restart` a Deployment/StatefulSet when the whole
+             replica set is wedged after evidence
+           - report ExternalSecret / cert-manager / gateway issues without
+             rewriting secrets
+        3. Never delete namespaces, PVCs, Secrets, CRDs, Argo Applications,
+           or perform destructive scale-to-zero on production sites without
+           human confirmation via anvil-hotline.
+        4. For each action: evidence first (events, logs tail, describe), then
+           one bounded mutation, then re-check readiness.
+        5. End with a concise report: healthy sites, fixed sites, remaining
+           incidents, and recommended human follow-ups.
+
+        If the API or node itself is unavailable, report that the control plane
+        is out of scope for in-cluster agents and stop.
+    - name: human-comms
+      description: Escalate when stuck after evidence.
+      content: |
+        Use anvil-hotline only after collecting concrete kubectl evidence.
+        Hotline replies are informational and do not expand RBAC.
+---
+apiVersion: control.anvil.hazyforge.io/v1alpha1
+kind: AgentSkillSet
+metadata:
+  name: hazy-sites-security-scan
+  namespace: anvil-agents-system
+  labels:
+    app.kubernetes.io/part-of: hazy-sites-agents
+    control.anvil.hazyforge.io/ownership: gitops
+spec:
+  description: Read-only security posture review for hazy-sites workloads.
+  skills:
+    - name: security-scan-policy
+      description: Inventory and report security findings without mutation.
+      content: |
+        You operate read-only on the hazy-sites cluster. Do not mutate any
+        resource. Use kubectl and the installed scan helpers only.
+
+        Cover at least:
+        1. Privileged / hostNetwork / hostPath / runAsRoot workload risks
+        2. Missing NetworkPolicies on public site namespaces
+        3. Over-broad ClusterRoleBindings and default SA token mounts
+        4. Secrets of unexpected types, plain ConfigMaps with credential-like keys
+        5. Public ingress/Gateway exposure without TLS certificates Ready
+        6. Image tags that are not digest-pinned on production Deployments
+        7. ExternalSecret readiness failures that may indicate credential drift
+        8. When trivy/govulncheck helpers are available, scan high-priority
+           running images or local checkout evidence and cite tool output
+
+        Severity rubric: Critical / High / Medium / Low / Info.
+        For each finding include namespace, object, evidence command, risk, and
+        a concrete remediation that a human or a separate change agent can apply.
+        Never apply remediations in this role.
+    - name: human-comms
+      description: Escalate only for ambiguous critical findings.
+      content: |
+        Prefer a written report. Use anvil-hotline only for critical active
+        exposure that needs immediate human attention.
+---
+apiVersion: control.anvil.hazyforge.io/v1alpha1
+kind: AgentToolSet
+metadata:
+  name: hazy-sites-ops-tools
+  namespace: anvil-agents-system
+  labels:
+    app.kubernetes.io/part-of: hazy-sites-agents
+    control.anvil.hazyforge.io/ownership: gitops
+spec:
+  description: Runtime helpers for site health checks and security scanning.
+  tools:
+    - name: site-health
+      description: Summarize readiness across managed site namespaces.
+      setupScript: |
+        set -eu
+        mkdir -p .anvil-tools
+        cat > .anvil-tools/site-health <<'SCRIPT'
+        #!/usr/bin/env bash
+        set -euo pipefail
+        namespaces="${HAZY_SITES_NAMESPACES:-}"
+        if [[ -z "${namespaces}" ]]; then
+          echo "HAZY_SITES_NAMESPACES is required" >&2
+          exit 2
+        fi
+        IFS=',' read -r -a ns_list <<< "${namespaces}"
+        printf 'cluster=%s\n' "${HAZY_SITES_CLUSTER:-unknown}"
+        for ns in "${ns_list[@]}"; do
+          ns="$(echo "${ns}" | tr -d '[:space:]')"
+          [[ -z "${ns}" ]] && continue
+          echo "=== namespace ${ns} ==="
+          kubectl get deploy,sts,ds,pods,httproute,certificate -n "${ns}" 2>/dev/null || \
+            kubectl get deploy,sts,ds,pods -n "${ns}" 2>/dev/null || true
+          kubectl get events -n "${ns}" --sort-by=.lastTimestamp 2>/dev/null | tail -n 15 || true
+        done
+        SCRIPT
+        chmod 0700 .anvil-tools/site-health
+      verifyCommand: ["bash", "-lc", "test -x .anvil-tools/site-health"]
+    - name: security-inventory
+      description: Collect read-only security inventory for priority namespaces.
+      setupScript: |
+        set -eu
+        mkdir -p .anvil-tools
+        cat > .anvil-tools/security-inventory <<'SCRIPT'
+        #!/usr/bin/env bash
+        set -euo pipefail
+        namespaces="${HAZY_SITES_NAMESPACES:-}"
+        IFS=',' read -r -a ns_list <<< "${namespaces}"
+        echo "=== cluster-scoped RBAC (top clusterrolebindings) ==="
+        kubectl get clusterrolebinding -o wide 2>/dev/null | head -n 50 || true
+        echo "=== nodes ==="
+        kubectl get nodes -o wide 2>/dev/null || true
+        for ns in "${ns_list[@]}"; do
+          ns="$(echo "${ns}" | tr -d '[:space:]')"
+          [[ -z "${ns}" ]] && continue
+          echo "=== security inventory ${ns} ==="
+          kubectl get sa,role,rolebinding,networkpolicy,ingress,httproute -n "${ns}" 2>/dev/null || true
+          kubectl get deploy,sts,ds -n "${ns}" -o json 2>/dev/null | \
+            jq -r '
+              .items[]? |
+              "\(.kind)/\(.metadata.name) sa=\(.spec.template.spec.serviceAccountName // "default") hostNetwork=\(.spec.template.spec.hostNetwork // false) privileged=\([.spec.template.spec.containers[]? | .securityContext.privileged // false] | any)"
+            ' 2>/dev/null || true
+        done
+        SCRIPT
+        chmod 0700 .anvil-tools/security-inventory
+      verifyCommand: ["bash", "-lc", "test -x .anvil-tools/security-inventory"]
+    - name: anvil-hotline
+      description: Discord human-comms tool for escalation.
+      setupScript: |
+        set -eu
+        install_dir="${HOME}/.local/bin"
+        mkdir -p "${install_dir}"
+        export PATH="${install_dir}:${PATH}"
+        if ! command -v anvil-hotline >/dev/null 2>&1; then
+          GOBIN="${install_dir}" CGO_ENABLED=0 \
+            go install github.com/hazyforge/anvil-hotline/cmd/anvil-hotline@v0.1.0
+        fi
+      verifyCommand: [bash, -lc, 'export PATH="$HOME/.local/bin:$PATH"; anvil-hotline --help']

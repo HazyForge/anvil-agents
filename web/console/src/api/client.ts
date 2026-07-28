@@ -166,3 +166,39 @@ export async function getUIConfig(signal?: AbortSignal): Promise<{ runs?: UIConf
   }
   return (await response.json()) as { runs?: UIConfigRuns };
 }
+
+export type CreateAgentRunBody = {
+  generateName?: string;
+  name?: string;
+  prompt: string;
+  profileName: string;
+  harnessProfileName?: string;
+  skillSetNames?: string[];
+  toolSetNames?: string[];
+  intent?: string;
+  purpose?: string;
+  sourceKind?: string;
+  sourceName?: string;
+};
+
+export async function createAgentRun(
+  token: string,
+  namespace: string,
+  body: CreateAgentRunBody,
+  signal?: AbortSignal,
+): Promise<AgentRunView> {
+  const response = await apiFetch(
+    `/api/v1/namespaces/${encodeURIComponent(namespace)}/agent-runs`,
+    token,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+      signal,
+    },
+  );
+  if (!response.ok) {
+    throw await readAPIError(response);
+  }
+  return (await response.json()) as AgentRunView;
+}

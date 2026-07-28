@@ -1,0 +1,74 @@
+apiVersion: control.anvil.hazyforge.io/v1alpha1
+kind: AgentRunControl
+metadata:
+  name: hazy-sites
+  labels:
+    app.kubernetes.io/part-of: hazy-sites-agents
+    control.anvil.hazyforge.io/ownership: gitops
+spec:
+  applicationRef:
+    name: hazy-sites
+  launchPolicy: Allowed
+  # Cap concurrent agent work on the single-node sites pool.
+  maxConcurrentRuns: 1
+  reason: Single-node hazy-sites concurrency cap for site-heal and security agents.
+---
+apiVersion: control.anvil.hazyforge.io/v1alpha1
+kind: AgentSchedule
+metadata:
+  name: hazy-sites-grok45-site-healer
+  namespace: anvil-agents-system
+  labels:
+    app.kubernetes.io/name: hazy-sites-site-healer
+    app.kubernetes.io/part-of: hazy-sites-agents
+    control.anvil.hazyforge.io/ownership: gitops
+spec:
+  applicationRef:
+    name: hazy-sites
+  # Start suspended until xAI secret + first manual smoke succeed.
+  suspend: true
+  intervalSeconds: 900
+  initialDelaySeconds: 120
+  concurrencyPolicy: Forbid
+  maxConcurrentRuns: 1
+  maxRunsPerDay: 48
+  runTemplates:
+    - name: site-heal-pass
+      template:
+        purpose: scheduledHealthCheck
+        profileRef:
+          name: hazy-sites-grok45-site-healer
+        prompt: |
+          Run site-health across managed namespaces. Fix only clear transient
+          pod/rollout failures with the least invasive restart. Report healthy,
+          fixed, and still-broken sites with evidence.
+---
+apiVersion: control.anvil.hazyforge.io/v1alpha1
+kind: AgentSchedule
+metadata:
+  name: hazy-sites-grok45-security-scanner
+  namespace: anvil-agents-system
+  labels:
+    app.kubernetes.io/name: hazy-sites-security-scanner
+    app.kubernetes.io/part-of: hazy-sites-agents
+    control.anvil.hazyforge.io/ownership: gitops
+spec:
+  applicationRef:
+    name: hazy-sites
+  # Start suspended until xAI secret + first manual smoke succeed.
+  suspend: true
+  intervalSeconds: 86400
+  initialDelaySeconds: 600
+  concurrencyPolicy: Forbid
+  maxConcurrentRuns: 1
+  maxRunsPerDay: 2
+  runTemplates:
+    - name: daily-security-pass
+      template:
+        purpose: scheduledHealthCheck
+        profileRef:
+          name: hazy-sites-grok45-security-scanner
+        prompt: |
+          Run security-inventory and a focused security review of hazy-sites.
+          Report Critical/High first with concrete remediations. Do not mutate
+          anything.

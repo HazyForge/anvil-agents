@@ -1,0 +1,19 @@
+apiVersion: control.anvil.hazyforge.io/v1alpha1
+kind: AgentDataVolume
+metadata:
+  name: hazy-sites-grok-home
+  namespace: anvil-agents-system
+  labels:
+    app.kubernetes.io/part-of: hazy-sites-agents
+    control.anvil.hazyforge.io/ownership: gitops
+spec:
+  # Shared durable Grok home for both Grok 4.5 site agents (OAuth auth.json).
+  agentName: hazy-sites-grok45
+  backend: grokBuild
+  applicationRef:
+    name: hazy-sites
+  storageClassName: hcloud-volumes
+  size: 2Gi
+  accessModes:
+    - ReadWriteOnce
+  notes: Durable Grok Build home for hazy-sites site-healer and security-scanner OAuth state.

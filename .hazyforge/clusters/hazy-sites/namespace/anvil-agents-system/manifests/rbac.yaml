@@ -1,0 +1,150 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: hazy-sites-site-healer
+  namespace: anvil-agents-system
+  labels:
+    app.kubernetes.io/name: hazy-sites-site-healer
+    app.kubernetes.io/part-of: hazy-sites-agents
+automountServiceAccountToken: true
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: hazy-sites-security-scanner
+  namespace: anvil-agents-system
+  labels:
+    app.kubernetes.io/name: hazy-sites-security-scanner
+    app.kubernetes.io/part-of: hazy-sites-agents
+automountServiceAccountToken: true
+---
+# Site healer may inspect and perform bounded restarts across site namespaces.
+# It must not delete namespaces, PVCs, Secrets, or CRDs.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: hazy-sites-site-healer
+  labels:
+    app.kubernetes.io/name: hazy-sites-site-healer
+    app.kubernetes.io/part-of: hazy-sites-agents
+rules:
+  - apiGroups: [""]
+    resources: [namespaces, nodes, persistentvolumeclaims, configmaps, services, endpoints, events, pods, pods/log, pods/status]
+    verbs: [get, list, watch]
+  - apiGroups: [""]
+    resources: [pods]
+    verbs: [delete] # restart via delete; controllers recreate
+  - apiGroups: [apps]
+    resources: [deployments, deployments/status, statefulsets, statefulsets/status, daemonsets, daemonsets/status, replicasets, replicasets/status]
+    verbs: [get, list, watch]
+  - apiGroups: [apps]
+    resources: [deployments, statefulsets, daemonsets]
+    verbs: [patch] # rollout restart annotation only
+  - apiGroups: [batch]
+    resources: [jobs, cronjobs]
+    verbs: [get, list, watch]
+  - apiGroups: [networking.k8s.io]
+    resources: [ingresses, networkpolicies]
+    verbs: [get, list, watch]
+  - apiGroups: [gateway.networking.k8s.io]
+    resources: [gateways, httproutes, referencegrants, grpcroutes]
+    verbs: [get, list, watch]
+  - apiGroups: [cert-manager.io]
+    resources: [certificates, certificaterequests, issuers, clusterissuers]
+    verbs: [get, list, watch]
+  - apiGroups: [argoproj.io]
+    resources: [applications, applicationsets, appprojects]
+    verbs: [get, list, watch]
+  - apiGroups: [external-secrets.io]
+    resources: [externalsecrets, secretstores, clustersecretstores]
+    verbs: [get, list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: hazy-sites-site-healer
+  labels:
+    app.kubernetes.io/name: hazy-sites-site-healer
+    app.kubernetes.io/part-of: hazy-sites-agents
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: hazy-sites-site-healer
+subjects:
+  - kind: ServiceAccount
+    name: hazy-sites-site-healer
+    namespace: anvil-agents-system
+---
+# Security scanner is read-only: inventory, RBAC, network posture, workload config.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: hazy-sites-security-scanner
+  labels:
+    app.kubernetes.io/name: hazy-sites-security-scanner
+    app.kubernetes.io/part-of: hazy-sites-agents
+rules:
+  - apiGroups: [""]
+    resources:
+      - namespaces
+      - nodes
+      - pods
+      - pods/log
+      - services
+      - endpoints
+      - configmaps
+      - serviceaccounts
+      - events
+      - persistentvolumeclaims
+      - resourcequotas
+      - limitranges
+    verbs: [get, list, watch]
+  - apiGroups: [""]
+    resources: [secrets]
+    verbs: [get, list, watch] # needed for imagePullSecret presence / secret-type audit only
+  - apiGroups: [apps]
+    resources: [deployments, statefulsets, daemonsets, replicasets]
+    verbs: [get, list, watch]
+  - apiGroups: [batch]
+    resources: [jobs, cronjobs]
+    verbs: [get, list, watch]
+  - apiGroups: [rbac.authorization.k8s.io]
+    resources: [roles, rolebindings, clusterroles, clusterrolebindings]
+    verbs: [get, list, watch]
+  - apiGroups: [networking.k8s.io]
+    resources: [ingresses, networkpolicies]
+    verbs: [get, list, watch]
+  - apiGroups: [gateway.networking.k8s.io]
+    resources: [gateways, httproutes, referencegrants, grpcroutes]
+    verbs: [get, list, watch]
+  - apiGroups: [policy]
+    resources: [poddisruptionbudgets]
+    verbs: [get, list, watch]
+  - apiGroups: [security.istio.io, networking.istio.io]
+    resources: ["*"]
+    verbs: [get, list, watch]
+  - apiGroups: [cert-manager.io]
+    resources: [certificates, certificaterequests, issuers, clusterissuers]
+    verbs: [get, list, watch]
+  - apiGroups: [external-secrets.io]
+    resources: [externalsecrets, secretstores, clustersecretstores]
+    verbs: [get, list, watch]
+  - apiGroups: [argoproj.io]
+    resources: [applications, applicationsets, appprojects]
+    verbs: [get, list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: hazy-sites-security-scanner
+  labels:
+    app.kubernetes.io/name: hazy-sites-security-scanner
+    app.kubernetes.io/part-of: hazy-sites-agents
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: hazy-sites-security-scanner
+subjects:
+  - kind: ServiceAccount
+    name: hazy-sites-security-scanner
+    namespace: anvil-agents-system
