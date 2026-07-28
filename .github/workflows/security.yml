@@ -8,8 +8,6 @@ on:
   pull_request:
   schedule:
     - cron: "23 7 * * 1"
-  release:
-    types: [published]
   workflow_dispatch:
 
 permissions:
@@ -36,11 +34,13 @@ jobs:
     name: "free · govulncheck"
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
           go-version: ${{ env.GO_VERSION }}
-          cache: true
+          cache: false
       - run: go install golang.org/x/vuln/cmd/govulncheck@latest
       - run: govulncheck ./...
       - run: |
@@ -51,12 +51,14 @@ jobs:
     name: "free · gosec"
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
           go-version: ${{ env.GO_VERSION }}
-          cache: true
-      - uses: securego/gosec@master
+          cache: false
+      - uses: securego/gosec@45b083a0cb42119d61b1e0e364d8c62c68f6f5cd # master
         with:
           args: >-
             -no-fail=false -fmt=sarif -out=gosec.sarif
@@ -65,7 +67,7 @@ jobs:
             ./cmd/... ./internal/... ./api/... ./lib/...
       - if: always() && hashFiles('gosec.sarif') != ''
         continue-on-error: true
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@3b0bd1d116c0bde30213346b22d4f634d96a2fb0 # v3
         with:
           sarif_file: gosec.sarif
           category: gosec
@@ -74,19 +76,23 @@ jobs:
     name: "free · CodeQL"
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: github/codeql-action/init@v3
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: github/codeql-action/init@3b0bd1d116c0bde30213346b22d4f634d96a2fb0 # v3
         with:
           languages: go
           queries: security-extended
-      - uses: github/codeql-action/autobuild@v3
-      - uses: github/codeql-action/analyze@v3
+      - uses: github/codeql-action/autobuild@3b0bd1d116c0bde30213346b22d4f634d96a2fb0 # v3
+      - uses: github/codeql-action/analyze@3b0bd1d116c0bde30213346b22d4f634d96a2fb0 # v3
 
   osv:
     name: "free · OSV-Scanner"
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
       - name: Install OSV-Scanner
         run: ./hack/ci-install-security-tools.sh osv
       - name: Scan lockfiles
@@ -112,7 +118,7 @@ jobs:
           echo "osv-scanner tool error exit=$code" >&2
           exit "$code"
       - if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: osv-scanner
           path: dist/security/osv.txt
@@ -122,11 +128,13 @@ jobs:
     name: "free · owned-deps / anvil-hotline"
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
           go-version: ${{ env.GO_VERSION }}
-          cache: true
+          cache: false
       - name: Install tools
         run: |
           ./hack/ci-install-security-tools.sh trivy
@@ -165,14 +173,14 @@ jobs:
           # still fail when osv tool errors (exit > 1).
           if [[ "$ocode" -gt 1 ]]; then exit "$ocode"; fi
       - if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: owned-deps-anvil-hotline
           path: dist/security/owned/
           if-no-files-found: warn
       - if: always() && hashFiles('dist/security/owned/anvil-hotline.sarif') != ''
         continue-on-error: true
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@3b0bd1d116c0bde30213346b22d4f634d96a2fb0 # v3
         with:
           sarif_file: dist/security/owned/anvil-hotline.sarif
           category: owned-deps-anvil-hotline
@@ -181,7 +189,9 @@ jobs:
     name: "free · trivy / filesystem"
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
       - name: Install Trivy
         run: ./hack/ci-install-security-tools.sh trivy
       - name: Trivy filesystem
@@ -207,14 +217,14 @@ jobs:
           trivy fs --format cyclonedx --output dist/security/fs/sbom.cdx.json \
             --skip-dirs web/console --skip-dirs dist --skip-dirs .cate . || true
       - if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: trivy-filesystem-sbom
           path: dist/security/fs/
           if-no-files-found: warn
       - if: always() && hashFiles('dist/security/fs/repo.sarif') != ''
         continue-on-error: true
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@3b0bd1d116c0bde30213346b22d4f634d96a2fb0 # v3
         with:
           sarif_file: dist/security/fs/repo.sarif
           category: trivy-filesystem
@@ -228,8 +238,10 @@ jobs:
       contents: read
       pull-requests: write
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/dependency-review-action@v4
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/dependency-review-action@da24556b548a50705dd671f47852072ea4c105d9 # v4
         with:
           fail-on-severity: high
           comment-summary-in-pr: on-failure
@@ -248,12 +260,12 @@ jobs:
       run:
         working-directory: web/console
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: "22"
-          cache: npm
-          cache-dependency-path: web/console/package-lock.json
       - name: npm ci + audit
         run: |
           set -euo pipefail
@@ -273,7 +285,7 @@ jobs:
           # remain visible in the summary/artifact (job is continue-on-error too).
           exit 0
       - if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: npm-audit-console
           path: dist-npm-audit.txt
@@ -283,7 +295,9 @@ jobs:
     name: "free · hadolint / Dockerfiles"
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
       - run: ./hack/ci-install-security-tools.sh hadolint
       - name: Lint Dockerfiles
         run: |
@@ -300,8 +314,10 @@ jobs:
     name: "free · checkov / helm"
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: bridgecrewio/checkov-action@v12
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: bridgecrewio/checkov-action@7b972723c44fb3d256283fac96fae5d7c1894bb7 # v12
         with:
           directory: charts/anvil-agents
           framework: helm
@@ -310,7 +326,7 @@ jobs:
           output_file_path: console,results.sarif
       - if: always() && hashFiles('results.sarif') != ''
         continue-on-error: true
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@3b0bd1d116c0bde30213346b22d4f634d96a2fb0 # v3
         with:
           sarif_file: results.sarif
           category: checkov-helm
@@ -319,9 +335,10 @@ jobs:
     name: "free · gitleaks / secrets"
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           fetch-depth: 0
+          persist-credentials: false
       - name: Install gitleaks CLI (free OSS; no license)
         run: ./hack/ci-install-security-tools.sh gitleaks
       - name: Scan history for secrets
@@ -333,7 +350,7 @@ jobs:
             --report-path dist/security/gitleaks.json \
             --report-format json
       - if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: gitleaks
           path: dist/security/gitleaks.json
@@ -342,9 +359,10 @@ jobs:
   zizmor:
     name: "free · zizmor / workflows"
     runs-on: ubuntu-latest
-    continue-on-error: true
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
       - run: ./hack/ci-install-security-tools.sh zizmor
       - name: Audit workflows
         run: |
@@ -353,7 +371,7 @@ jobs:
           mkdir -p dist/security
           zizmor --format plain .github/workflows | tee dist/security/zizmor.txt
       - if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: zizmor-workflows
           path: dist/security/zizmor.txt
@@ -391,8 +409,10 @@ jobs:
       contents: read
       security-events: write
     steps:
-      - uses: actions/checkout@v4
-      - uses: docker/setup-buildx-action@v3
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
       - name: Install scanners
         run: |
           ./hack/ci-install-security-tools.sh trivy
@@ -412,7 +432,7 @@ jobs:
         run: |
           set -euo pipefail
           export PATH="${HOME}/.local/bin:${PATH}"
-          tag="${{ steps.build.outputs.tag }}"
+          tag="${STEPS_BUILD_OUTPUTS_TAG}"
           ref="${{ matrix.image }}:${tag}"
           mkdir -p dist/security/trivy dist/security/grype dist/security/sbom
           # Free dual-scanner + SBOM for every image. Findings are reported as
@@ -450,8 +470,10 @@ jobs:
             cat dist/security/trivy/summary.txt 2>/dev/null || true
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
+        env:
+          STEPS_BUILD_OUTPUTS_TAG: ${{ steps.build.outputs.tag }}
       - if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: container-${{ matrix.component }}
           path: |
@@ -461,13 +483,13 @@ jobs:
           if-no-files-found: warn
       - if: always() && hashFiles(format('dist/security/trivy/{0}.sarif', matrix.component)) != ''
         continue-on-error: true
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@3b0bd1d116c0bde30213346b22d4f634d96a2fb0 # v3
         with:
           sarif_file: dist/security/trivy/${{ matrix.component }}.sarif
           category: trivy-image-${{ matrix.component }}
       - if: always() && hashFiles(format('dist/security/grype/{0}.sarif', matrix.component)) != ''
         continue-on-error: true
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@3b0bd1d116c0bde30213346b22d4f634d96a2fb0 # v3
         with:
           sarif_file: dist/security/grype/${{ matrix.component }}.sarif
           category: grype-image-${{ matrix.component }}
@@ -485,10 +507,10 @@ jobs:
       contents: read
       actions: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           persist-credentials: false
-      - uses: ossf/scorecard-action@v2.4.0
+      - uses: ossf/scorecard-action@ff5dd8929f96a8a4dc67d13f32b8c75057829621 # v2.4.0
         continue-on-error: true
         with:
           results_file: results.sarif
@@ -496,7 +518,7 @@ jobs:
           publish_results: true
       - if: always() && hashFiles('results.sarif') != ''
         continue-on-error: true
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@3b0bd1d116c0bde30213346b22d4f634d96a2fb0 # v3
         with:
           sarif_file: results.sarif
           category: openssf-scorecard
@@ -513,8 +535,10 @@ jobs:
       - hadolint
       - checkov
       - gitleaks
+      - zizmor
       - container-scan
-    # npm-audit, dependency-review, zizmor, scorecard are advisory free signals.
+    # npm-audit (react-router registry lag), dependency-review (needs Dependency
+    # graph setting), and scorecard remain advisory free signals.
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -536,15 +560,16 @@ jobs:
           check hadolint "${{ needs.hadolint.result }}"
           check checkov "${{ needs.checkov.result }}"
           check gitleaks "${{ needs.gitleaks.result }}"
+          check zizmor "${{ needs.zizmor.result }}"
           check container-scan "${{ needs['container-scan'].result }}"
           {
             echo "## Free public security program"
             echo "Public Actions minutes only — no paid scanners."
             echo ""
             echo "### Required"
-            echo "govulncheck · gosec · CodeQL · OSV · owned-deps · trivy-fs · hadolint · checkov · gitleaks · image×7 (Trivy+Grype+SBOM)"
+            echo "govulncheck · gosec · CodeQL · OSV · owned-deps · trivy-fs · hadolint · checkov · gitleaks · zizmor · image×7 (Trivy+Grype+SBOM)"
             echo ""
             echo "### Advisory (still run free)"
-            echo "npm audit · dependency-review · zizmor · OpenSSF Scorecard · Dependabot"
+            echo "npm audit · dependency-review · OpenSSF Scorecard · Dependabot"
           } >> "$GITHUB_STEP_SUMMARY"
           test "$failed" -eq 0
