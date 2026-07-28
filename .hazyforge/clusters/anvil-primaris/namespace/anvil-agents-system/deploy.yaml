@@ -44,7 +44,8 @@ archive:
   databaseURLSecret:
     name: anvilhub-inventory-database
     key: database-url
-  terminalRetention: 72h
+  # Live CRs prune after archive; console purge can keep the board shorter.
+  terminalRetention: 24h
 # The read-only API uses the existing Anvil Primaris resource audience and an
 # explicit compatibility binding. Replace this administrative role with the
 # narrower anvil_agents_viewer role when that role is provisioned in ZITADEL.
@@ -63,6 +64,8 @@ api:
     runs:
       # Append-only AgentRun create remains available for future run launch UI.
       createEnabled: true
+      # Console can purge terminal live CRs after PostgreSQL archive success.
+      purgeEnabled: true
     authorization:
       roleClaims: []
       roleObjectClaims:
@@ -75,6 +78,7 @@ api:
             - anvil-agents:runs:read
             - anvil-agents:runs:stream
             - anvil-agents:runs:create
+            - anvil-agents:runs:purge
             - anvil-agents:composition:read
             - anvil-agents:composition:write
           namespaces:

@@ -184,9 +184,15 @@ LIMIT 10;
 ```
 
 Archive rows have no automatic expiry in this release. Define database backup,
-monitoring, capacity, and row-retention policy outside the controller. The
-standalone API and CLI currently read live Kubernetes AgentRuns, not archived
-rows.
+monitoring, capacity, and row-retention policy outside the controller.
+
+The console API can list archive rows from PostgreSQL (`GET
+/api/v1/namespaces/{ns}/agent-run-archives`) when the API process has
+`ANVIL_AGENTS_ARCHIVE_DATABASE_URL`. Live-board cleanup is separate: `POST
+/api/v1/namespaces/{ns}/agent-runs/purge` (permission
+`anvil-agents:runs:purge`, opt-in `api.config.runs.purgeEnabled`) deletes
+terminal Kubernetes AgentRun CRs only after a successful archive status (and,
+when configured, a matching PostgreSQL row). Archive history is retained.
 
 Switching modes does not copy data. Back up, restore or replicate the existing
 database, point the new mode at the migrated data, verify a real archive row,

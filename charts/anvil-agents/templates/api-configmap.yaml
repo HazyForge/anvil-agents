@@ -34,8 +34,9 @@
 {{- $compositionRead := dig "composition" "readEnabled" false $.Values.api.config }}
 {{- $compositionWrite := dig "composition" "writeEnabled" false $.Values.api.config }}
 {{- $runsCreate := dig "runs" "createEnabled" false $.Values.api.config }}
+{{- $runsPurge := dig "runs" "purgeEnabled" false $.Values.api.config }}
 {{- range $permission := $binding.permissions }}
-{{- if not (has $permission (list "anvil-agents:runs:read" "anvil-agents:runs:stream" "anvil-agents:runs:create" "anvil-agents:composition:read" "anvil-agents:composition:write")) }}
+{{- if not (has $permission (list "anvil-agents:runs:read" "anvil-agents:runs:stream" "anvil-agents:runs:create" "anvil-agents:runs:purge" "anvil-agents:composition:read" "anvil-agents:composition:write")) }}
 {{- fail (printf "api.config.authorization binding contains unsupported permission %q" $permission) }}
 {{- end }}
 {{- if and (eq $permission "anvil-agents:composition:read") (not $compositionRead) }}
@@ -46,6 +47,9 @@
 {{- end }}
 {{- if and (eq $permission "anvil-agents:runs:create") (not $runsCreate) }}
 {{- fail "api.config.authorization grants anvil-agents:runs:create but api.config.runs.createEnabled is false" }}
+{{- end }}
+{{- if and (eq $permission "anvil-agents:runs:purge") (not $runsPurge) }}
+{{- fail "api.config.authorization grants anvil-agents:runs:purge but api.config.runs.purgeEnabled is false" }}
 {{- end }}
 {{- end }}
 {{- if not (or $binding.namespaces $binding.namespacesFromClaim) }}

@@ -196,6 +196,8 @@ api:
     # Append-only AgentRun create for console agent cards.
     runs:
       createEnabled: false
+      # Purge deletes terminal live AgentRun CRs only after PostgreSQL archive.
+      purgeEnabled: false
     list:
       maxItems: 5000
     stream:

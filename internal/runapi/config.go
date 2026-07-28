@@ -16,6 +16,7 @@ const (
 	PermissionRunsRead         = "anvil-agents:runs:read"
 	PermissionRunsStream       = "anvil-agents:runs:stream"
 	PermissionRunsCreate       = "anvil-agents:runs:create"
+	PermissionRunsPurge        = "anvil-agents:runs:purge"
 	PermissionCompositionRead  = "anvil-agents:composition:read"
 	PermissionCompositionWrite = "anvil-agents:composition:write"
 )
@@ -25,6 +26,7 @@ var knownPermissions = map[string]struct{}{
 	PermissionRunsRead:         {},
 	PermissionRunsStream:       {},
 	PermissionRunsCreate:       {},
+	PermissionRunsPurge:        {},
 	PermissionCompositionRead:  {},
 	PermissionCompositionWrite: {},
 }
@@ -47,6 +49,9 @@ type Config struct {
 type RunsConfig struct {
 	// CreateEnabled serves POST /agent-runs when true.
 	CreateEnabled bool `json:"createEnabled"`
+	// PurgeEnabled serves POST /agent-runs/purge when true. Purge only deletes
+	// terminal live CRs that already have a successful PostgreSQL archive.
+	PurgeEnabled bool `json:"purgeEnabled"`
 }
 
 // CompositionConfig controls composition library endpoints. GitOps remains the
@@ -283,6 +288,9 @@ func (config Config) Validate() error {
 			}
 			if permission == PermissionRunsCreate && !config.Runs.CreateEnabled {
 				return fmt.Errorf("authorization %s grants %s but runs.createEnabled is false", name, permission)
+			}
+			if permission == PermissionRunsPurge && !config.Runs.PurgeEnabled {
+				return fmt.Errorf("authorization %s grants %s but runs.purgeEnabled is false", name, permission)
 			}
 		}
 		if len(binding.Namespaces) == 0 && !binding.NamespacesFromClaim {
