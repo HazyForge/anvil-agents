@@ -1,98 +1,79 @@
-# Public security program (GitHub Actions)
+# Free public security program (GitHub Actions)
 
-`anvil-agents` is an **open-source** repository. Security evidence lives in
-**public GitHub Actions** so anyone can see what was scanned before they run
-images. This is intentionally **independent of Anvil Primaris lifecycle**.
+`anvil-agents` is open source. Security evidence is **as many free scanners as
+practical**, running on **public GitHub Actions minutes** (no paid SaaS, no
+Primaris lifecycle coupling). Anyone can open the Actions tab and inspect
+check runs, job summaries, artifacts, and the Security tab.
 
-Primaris only **installs** this operator into the home cluster via GitOps:
+Primaris only **installs** this operator:
 
 ```text
 .hazyforge/clusters/anvil-primaris/namespace/anvil-agents-system/
 ```
 
-That overlay pins digests and deploys the chart. It does **not** own security
-gates, TestContract security suites, or release scan orchestration.
+## Free scanners (security.yml)
 
-## What people can inspect on GitHub
-
-Workflow: [`.github/workflows/security.yml`](../.github/workflows/security.yml)
-
-| Layer | Public jobs | What it proves |
+| Layer | Public job name | Tool (cost) |
 | --- | --- | --- |
-| Source | `govulncheck / module+binary`, `gosec / static analysis`, `codeql / go` | This repo’s Go code |
-| Owned deps | `owned-deps / anvil-hotline` | First-party `anvil-hotline` pin used by every runner image |
-| Repo deps / configs | `trivy / filesystem+deps`, PR `dependency-review` | go.mod, Dockerfiles, charts, secrets/misconfig |
-| Containers | `trivy / controller` … `trivy / pi` (7 named jobs) | Full breadth of operator + agent tooling images |
-| Trust | `openssf-scorecard` | OpenSSF scorecard on default branch |
-| Gate | `security-gate` | All required jobs green |
+| Go vulns | `free · govulncheck` | govulncheck (free) |
+| Go SAST | `free · gosec` | gosec (free) |
+| Go SAST | `free · CodeQL` | GitHub CodeQL free for public repos |
+| Lockfiles | `free · OSV-Scanner` | Google OSV (free) |
+| Owned dep | `free · owned-deps / anvil-hotline` | govulncheck + Trivy + OSV on pin |
+| Repo FS | `free · trivy / filesystem` | Trivy vuln/secret/misconfig + SBOM |
+| PR graph | `free · dependency-review` | GitHub free for public repos |
+| Console | `free · npm audit / console` | npm audit (free) |
+| Dockerfiles | `free · hadolint / Dockerfiles` | Hadolint (free) |
+| Helm | `free · checkov / helm` | Checkov OSS (free) |
+| Secrets | `free · gitleaks / secrets` | Gitleaks free for public |
+| Workflows | `free · zizmor / workflows` | zizmor (free, advisory) |
+| Images ×7 | `free · image / <component>` | **Trivy + Grype + CycloneDX SBOM** |
+| Trust | `free · OpenSSF Scorecard` | Scorecard free for public |
+| Gate | `free · security-gate` | Requires the required jobs green |
+| Updates | Dependabot | Free alerts + PRs (gomod, npm, docker, actions, helm) |
 
-Each container job includes a **job summary** (role of the image, Trivy
-excerpt) and **downloadable artifacts** + **SARIF** for the Security tab.
+### Containers (breadth of tooling)
 
-### Containers covered
+Each of the seven images gets its **own named free check run**:
 
-| Component | Image | Role |
-| --- | --- | --- |
-| controller | `anvil-agents` | Operator + API + console |
-| codex | `anvil-agent-run-codex` | Codex runner + anvil-hotline |
-| opencode | `anvil-agent-run-opencode` | OpenCode runner + anvil-hotline |
-| grok-build | `anvil-agent-run-grok-build` | Grok Build runner + anvil-hotline |
-| hermes | `anvil-agent-run-hermes` | Hermes runner + anvil-hotline |
-| openclaw | `anvil-agent-run-openclaw` | OpenClaw runner + anvil-hotline |
-| pi | `anvil-agent-run-pi` | Pi runner + anvil-hotline |
+| Component | Image |
+| --- | --- |
+| controller | `anvil-agents` |
+| codex | `anvil-agent-run-codex` |
+| opencode | `anvil-agent-run-opencode` |
+| grok-build | `anvil-agent-run-grok-build` |
+| hermes | `anvil-agent-run-hermes` |
+| openclaw | `anvil-agent-run-openclaw` |
+| pi | `anvil-agent-run-pi` |
 
-Trivy fails on **HIGH/CRITICAL** (unfixed CVEs ignored by default).
+Per image: Trivy (HIGH/CRITICAL), Grype (high+), CycloneDX SBOM artifact.
 
-### Owned dependency pin
+### Owned first-party pin
 
-Runner Dockerfiles pin:
+Runner Dockerfiles pin `ANVIL_HOTLINE_VERSION`. The owned-deps job requires a
+single pin and scans that public tag.
 
-```dockerfile
-ARG ANVIL_HOTLINE_VERSION=v0.1.0
-```
+## When it runs (all free public minutes)
 
-The `owned-deps / anvil-hotline` job requires a **single** pin across all
-runner Dockerfiles, checks out that public tag, and runs govulncheck + Trivy
-filesystem against it.
-
-## When it runs
-
-- Every PR and push to `master` / `main`
-- Weekly schedule (public minutes)
+- Every PR / push to `master` / `main`
+- Weekly schedule
 - GitHub Releases
 - Manual `workflow_dispatch`
-- Publish workflow requires security green before GHCR push
+- Publish workflow waits on security before GHCR push
 
-## Local mirrors (optional)
-
-Same tools as Actions; not required for Primaris install:
+## Local optional mirrors
 
 ```bash
-make security              # govulncheck + gosec
-make security-trivy        # build + Trivy every container
-make security-all          # full local parity with security-gate
-./hack/security-trivy-images.sh --component controller
+make security          # govulncheck + gosec
+make security-trivy    # Trivy all containers
+make security-all      # both
 ```
 
-## Primaris install only
+## Branch protection tip
 
-```bash
-# Build/push images and pin the Primaris overlay (no security gate here)
-VERSION=vX.Y.Z make release-primaris-fast
+Protect `master` with required check: **`free · security-gate`**.
 
-# Apply chart + pinned digests to the cluster
-make deploy-primaris
-```
+## GitHub settings (once, free)
 
-Security for consumers remains the green **Actions** run on the tag/commit
-they trust—not a Primaris TestRun.
-
-## GitHub settings (once)
-
-1. **Settings → Code security** — Code scanning, Dependency graph, Dependabot.
-2. Workflows use `security-events: write` for SARIF upload.
-
-## Failure policy
-
-Any required `security.yml` job failing (including any single container Trivy
-job or the owned-deps scan) fails `security-gate` and blocks publish.
+1. **Code security** — enable Dependency graph, Dependabot alerts, Code scanning.
+2. No paid Advanced Security required for a **public** repository.

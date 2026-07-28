@@ -1,0 +1,8 @@
+# Free Hadolint config for public CI. Style/noise rules ignored; real errors fail.
+failure-threshold: error
+ignored:
+  - DL3008 # pin versions in apt-get (base image churn)
+  - DL3018 # pin versions in apk
+  - DL3009 # delete apt lists (multi-stage often reuses)
+  - DL3059 # multiple consecutive RUN (readability vs layer count)
+  - DL4006 # pipefail (not always available in shell form)
