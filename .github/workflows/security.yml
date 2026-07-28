@@ -65,7 +65,7 @@ jobs:
             ./cmd/... ./internal/... ./api/... ./lib/...
       - if: always() && hashFiles('gosec.sarif') != ''
         continue-on-error: true
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: gosec.sarif
           category: gosec
@@ -75,12 +75,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: github/codeql-action/init@v3
+      - uses: github/codeql-action/init@v4
         with:
           languages: go
           queries: security-extended
-      - uses: github/codeql-action/autobuild@v3
-      - uses: github/codeql-action/analyze@v3
+      - uses: github/codeql-action/autobuild@v4
+      - uses: github/codeql-action/analyze@v4
 
   osv:
     name: "free · OSV-Scanner"
@@ -172,7 +172,7 @@ jobs:
           if-no-files-found: warn
       - if: always() && hashFiles('dist/security/owned/anvil-hotline.sarif') != ''
         continue-on-error: true
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: dist/security/owned/anvil-hotline.sarif
           category: owned-deps-anvil-hotline
@@ -214,7 +214,7 @@ jobs:
           if-no-files-found: warn
       - if: always() && hashFiles('dist/security/fs/repo.sarif') != ''
         continue-on-error: true
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: dist/security/fs/repo.sarif
           category: trivy-filesystem
@@ -310,7 +310,7 @@ jobs:
           output_file_path: console,results.sarif
       - if: always() && hashFiles('results.sarif') != ''
         continue-on-error: true
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: results.sarif
           category: checkov-helm
@@ -461,13 +461,13 @@ jobs:
           if-no-files-found: warn
       - if: always() && hashFiles(format('dist/security/trivy/{0}.sarif', matrix.component)) != ''
         continue-on-error: true
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: dist/security/trivy/${{ matrix.component }}.sarif
           category: trivy-image-${{ matrix.component }}
       - if: always() && hashFiles(format('dist/security/grype/{0}.sarif', matrix.component)) != ''
         continue-on-error: true
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: dist/security/grype/${{ matrix.component }}.sarif
           category: grype-image-${{ matrix.component }}
@@ -496,7 +496,7 @@ jobs:
           publish_results: true
       - if: always() && hashFiles('results.sarif') != ''
         continue-on-error: true
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: results.sarif
           category: openssf-scorecard
