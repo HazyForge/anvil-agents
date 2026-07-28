@@ -10,9 +10,10 @@ on:
     - cron: "23 7 * * 1"
   workflow_dispatch:
 
+# Least privilege at workflow level (zizmor excessive-permissions).
+# Jobs that upload SARIF declare security-events: write themselves.
 permissions:
   contents: read
-  security-events: write
   actions: read
   pull-requests: read
 
@@ -50,6 +51,9 @@ jobs:
   gosec:
     name: "free · gosec"
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
@@ -75,6 +79,9 @@ jobs:
   codeql:
     name: "free · CodeQL"
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
@@ -127,6 +134,9 @@ jobs:
   owned-deps:
     name: "free · owned-deps / anvil-hotline"
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
@@ -188,6 +198,9 @@ jobs:
   trivy-fs:
     name: "free · trivy / filesystem"
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
@@ -313,6 +326,9 @@ jobs:
   checkov:
     name: "free · checkov / helm"
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
