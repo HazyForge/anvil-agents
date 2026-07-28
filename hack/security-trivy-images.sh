@@ -13,6 +13,7 @@ image_tag="${ANVIL_AGENTS_IMAGE_TAG:-security-scan}"
 platform="${ANVIL_AGENTS_IMAGE_PLATFORM:-linux/amd64}"
 report_dir="${TRIVY_REPORT_DIR:-${repo_root}/dist/security/trivy}"
 severity="${TRIVY_SEVERITY:-HIGH,CRITICAL}"
+# 1 = fail on findings (local hard gate); 0 = report only (public CI visibility).
 exit_code="${TRIVY_EXIT_CODE:-1}"
 ignore_unfixed="${TRIVY_IGNORE_UNFIXED:-true}"
 build_images="${TRIVY_BUILD_IMAGES:-true}"

@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 
-ARG GO_VERSION=1.25.5
+ARG GO_VERSION=1.26.5
 ARG HERMES_AGENT_IMAGE=nousresearch/hermes-agent:v2026.7.7.2
 FROM golang:${GO_VERSION}-bookworm AS agent-feedback-builder
 
