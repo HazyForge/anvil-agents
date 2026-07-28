@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Link, Navigate, Route, Routes, useLocation } from "react-router-dom";
-import { NamespaceSwitcher } from "./components/NamespaceSwitcher";
+import { Navigate, Route, Routes } from "react-router-dom";
+import { NamespaceTree } from "./components/NamespaceTree";
 import { LoginGate } from "./components/LoginGate";
 import { BoardPage } from "./pages/BoardPage";
 import { RunPage } from "./pages/RunPage";
@@ -33,7 +33,6 @@ export default function App() {
   const [compositionWrite, setCompositionWrite] = useState(false);
   /** Avoid catch-all redirect until /api/v1/ui-config finishes — deep links like /harness-profiles/new must not bounce to /. */
   const [configReady, setConfigReady] = useState(false);
-  const location = useLocation();
 
   useEffect(() => {
     clearLegacyToken();
@@ -142,9 +141,6 @@ export default function App() {
   }, []);
 
   const authed = useMemo(() => Boolean(token.trim()), [token]);
-  const profilesActive =
-    location.pathname.startsWith("/profiles") ||
-    /\/ns\/[^/]+\/profiles(\/|$)/.test(location.pathname);
 
   return (
     <Routes>
@@ -165,130 +161,118 @@ export default function App() {
                       : compositionRead
                         ? "Observer · profiles + library"
                         : "Observer · runs only"}
+                    {activeNamespace ? (
+                      <>
+                        {" · "}
+                        <span className="mono">{activeNamespace}</span>
+                      </>
+                    ) : null}
                   </div>
                 </div>
-                <nav className="top-nav" aria-label="Primary">
-                  <Link
-                    className={`top-nav-link${location.pathname === "/" || location.pathname.includes("/runs/") ? " active" : ""}`}
-                    to="/"
-                  >
-                    Runs
-                  </Link>
-                  {compositionRead ? (
-                    <>
-                      <Link className={`top-nav-link${profilesActive ? " active" : ""}`} to="/profiles">
-                        Profiles
-                      </Link>
-                      <Link
-                        className={`top-nav-link${location.pathname.startsWith("/library") || (!profilesActive && (location.pathname.includes("/skill-sets") || location.pathname.includes("/tool-sets") || location.pathname.includes("/volume") || location.pathname.includes("/harness") || location.pathname.includes("/data-volumes"))) ? " active" : ""}`}
-                        to="/library"
-                      >
-                        Library
-                      </Link>
-                    </>
-                  ) : null}
-                </nav>
-                <NamespaceSwitcher
-                  namespaces={namespaces}
-                  active={activeNamespace}
-                  onSelect={onSelectNamespace}
-                  onAdd={onAddNamespace}
-                  onRemove={onRemoveNamespace}
-                />
                 <div className="topbar-actions">
                   <button type="button" className="btn btn-danger" onClick={handleLogout}>
                     Sign out
                   </button>
                 </div>
               </header>
-              <main className="main">
-                <Routes>
-                  <Route path="/" element={<BoardPage token={token} namespace={activeNamespace} />} />
-                  <Route
-                    path="/ns/:namespace/runs/:name"
-                    element={<RunPage token={token} onViewNamespace={onViewNamespace} />}
-                  />
-                  {compositionRead ? (
-                    <>
-                      <Route
-                        path="/profiles"
-                        element={
-                          <ProfileCardsPage
-                            token={token}
-                            namespace={activeNamespace}
-                            writeEnabled={compositionWrite}
-                          />
-                        }
-                      />
-                      <Route
-                        path="/profiles/new"
-                        element={
-                          <ProfileEditorPage
-                            token={token}
-                            namespace={activeNamespace}
-                            writeEnabled={compositionWrite}
-                          />
-                        }
-                      />
-                      <Route
-                        path="/ns/:namespace/profiles"
-                        element={
-                          <ProfileCardsPage
-                            token={token}
-                            namespace={activeNamespace}
-                            writeEnabled={compositionWrite}
-                          />
-                        }
-                      />
-                      <Route
-                        path="/ns/:namespace/profiles/:name"
-                        element={
-                          <ProfileEditorPage
-                            token={token}
-                            namespace={activeNamespace}
-                            writeEnabled={compositionWrite}
-                          />
-                        }
-                      />
-                      <Route
-                        path="/library"
-                        element={
-                          <LibraryHubPage
-                            namespace={activeNamespace}
-                            writeEnabled={compositionWrite}
-                          />
-                        }
-                      />
-                      <Route
-                        path="/ns/:namespace/:kind"
-                        element={
-                          <CompositionListPage
-                            token={token}
-                            namespace={activeNamespace}
-                            writeEnabled={compositionWrite}
-                          />
-                        }
-                      />
-                      <Route
-                        path="/ns/:namespace/:kind/:name"
-                        element={
-                          <CompositionEditorPage
-                            token={token}
-                            namespace={activeNamespace}
-                            writeEnabled={compositionWrite}
-                          />
-                        }
-                      />
-                    </>
-                  ) : null}
-                  <Route path="/cards/*" element={<Navigate to="/profiles" replace />} />
-                  {!configReady ? (
-                    <Route path="*" element={<div className="empty">Loading console…</div>} />
-                  ) : (
-                    <Route path="*" element={<Navigate to="/" replace />} />
-                  )}
-                </Routes>
-              </main>
+              <div className="app-body">
+                <NamespaceTree
+                  namespaces={namespaces}
+                  activeNamespace={activeNamespace}
+                  compositionRead={compositionRead}
+                  onSelectNamespace={onSelectNamespace}
+                  onAddNamespace={onAddNamespace}
+                  onRemoveNamespace={onRemoveNamespace}
+                />
+                <main className="main">
+                  <Routes>
+                    <Route path="/" element={<BoardPage token={token} namespace={activeNamespace} />} />
+                    <Route
+                      path="/ns/:namespace/runs/:name"
+                      element={<RunPage token={token} onViewNamespace={onViewNamespace} />}
+                    />
+                    {compositionRead ? (
+                      <>
+                        <Route
+                          path="/profiles"
+                          element={
+                            <ProfileCardsPage
+                              token={token}
+                              namespace={activeNamespace}
+                              writeEnabled={compositionWrite}
+                            />
+                          }
+                        />
+                        <Route
+                          path="/profiles/new"
+                          element={
+                            <ProfileEditorPage
+                              token={token}
+                              namespace={activeNamespace}
+                              writeEnabled={compositionWrite}
+                            />
+                          }
+                        />
+                        <Route
+                          path="/ns/:namespace/profiles"
+                          element={
+                            <ProfileCardsPage
+                              token={token}
+                              namespace={activeNamespace}
+                              writeEnabled={compositionWrite}
+                            />
+                          }
+                        />
+                        <Route
+                          path="/ns/:namespace/profiles/:name"
+                          element={
+                            <ProfileEditorPage
+                              token={token}
+                              namespace={activeNamespace}
+                              writeEnabled={compositionWrite}
+                            />
+                          }
+                        />
+                        <Route
+                          path="/library"
+                          element={
+                            <LibraryHubPage
+                              namespace={activeNamespace}
+                              writeEnabled={compositionWrite}
+                            />
+                          }
+                        />
+                        <Route
+                          path="/ns/:namespace/:kind"
+                          element={
+                            <CompositionListPage
+                              token={token}
+                              namespace={activeNamespace}
+                              writeEnabled={compositionWrite}
+                            />
+                          }
+                        />
+                        <Route
+                          path="/ns/:namespace/:kind/:name"
+                          element={
+                            <CompositionEditorPage
+                              token={token}
+                              namespace={activeNamespace}
+                              writeEnabled={compositionWrite}
+                            />
+                          }
+                        />
+                      </>
+                    ) : null}
+                    <Route path="/cards/*" element={<Navigate to="/profiles" replace />} />
+                    {!configReady ? (
+                      <Route path="*" element={<div className="empty">Loading console…</div>} />
+                    ) : (
+                      <Route path="*" element={<Navigate to="/" replace />} />
+                    )}
+                  </Routes>
+                </main>
+              </div>
             </div>
           )
         }
