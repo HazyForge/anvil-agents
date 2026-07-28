@@ -162,7 +162,7 @@ jobs:
           echo '```' >> "${GITHUB_STEP_SUMMARY}"
       - name: Upload Trivy reports
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: release-trivy-${{ matrix.component }}-${{ inputs.tag }}
           path: dist/security/trivy/

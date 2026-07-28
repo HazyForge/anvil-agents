@@ -112,7 +112,7 @@ jobs:
           echo "osv-scanner tool error exit=$code" >&2
           exit "$code"
       - if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: osv-scanner
           path: dist/security/osv.txt
@@ -165,7 +165,7 @@ jobs:
           # still fail when osv tool errors (exit > 1).
           if [[ "$ocode" -gt 1 ]]; then exit "$ocode"; fi
       - if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: owned-deps-anvil-hotline
           path: dist/security/owned/
@@ -207,7 +207,7 @@ jobs:
           trivy fs --format cyclonedx --output dist/security/fs/sbom.cdx.json \
             --skip-dirs web/console --skip-dirs dist --skip-dirs .cate . || true
       - if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: trivy-filesystem-sbom
           path: dist/security/fs/
@@ -273,7 +273,7 @@ jobs:
           # remain visible in the summary/artifact (job is continue-on-error too).
           exit 0
       - if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: npm-audit-console
           path: dist-npm-audit.txt
@@ -333,7 +333,7 @@ jobs:
             --report-path dist/security/gitleaks.json \
             --report-format json
       - if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: gitleaks
           path: dist/security/gitleaks.json
@@ -353,7 +353,7 @@ jobs:
           mkdir -p dist/security
           zizmor --format plain .github/workflows | tee dist/security/zizmor.txt
       - if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: zizmor-workflows
           path: dist/security/zizmor.txt
@@ -451,7 +451,7 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
       - if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: container-${{ matrix.component }}
           path: |
