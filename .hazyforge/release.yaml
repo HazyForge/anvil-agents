@@ -1,0 +1,22 @@
+# Optional release notes for Anvil Primaris Application catalog.
+# Security is owned by public GitHub Actions, not Primaris lifecycle.
+apiVersion: anvil.hazyforge.io/release/v1alpha1
+kind: ReleaseContract
+metadata:
+  name: anvil-agents
+  application: anvil-agents
+spec:
+  description: >-
+    Standalone open-source agent execution operator and runner images.
+    Primaris cluster install is GitOps under .hazyforge/clusters/anvil-primaris/.
+    Security scanning is independent public GitHub Actions (security.yml).
+  testGateSuites:
+    - standalone-operator
+  notes: |
+    Cluster install (this repo → Primaris GitOps):
+      .hazyforge/clusters/anvil-primaris/namespace/anvil-agents-system/
+    Public security (GitHub Actions — source of truth for consumers):
+      .github/workflows/security.yml
+      docs/security.md  (see security-and-release.md)
+    Local image pin to Primaris overlay:
+      VERSION=vX.Y.Z make release-primaris-fast

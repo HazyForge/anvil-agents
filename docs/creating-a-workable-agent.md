@@ -24,6 +24,10 @@ AgentRun that can install tools, follow skills, contact a human, and open PRs.
 - ToolSet + SkillSet name: `human-comms`
 - Binary: `anvil-hotline` (public module `github.com/hazyforge/anvil-hotline`)
 - Secret: `agent-feedback-discord` in the run namespace
+- **Wait budget** (skill requires full wait; do not cancel early):
+  - `ANVIL_HOTLINE_TIMEOUT` or `ANVIL_AGENT_FEEDBACK_TIMEOUT` via profile
+    `extraEnv` (e.g. `30m`, `1h`)
+  - default if unset: `30m`
 
 **Repository / branch scope** (profile or run `spec.scope.repository`)
 

@@ -1,3 +1,6 @@
+# Optional TestContract for local/worker verify. Security is intentionally
+# NOT a Primaris gate — public GitHub Actions (.github/workflows/security.yml)
+# are the independent open-source security program.
 apiVersion: anvil.hazyforge.io/tests/v1alpha1
 kind: TestContract
 metadata:

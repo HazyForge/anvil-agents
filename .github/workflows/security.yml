@@ -1,0 +1,542 @@
+name: security
+
+# Free public-repo security program (public Actions minutes only; no paid SaaS).
+# Primaris install is separate: .hazyforge/clusters/anvil-primaris/
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+  schedule:
+    - cron: "23 7 * * 1"
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  security-events: write
+  actions: read
+  pull-requests: read
+
+concurrency:
+  group: security-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GO_VERSION: "1.26.5"
+  TRIVY_VERSION: "0.72.0"
+  GRYPE_VERSION: "0.116.0"
+  OSV_VERSION: "2.4.0"
+  GITLEAKS_VERSION: "8.30.1"
+  ZIZMOR_VERSION: "1.28.0"
+  TRIVY_SEVERITY: HIGH,CRITICAL
+
+jobs:
+  govulncheck:
+    name: "free · govulncheck"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+      - run: go install golang.org/x/vuln/cmd/govulncheck@latest
+      - run: govulncheck ./...
+      - run: |
+          go build -trimpath -o /tmp/anvil-agents ./cmd/anvil-agents
+          govulncheck -mode=binary /tmp/anvil-agents
+
+  gosec:
+    name: "free · gosec"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+      - uses: securego/gosec@master
+        with:
+          args: >-
+            -no-fail=false -fmt=sarif -out=gosec.sarif
+            -exclude=G101,G104,G115,G301,G304,G703
+            -exclude-dir=web -exclude-dir=charts
+            ./cmd/... ./internal/... ./api/... ./lib/...
+      - if: always() && hashFiles('gosec.sarif') != ''
+        continue-on-error: true
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: gosec.sarif
+          category: gosec
+
+  codeql:
+    name: "free · CodeQL"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: github/codeql-action/init@v3
+        with:
+          languages: go
+          queries: security-extended
+      - uses: github/codeql-action/autobuild@v3
+      - uses: github/codeql-action/analyze@v3
+
+  osv:
+    name: "free · OSV-Scanner"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install OSV-Scanner
+        run: ./hack/ci-install-security-tools.sh osv
+      - name: Scan lockfiles
+        run: |
+          set -euo pipefail
+          export PATH="${HOME}/.local/bin:${PATH}"
+          mkdir -p dist/security
+          # Exit 0 clean, 1 vulns found. Fail the job on known vulns.
+          set +e
+          # Hard-gate Go module vulns. Console SPA npm is covered by npm-audit
+          # (advisory until a fixed react-router release is on the registry).
+          osv-scanner scan source \
+            --lockfile=go.mod \
+            --format table \
+            --output-file dist/security/osv.txt \
+            .
+          code=$?
+          set -e
+          cat dist/security/osv.txt || true
+          if [[ "$code" -eq 0 || "$code" -eq 1 ]]; then
+            exit "$code"
+          fi
+          echo "osv-scanner tool error exit=$code" >&2
+          exit "$code"
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: osv-scanner
+          path: dist/security/osv.txt
+          if-no-files-found: warn
+
+  owned-deps:
+    name: "free · owned-deps / anvil-hotline"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+      - name: Install tools
+        run: |
+          ./hack/ci-install-security-tools.sh trivy
+          ./hack/ci-install-security-tools.sh osv
+      - name: Resolve pin + scan anvil-hotline
+        run: |
+          set -euo pipefail
+          export PATH="${HOME}/.local/bin:${PATH}"
+          mapfile -t pins < <(
+            grep -hRhoE 'ANVIL_HOTLINE_VERSION=[^[:space:]]+' docker/agent-run-*/Dockerfile \
+              | sed 's/^ANVIL_HOTLINE_VERSION=//' | sort -u
+          )
+          test "${#pins[@]}" -eq 1
+          ver="${pins[0]}"
+          echo "Pinned anvil-hotline: ${ver}"
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          mkdir -p dist/security/owned
+          work="$(mktemp -d)"
+          git clone --depth 1 --branch "${ver}" \
+            https://github.com/HazyForge/anvil-hotline.git "${work}/anvil-hotline"
+          cd "${work}/anvil-hotline"
+          govulncheck ./...
+          go build -trimpath -o /tmp/anvil-hotline ./cmd/anvil-hotline
+          govulncheck -mode=binary /tmp/anvil-hotline
+          trivy fs --severity "${TRIVY_SEVERITY}" --ignore-unfixed --exit-code 1 \
+            --format table --output "${GITHUB_WORKSPACE}/dist/security/owned/anvil-hotline.txt" .
+          trivy fs --severity "${TRIVY_SEVERITY}" --ignore-unfixed --exit-code 0 \
+            --format sarif --output "${GITHUB_WORKSPACE}/dist/security/owned/anvil-hotline.sarif" . || true
+          set +e
+          osv-scanner scan source -r --format table \
+            --output-file "${GITHUB_WORKSPACE}/dist/security/owned/anvil-hotline-osv.txt" .
+          ocode=$?
+          set -e
+          cat "${GITHUB_WORKSPACE}/dist/security/owned/anvil-hotline-osv.txt" || true
+          # Owned module OSV findings are informational if only transitive noise;
+          # still fail when osv tool errors (exit > 1).
+          if [[ "$ocode" -gt 1 ]]; then exit "$ocode"; fi
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: owned-deps-anvil-hotline
+          path: dist/security/owned/
+          if-no-files-found: warn
+      - if: always() && hashFiles('dist/security/owned/anvil-hotline.sarif') != ''
+        continue-on-error: true
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: dist/security/owned/anvil-hotline.sarif
+          category: owned-deps-anvil-hotline
+
+  trivy-fs:
+    name: "free · trivy / filesystem"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Trivy
+        run: ./hack/ci-install-security-tools.sh trivy
+      - name: Trivy filesystem
+        run: |
+          set -euo pipefail
+          export PATH="${HOME}/.local/bin:${PATH}"
+          mkdir -p dist/security/fs
+          # Hard-fail on dependency vulns only. Secrets/misconfig still scanned and
+          # uploaded for visibility without blocking on policy noise.
+          trivy fs --severity "${TRIVY_SEVERITY}" --ignore-unfixed \
+            --scanners vuln \
+            --exit-code 1 \
+            --format table --output dist/security/fs/repo.txt \
+            --skip-dirs web/console --skip-dirs dist --skip-dirs .cate .
+          trivy fs --severity "${TRIVY_SEVERITY}" --ignore-unfixed \
+            --scanners vuln,secret,misconfig --exit-code 0 \
+            --format table --output dist/security/fs/repo-full.txt \
+            --skip-dirs web/console --skip-dirs dist --skip-dirs .cate . || true
+          trivy fs --severity "${TRIVY_SEVERITY}" --ignore-unfixed \
+            --scanners vuln,secret,misconfig --exit-code 0 \
+            --format sarif --output dist/security/fs/repo.sarif \
+            --skip-dirs web/console --skip-dirs dist --skip-dirs .cate . || true
+          trivy fs --format cyclonedx --output dist/security/fs/sbom.cdx.json \
+            --skip-dirs web/console --skip-dirs dist --skip-dirs .cate . || true
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trivy-filesystem-sbom
+          path: dist/security/fs/
+          if-no-files-found: warn
+      - if: always() && hashFiles('dist/security/fs/repo.sarif') != ''
+        continue-on-error: true
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: dist/security/fs/repo.sarif
+          category: trivy-filesystem
+
+  dependency-review:
+    name: "free · dependency-review"
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    continue-on-error: true # requires Dependency graph enabled in repo settings
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/dependency-review-action@v4
+        with:
+          fail-on-severity: high
+          comment-summary-in-pr: on-failure
+      - name: Note
+        if: always()
+        run: |
+          echo "Enable Settings → Code security → Dependency graph for this job to enforce." >> "$GITHUB_STEP_SUMMARY"
+
+  npm-audit:
+    name: "free · npm audit / console"
+    runs-on: ubuntu-latest
+    # react-router advisories often leave no clean version; keep the free
+    # signal visible without permanently blocking the whole program.
+    continue-on-error: true
+    defaults:
+      run:
+        working-directory: web/console
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/console/package-lock.json
+      - name: npm ci + audit
+        run: |
+          set -euo pipefail
+          npm ci --ignore-scripts
+          set +e
+          npm audit --audit-level=high | tee "${GITHUB_WORKSPACE}/dist-npm-audit.txt"
+          code=$?
+          set -e
+          {
+            echo "## npm audit (free · console)"
+            echo "Exit code: $code (continue-on-error; upgrade when a clean fix exists)."
+            echo '```'
+            head -n 80 "${GITHUB_WORKSPACE}/dist-npm-audit.txt" 2>/dev/null || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit "$code"
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: npm-audit-console
+          path: dist-npm-audit.txt
+          if-no-files-found: warn
+
+  hadolint:
+    name: "free · hadolint / Dockerfiles"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: ./hack/ci-install-security-tools.sh hadolint
+      - name: Lint Dockerfiles
+        run: |
+          set -euo pipefail
+          export PATH="${HOME}/.local/bin:${PATH}"
+          failed=0
+          while IFS= read -r -d '' f; do
+            echo "==> hadolint $f"
+            hadolint --config .hadolint.yaml "$f" || failed=1
+          done < <(find . -name Dockerfile -print0)
+          exit "$failed"
+
+  checkov:
+    name: "free · checkov / helm"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: bridgecrewio/checkov-action@v12
+        with:
+          directory: charts/anvil-agents
+          framework: helm
+          soft_fail: true
+          output_format: cli,sarif
+          output_file_path: console,results.sarif
+      - if: always() && hashFiles('results.sarif') != ''
+        continue-on-error: true
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: results.sarif
+          category: checkov-helm
+
+  gitleaks:
+    name: "free · gitleaks / secrets"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Install gitleaks CLI (free OSS; no license)
+        run: ./hack/ci-install-security-tools.sh gitleaks
+      - name: Scan history for secrets
+        run: |
+          set -euo pipefail
+          export PATH="${HOME}/.local/bin:${PATH}"
+          mkdir -p dist/security
+          gitleaks detect --source . --verbose --redact \
+            --report-path dist/security/gitleaks.json \
+            --report-format json
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gitleaks
+          path: dist/security/gitleaks.json
+          if-no-files-found: warn
+
+  zizmor:
+    name: "free · zizmor / workflows"
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - run: ./hack/ci-install-security-tools.sh zizmor
+      - name: Audit workflows
+        run: |
+          set -euo pipefail
+          export PATH="${HOME}/.local/bin:${PATH}"
+          mkdir -p dist/security
+          zizmor --format plain .github/workflows | tee dist/security/zizmor.txt
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: zizmor-workflows
+          path: dist/security/zizmor.txt
+          if-no-files-found: warn
+
+  container-scan:
+    name: "free · image / ${{ matrix.component }}"
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - component: controller
+            image: anvil-agents
+            role: "Operator + API + console"
+          - component: codex
+            image: anvil-agent-run-codex
+            role: "Codex runner + anvil-hotline"
+          - component: opencode
+            image: anvil-agent-run-opencode
+            role: "OpenCode runner + anvil-hotline"
+          - component: grok-build
+            image: anvil-agent-run-grok-build
+            role: "Grok Build runner + anvil-hotline"
+          - component: hermes
+            image: anvil-agent-run-hermes
+            role: "Hermes runner + anvil-hotline"
+          - component: openclaw
+            image: anvil-agent-run-openclaw
+            role: "OpenClaw runner + anvil-hotline"
+          - component: pi
+            image: anvil-agent-run-pi
+            role: "Pi runner + anvil-hotline"
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Install scanners
+        run: |
+          ./hack/ci-install-security-tools.sh trivy
+          ./hack/ci-install-security-tools.sh grype
+      - name: Build image
+        id: build
+        run: |
+          set -euo pipefail
+          tag="gha-${GITHUB_SHA:0:12}"
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+          ./hack/build-images.sh \
+            --component "${{ matrix.component }}" \
+            --tag "${tag}" \
+            --platform linux/amd64 \
+            --load
+      - name: Trivy + Grype + SBOM
+        run: |
+          set -euo pipefail
+          export PATH="${HOME}/.local/bin:${PATH}"
+          tag="${{ steps.build.outputs.tag }}"
+          ref="${{ matrix.image }}:${tag}"
+          mkdir -p dist/security/trivy dist/security/grype dist/security/sbom
+          # Free dual-scanner + SBOM for every image. Findings are reported as
+          # artifacts/summaries; job fails only if the scanner tools error out
+          # (base-image HIGH noise must not block publishing free visibility).
+          set +e
+          TRIVY_EXIT_CODE=0 ./hack/security-trivy-images.sh \
+            --component "${{ matrix.component }}" \
+            --tag "${tag}" \
+            --no-build \
+            --report-dir dist/security/trivy
+          trivy_code=$?
+          # Omit --fail-on so findings are reported without failing the free check.
+          grype "${ref}" --output table --file "dist/security/grype/${{ matrix.component }}.txt"
+          grype_code=$?
+          grype "${ref}" --output sarif --file "dist/security/grype/${{ matrix.component }}.sarif" || true
+          trivy image --format cyclonedx --output "dist/security/sbom/${{ matrix.component }}.cdx.json" "${ref}"
+          sbom_code=$?
+          set -e
+          {
+            echo "trivy_tool_exit=${trivy_code}"
+            echo "grype_tool_exit=${grype_code}"
+            echo "sbom_tool_exit=${sbom_code}"
+            cat dist/security/trivy/summary.txt 2>/dev/null || true
+          } | tee dist/security/trivy/${{ matrix.component }}-exits.txt
+          # Tool crash (not vuln findings) fails the job.
+          test "$trivy_code" -eq 0
+          test "$grype_code" -eq 0
+          test "$sbom_code" -eq 0
+          {
+            echo "## \`${{ matrix.image }}\`"
+            echo "Role: ${{ matrix.role }}"
+            echo "Scanners: Trivy · Grype · CycloneDX (free)"
+            echo '```'
+            cat dist/security/trivy/summary.txt 2>/dev/null || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: container-${{ matrix.component }}
+          path: |
+            dist/security/trivy/
+            dist/security/grype/
+            dist/security/sbom/
+          if-no-files-found: warn
+      - if: always() && hashFiles(format('dist/security/trivy/{0}.sarif', matrix.component)) != ''
+        continue-on-error: true
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: dist/security/trivy/${{ matrix.component }}.sarif
+          category: trivy-image-${{ matrix.component }}
+      - if: always() && hashFiles(format('dist/security/grype/{0}.sarif', matrix.component)) != ''
+        continue-on-error: true
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: dist/security/grype/${{ matrix.component }}.sarif
+          category: grype-image-${{ matrix.component }}
+
+  scorecard:
+    name: "free · OpenSSF Scorecard"
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+      id-token: write
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: ossf/scorecard-action@v2.4.0
+        with:
+          results_file: results.sarif
+          results_format: sarif
+          publish_results: true
+      - uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: results.sarif
+          category: openssf-scorecard
+
+  security-gate:
+    name: "free · security-gate"
+    needs:
+      - govulncheck
+      - gosec
+      - codeql
+      - osv
+      - owned-deps
+      - trivy-fs
+      - hadolint
+      - checkov
+      - gitleaks
+      - container-scan
+    # npm-audit, dependency-review, zizmor, scorecard are advisory free signals.
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require free security jobs
+        run: |
+          set -euo pipefail
+          failed=0
+          check() {
+            local name="$1" result="$2"
+            echo "$name=$result"
+            [[ "$result" == "success" ]] || failed=1
+          }
+          check govulncheck "${{ needs.govulncheck.result }}"
+          check gosec "${{ needs.gosec.result }}"
+          check codeql "${{ needs.codeql.result }}"
+          check osv "${{ needs.osv.result }}"
+          check owned-deps "${{ needs['owned-deps'].result }}"
+          check trivy-fs "${{ needs['trivy-fs'].result }}"
+          check hadolint "${{ needs.hadolint.result }}"
+          check checkov "${{ needs.checkov.result }}"
+          check gitleaks "${{ needs.gitleaks.result }}"
+          check container-scan "${{ needs['container-scan'].result }}"
+          {
+            echo "## Free public security program"
+            echo "Public Actions minutes only — no paid scanners."
+            echo ""
+            echo "### Required"
+            echo "govulncheck · gosec · CodeQL · OSV · owned-deps · trivy-fs · hadolint · checkov · gitleaks · image×7 (Trivy+Grype+SBOM)"
+            echo ""
+            echo "### Advisory (still run free)"
+            echo "npm audit · dependency-review · zizmor · OpenSSF Scorecard · Dependabot"
+          } >> "$GITHUB_STEP_SUMMARY"
+          test "$failed" -eq 0

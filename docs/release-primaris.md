@@ -38,6 +38,12 @@ kubectl config current-context
 | **hot** | `make release-primaris-hot` | Rebuild/push **controller** only, pin its digest, **helm deploy** chart+CRDs now |
 | **deploy** | `make deploy-primaris` | Apply local chart + current `deploy.yaml` only (no build) |
 
+**Security is not part of this Primaris path.** Public GitHub Actions
+(`.github/workflows/security.yml`) own independent open-source scans for
+source, owned deps (`anvil-hotline`), and every container. Primaris only
+**installs** via `.hazyforge/clusters/anvil-primaris/`. See
+[security-and-release.md](security-and-release.md).
+
 Equivalent scripts:
 
 ```bash

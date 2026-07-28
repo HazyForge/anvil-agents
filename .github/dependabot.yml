@@ -1,0 +1,82 @@
+# Free Dependabot for a public repository (alerts + PRs; no paid plan).
+version: 2
+updates:
+  - package-ecosystem: gomod
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 10
+    labels: [dependencies, security]
+
+  - package-ecosystem: npm
+    directory: "/web/console"
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 10
+    labels: [dependencies, security, console]
+
+  - package-ecosystem: docker
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    labels: [dependencies, security, docker]
+
+  - package-ecosystem: docker
+    directory: "/docker/agent-run-codex"
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 3
+    labels: [dependencies, security, docker]
+
+  - package-ecosystem: docker
+    directory: "/docker/agent-run-opencode"
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 3
+    labels: [dependencies, security, docker]
+
+  - package-ecosystem: docker
+    directory: "/docker/agent-run-grok-build"
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 3
+    labels: [dependencies, security, docker]
+
+  - package-ecosystem: docker
+    directory: "/docker/agent-run-hermes"
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 3
+    labels: [dependencies, security, docker]
+
+  - package-ecosystem: docker
+    directory: "/docker/agent-run-openclaw"
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 3
+    labels: [dependencies, security, docker]
+
+  - package-ecosystem: docker
+    directory: "/docker/agent-run-pi"
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 3
+    labels: [dependencies, security, docker]
+
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 10
+    labels: [dependencies, security, github-actions]

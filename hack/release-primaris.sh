@@ -397,6 +397,11 @@ case "${mode}" in
 			publish_args+=(--skip-verification)
 		fi
 
+		# Security scanning is intentionally NOT part of the Primaris lifecycle.
+		# Public GitHub Actions (.github/workflows/security.yml) own source,
+		# owned-dependency, and per-container Trivy evidence for OSS consumers.
+		# This script only builds/pushes images and pins the Primaris overlay.
+
 		"${repo_root}/hack/publish-release.sh" "${publish_args[@]}"
 
 		lock="${output_dir}/images-${version}.lock.tsv"

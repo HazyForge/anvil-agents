@@ -36,10 +36,15 @@ documentation.
 
 ## Validation
 
-Run `make verify` before publishing. Regenerate API objects, CRDs, and chart CRDs
-with `make manifests` whenever API markers change. Use
-`hack/build-images.sh` for local checks, builds, and registry pushes so local,
-CI, and release workflows keep one image/component mapping. Run
+Run `make verify` before publishing. Security is an **independent public
+GitHub Actions** program (`.github/workflows/security.yml`): govulncheck,
+gosec, CodeQL, owned-deps (`anvil-hotline`), Trivy filesystem, and Trivy on
+every container. Primaris only installs this operator via
+`.hazyforge/clusters/anvil-primaris/` — it does not own security gates. See
+`docs/security-and-release.md`. Regenerate API objects, CRDs, and chart CRDs
+with `make manifests` whenever API markers change. Use `hack/build-images.sh`
+for local checks, builds, and registry pushes so local, CI, and release
+workflows keep one image/component mapping. Run
 `bash -n hack/stream-agent-run.sh` after changing the live-stream helper, and
 render the chart with both `api.enabled=false` and a complete enabled API
 configuration.

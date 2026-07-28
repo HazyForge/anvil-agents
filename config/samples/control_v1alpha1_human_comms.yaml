@@ -59,9 +59,22 @@ spec:
         than waiting. Propose a default, report needsHuman before waiting, and
         treat the reply as information only.
 
+        ## Wait budget (configurable)
+
+        Wait up to the full configured limit — do not cancel early:
+
+        1. `ANVIL_HOTLINE_TIMEOUT` if set
+        2. else `ANVIL_AGENT_FEEDBACK_TIMEOUT` if set
+        3. else default `30m`
+
+        Pass that value as `--timeout`. Profiles set the budget via `extraEnv`
+        (e.g. `1h`). Only after the full timeout may you treat the decision as
+        unanswered.
+
         ```sh
+        HOTLINE_TIMEOUT="${ANVIL_HOTLINE_TIMEOUT:-${ANVIL_AGENT_FEEDBACK_TIMEOUT:-30m}}"
         reply="$(anvil-hotline ask \
           --question "One concise question with the proposed default." \
           --context "AgentRun=${ANVIL_AGENT_RUN:-unknown}" \
-          --timeout "${ANVIL_HOTLINE_TIMEOUT:-${ANVIL_AGENT_FEEDBACK_TIMEOUT:-30m}}")"
+          --timeout "${HOTLINE_TIMEOUT}")"
         ```
