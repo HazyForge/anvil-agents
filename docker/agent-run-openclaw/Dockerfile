@@ -26,7 +26,7 @@ RUN --mount=type=cache,target=/root/.cache/go-build \
 	CGO_ENABLED=0 GOOS="${TARGETOS}" GOARCH="${TARGETARCH}" \
 	go build -trimpath -ldflags="-s -w" -o /out/anvil-agentctl ./cmd/anvil-agentctl
 
-FROM node:24-bookworm-slim
+FROM node:26-bookworm-slim
 
 ARG CODEX_VERSION=0.142.5
 ARG OPENCLAW_VERSION=2026.6.11
