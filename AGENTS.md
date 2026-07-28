@@ -36,13 +36,15 @@ documentation.
 
 ## Validation
 
-Run `make verify` before publishing. Regenerate API objects, CRDs, and chart CRDs
-with `make manifests` whenever API markers change. Use
-`hack/build-images.sh` for local checks, builds, and registry pushes so local,
-CI, and release workflows keep one image/component mapping. Run
-`bash -n hack/stream-agent-run.sh` after changing the live-stream helper, and
-render the chart with both `api.enabled=false` and a complete enabled API
-configuration.
+Run `make verify` before publishing. Run `make security` (govulncheck + gosec)
+before versioned releases — Primaris `gates.release` and local
+`release-primaris` full/fast require it. See `docs/security-and-release.md`.
+Regenerate API objects, CRDs, and chart CRDs with `make manifests` whenever API
+markers change. Use `hack/build-images.sh` for local checks, builds, and
+registry pushes so local, CI, and release workflows keep one image/component
+mapping. Run `bash -n hack/stream-agent-run.sh` after changing the live-stream
+helper, and render the chart with both `api.enabled=false` and a complete
+enabled API configuration.
 
 ## Local release to Anvil Primaris
 

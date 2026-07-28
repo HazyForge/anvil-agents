@@ -8,7 +8,8 @@ metadata:
     app.kubernetes.io/name: anvil-agents
 gates:
   release:
-    suites: [standalone-operator]
+    # Primaris ApplicationRelease must pass operator verify and security scans.
+    suites: [standalone-operator, security]
 profiles:
   anvil-agents:
     namespace: anvilhub
@@ -43,3 +44,19 @@ suites:
           for dockerfile in docker/agent-run-*/Dockerfile; do
             docker build --check -f "$dockerfile" .
           done
+  security:
+    profile: anvil-agents
+    timeoutSeconds: 2400
+    coverage:
+      components:
+        - controller
+      sources: [primary]
+    lanes:
+      - name: govulncheck-and-gosec
+        adapter: shell
+        script: |
+          set -euo pipefail
+          export PATH="$(go env GOPATH)/bin:${PATH}"
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          go install github.com/securego/gosec/v2/cmd/gosec@latest
+          make security

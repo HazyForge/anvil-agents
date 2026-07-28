@@ -397,6 +397,13 @@ case "${mode}" in
 			publish_args+=(--skip-verification)
 		fi
 
+		# Primaris release gate: security suite (govulncheck + gosec) must pass
+		# before images/chart publish. Mirrors .hazyforge/tests.yaml gates.release.
+		if [[ "${skip_verification}" != "true" ]]; then
+			echo "Running release security gate (make security)..."
+			make -C "${repo_root}" security
+		fi
+
 		"${repo_root}/hack/publish-release.sh" "${publish_args[@]}"
 
 		lock="${output_dir}/images-${version}.lock.tsv"

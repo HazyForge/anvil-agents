@@ -1,0 +1,121 @@
+name: security
+
+# Public-repo security scans (uses free public GitHub Actions minutes).
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+  schedule:
+    - cron: "23 7 * * 1"
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  security-events: write
+  actions: read
+
+concurrency:
+  group: security-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  govulncheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.5"
+          cache: true
+      - run: go install golang.org/x/vuln/cmd/govulncheck@latest
+      - name: govulncheck modules
+        run: govulncheck ./...
+      - name: govulncheck controller binary
+        run: |
+          go build -trimpath -o /tmp/anvil-agents ./cmd/anvil-agents
+          govulncheck -mode=binary /tmp/anvil-agents
+
+  gosec:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.5"
+          cache: true
+      - uses: securego/gosec@master
+        with:
+          # Align with make security-gosec excludes (FPs); CodeQL covers deeper analysis.
+          args: >-
+            -no-fail=false -fmt=sarif -out=gosec.sarif
+            -exclude=G101,G104,G115,G301,G304,G703
+            -exclude-dir=web -exclude-dir=charts
+            ./cmd/... ./internal/... ./api/... ./lib/...
+      - name: Upload gosec SARIF
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: gosec.sarif
+          category: gosec
+
+  codeql:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: github/codeql-action/init@v3
+        with:
+          languages: go
+          queries: security-extended
+      - uses: github/codeql-action/autobuild@v3
+      - uses: github/codeql-action/analyze@v3
+
+  dependency-review:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/dependency-review-action@v4
+        with:
+          fail-on-severity: high
+
+  scorecard:
+    name: openssf-scorecard
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+      id-token: write
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: ossf/scorecard-action@v2.4.0
+        with:
+          results_file: results.sarif
+          results_format: sarif
+          publish_results: true
+      - uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: results.sarif
+          category: openssf-scorecard
+
+  security-gate:
+    needs: [govulncheck, gosec, codeql]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require security jobs
+        run: |
+          set -euo pipefail
+          for job in govulncheck gosec codeql; do
+            result="${{ needs[job].result }}"
+            echo "$job=$result"
+            test "$result" = "success"
+          done

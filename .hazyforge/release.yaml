@@ -1,0 +1,26 @@
+# Anvil Primaris release contract for public operator anvil-agents.
+# ApplicationRelease / local release-primaris must pass security before publish.
+apiVersion: anvil.hazyforge.io/release/v1alpha1
+kind: ReleaseContract
+metadata:
+  name: anvil-agents
+  application: anvil-agents
+spec:
+  description: >-
+    Standalone agent execution operator and runner images.
+    Releases require standalone-operator verify and security TestContract suites.
+  testGateSuites:
+    - standalone-operator
+    - security
+  notes: |
+    Local/public CI:
+      make verify
+      make security
+    GitHub (public Actions minutes):
+      - security.yml on PR/push/schedule/release
+      - publish.yaml requires security job before GHCR publish
+    Primaris:
+      anvilctl test run --application anvil-agents --suite security
+      anvilctl test run --application anvil-agents --gate release
+      VERSION=vX.Y.Z make release-primaris       # runs make security before publish
+      VERSION=vX.Y.Z make release-primaris-fast  # same security gate

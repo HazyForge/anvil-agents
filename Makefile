@@ -9,7 +9,7 @@ RELEASE_REPO ?= HazyForge/anvil-agents
 RELEASE_DEPLOY_VALUES ?= .hazyforge/clusters/anvil-primaris/namespace/anvil-agents-system/deploy.yaml
 RELEASE_IMAGE_LOCK ?= $(RELEASE_OUTPUT)/images-$(VERSION).lock.tsv
 
-.PHONY: generate manifests test verify verify-runner-contract build console-build console-typecheck console-embed console-embed-restore docker-build images image-checks helm-lint archive-postgres-integration chart-package release-tag release-tag-push release-local release-publish release-github release-local-all release-pin-deploy release-primaris release-primaris-fast release-primaris-hot deploy-primaris judge-prerequisites judge-kind-e2e kind-upgrade-e2e kind-e2e
+.PHONY: generate manifests test verify verify-runner-contract security security-govulncheck security-gosec build console-build console-typecheck console-embed console-embed-restore docker-build images image-checks helm-lint archive-postgres-integration chart-package release-tag release-tag-push release-local release-publish release-github release-local-all release-pin-deploy release-primaris release-primaris-fast release-primaris-hot deploy-primaris judge-prerequisites judge-kind-e2e kind-upgrade-e2e kind-e2e
 
 generate:
 	$(CONTROLLER_GEN) object paths=./api/...
@@ -27,6 +27,28 @@ manifests: generate
 
 test:
 	go test ./...
+
+# Local / Primaris security gate (mirrored in GitHub Actions and .hazyforge/tests.yaml).
+# Public repo Actions minutes cover CodeQL/scorecard; this target is the release fail-closed path.
+# Prefer the go.mod toolchain (go1.26.5+) so stdlib CVE scans match CI.
+security-govulncheck:
+	@command -v govulncheck >/dev/null || go install golang.org/x/vuln/cmd/govulncheck@latest
+	govulncheck ./...
+	go build -trimpath -o /tmp/anvil-agents-security-scan ./cmd/anvil-agents
+	govulncheck -mode=binary /tmp/anvil-agents-security-scan
+	rm -f /tmp/anvil-agents-security-scan
+
+# gosec: fail on real issues. Exclude noisy false-positive classes that CodeQL
+# already covers more carefully (G101 name matches, G104 Close errors, G115
+# int32 conversions, intentional CLI/env path IO under G301/G304/G703).
+security-gosec:
+	@command -v gosec >/dev/null || go install github.com/securego/gosec/v2/cmd/gosec@latest
+	gosec -quiet \
+		-exclude=G101,G104,G115,G301,G304,G703 \
+		-exclude-dir=web -exclude-dir=charts \
+		./cmd/... ./internal/... ./api/... ./lib/...
+
+security: security-govulncheck security-gosec
 
 build:
 	go build ./cmd/anvil-agents ./cmd/anvil-agents-api ./cmd/anvil-agentctl

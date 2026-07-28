@@ -33,10 +33,13 @@ kubectl config current-context
 
 | Mode | Command | What it does |
 |------|---------|----------------|
-| **full** | `VERSION=vX.Y.Z make release-primaris` | Tag+push, `make verify` + Kind e2e, build/push 7 images, OCI chart, pin Primaris digests |
-| **fast** | `VERSION=vX.Y.Z make release-primaris-fast` | Same without Kind e2e (still `make verify`); good trusted cutovers |
-| **hot** | `make release-primaris-hot` | Rebuild/push **controller** only, pin its digest, **helm deploy** chart+CRDs now |
+| **full** | `VERSION=vX.Y.Z make release-primaris` | Tag+push, `make verify` + Kind e2e + **`make security`**, build/push 7 images, OCI chart, pin Primaris digests |
+| **fast** | `VERSION=vX.Y.Z make release-primaris-fast` | Same without Kind e2e (still `make verify` + **`make security`**); good trusted cutovers |
+| **hot** | `make release-primaris-hot` | Rebuild/push **controller** only, pin its digest, **helm deploy** chart+CRDs now (skips full security gate; run `make security` before promoting) |
 | **deploy** | `make deploy-primaris` | Apply local chart + current `deploy.yaml` only (no build) |
+
+Security is part of the Primaris release gate (`gates.release` suite `security`
+in `.hazyforge/tests.yaml`). Details: [security-and-release.md](security-and-release.md).
 
 Equivalent scripts:
 
