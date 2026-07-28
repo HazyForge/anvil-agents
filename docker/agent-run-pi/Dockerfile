@@ -27,7 +27,7 @@ RUN --mount=type=cache,target=/root/.cache/go-build \
 	CGO_ENABLED=0 GOOS="${TARGETOS}" GOARCH="${TARGETARCH}" \
 	go build -trimpath -ldflags="-s -w" -o /out/anvil-agentctl ./cmd/anvil-agentctl
 
-FROM node:24-bookworm-slim
+FROM node:26-bookworm-slim
 
 ARG AGENT_UID=10001
 ARG AGENT_GID=10001
