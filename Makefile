@@ -9,7 +9,7 @@ RELEASE_REPO ?= HazyForge/anvil-agents
 RELEASE_DEPLOY_VALUES ?= .hazyforge/clusters/anvil-primaris/namespace/anvil-agents-system/deploy.yaml
 RELEASE_IMAGE_LOCK ?= $(RELEASE_OUTPUT)/images-$(VERSION).lock.tsv
 
-.PHONY: generate manifests test verify verify-runner-contract security security-govulncheck security-gosec security-trivy security-release build console-build console-typecheck console-embed console-embed-restore docker-build images image-checks helm-lint archive-postgres-integration chart-package release-tag release-tag-push release-local release-publish release-github release-local-all release-pin-deploy release-primaris release-primaris-fast release-primaris-hot deploy-primaris judge-prerequisites judge-kind-e2e kind-upgrade-e2e kind-e2e
+.PHONY: generate manifests test verify verify-runner-contract security security-govulncheck security-gosec security-trivy security-all build console-build console-typecheck console-embed console-embed-restore docker-build images image-checks helm-lint archive-postgres-integration chart-package release-tag release-tag-push release-local release-publish release-github release-local-all release-pin-deploy release-primaris release-primaris-fast release-primaris-hot deploy-primaris judge-prerequisites judge-kind-e2e kind-upgrade-e2e kind-e2e
 
 generate:
 	$(CONTROLLER_GEN) object paths=./api/...
@@ -28,8 +28,8 @@ manifests: generate
 test:
 	go test ./...
 
-# Local / Primaris security gate (mirrored in GitHub Actions and .hazyforge/tests.yaml).
-# Public repo Actions minutes cover CodeQL/scorecard; this target is the release fail-closed path.
+# Local mirrors of the public GitHub Actions security program
+# (.github/workflows/security.yml). Not part of Primaris lifecycle.
 # Prefer the go.mod toolchain (go1.26.5+) so stdlib CVE scans match CI.
 security-govulncheck:
 	@command -v govulncheck >/dev/null || go install golang.org/x/vuln/cmd/govulncheck@latest
@@ -48,20 +48,19 @@ security-gosec:
 		-exclude-dir=web -exclude-dir=charts \
 		./cmd/... ./internal/... ./api/... ./lib/...
 
-# Source-level security only (fast). Used on PR unit loops.
+# Source-level security only (fast).
 security: security-govulncheck security-gosec
 
 # Per-container Trivy image scan (builds all seven images by default).
-# Primaris release + GHA security matrix use this for public/release evidence.
+# Same script as GHA matrix jobs "trivy / <component>".
 security-trivy:
 	./hack/security-trivy-images.sh \
 		$(if $(IMAGE_PREFIX),--prefix "$(IMAGE_PREFIX)",) \
 		--tag "$(IMAGE_TAG)" \
 		--platform "$(RELEASE_PLATFORM)"
 
-# Full release security gate: source scans + every container Trivy scan.
-# Primaris ApplicationRelease suite "security" and release-primaris full/fast.
-security-release: security security-trivy
+# Full local parity with GHA security-gate (source + every container).
+security-all: security security-trivy
 
 build:
 	go build ./cmd/anvil-agents ./cmd/anvil-agents-api ./cmd/anvil-agentctl

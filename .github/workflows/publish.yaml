@@ -1,5 +1,7 @@
 name: Publish release
 
+# Publishes images/chart only after the public security program is green.
+# Security is GitHub Actions–owned (not Primaris lifecycle).
 on:
   workflow_dispatch:
     inputs:
@@ -18,6 +20,9 @@ concurrency:
 
 env:
   RELEASE_TAG: ${{ inputs.tag }}
+  GO_VERSION: "1.26.5"
+  TRIVY_VERSION: v0.63.0
+  TRIVY_SEVERITY: HIGH,CRITICAL
 
 jobs:
   verify:
@@ -29,7 +34,7 @@ jobs:
           ref: ${{ inputs.tag }}
       - uses: actions/setup-go@v6
         with:
-          go-version: 1.26.5
+          go-version: ${{ env.GO_VERSION }}
           cache: true
       - uses: azure/setup-helm@v4
       - uses: azure/setup-kubectl@v4
@@ -49,7 +54,8 @@ jobs:
       - name: Verify clean install, execution, upgrade, and uninstall
         run: make kind-e2e
 
-  security:
+  security-source:
+    name: security / source
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -60,7 +66,7 @@ jobs:
           ref: ${{ inputs.tag }}
       - uses: actions/setup-go@v6
         with:
-          go-version: 1.26.5
+          go-version: ${{ env.GO_VERSION }}
           cache: true
       - name: govulncheck
         run: |
@@ -83,8 +89,41 @@ jobs:
       - uses: github/codeql-action/autobuild@v3
       - uses: github/codeql-action/analyze@v3
 
-  # Visible per-container Trivy scans for the release tag (public Actions minutes).
-  trivy:
+  owned-deps:
+    name: owned-deps / anvil-hotline
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.tag }}
+      - uses: actions/setup-go@v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+      - name: Install Trivy
+        run: |
+          curl -fsSL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh |
+            sh -s -- -b /usr/local/bin "${TRIVY_VERSION}"
+      - name: Scan pinned anvil-hotline
+        run: |
+          set -euo pipefail
+          mapfile -t pins < <(
+            grep -hRhoE 'ANVIL_HOTLINE_VERSION=[^[:space:]]+' docker/agent-run-*/Dockerfile \
+              | sed 's/^ANVIL_HOTLINE_VERSION=//' | sort -u
+          )
+          test "${#pins[@]}" -eq 1
+          ver="${pins[0]}"
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          work="$(mktemp -d)"
+          git clone --depth 1 --branch "${ver}" \
+            https://github.com/HazyForge/anvil-hotline.git "${work}/anvil-hotline"
+          cd "${work}/anvil-hotline"
+          govulncheck ./...
+          go build -trimpath -o /tmp/anvil-hotline ./cmd/anvil-hotline
+          govulncheck -mode=binary /tmp/anvil-hotline
+          trivy fs --severity "${TRIVY_SEVERITY}" --ignore-unfixed --exit-code 1 .
+
+  trivy-image:
     name: trivy / ${{ matrix.component }}
     runs-on: ubuntu-latest
     strategy:
@@ -98,9 +137,6 @@ jobs:
           - hermes
           - openclaw
           - pi
-    permissions:
-      contents: read
-      security-events: write
     steps:
       - uses: actions/checkout@v6
         with:
@@ -108,10 +144,8 @@ jobs:
       - uses: docker/setup-buildx-action@v3
       - name: Install Trivy
         run: |
-          set -euo pipefail
           curl -fsSL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh |
-            sh -s -- -b /usr/local/bin v0.63.0
-          trivy --version
+            sh -s -- -b /usr/local/bin "${TRIVY_VERSION}"
       - name: Build and Trivy-scan container
         env:
           TRIVY_REPORT_DIR: dist/security/trivy
@@ -133,16 +167,9 @@ jobs:
           name: release-trivy-${{ matrix.component }}-${{ inputs.tag }}
           path: dist/security/trivy/
           if-no-files-found: warn
-      - name: Upload Trivy SARIF
-        if: always()
-        continue-on-error: true
-        uses: github/codeql-action/upload-sarif@v3
-        with:
-          sarif_file: dist/security/trivy/${{ matrix.component }}.sarif
-          category: release-trivy-${{ matrix.component }}
 
   publish:
-    needs: [verify, security, trivy]
+    needs: [verify, security-source, owned-deps, trivy-image]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6

@@ -1,3 +1,6 @@
+# Optional TestContract for local/worker verify. Security is intentionally
+# NOT a Primaris gate — public GitHub Actions (.github/workflows/security.yml)
+# are the independent open-source security program.
 apiVersion: anvil.hazyforge.io/tests/v1alpha1
 kind: TestContract
 metadata:
@@ -8,8 +11,7 @@ metadata:
     app.kubernetes.io/name: anvil-agents
 gates:
   release:
-    # Primaris ApplicationRelease must pass operator verify and security scans.
-    suites: [standalone-operator, security]
+    suites: [standalone-operator]
 profiles:
   anvil-agents:
     namespace: anvilhub
@@ -44,33 +46,3 @@ suites:
           for dockerfile in docker/agent-run-*/Dockerfile; do
             docker build --check -f "$dockerfile" .
           done
-  security:
-    profile: anvil-agents
-    # Includes per-container Trivy builds; allow time for seven images.
-    timeoutSeconds: 7200
-    coverage:
-      components:
-        - controller
-        - codex-runner
-        - opencode-runner
-        - grok-build-runner
-        - hermes-runner
-        - openclaw-runner
-        - pi-runner
-      sources: [primary]
-    lanes:
-      - name: govulncheck-and-gosec
-        adapter: shell
-        script: |
-          set -euo pipefail
-          export PATH="$(go env GOPATH)/bin:${PATH}"
-          go install golang.org/x/vuln/cmd/govulncheck@latest
-          go install github.com/securego/gosec/v2/cmd/gosec@latest
-          make security
-      - name: trivy-each-container
-        adapter: shell
-        script: |
-          set -euo pipefail
-          # Primaris release evidence: build and Trivy-scan every container.
-          # Reports land under dist/security/trivy/ (summary.txt PASS/FAIL).
-          make security-trivy IMAGE_TAG=primaris-security-scan

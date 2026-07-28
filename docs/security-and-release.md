@@ -1,113 +1,98 @@
-# Security scans and Anvil Primaris release gates
+# Public security program (GitHub Actions)
 
-`anvil-agents` is a **public** repository. Security checks run in GitHub
-Actions (public minutes, visible check runs / artifacts) and as Anvil Primaris
-**TestContract** / `release-primaris` steps so release promotion fails closed
-and **shows that scans ran**.
+`anvil-agents` is an **open-source** repository. Security evidence lives in
+**public GitHub Actions** so anyone can see what was scanned before they run
+images. This is intentionally **independent of Anvil Primaris lifecycle**.
 
-## What runs
-
-| Check | Local / Primaris release | GitHub Actions |
-| --- | --- | --- |
-| `make verify` / Kind e2e | `make verify`, `make kind-e2e` | `ci.yaml`, publish `verify` |
-| govulncheck + gosec | `make security` | `security.yml`, publish `security` |
-| **Trivy per container** (×7) | `make security-trivy` / `make security-release` | `security.yml` job `trivy / <component>`; publish same matrix |
-| CodeQL | — | `security.yml` / publish |
-| Dependency review | — | PRs only |
-| OpenSSF Scorecard | — | push/schedule/release |
-
-Containers scanned (each is its own GHA check run):
-
-1. `controller` → `anvil-agents`
-2. `codex` → `anvil-agent-run-codex`
-3. `opencode` → `anvil-agent-run-opencode`
-4. `grok-build` → `anvil-agent-run-grok-build`
-5. `hermes` → `anvil-agent-run-hermes`
-6. `openclaw` → `anvil-agent-run-openclaw`
-7. `pi` → `anvil-agent-run-pi`
-
-Trivy fails the gate on **HIGH/CRITICAL** findings (unfixed CVEs ignored by
-default so base-image lag does not false-block forever). Reports:
+Primaris only **installs** this operator into the home cluster via GitOps:
 
 ```text
-dist/security/trivy/summary.txt     # RESULT=PASS|FAIL (Primaris evidence)
-dist/security/trivy/<component>.txt
-dist/security/trivy/<component>.json
-dist/security/trivy/<component>.sarif
+.hazyforge/clusters/anvil-primaris/namespace/anvil-agents-system/
 ```
 
-## Local
+That overlay pins digests and deploys the chart. It does **not** own security
+gates, TestContract security suites, or release scan orchestration.
+
+## What people can inspect on GitHub
+
+Workflow: [`.github/workflows/security.yml`](../.github/workflows/security.yml)
+
+| Layer | Public jobs | What it proves |
+| --- | --- | --- |
+| Source | `govulncheck / module+binary`, `gosec / static analysis`, `codeql / go` | This repo’s Go code |
+| Owned deps | `owned-deps / anvil-hotline` | First-party `anvil-hotline` pin used by every runner image |
+| Repo deps / configs | `trivy / filesystem+deps`, PR `dependency-review` | go.mod, Dockerfiles, charts, secrets/misconfig |
+| Containers | `trivy / controller` … `trivy / pi` (7 named jobs) | Full breadth of operator + agent tooling images |
+| Trust | `openssf-scorecard` | OpenSSF scorecard on default branch |
+| Gate | `security-gate` | All required jobs green |
+
+Each container job includes a **job summary** (role of the image, Trivy
+excerpt) and **downloadable artifacts** + **SARIF** for the Security tab.
+
+### Containers covered
+
+| Component | Image | Role |
+| --- | --- | --- |
+| controller | `anvil-agents` | Operator + API + console |
+| codex | `anvil-agent-run-codex` | Codex runner + anvil-hotline |
+| opencode | `anvil-agent-run-opencode` | OpenCode runner + anvil-hotline |
+| grok-build | `anvil-agent-run-grok-build` | Grok Build runner + anvil-hotline |
+| hermes | `anvil-agent-run-hermes` | Hermes runner + anvil-hotline |
+| openclaw | `anvil-agent-run-openclaw` | OpenClaw runner + anvil-hotline |
+| pi | `anvil-agent-run-pi` | Pi runner + anvil-hotline |
+
+Trivy fails on **HIGH/CRITICAL** (unfixed CVEs ignored by default).
+
+### Owned dependency pin
+
+Runner Dockerfiles pin:
+
+```dockerfile
+ARG ANVIL_HOTLINE_VERSION=v0.1.0
+```
+
+The `owned-deps / anvil-hotline` job requires a **single** pin across all
+runner Dockerfiles, checks out that public tag, and runs govulncheck + Trivy
+filesystem against it.
+
+## When it runs
+
+- Every PR and push to `master` / `main`
+- Weekly schedule (public minutes)
+- GitHub Releases
+- Manual `workflow_dispatch`
+- Publish workflow requires security green before GHCR push
+
+## Local mirrors (optional)
+
+Same tools as Actions; not required for Primaris install:
 
 ```bash
-make verify
-make security              # source only (govulncheck + gosec)
+make security              # govulncheck + gosec
 make security-trivy        # build + Trivy every container
-make security-release      # full Primaris release security gate
+make security-all          # full local parity with security-gate
+./hack/security-trivy-images.sh --component controller
 ```
 
-Shared implementation: `hack/security-trivy-images.sh`.
-
-## GitHub Actions (show people the scans ran)
-
-- **Every PR / push:** `security.yml`
-  - Source jobs: govulncheck, gosec, CodeQL
-  - **Seven named jobs** `trivy / controller` … `trivy / pi` (matrix)
-  - Job summaries + downloadable artifacts + SARIF (Security tab)
-  - `security-gate` requires all of the above
-- **Publish release:** `publish.yaml` needs `[verify, security, trivy]` so
-  GHCR publish cannot proceed without every container scan green
-
-Public repos get free Actions minutes for this volume of matrix builds.
-
-## Drive with Anvil Primaris
-
-Repo contracts:
-
-- `.hazyforge/tests.yaml` — TestContract `anvil-agents`
-  - `gates.release.suites: [standalone-operator, security]`
-  - suite `security` lanes:
-    1. `govulncheck-and-gosec`
-    2. `trivy-each-container` → `make security-trivy`
-- `.hazyforge/release.yaml` — same suites
-- Application `anvil-agents` points `spec.testContract` at `.hazyforge/tests.yaml`
+## Primaris install only
 
 ```bash
-# Security suite only (source + every container)
-anvilctl test run --application anvil-agents --suite security
-
-# Full release gate
-anvilctl test run --application anvil-agents --gate release
-```
-
-Local Primaris-driven image release runs the same gate before publish:
-
-```bash
+# Build/push images and pin the Primaris overlay (no security gate here)
 VERSION=vX.Y.Z make release-primaris-fast
-# → make security-release (source + Trivy ×7)
-# → requires dist/security/trivy/summary.txt RESULT=PASS
-# → then publish-release / pin deploy.yaml
 
-VERSION=vX.Y.Z make release-primaris   # + Kind e2e
+# Apply chart + pinned digests to the cluster
+make deploy-primaris
 ```
 
-`--skip-verification` skips verify **and** security-release (escape hatch only).
+Security for consumers remains the green **Actions** run on the tag/commit
+they trust—not a Primaris TestRun.
 
-Hot controller cutovers (`make release-primaris-hot`) skip the full security
-gate for iteration speed. Run `make security-release` before promoting a hot
-pin into a versioned release.
-
-Deployed-image audits of *already running* digests use the Primaris skill
-`audit-deployed-security-with-trivy` — cluster posture, separate from this
-source/release gate.
-
-## Required GitHub settings (once)
+## GitHub settings (once)
 
 1. **Settings → Code security** — Code scanning, Dependency graph, Dependabot.
-2. Workflows request `security-events: write` for SARIF upload.
+2. Workflows use `security-events: write` for SARIF upload.
 
 ## Failure policy
 
-- govulncheck, gosec, CodeQL, or **any** container Trivy failure blocks merge
-  (PR security-gate), GHA publish, Primaris TestContract suite `security`, and
-  local `release-primaris` full/fast.
-- Reviewers should see seven green `trivy / …` checks (or red with reports).
+Any required `security.yml` job failing (including any single container Trivy
+job or the owned-deps scan) fails `security-gate` and blocks publish.

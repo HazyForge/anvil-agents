@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Build (optional) and Trivy-scan every anvil-agents container image.
 # Used by:
-#   - make security-trivy / Primaris TestContract suite security
-#   - release-primaris full/fast (release evidence that image scans ran)
+#   - make security-trivy / local optional mirror of GHA security
+#   - optional local full scans
 #   - GitHub Actions security.yml (public check runs per container)
 set -euo pipefail
 

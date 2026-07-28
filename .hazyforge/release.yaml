@@ -1,5 +1,5 @@
-# Anvil Primaris release contract for public operator anvil-agents.
-# ApplicationRelease / local release-primaris must pass security before publish.
+# Optional release notes for Anvil Primaris Application catalog.
+# Security is owned by public GitHub Actions, not Primaris lifecycle.
 apiVersion: anvil.hazyforge.io/release/v1alpha1
 kind: ReleaseContract
 metadata:
@@ -7,23 +7,16 @@ metadata:
   application: anvil-agents
 spec:
   description: >-
-    Standalone agent execution operator and runner images.
-    Releases require standalone-operator verify and security TestContract suites
-    (govulncheck, gosec, and Trivy for every container).
+    Standalone open-source agent execution operator and runner images.
+    Primaris cluster install is GitOps under .hazyforge/clusters/anvil-primaris/.
+    Security scanning is independent public GitHub Actions (security.yml).
   testGateSuites:
     - standalone-operator
-    - security
   notes: |
-    Local:
-      make verify
-      make security              # source
-      make security-trivy        # Trivy ×7 containers
-      make security-release      # source + Trivy (Primaris release gate)
-    GitHub (public Actions minutes — visible per-container check runs):
-      - security.yml: trivy / controller … trivy / pi matrix
-      - publish.yaml needs: [verify, security, trivy]
-    Primaris:
-      anvilctl test run --application anvil-agents --suite security
-      anvilctl test run --application anvil-agents --gate release
-      VERSION=vX.Y.Z make release-primaris-fast  # security-release then publish
-      Evidence: dist/security/trivy/summary.txt RESULT=PASS
+    Cluster install (this repo → Primaris GitOps):
+      .hazyforge/clusters/anvil-primaris/namespace/anvil-agents-system/
+    Public security (GitHub Actions — source of truth for consumers):
+      .github/workflows/security.yml
+      docs/security.md  (see security-and-release.md)
+    Local image pin to Primaris overlay:
+      VERSION=vX.Y.Z make release-primaris-fast

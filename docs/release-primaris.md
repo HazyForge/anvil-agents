@@ -33,15 +33,15 @@ kubectl config current-context
 
 | Mode | Command | What it does |
 |------|---------|----------------|
-| **full** | `VERSION=vX.Y.Z make release-primaris` | Tag+push, `make verify` + Kind e2e + **`make security-release`** (source + Trivy ×7), build/push 7 images, OCI chart, pin Primaris digests |
-| **fast** | `VERSION=vX.Y.Z make release-primaris-fast` | Same without Kind e2e (still `make verify` + **`make security-release`**); good trusted cutovers |
-| **hot** | `make release-primaris-hot` | Rebuild/push **controller** only, pin its digest, **helm deploy** chart+CRDs now (skips full security gate; run `make security-release` before promoting) |
+| **full** | `VERSION=vX.Y.Z make release-primaris` | Tag+push, `make verify` + Kind e2e, build/push 7 images, OCI chart, pin Primaris digests |
+| **fast** | `VERSION=vX.Y.Z make release-primaris-fast` | Same without Kind e2e (still `make verify`); good trusted cutovers |
+| **hot** | `make release-primaris-hot` | Rebuild/push **controller** only, pin its digest, **helm deploy** chart+CRDs now |
 | **deploy** | `make deploy-primaris` | Apply local chart + current `deploy.yaml` only (no build) |
 
-Security is part of the Primaris release gate (`gates.release` suite `security`
-in `.hazyforge/tests.yaml`): govulncheck, gosec, and **Trivy for each of the
-seven containers**, with evidence under `dist/security/trivy/`. Public GitHub
-Actions mirror the same per-container scans as named check runs. Details:
+**Security is not part of this Primaris path.** Public GitHub Actions
+(`.github/workflows/security.yml`) own independent open-source scans for
+source, owned deps (`anvil-hotline`), and every container. Primaris only
+**installs** via `.hazyforge/clusters/anvil-primaris/`. See
 [security-and-release.md](security-and-release.md).
 
 Equivalent scripts:
