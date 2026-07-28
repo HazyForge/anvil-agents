@@ -7,7 +7,7 @@ toolchain go1.26.5
 require (
 	github.com/coreos/go-oidc/v3 v3.18.0
 	github.com/go-jose/go-jose/v4 v4.1.4
-	github.com/go-logr/logr v1.4.3
+	github.com/go-logr/logr v1.4.4
 	github.com/jackc/pgx/v5 v5.9.2
 	github.com/spf13/pflag v1.0.9
 	github.com/spiffe/go-spiffe/v2 v2.7.0
