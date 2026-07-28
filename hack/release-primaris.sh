@@ -397,11 +397,29 @@ case "${mode}" in
 			publish_args+=(--skip-verification)
 		fi
 
-		# Primaris release gate: security suite (govulncheck + gosec) must pass
-		# before images/chart publish. Mirrors .hazyforge/tests.yaml gates.release.
+		# Primaris release security gate (mirrors .hazyforge/tests.yaml suite security):
+		# 1) source: govulncheck + gosec
+		# 2) containers: Trivy HIGH/CRITICAL on all seven images
+		# Evidence: dist/security/trivy/summary.txt and per-image reports.
 		if [[ "${skip_verification}" != "true" ]]; then
-			echo "Running release security gate (make security)..."
-			make -C "${repo_root}" security
+			echo "Running Primaris release security gate (make security-release)..."
+			echo "  - source scans (govulncheck, gosec)"
+			echo "  - Trivy scan for each container (controller + six runners)"
+			make -C "${repo_root}" security-release \
+				IMAGE_TAG="security-${version}" \
+				RELEASE_PLATFORM="${platform}" \
+				IMAGE_PREFIX=""
+			if [[ ! -f "${repo_root}/dist/security/trivy/summary.txt" ]]; then
+				echo "missing Trivy summary evidence at dist/security/trivy/summary.txt" >&2
+				exit 1
+			fi
+			grep -q 'RESULT=PASS' "${repo_root}/dist/security/trivy/summary.txt" || {
+				echo "Trivy summary did not report RESULT=PASS" >&2
+				cat "${repo_root}/dist/security/trivy/summary.txt" >&2
+				exit 1
+			}
+			echo "Primaris release security evidence:"
+			cat "${repo_root}/dist/security/trivy/summary.txt"
 		fi
 
 		"${repo_root}/hack/publish-release.sh" "${publish_args[@]}"

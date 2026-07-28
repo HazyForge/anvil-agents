@@ -8,19 +8,22 @@ metadata:
 spec:
   description: >-
     Standalone agent execution operator and runner images.
-    Releases require standalone-operator verify and security TestContract suites.
+    Releases require standalone-operator verify and security TestContract suites
+    (govulncheck, gosec, and Trivy for every container).
   testGateSuites:
     - standalone-operator
     - security
   notes: |
-    Local/public CI:
+    Local:
       make verify
-      make security
-    GitHub (public Actions minutes):
-      - security.yml on PR/push/schedule/release
-      - publish.yaml requires security job before GHCR publish
+      make security              # source
+      make security-trivy        # Trivy ×7 containers
+      make security-release      # source + Trivy (Primaris release gate)
+    GitHub (public Actions minutes — visible per-container check runs):
+      - security.yml: trivy / controller … trivy / pi matrix
+      - publish.yaml needs: [verify, security, trivy]
     Primaris:
       anvilctl test run --application anvil-agents --suite security
       anvilctl test run --application anvil-agents --gate release
-      VERSION=vX.Y.Z make release-primaris       # runs make security before publish
-      VERSION=vX.Y.Z make release-primaris-fast  # same security gate
+      VERSION=vX.Y.Z make release-primaris-fast  # security-release then publish
+      Evidence: dist/security/trivy/summary.txt RESULT=PASS

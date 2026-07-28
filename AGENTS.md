@@ -36,9 +36,10 @@ documentation.
 
 ## Validation
 
-Run `make verify` before publishing. Run `make security` (govulncheck + gosec)
-before versioned releases — Primaris `gates.release` and local
-`release-primaris` full/fast require it. See `docs/security-and-release.md`.
+Run `make verify` before publishing. Run `make security-release` (govulncheck +
+gosec + Trivy on every container) before versioned releases — Primaris
+`gates.release` and local `release-primaris` full/fast require it. Public GHA
+shows one Trivy check per image. See `docs/security-and-release.md`.
 Regenerate API objects, CRDs, and chart CRDs with `make manifests` whenever API
 markers change. Use `hack/build-images.sh` for local checks, builds, and
 registry pushes so local, CI, and release workflows keep one image/component

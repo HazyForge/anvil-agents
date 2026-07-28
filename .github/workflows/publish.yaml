@@ -83,8 +83,66 @@ jobs:
       - uses: github/codeql-action/autobuild@v3
       - uses: github/codeql-action/analyze@v3
 
+  # Visible per-container Trivy scans for the release tag (public Actions minutes).
+  trivy:
+    name: trivy / ${{ matrix.component }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        component:
+          - controller
+          - codex
+          - opencode
+          - grok-build
+          - hermes
+          - openclaw
+          - pi
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.tag }}
+      - uses: docker/setup-buildx-action@v3
+      - name: Install Trivy
+        run: |
+          set -euo pipefail
+          curl -fsSL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh |
+            sh -s -- -b /usr/local/bin v0.63.0
+          trivy --version
+      - name: Build and Trivy-scan container
+        env:
+          TRIVY_REPORT_DIR: dist/security/trivy
+        run: |
+          set -euo pipefail
+          ./hack/security-trivy-images.sh \
+            --component "${{ matrix.component }}" \
+            --tag "release-${RELEASE_TAG}" \
+            --platform linux/amd64 \
+            --report-dir "${TRIVY_REPORT_DIR}"
+          echo "## Trivy \`${{ matrix.component }}\` @ \`${RELEASE_TAG}\`" >> "${GITHUB_STEP_SUMMARY}"
+          echo '```' >> "${GITHUB_STEP_SUMMARY}"
+          cat "${TRIVY_REPORT_DIR}/summary.txt" >> "${GITHUB_STEP_SUMMARY}"
+          echo '```' >> "${GITHUB_STEP_SUMMARY}"
+      - name: Upload Trivy reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-trivy-${{ matrix.component }}-${{ inputs.tag }}
+          path: dist/security/trivy/
+          if-no-files-found: warn
+      - name: Upload Trivy SARIF
+        if: always()
+        continue-on-error: true
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: dist/security/trivy/${{ matrix.component }}.sarif
+          category: release-trivy-${{ matrix.component }}
+
   publish:
-    needs: [verify, security]
+    needs: [verify, security, trivy]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6

@@ -1,6 +1,9 @@
 name: security
 
 # Public-repo security scans (uses free public GitHub Actions minutes).
+# Per-container Trivy jobs are first-class check runs so reviewers can see
+# that every image was scanned. Primaris release reuses the same script
+# (make security-release / TestContract suite security).
 on:
   push:
     branches: [master, main]
@@ -71,6 +74,74 @@ jobs:
       - uses: github/codeql-action/autobuild@v3
       - uses: github/codeql-action/analyze@v3
 
+  # One visible check run per container so reviewers can see each image scan.
+  trivy:
+    name: trivy / ${{ matrix.component }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        component:
+          - controller
+          - codex
+          - opencode
+          - grok-build
+          - hermes
+          - openclaw
+          - pi
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Install Trivy
+        run: |
+          set -euo pipefail
+          curl -fsSL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh |
+            sh -s -- -b /usr/local/bin v0.63.0
+          trivy --version
+      - name: Build and Trivy-scan container
+        env:
+          TRIVY_REPORT_DIR: dist/security/trivy
+          TRIVY_SEVERITY: HIGH,CRITICAL
+          TRIVY_IGNORE_UNFIXED: "true"
+        run: |
+          set -euo pipefail
+          tag="gha-${GITHUB_SHA:0:12}"
+          ./hack/security-trivy-images.sh \
+            --component "${{ matrix.component }}" \
+            --tag "${tag}" \
+            --platform linux/amd64 \
+            --report-dir "${TRIVY_REPORT_DIR}"
+          echo "## Trivy \`${{ matrix.component }}\`" >> "${GITHUB_STEP_SUMMARY}"
+          if [[ -f "${TRIVY_REPORT_DIR}/summary.txt" ]]; then
+            echo '```' >> "${GITHUB_STEP_SUMMARY}"
+            cat "${TRIVY_REPORT_DIR}/summary.txt" >> "${GITHUB_STEP_SUMMARY}"
+            echo '```' >> "${GITHUB_STEP_SUMMARY}"
+          fi
+          table="$(ls "${TRIVY_REPORT_DIR}"/*.txt 2>/dev/null | grep -v summary.txt | head -1 || true)"
+          if [[ -n "${table}" ]]; then
+            echo "### Report" >> "${GITHUB_STEP_SUMMARY}"
+            echo '```' >> "${GITHUB_STEP_SUMMARY}"
+            head -n 200 "${table}" >> "${GITHUB_STEP_SUMMARY}"
+            echo '```' >> "${GITHUB_STEP_SUMMARY}"
+          fi
+      - name: Upload Trivy reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trivy-${{ matrix.component }}
+          path: dist/security/trivy/
+          if-no-files-found: warn
+      - name: Upload Trivy SARIF
+        if: always()
+        continue-on-error: true
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: dist/security/trivy/${{ matrix.component }}.sarif
+          category: trivy-${{ matrix.component }}
+
   dependency-review:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
@@ -107,14 +178,15 @@ jobs:
           category: openssf-scorecard
 
   security-gate:
-    needs: [govulncheck, gosec, codeql]
+    name: security-gate
+    needs: [govulncheck, gosec, codeql, trivy]
     if: always()
     runs-on: ubuntu-latest
     steps:
-      - name: Require security jobs
+      - name: Require security jobs (including every container Trivy scan)
         run: |
           set -euo pipefail
-          for job in govulncheck gosec codeql; do
+          for job in govulncheck gosec codeql trivy; do
             result="${{ needs[job].result }}"
             echo "$job=$result"
             test "$result" = "success"

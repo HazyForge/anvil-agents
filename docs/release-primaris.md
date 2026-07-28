@@ -33,13 +33,16 @@ kubectl config current-context
 
 | Mode | Command | What it does |
 |------|---------|----------------|
-| **full** | `VERSION=vX.Y.Z make release-primaris` | Tag+push, `make verify` + Kind e2e + **`make security`**, build/push 7 images, OCI chart, pin Primaris digests |
-| **fast** | `VERSION=vX.Y.Z make release-primaris-fast` | Same without Kind e2e (still `make verify` + **`make security`**); good trusted cutovers |
-| **hot** | `make release-primaris-hot` | Rebuild/push **controller** only, pin its digest, **helm deploy** chart+CRDs now (skips full security gate; run `make security` before promoting) |
+| **full** | `VERSION=vX.Y.Z make release-primaris` | Tag+push, `make verify` + Kind e2e + **`make security-release`** (source + Trivy ×7), build/push 7 images, OCI chart, pin Primaris digests |
+| **fast** | `VERSION=vX.Y.Z make release-primaris-fast` | Same without Kind e2e (still `make verify` + **`make security-release`**); good trusted cutovers |
+| **hot** | `make release-primaris-hot` | Rebuild/push **controller** only, pin its digest, **helm deploy** chart+CRDs now (skips full security gate; run `make security-release` before promoting) |
 | **deploy** | `make deploy-primaris` | Apply local chart + current `deploy.yaml` only (no build) |
 
 Security is part of the Primaris release gate (`gates.release` suite `security`
-in `.hazyforge/tests.yaml`). Details: [security-and-release.md](security-and-release.md).
+in `.hazyforge/tests.yaml`): govulncheck, gosec, and **Trivy for each of the
+seven containers**, with evidence under `dist/security/trivy/`. Public GitHub
+Actions mirror the same per-container scans as named check runs. Details:
+[security-and-release.md](security-and-release.md).
 
 Equivalent scripts:
 

@@ -9,7 +9,7 @@ RELEASE_REPO ?= HazyForge/anvil-agents
 RELEASE_DEPLOY_VALUES ?= .hazyforge/clusters/anvil-primaris/namespace/anvil-agents-system/deploy.yaml
 RELEASE_IMAGE_LOCK ?= $(RELEASE_OUTPUT)/images-$(VERSION).lock.tsv
 
-.PHONY: generate manifests test verify verify-runner-contract security security-govulncheck security-gosec build console-build console-typecheck console-embed console-embed-restore docker-build images image-checks helm-lint archive-postgres-integration chart-package release-tag release-tag-push release-local release-publish release-github release-local-all release-pin-deploy release-primaris release-primaris-fast release-primaris-hot deploy-primaris judge-prerequisites judge-kind-e2e kind-upgrade-e2e kind-e2e
+.PHONY: generate manifests test verify verify-runner-contract security security-govulncheck security-gosec security-trivy security-release build console-build console-typecheck console-embed console-embed-restore docker-build images image-checks helm-lint archive-postgres-integration chart-package release-tag release-tag-push release-local release-publish release-github release-local-all release-pin-deploy release-primaris release-primaris-fast release-primaris-hot deploy-primaris judge-prerequisites judge-kind-e2e kind-upgrade-e2e kind-e2e
 
 generate:
 	$(CONTROLLER_GEN) object paths=./api/...
@@ -48,7 +48,20 @@ security-gosec:
 		-exclude-dir=web -exclude-dir=charts \
 		./cmd/... ./internal/... ./api/... ./lib/...
 
+# Source-level security only (fast). Used on PR unit loops.
 security: security-govulncheck security-gosec
+
+# Per-container Trivy image scan (builds all seven images by default).
+# Primaris release + GHA security matrix use this for public/release evidence.
+security-trivy:
+	./hack/security-trivy-images.sh \
+		$(if $(IMAGE_PREFIX),--prefix "$(IMAGE_PREFIX)",) \
+		--tag "$(IMAGE_TAG)" \
+		--platform "$(RELEASE_PLATFORM)"
+
+# Full release security gate: source scans + every container Trivy scan.
+# Primaris ApplicationRelease suite "security" and release-primaris full/fast.
+security-release: security security-trivy
 
 build:
 	go build ./cmd/anvil-agents ./cmd/anvil-agents-api ./cmd/anvil-agentctl
