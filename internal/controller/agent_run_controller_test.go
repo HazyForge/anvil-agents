@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -21,6 +22,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/validation"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
@@ -46,6 +48,62 @@ func (s *recordingAgentRunArchiveStore) ArchiveAgentRun(ctx context.Context, rec
 }
 
 func (s *recordingAgentRunArchiveStore) Close() {}
+
+func TestAgentRunChildNameHandlesOversizedFinalToken(t *testing.T) {
+	t.Parallel()
+
+	longSessionName := "codex-reauth-hazy-trade-docs-code-steward-codex-home-1785363423"
+	fullName := "auth-" + longSessionName
+	got := agentRunChildName("auth", longSessionName)
+	if len(got) > 63 {
+		t.Fatalf("name length = %d, want at most 63: %q", len(got), got)
+	}
+	if !strings.HasSuffix(got, "-"+shortHash(fullName)) {
+		t.Fatalf("name = %q, want deterministic hash suffix %q", got, shortHash(fullName))
+	}
+	if got != agentRunChildName("auth", longSessionName) {
+		t.Fatalf("name is not deterministic: %q", got)
+	}
+	if problems := validation.IsDNS1123Label(got); len(problems) != 0 {
+		t.Fatalf("name = %q is not a DNS-1123 label: %v", got, problems)
+	}
+}
+
+func TestAgentRunChildNameFinalTokenBoundaries(t *testing.T) {
+	t.Parallel()
+
+	for _, suffixLength := range []int{61, 62, 63, 64} {
+		suffixLength := suffixLength
+		t.Run(fmt.Sprintf("suffix-%d", suffixLength), func(t *testing.T) {
+			suffix := strings.Repeat("s", suffixLength)
+			got := agentRunChildName("auth", suffix)
+			if len(got) > 63 {
+				t.Fatalf("name length = %d, want at most 63: %q", len(got), got)
+			}
+			if problems := validation.IsDNS1123Label(got); len(problems) != 0 {
+				t.Fatalf("name = %q is not a DNS-1123 label: %v", got, problems)
+			}
+			if suffixLength == 62 && got != suffix {
+				t.Fatalf("62-character legacy suffix = %q, want unchanged %q", got, suffix)
+			}
+			if suffixLength >= 63 && !strings.HasSuffix(got, "-"+shortHash("auth-"+suffix)) {
+				t.Fatalf("name = %q, want deterministic hash suffix", got)
+			}
+		})
+	}
+}
+
+func TestAgentRunChildNamePreservesShortFinalToken(t *testing.T) {
+	t.Parallel()
+
+	got := agentRunChildName(strings.Repeat("long-prefix-", 8), "prompt-hash")
+	if len(got) > 63 {
+		t.Fatalf("name length = %d, want at most 63: %q", len(got), got)
+	}
+	if !strings.HasSuffix(got, "-prompt-hash") {
+		t.Fatalf("name = %q, want preserved final token", got)
+	}
+}
 
 func TestAgentRunStatusReportsFromOutputAppliesDecision(t *testing.T) {
 	t.Parallel()
