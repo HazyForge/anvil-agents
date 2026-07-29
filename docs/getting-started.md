@@ -140,21 +140,14 @@ package, pass that same file to `package-chart.sh --image-lock` together with
 `--source-revision "$(git rev-parse 'vX.Y.Z^{commit}')"`. The package command
 rejects lock metadata that does not match the expected version-tag commit.
 
-### Anvil Primaris first-party cutovers
+### Publish release artifacts
 
-For the Hazy Forge Primaris overlay (digest pins + CRD install + optional live
-Helm apply), prefer the local Docker path in
-[Release to Primaris](release-primaris.md):
+This repository publishes the reusable chart, controller and runner images,
+and immutable image lock. Consumer deployment repositories own cluster rollout
+and promotion:
 
 ```bash
-# Console/controller iteration → build, pin, helm deploy (no Actions, no Kind):
-make release-primaris-hot
-
-# Versioned release, pin Primaris deploy.yaml (commit for Argo):
-VERSION=v0.1.14 make release-primaris-fast
-
-# Apply current pins + CRDs from the local chart:
-make deploy-primaris
+VERSION=vX.Y.Z make release-local
 ```
 
 ## Add A Real Harness
