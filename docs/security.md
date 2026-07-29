@@ -113,6 +113,7 @@ Permissions:
 | --- | --- |
 | `anvil-agents:runs:read` | List/get sanitized AgentRun views |
 | `anvil-agents:runs:stream` | Live log/status streams (with read) |
+| `anvil-agents:runs:purge` | Purge terminal live AgentRun CRs already archived to PostgreSQL |
 | `anvil-agents:composition:read` | List/get composition CRs (when `composition.readEnabled`) |
 | `anvil-agents:composition:write` | Create/update/delete **console-managed** composition CRs (when `composition.writeEnabled`) |
 

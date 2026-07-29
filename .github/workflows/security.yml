@@ -1,7 +1,7 @@
 name: security
 
 # Free public-repo security program (public Actions minutes only; no paid SaaS).
-# Primaris install is separate: .hazyforge/clusters/anvil-primaris/
+# Cluster deployment and release promotion are owned by consumer repositories.
 on:
   push:
     branches: [master, main]

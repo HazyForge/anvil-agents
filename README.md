@@ -148,9 +148,6 @@ make kind-e2e
 # Complete local publication from a clean checkout after docker login and
 # helm registry login:
 make release-local-all VERSION=vX.Y.Z REGISTRY_PREFIX=registry.example.com/team
-
-# Update the first-party Anvil Primaris deploy overlay from the generated lock:
-make release-pin-deploy VERSION=vX.Y.Z
 ```
 
 `make images` builds the controller plus all six built-in runner images into
@@ -167,11 +164,10 @@ and chart artifacts, run `make release-local`.
 `publish-release.sh` runs `make verify` and `make kind-e2e`, publishes all
 seven versioned images, verifies their immutable digests and source revision,
 writes a digest lock, and pushes an OCI chart whose seven default image
-references are pinned to that lock. `make release-pin-deploy` updates the
-first-party Anvil Primaris overlay from that lock so the controller and built-in
-runner defaults move together.
+references are pinned to that lock. Consumer deployment repositories use that
+lock to advance their controller and built-in runner references together.
 
-GitHub workflows use the same repository-owned build and test contracts and are
+GitHub workflows use the same repository-owned build and test scripts and are
 optional. The optional release workflow is manual-only for an existing `v*` tag.
 It verifies the tag and Kind upgrade/install tests, then invokes
 `publish-release.sh --skip-verification` so Actions and local publication
@@ -212,13 +208,12 @@ audience, and explicit namespace authorization bindings are configured. See
 - [Migration from Anvil Primaris](docs/migration-from-anvil-primaris.md)
 - [Third-party notices](THIRD_PARTY_NOTICES.md)
 
-Hazy Forge uses this same open-source runtime for its own agent system. The
-repository-local `.hazyforge/artifact-build.yaml` and `.hazyforge/tests.yaml`
-files are maintainer build and test contracts. The
-`.hazyforge/clusters/anvil-primaris/` tree is an optional Hazy Forge consumer
-deployment with environment-specific identity, credentials, routing, storage,
-placement, and image pins. None of those files is a chart default or runtime
-dependency; other consumers provide their own Helm values or GitOps layer.
+Hazy Forge uses this same open-source runtime for its own agent system. This
+repository owns the source, CRDs, reusable Helm chart, controller and runner
+images, portable examples, public security evidence, and release artifacts.
+Environment-specific identity, credentials, routing, storage, placement,
+application policy, and image pins live in consumer deployment repositories,
+including the private Anvil Primaris repository.
 
 ## Project Status
 

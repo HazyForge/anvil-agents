@@ -39,25 +39,25 @@ documentation.
 Run `make verify` before publishing. Security is an **independent public
 GitHub Actions** program (`.github/workflows/security.yml`): govulncheck,
 gosec, CodeQL, owned-deps (`anvil-hotline`), Trivy filesystem, and Trivy on
-every container. Primaris only installs this operator via
-`.hazyforge/clusters/anvil-primaris/` — it does not own security gates. See
-`docs/security-and-release.md`. Regenerate API objects, CRDs, and chart CRDs
-with `make manifests` whenever API markers change. Use `hack/build-images.sh`
-for local checks, builds, and registry pushes so local, CI, and release
-workflows keep one image/component mapping. Run
+every container. Consumer repositories own cluster-specific values, identity,
+credentials, routing, placement, and image pins; they do not own this public
+security program. See `docs/security-and-release.md`. Regenerate API objects,
+CRDs, and chart CRDs with `make manifests` whenever API markers change. Use
+`hack/build-images.sh` for local checks, builds, and registry pushes so local,
+CI, and release workflows keep one image/component mapping. Run
 `bash -n hack/stream-agent-run.sh` after changing the live-stream helper, and
 render the chart with both `api.enabled=false` and a complete enabled API
 configuration.
 
-## Local release to Anvil Primaris
+## Local release
 
 GitHub Actions is never required. Prefer local Docker Buildx:
 
-- `make release-primaris-hot` — controller-only build/push, pin Primaris
-  `deploy.yaml`, helm-deploy chart+CRDs (fast console/API loops).
-- `VERSION=vX.Y.Z make release-primaris-fast` — seven-image publish without Kind
-  e2e, pin Primaris digests (add `RELEASE_DEPLOY=true` for live apply).
-- `VERSION=vX.Y.Z make release-primaris` — full gates including Kind e2e.
-- `make deploy-primaris` — apply local chart + current Primaris overlay only.
+- `make release-local` — verify, publish all seven images and the OCI chart,
+  and write the immutable image lock.
+- `make release-local-all` — push the release tag, publish artifacts, and
+  create the GitHub Release.
+- `make kind-e2e` — run the disposable upgrade/install suite before release.
 
-Details: `docs/release-primaris.md`.
+Deployment repositories consume the published chart and image lock. Do not add
+cluster-specific deployment directives back to this repository.

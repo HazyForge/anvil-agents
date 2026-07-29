@@ -47,6 +47,19 @@ func (s *recordingAgentRunArchiveStore) ArchiveAgentRun(ctx context.Context, rec
 	return archive.AgentRunArchiveResult{Store: archive.AgentRunArchiveStorePostgres, ArchivedAt: record.ArchivedAt, Digest: record.Digest}, nil
 }
 
+func (s *recordingAgentRunArchiveStore) ListAgentRunArchives(context.Context, string, int) ([]archive.AgentRunArchiveListItem, error) {
+	return nil, nil
+}
+
+func (s *recordingAgentRunArchiveStore) HasAgentRunArchive(_ context.Context, namespace, name, uid string) (bool, error) {
+	for _, record := range s.records {
+		if record.Namespace == namespace && record.Name == name && record.UID == uid {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 func (s *recordingAgentRunArchiveStore) Close() {}
 
 func TestAgentRunChildNameHandlesOversizedFinalToken(t *testing.T) {

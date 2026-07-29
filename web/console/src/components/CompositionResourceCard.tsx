@@ -16,6 +16,10 @@ interface Props {
   size?: "md" | "lg";
   primaryLabel?: string;
   secondaryLabel?: string;
+  /** Optional third action (for example Run now). */
+  actionLabel?: string;
+  actionDisabled?: boolean;
+  onAction?: () => void;
   onOpen: () => void;
 }
 
@@ -45,6 +49,9 @@ export function CompositionResourceCard({
   size = "md",
   primaryLabel = "Open",
   secondaryLabel,
+  actionLabel,
+  actionDisabled = false,
+  onAction,
   onOpen,
 }: Props) {
   const description = String(doc.spec?.description ?? "").trim();
@@ -105,6 +112,19 @@ export function CompositionResourceCard({
           <Link className="btn" to={href} onClick={(event) => event.stopPropagation()}>
             {secondaryLabel}
           </Link>
+        ) : null}
+        {actionLabel && onAction ? (
+          <button
+            type="button"
+            className="btn btn-primary"
+            disabled={actionDisabled}
+            onClick={(event) => {
+              event.stopPropagation();
+              onAction();
+            }}
+          >
+            {actionLabel}
+          </button>
         ) : null}
       </footer>
     </article>
