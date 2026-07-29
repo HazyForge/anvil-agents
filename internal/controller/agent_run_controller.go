@@ -4115,12 +4115,26 @@ func agentRunChildName(parts ...string) string {
 		return name
 	}
 	suffix := tokens[len(tokens)-1]
-	prefixMax := 63 - len(suffix) - 1
-	prefix := strings.Trim(strings.TrimRight(name[:prefixMax], "-"), "-")
-	if prefix == "" {
+	if len(suffix) < 63 {
+		prefixMax := 63 - len(suffix) - 1
+		prefix := strings.Trim(name[:prefixMax], "-")
+		if prefix != "" {
+			return prefix + "-" + suffix
+		}
+		// Preserve the legacy result when a 62-character final token leaves no
+		// room for both a prefix and separator.
 		return suffix
 	}
-	return prefix + "-" + suffix
+	// A final token can itself exceed the DNS-label limit (for example an
+	// AgentAuthSession name used as a Job suffix). Keep a readable prefix and a
+	// deterministic hash instead of slicing with a negative prefix budget.
+	hash := shortHash(name)
+	prefixMax := 63 - len(hash) - 1
+	prefix := strings.Trim(name[:prefixMax], "-")
+	if prefix == "" {
+		return hash
+	}
+	return prefix + "-" + hash
 }
 
 func sanitizeDNSLabel(value string) string {

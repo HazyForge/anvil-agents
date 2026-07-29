@@ -207,7 +207,14 @@ export function BoardPage({ token, namespace }: Props) {
   return (
     <div className="panel">
       <div className="panel-header">
-        <h2 className="panel-title">Run board</h2>
+        <div>
+          <h2 className="panel-title">Run board</h2>
+          {namespace ? (
+            <div className="panel-subtitle mono">
+              {namespace} · AgentRun
+            </div>
+          ) : null}
+        </div>
         <div className="toolbar-inline">
           <span className="count-pill">
             {filtered.length}/{runs.length}
