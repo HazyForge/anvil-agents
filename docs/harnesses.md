@@ -43,7 +43,9 @@ Every built-in runner receives:
 - `ANVIL_AGENT_RUN_STATUS_LOG_PREFIX`: prefix for JSON status log records.
 - provider and backend-specific environment variables.
 
-Setup scripts run after repository preparation and before the runtime starts.
+Structured acquisition, setup scripts, argv verification, MCP adapter
+generation, and MCP initialize/tools-list preflight run after repository
+preparation and before the runtime starts.
 They execute as the container user in the configured workdir. Keep them
 idempotent, install only into writable paths, pin downloaded artifacts, and
 pass credentials through the selected harness profile's `envSecretRefs` rather

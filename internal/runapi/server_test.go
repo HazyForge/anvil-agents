@@ -449,6 +449,8 @@ func TestConsoleIndexIsServedAtRoot(t *testing.T) {
 	}
 	if csp := response.Header().Get("Content-Security-Policy"); !strings.Contains(csp, "script-src 'self'") {
 		t.Fatalf("expected SPA CSP, got %q", csp)
+	} else if !strings.Contains(csp, "connect-src 'self' https://api.github.com") {
+		t.Fatalf("expected bounded public GitHub import origin, got %q", csp)
 	}
 }
 

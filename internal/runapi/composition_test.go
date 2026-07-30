@@ -83,6 +83,97 @@ func TestCompositionListAndGet(t *testing.T) {
 	}
 }
 
+func TestCompositionRegistryIncludesCanonicalCapabilityKinds(t *testing.T) {
+	t.Parallel()
+	want := map[string]string{
+		"agent-skills":      "AgentSkill",
+		"agent-tools":       "AgentTool",
+		"agent-mcp-servers": "AgentMCPServer",
+		"agent-mcp-sets":    "AgentMCPSet",
+	}
+	for segment, kindName := range want {
+		registered, ok := compositionKinds[segment]
+		if !ok {
+			t.Errorf("compositionKinds missing %q", segment)
+			continue
+		}
+		if registered.Kind != kindName {
+			t.Errorf("compositionKinds[%q].Kind = %q, want %q", segment, registered.Kind, kindName)
+		}
+		if registered.NewObject() == nil || registered.NewList() == nil {
+			t.Errorf("compositionKinds[%q] has nil constructors", segment)
+		}
+	}
+}
+
+func TestCanonicalCapabilityCompositionCRUD(t *testing.T) {
+	tests := []struct {
+		segment string
+		name    string
+		spec    string
+	}{
+		{"agent-skills", "review", `{"inline":{"skillMD":"# Review"}}`},
+		{"agent-tools", "query", `{"executable":{"name":"query","path":"query"},"source":{"inlineScript":{"interpreter":["sh"],"script":"exit 0"}},"verifyCommand":["query","--help"]}`},
+		{"agent-mcp-servers", "knowledge", `{"transport":{"stdio":{"command":["knowledge-mcp"]}}}`},
+		{"agent-mcp-sets", "research", `{"serverRefs":[{"name":"knowledge"}]}`},
+	}
+	for _, test := range tests {
+		t.Run(test.segment, func(t *testing.T) {
+			server := compositionTestServer(t, true, true)
+			body := `{"metadata":{"name":"` + test.name + `"},"spec":` + test.spec + `}`
+			request := httptest.NewRequest(http.MethodPost, "/api/v1/namespaces/agents/"+test.segment, bytes.NewBufferString(body))
+			request.Header.Set("Authorization", "Bearer valid")
+			response := httptest.NewRecorder()
+			server.routes().ServeHTTP(response, request)
+			if response.Code != http.StatusCreated {
+				t.Fatalf("create status = %d %s", response.Code, response.Body.String())
+			}
+			if !strings.Contains(response.Body.String(), `"`+test.name+`"`) || !strings.Contains(response.Body.String(), `"console_managed"`) {
+				t.Fatalf("create response missing name/management: %s", response.Body.String())
+			}
+			var created CompositionDocument
+			if err := json.Unmarshal(response.Body.Bytes(), &created); err != nil {
+				t.Fatal(err)
+			}
+			listRequest := httptest.NewRequest(http.MethodGet, "/api/v1/namespaces/agents/"+test.segment, nil)
+			listRequest.Header.Set("Authorization", "Bearer valid")
+			listResponse := httptest.NewRecorder()
+			server.routes().ServeHTTP(listResponse, listRequest)
+			if listResponse.Code != http.StatusOK || !strings.Contains(listResponse.Body.String(), `"`+test.name+`"`) {
+				t.Fatalf("list status = %d %s", listResponse.Code, listResponse.Body.String())
+			}
+
+			var updatedSpec map[string]any
+			if err := json.Unmarshal(created.Spec, &updatedSpec); err != nil {
+				t.Fatal(err)
+			}
+			updatedSpec["description"] = "updated"
+			updateBody, err := json.Marshal(map[string]any{
+				"metadata": map[string]any{"name": test.name, "resourceVersion": created.Metadata.ResourceVersion, "labels": created.Metadata.Labels},
+				"spec":     updatedSpec,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			updateRequest := httptest.NewRequest(http.MethodPut, "/api/v1/namespaces/agents/"+test.segment+"/"+test.name, bytes.NewReader(updateBody))
+			updateRequest.Header.Set("Authorization", "Bearer valid")
+			updateResponse := httptest.NewRecorder()
+			server.routes().ServeHTTP(updateResponse, updateRequest)
+			if updateResponse.Code != http.StatusOK || !strings.Contains(updateResponse.Body.String(), "updated") {
+				t.Fatalf("update status = %d %s", updateResponse.Code, updateResponse.Body.String())
+			}
+
+			deleteRequest := httptest.NewRequest(http.MethodDelete, "/api/v1/namespaces/agents/"+test.segment+"/"+test.name, nil)
+			deleteRequest.Header.Set("Authorization", "Bearer valid")
+			deleteResponse := httptest.NewRecorder()
+			server.routes().ServeHTTP(deleteResponse, deleteRequest)
+			if deleteResponse.Code != http.StatusNoContent {
+				t.Fatalf("delete status = %d %s", deleteResponse.Code, deleteResponse.Body.String())
+			}
+		})
+	}
+}
+
 func TestCompositionCreateStampsConsoleManaged(t *testing.T) {
 	server := compositionTestServer(t, true, true)
 
@@ -242,11 +333,11 @@ func TestCompositionAuthSessionAppendOnly(t *testing.T) {
 			Namespace: "agents",
 		},
 		Spec: agentsv1alpha1.AgentAuthSessionSpec{
-			Provider: agentsv1alpha1.AgentAuthSessionProviderGrokBuild,
-			Action:   agentsv1alpha1.AgentAuthSessionActionReauth,
-			DataVolumeRef: corev1.LocalObjectReference{Name: "home"},
+			Provider:         agentsv1alpha1.AgentAuthSessionProviderGrokBuild,
+			Action:           agentsv1alpha1.AgentAuthSessionActionReauth,
+			DataVolumeRef:    corev1.LocalObjectReference{Name: "home"},
 			StagingSecretRef: &corev1.LocalObjectReference{Name: "staging"},
-			SeedID: "seed-1",
+			SeedID:           "seed-1",
 		},
 		Status: agentsv1alpha1.AgentAuthSessionStatus{Phase: agentsv1alpha1.AgentAuthSessionPhaseRunning},
 	}

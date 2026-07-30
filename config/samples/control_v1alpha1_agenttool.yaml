@@ -1,0 +1,19 @@
+apiVersion: control.anvil.hazyforge.io/v1alpha1
+kind: AgentTool
+metadata:
+  name: repository-status
+  namespace: agents
+spec:
+  description: Show the checked-out revision and working-tree status.
+  executable:
+    name: repository-status
+    path: repository-status
+  source:
+    inlineScript:
+      interpreter: [/usr/bin/env, sh]
+      script: |
+        #!/usr/bin/env sh
+        set -eu
+        git rev-parse HEAD
+        git status --short
+  verifyCommand: [repository-status, --help]

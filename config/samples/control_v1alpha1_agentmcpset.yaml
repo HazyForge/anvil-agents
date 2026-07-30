@@ -1,0 +1,9 @@
+apiVersion: control.anvil.hazyforge.io/v1alpha1
+kind: AgentMCPSet
+metadata:
+  name: organization-context
+  namespace: agents
+spec:
+  description: Organization-owned context servers.
+  serverRefs:
+    - name: organization-runbooks

@@ -13,12 +13,18 @@ import {
   CompositionCardPicker,
   optionsFromDocs,
 } from "../../components/CompositionCardPicker";
+import { CapabilitySelectionPicker, type CapabilitySelection } from "../../components/CapabilitySelectionPicker";
 import { IconPicker } from "../../components/IconPicker";
 import {
   getIconUrl,
   getScreenshotUrl,
   mergePresentationAnnotations,
 } from "../../utils/icons";
+import {
+  preserveCapabilitySelections,
+  preserveNamedReference,
+  preserveOrderedNamedReferences,
+} from "./profileReferenceMerge";
 
 interface Props {
   token: string;
@@ -29,6 +35,10 @@ interface Props {
 function arrayLen(spec: Record<string, unknown>, key: string): number {
   const value = spec[key];
   return Array.isArray(value) ? value.length : 0;
+}
+
+function objectValue(value: unknown): Record<string, unknown> {
+  return typeof value === "object" && value ? (value as Record<string, unknown>) : {};
 }
 
 function harnessMeta(doc: CompositionDocument): string | undefined {
@@ -63,6 +73,13 @@ interface ProfileForm {
   harnessProfileName: string;
   skillSetNames: string[];
   toolSetNames: string[];
+  skillMode: string;
+  skillSelections: CapabilitySelection[];
+  skillOverrides: unknown[];
+  toolMode: string;
+  toolSelections: CapabilitySelection[];
+  mcpMode: string;
+  mcpSelections: CapabilitySelection[];
   intent: string;
   systemPrompt: string;
   applicationName: string;
@@ -77,6 +94,13 @@ function emptyForm(): ProfileForm {
     harnessProfileName: "",
     skillSetNames: [],
     toolSetNames: [],
+    skillMode: "",
+    skillSelections: [],
+    skillOverrides: [],
+    toolMode: "",
+    toolSelections: [],
+    mcpMode: "",
+    mcpSelections: [],
     intent: "",
     systemPrompt: "",
     applicationName: "",
@@ -123,6 +147,22 @@ function formFromDoc(doc: CompositionDocument): ProfileForm {
     typeof spec.scope === "object" && spec.scope
       ? (spec.scope as { applicationRef?: { name?: string } })
       : {};
+  const capabilities = typeof spec.capabilities === "object" && spec.capabilities ? spec.capabilities as Record<string, unknown> : {};
+  const skills = typeof capabilities.skills === "object" && capabilities.skills ? capabilities.skills as Record<string, unknown> : {};
+  const tools = typeof capabilities.tools === "object" && capabilities.tools ? capabilities.tools as Record<string, unknown> : {};
+  const mcps = typeof capabilities.mcpServers === "object" && capabilities.mcpServers ? capabilities.mcpServers as Record<string, unknown> : {};
+  const selections = (value: unknown, atomicKey: string, setKey: string): CapabilitySelection[] => {
+    const result: CapabilitySelection[] = [];
+    if (!Array.isArray(value)) return result;
+    for (const raw of value) {
+      const item = typeof raw === "object" && raw ? raw as Record<string, unknown> : {};
+      const atomic = typeof item[atomicKey] === "object" && item[atomicKey] ? String((item[atomicKey] as {name?: string}).name ?? "") : "";
+      const set = typeof item[setKey] === "object" && item[setKey] ? String((item[setKey] as {name?: string}).name ?? "") : "";
+      if (atomic) result.push({ type: "atomic", name: atomic });
+      else if (set) result.push({ type: "set", name: set });
+    }
+    return result;
+  };
   return {
     name: doc.metadata.name,
     description: String(spec.description ?? ""),
@@ -131,6 +171,13 @@ function formFromDoc(doc: CompositionDocument): ProfileForm {
     harnessProfileName: harnessRef,
     skillSetNames: uniqueNames(skillRefs),
     toolSetNames: uniqueNames(toolRefs),
+    skillMode: String(skills.mode ?? ""),
+    skillSelections: selections(skills.selections, "skillRef", "skillSetRef"),
+    skillOverrides: Array.isArray(skills.overrides) ? skills.overrides : [],
+    toolMode: String(tools.mode ?? ""),
+    toolSelections: selections(tools.selections, "toolRef", "toolSetRef"),
+    mcpMode: String(mcps.mode ?? ""),
+    mcpSelections: selections(mcps.selections, "serverRef", "mcpSetRef"),
     intent: String(harness.intent ?? ""),
     systemPrompt: String(harness.systemPrompt ?? ""),
     applicationName: String(scope.applicationRef?.name ?? ""),
@@ -164,6 +211,12 @@ function buildSpec(form: ProfileForm): Record<string, unknown> {
       refs: toolNames.map((name) => ({ name })),
     };
   }
+  const capabilities: Record<string, unknown> = {};
+  const buildSelections = (items: CapabilitySelection[], atomicKey: string, setKey: string) => items.map((item) => ({ [item.type === "atomic" ? atomicKey : setKey]: { name: item.name } }));
+  if (form.skillMode || form.skillSelections.length || form.skillOverrides.length) capabilities.skills = { ...(form.skillMode ? { mode: form.skillMode } : {}), ...(form.skillSelections.length ? { selections: buildSelections(form.skillSelections, "skillRef", "skillSetRef") } : {}), ...(form.skillOverrides.length ? { overrides: form.skillOverrides } : {}) };
+  if (form.toolMode || form.toolSelections.length) capabilities.tools = { ...(form.toolMode ? { mode: form.toolMode } : {}), ...(form.toolSelections.length ? { selections: buildSelections(form.toolSelections, "toolRef", "toolSetRef") } : {}) };
+  if (form.mcpMode || form.mcpSelections.length) capabilities.mcpServers = { ...(form.mcpMode ? { mode: form.mcpMode } : {}), ...(form.mcpSelections.length ? { selections: buildSelections(form.mcpSelections, "serverRef", "mcpSetRef") } : {}) };
+  if (Object.keys(capabilities).length) spec.capabilities = capabilities;
   if (Object.keys(harness).length > 0) {
     spec.harness = harness;
   }
@@ -191,6 +244,10 @@ export function ProfileEditorPage({ token, namespace: activeNamespace, writeEnab
   const [harnessDocs, setHarnessDocs] = useState<CompositionDocument[]>([]);
   const [skillSetDocs, setSkillSetDocs] = useState<CompositionDocument[]>([]);
   const [toolSetDocs, setToolSetDocs] = useState<CompositionDocument[]>([]);
+  const [skillDocs, setSkillDocs] = useState<CompositionDocument[]>([]);
+  const [toolDocs, setToolDocs] = useState<CompositionDocument[]>([]);
+  const [mcpServerDocs, setMCPServerDocs] = useState<CompositionDocument[]>([]);
+  const [mcpSetDocs, setMCPSetDocs] = useState<CompositionDocument[]>([]);
 
   useEffect(() => {
     if (!namespace || !token) {
@@ -201,11 +258,16 @@ export function ProfileEditorPage({ token, namespace: activeNamespace, writeEnab
       listComposition(token, namespace, "agent-harness-profiles", 200, controller.signal),
       listComposition(token, namespace, "agent-skill-sets", 200, controller.signal),
       listComposition(token, namespace, "agent-tool-sets", 200, controller.signal),
+      listComposition(token, namespace, "agent-skills", 200, controller.signal),
+      listComposition(token, namespace, "agent-tools", 200, controller.signal),
+      listComposition(token, namespace, "agent-mcp-servers", 200, controller.signal),
+      listComposition(token, namespace, "agent-mcp-sets", 200, controller.signal),
     ])
-      .then(([h, s, t]) => {
+      .then(([h, s, t, skills, tools, mcpServers, mcpSets]) => {
         setHarnessDocs(h);
         setSkillSetDocs(s);
         setToolSetDocs(t);
+        setSkillDocs(skills); setToolDocs(tools); setMCPServerDocs(mcpServers); setMCPSetDocs(mcpSets);
       })
       .catch(() => {
         // card grid will show empty; selected names still render as orphan cards
@@ -311,34 +373,64 @@ export function ProfileEditorPage({ token, namespace: activeNamespace, writeEnab
         ...(doc.spec ?? {}),
         ...spec,
       };
+      if (!form.description.trim()) {
+        delete mergedSpec.description;
+      }
       if (!form.harnessProfileName.trim()) {
         delete mergedSpec.harnessProfileRef;
+	  } else {
+		mergedSpec.harnessProfileRef = preserveNamedReference(doc.spec?.harnessProfileRef, form.harnessProfileName.trim());
       }
-      if (form.skillSetNames.length === 0) {
-        delete mergedSpec.skillSets;
-      }
-      if (form.toolSetNames.length === 0) {
-        delete mergedSpec.toolSets;
-      }
+
+      const mergeLegacyRefs = (key: "skillSets" | "toolSets", hasRefs: boolean) => {
+        const prior = objectValue(doc.spec?.[key]);
+        const next = { ...prior, ...objectValue(spec[key]) };
+		if (!hasRefs) delete next.refs;
+		else next.refs = preserveOrderedNamedReferences(prior.refs, key === "skillSets" ? uniqueNames(form.skillSetNames) : uniqueNames(form.toolSetNames));
+        if (Object.keys(next).length) mergedSpec[key] = next;
+        else delete mergedSpec[key];
+      };
+      mergeLegacyRefs("skillSets", form.skillSetNames.length > 0);
+      mergeLegacyRefs("toolSets", form.toolSetNames.length > 0);
+
+      const priorCapabilities = objectValue(doc.spec?.capabilities);
+      const nextCapabilities: Record<string, unknown> = { ...priorCapabilities };
+      const builtCapabilities = objectValue(spec.capabilities);
+      const mergeCapability = (
+        key: "skills" | "tools" | "mcpServers",
+        mode: string,
+        selections: CapabilitySelection[],
+        overrides?: unknown[],
+      ) => {
+        const next = { ...objectValue(priorCapabilities[key]), ...objectValue(builtCapabilities[key]) };
+        if (!mode) delete next.mode;
+		if (!selections.length) delete next.selections;
+		else {
+			const keys = key === "skills" ? ["skillRef", "skillSetRef"] : key === "tools" ? ["toolRef", "toolSetRef"] : ["serverRef", "mcpSetRef"];
+			next.selections = preserveCapabilitySelections(objectValue(priorCapabilities[key]).selections, selections, keys[0], keys[1]);
+		}
+        if (overrides && !overrides.length) delete next.overrides;
+        if (Object.keys(next).length) nextCapabilities[key] = next;
+        else delete nextCapabilities[key];
+      };
+      mergeCapability("skills", form.skillMode, form.skillSelections, form.skillOverrides);
+      mergeCapability("tools", form.toolMode, form.toolSelections);
+      mergeCapability("mcpServers", form.mcpMode, form.mcpSelections);
+      if (Object.keys(nextCapabilities).length) mergedSpec.capabilities = nextCapabilities;
+      else delete mergedSpec.capabilities;
+
       // Keep existing harness fields (backend/image/etc) while applying intent/systemPrompt.
-      if (typeof doc.spec?.harness === "object" && doc.spec.harness) {
-        const prior = doc.spec.harness as Record<string, unknown>;
-        const nextHarness = {
-          ...prior,
-          ...((spec.harness as Record<string, unknown> | undefined) ?? {}),
-        };
-        if (!form.intent) {
-          delete nextHarness.intent;
-        }
-        if (!form.systemPrompt.trim()) {
-          delete nextHarness.systemPrompt;
-        }
-        if (Object.keys(nextHarness).length > 0) {
-          mergedSpec.harness = nextHarness;
-        } else {
-          delete mergedSpec.harness;
-        }
-      }
+      const nextHarness = { ...objectValue(doc.spec?.harness), ...objectValue(spec.harness) };
+      if (!form.intent) delete nextHarness.intent;
+      if (!form.systemPrompt.trim()) delete nextHarness.systemPrompt;
+      if (Object.keys(nextHarness).length) mergedSpec.harness = nextHarness;
+      else delete mergedSpec.harness;
+
+      const nextScope = { ...objectValue(doc.spec?.scope), ...objectValue(spec.scope) };
+      if (!form.applicationName.trim()) delete nextScope.applicationRef;
+	  else nextScope.applicationRef = preserveNamedReference(objectValue(doc.spec?.scope).applicationRef, form.applicationName.trim());
+      if (Object.keys(nextScope).length) mergedSpec.scope = nextScope;
+      else delete mergedSpec.scope;
       const updated = await updateComposition(
         token,
         namespace,
@@ -474,6 +566,18 @@ export function ProfileEditorPage({ token, namespace: activeNamespace, writeEnab
               onChange={(next) => update("harnessProfileName", next)}
             />
 
+            <h3 className="form-section-title">Canonical capabilities</h3>
+            <div className="field-row">
+              {(["skillMode", "toolMode", "mcpMode"] as const).map((key) => <label className="field" key={key}><span className="label">{key === "skillMode" ? "Skills" : key === "toolMode" ? "Tools" : "MCP servers"} mode</span><select className="select" value={form[key]} disabled={!writable} onChange={(event) => update(key, event.target.value)}><option value="">Append (default)</option><option value="Append">Append</option><option value="Replace">Replace inherited selections</option></select></label>)}
+            </div>
+            <CapabilitySelectionPicker label="Skills" help="Atomic skills and skill sets share one explicit order. Selecting a tool never selects a skill." atomicLabel="skill" setLabel="skill set" atomics={skillDocs} sets={skillSetDocs} value={form.skillSelections} disabled={!writable} onChange={(next) => update("skillSelections", next)} />
+            {form.skillOverrides.length ? <div className="banner banner-info">{form.skillOverrides.length} existing skill override(s) are preserved. Edit their full shape through the advanced/API surface until the guided override editor is added.</div> : null}
+            <CapabilitySelectionPicker label="Tools" help="Atomic tools and tool sets share one explicit order. This is code-execution capability, not runtime identity." atomicLabel="tool" setLabel="tool set" atomics={toolDocs} sets={toolSetDocs} value={form.toolSelections} disabled={!writable} onChange={(next) => update("toolSelections", next)} />
+            <CapabilitySelectionPicker label="MCP servers" help="MCP servers and MCP sets compose independently from executable tools and skills." atomicLabel="server" setLabel="MCP set" atomics={mcpServerDocs} sets={mcpSetDocs} value={form.mcpSelections} disabled={!writable} onChange={(next) => update("mcpSelections", next)} />
+
+            <details className="spec-preview" open={form.skillSetNames.length > 0 || form.toolSetNames.length > 0}>
+              <summary>Deprecated compatibility selections</summary>
+              <div className="banner banner-warn">These fields remain supported for existing objects. New profiles should use canonical capabilities above.</div>
             <CompositionCardPicker
               mode="multi"
               label="Skill sets"
@@ -495,6 +599,7 @@ export function ProfileEditorPage({ token, namespace: activeNamespace, writeEnab
               emptyLabel="No tool sets in this namespace."
               onChange={(next) => update("toolSetNames", next)}
             />
+            </details>
 
             <div className="field-row">
               <label className="field">

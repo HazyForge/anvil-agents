@@ -10,8 +10,9 @@ to succeed. It does not call an LLM or require a provider token.
 
 Set `ANVIL_AGENTS_KIND_CLUSTER` to use a different cluster name. The script
 leaves the cluster running for inspection. `manifests.yaml` is also a compact
-reference for the minimum valid `sourceRef`, harness profile, skill set, run
-profile, runner ServiceAccount, local override, and run.
+reference for the minimum valid `sourceRef`, harness profile, atomic skill and
+tool, ordered sets, canonical profile/run capability selection, runner
+ServiceAccount, local override, and run.
 
 On a reused cluster, the script deletes and recreates only its deterministic
 `demo-001` run because completed `AgentRun` specs are intentionally immutable.

@@ -52,9 +52,9 @@ is pinned to `kind-anvil-agents` (or the selected
 cluster available for inspection.
 
 `make kind-e2e` first uses a disposable cluster to upgrade a portable seven-CRD
-legacy-object baseline to the twelve-CRD composition and signal API without losing
+legacy-object baseline to the sixteen-CRD composition and signal API without losing
 existing objects. It then runs the current execution, validates every sample with
-server-side dry-run, uninstalls the chart, proves all twelve CRDs plus the run,
+server-side dry-run, uninstalls the chart, proves all sixteen CRDs plus the run,
 profiles, skill set, tool set, data volume, and PVC were retained, and reinstalls the
 controller. A second run then executes through the retained composition and
 storage objects. The quickstart also asserts the resolved harness, skill-set,
@@ -157,10 +157,11 @@ VERSION=vX.Y.Z make release-local
 3. Create one provider credential Secret in that namespace.
 4. Create an `AgentHarnessProfile` selecting the adapter, digest-pinned image,
    ServiceAccount, provider Secret, timeout, and resource limits.
-5. Create any backend-neutral `AgentSkillSet` instruction packs and
-   `AgentToolSet` external tool contracts.
-6. Create an `AgentRunProfile` that composes the role, harness, skills, and
-   tools.
+5. Create backend-neutral atomic `AgentSkill`, `AgentTool`, and
+   `AgentMCPServer` resources, then collect reusable ordered selections in
+   their corresponding sets where useful.
+6. Create an `AgentRunProfile` that explicitly composes the role, harness,
+   atomic capabilities, and sets.
 7. Create a run with a non-empty `sourceRef.kind` and `sourceRef.name`.
 8. Observe status and logs, then enable schedules only after the manual path is
    bounded and repeatable.

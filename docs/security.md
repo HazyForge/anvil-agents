@@ -9,14 +9,17 @@ multi-tenant sandbox.
 An `AgentRun`, `AgentRunProfile`, or `AgentHarnessProfile` author can select an
 image, custom command, ServiceAccount, same-namespace Secrets, pull
 credentials, security context, node placement, and tolerations. An
-`AgentToolSet` author, or an author using the legacy `AgentSkillSet.spec.tools`
-field, can supply setup scripts that execute in consuming Jobs.
+`AgentTool` or `AgentToolSet` author, or an author using the legacy
+`AgentSkillSet.spec.tools` field, can supply setup scripts that execute in
+consuming Jobs. `AgentMCPServer` authors select executable argv or an egress
+endpoint, header names, and required environment names, but never Secret refs
+or credential values.
 Granting write access to any of these resources is therefore equivalent to
 granting substantial code-execution authority in that namespace. An admission
 controller should enforce allowed registries, ServiceAccounts, Secret and PVC
 refs, security contexts, resources, and placement rules.
 
-Skill and tool sets cannot directly select images, identities, Secrets,
+Atomic capabilities and their sets cannot directly select images, identities, Secrets,
 storage, or placement. Remote skill sources must identify a full immutable Git
 commit, and private-source tokens are selected by exact API host only from the
 trusted harness execution envelope. Keep those boundaries in admission policy too. A
@@ -127,8 +130,9 @@ Permissions:
 | `anvil-agents:composition:read` | List/get composition CRs (when `composition.readEnabled`) |
 | `anvil-agents:composition:write` | Create/update/delete **console-managed** composition CRs (when `composition.writeEnabled`) |
 
-Composition kinds: `AgentRunProfile`, `AgentHarnessProfile`, `AgentSkillSet`,
-`AgentToolSet`, `VolumeProfile`, `AgentDataVolume`.
+Composition kinds: `AgentRunProfile`, `AgentHarnessProfile`, `AgentSkill`,
+`AgentSkillSet`, `AgentTool`, `AgentToolSet`, `AgentMCPServer`, `AgentMCPSet`,
+`VolumeProfile`, and `AgentDataVolume`.
 
 **GitOps is source of truth.** Even with composition write enabled, the API
 refuses to update or delete objects that:

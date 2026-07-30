@@ -5,14 +5,10 @@ metadata:
   namespace: agents
 spec:
   description: Backend-neutral repository review capability pack.
-  skills:
+  skillRefs:
     - name: evidence-backed-review
-      description: Review repository behavior from current source and tests.
-      content: Cite concrete file paths and distinguish confirmed defects from risks.
-  tools:
-    - name: ripgrep
-      description: Fast repository text search.
-      verifyCommand: [rg, --version]
+  # Embedded skills, tools, and personas remain accepted only as deprecated
+  # v1alpha1 migration inputs.
   subagents:
     - name: correctness-reviewer
       when: The change affects shared behavior or runtime contracts.

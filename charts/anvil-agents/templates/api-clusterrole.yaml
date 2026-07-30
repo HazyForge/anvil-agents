@@ -30,6 +30,10 @@ rules:
     resources:
       - agentrunprofiles
       - agentharnessprofiles
+      - agentskills
+      - agenttools
+      - agentmcpservers
+      - agentmcpsets
       - agentskillsets
       - agenttoolsets
       - volumeprofiles
@@ -44,6 +48,10 @@ rules:
     resources:
       - agentrunprofiles
       - agentharnessprofiles
+      - agentskills
+      - agenttools
+      - agentmcpservers
+      - agentmcpsets
       - agentskillsets
       - agenttoolsets
       - volumeprofiles
