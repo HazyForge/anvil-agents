@@ -2,12 +2,10 @@ package agentctl
 
 import (
 	"bufio"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/url"
 	"os"
-	"reflect"
 	"regexp"
 	"strings"
 
@@ -168,6 +166,10 @@ func migrateCompositionObjects(objects []*unstructured.Unstructured) ([]runtime.
 	}
 	var converted []runtime.Object
 	for _, object := range objects {
+		if object.GetAPIVersion() != agentsv1alpha1.GroupVersion.String() {
+			converted = append(converted, object.DeepCopy())
+			continue
+		}
 		switch object.GetKind() {
 		case "AgentSkillSet":
 			items, err := inventory.migrateSkillSet(object, inventory.skillSets[compositionObjectKey(object.GetNamespace(), object.GetName())])
@@ -182,19 +184,11 @@ func migrateCompositionObjects(objects []*unstructured.Unstructured) ([]runtime.
 			}
 			converted = append(converted, items...)
 		case "AgentRunProfile":
-			value := &agentsv1alpha1.AgentRunProfile{}
-			if err := runtime.DefaultUnstructuredConverter.FromUnstructured(object.Object, value); err != nil {
-				return nil, fmt.Errorf("decode AgentRunProfile %s/%s: %w", object.GetNamespace(), object.GetName(), err)
-			}
-			if inventory.migrateRunProfileSpec(&value.Spec) {
-				patched, patchErr := patchProfileComposition(object, &value.Spec)
-				if patchErr != nil {
-					return nil, patchErr
-				}
-				converted = append(converted, patched)
-			} else {
-				converted = append(converted, object.DeepCopy())
-			}
+			// Moving profile legacy selectors into the later canonical layer can
+			// reverse precedence against append-only runs that still use legacy
+			// run selectors. Emit canonical set candidates, but keep profiles
+			// unchanged for an explicit producer-aware cutover.
+			converted = append(converted, object.DeepCopy())
 		case "AgentRun":
 			// AgentRun is append-only. The migration command may be run over a
 			// mixed export, but it never rewrites an existing execution record.
@@ -210,30 +204,34 @@ func (inventory *migrationInventory) migrateSkillSet(original *unstructured.Unst
 	if set == nil {
 		return nil, nil
 	}
-	out := set.DeepCopy()
-	remainingSkills := make([]agentsv1alpha1.AgentRunSkillInjectionSpec, 0, len(set.Spec.Skills))
-	generatedRefs := make([]agentsv1alpha1.NamespacedObjectReference, 0, len(set.Spec.Skills))
-	var objects []runtime.Object
+	if len(set.Spec.Skills) == 0 {
+		return []runtime.Object{original.DeepCopy()}, nil
+	}
+	atomics := make([]*agentsv1alpha1.AgentSkill, 0, len(set.Spec.Skills))
 	for _, skill := range set.Spec.Skills {
 		atomic, ok := migratableLegacySkill(set.ObjectMeta, skill)
-		if !ok {
-			remainingSkills = append(remainingSkills, skill)
-			continue
+		if !ok || referenceNameExists(set.Spec.SkillRefs, atomic.Name) || !inventory.canReserveGenerated(atomic) {
+			return []runtime.Object{original.DeepCopy()}, nil
 		}
-		if !inventory.reserveGenerated(atomic) || referenceNameExists(out.Spec.SkillRefs, atomic.Name) {
-			remainingSkills = append(remainingSkills, skill)
-			continue
-		}
+		atomics = append(atomics, atomic)
+	}
+	canonical := set.DeepCopy()
+	canonical.Name = canonicalMigrationName(set.Name)
+	canonical.ResourceVersion, canonical.UID, canonical.Generation = "", "", 0
+	canonical.Spec.Skills = nil
+	canonical.Spec.SkillRefs = nil
+	if !inventory.canReserveGenerated(canonical) {
+		return []runtime.Object{original.DeepCopy()}, nil
+	}
+	objects := make([]runtime.Object, 0, len(atomics)+2)
+	for _, atomic := range atomics {
+		inventory.reserveGenerated(atomic)
 		objects = append(objects, atomic)
-		generatedRefs = append(generatedRefs, agentsv1alpha1.NamespacedObjectReference{Name: atomic.Name})
+		canonical.Spec.SkillRefs = append(canonical.Spec.SkillRefs, agentsv1alpha1.NamespacedObjectReference{Name: atomic.Name})
 	}
-	out.Spec.Skills = remainingSkills
-	out.Spec.SkillRefs = append(generatedRefs, out.Spec.SkillRefs...)
-	patched, err := patchSetComposition(original, "skills", out.Spec.Skills, "skillRefs", out.Spec.SkillRefs)
-	if err != nil {
-		return nil, err
-	}
-	objects = append(objects, patched)
+	canonical.Spec.SkillRefs = append(canonical.Spec.SkillRefs, set.Spec.SkillRefs...)
+	inventory.reserveGenerated(canonical)
+	objects = append(objects, canonical, original.DeepCopy())
 	return objects, nil
 }
 
@@ -268,30 +266,34 @@ func (inventory *migrationInventory) migrateToolSet(original *unstructured.Unstr
 	if set == nil {
 		return nil, nil
 	}
-	out := set.DeepCopy()
-	remaining := make([]agentsv1alpha1.AgentRunToolSpec, 0, len(set.Spec.Tools))
-	generatedRefs := make([]agentsv1alpha1.NamespacedObjectReference, 0, len(set.Spec.Tools))
-	var objects []runtime.Object
+	if len(set.Spec.Tools) == 0 {
+		return []runtime.Object{original.DeepCopy()}, nil
+	}
+	atomics := make([]*agentsv1alpha1.AgentTool, 0, len(set.Spec.Tools))
 	for _, tool := range set.Spec.Tools {
 		atomic, ok := migratableLegacyTool(set.ObjectMeta, tool)
-		if !ok {
-			remaining = append(remaining, tool)
-			continue
+		if !ok || referenceNameExists(set.Spec.ToolRefs, atomic.Name) || !inventory.canReserveGenerated(atomic) {
+			return []runtime.Object{original.DeepCopy()}, nil
 		}
-		if !inventory.reserveGenerated(atomic) || referenceNameExists(out.Spec.ToolRefs, atomic.Name) {
-			remaining = append(remaining, tool)
-			continue
-		}
+		atomics = append(atomics, atomic)
+	}
+	canonical := set.DeepCopy()
+	canonical.Name = canonicalMigrationName(set.Name)
+	canonical.ResourceVersion, canonical.UID, canonical.Generation = "", "", 0
+	canonical.Spec.Tools = nil
+	canonical.Spec.ToolRefs = nil
+	if !inventory.canReserveGenerated(canonical) {
+		return []runtime.Object{original.DeepCopy()}, nil
+	}
+	objects := make([]runtime.Object, 0, len(atomics)+2)
+	for _, atomic := range atomics {
+		inventory.reserveGenerated(atomic)
 		objects = append(objects, atomic)
-		generatedRefs = append(generatedRefs, agentsv1alpha1.NamespacedObjectReference{Name: atomic.Name})
+		canonical.Spec.ToolRefs = append(canonical.Spec.ToolRefs, agentsv1alpha1.NamespacedObjectReference{Name: atomic.Name})
 	}
-	out.Spec.Tools = remaining
-	out.Spec.ToolRefs = append(generatedRefs, out.Spec.ToolRefs...)
-	patched, err := patchSetComposition(original, "tools", out.Spec.Tools, "toolRefs", out.Spec.ToolRefs)
-	if err != nil {
-		return nil, err
-	}
-	objects = append(objects, patched)
+	canonical.Spec.ToolRefs = append(canonical.Spec.ToolRefs, set.Spec.ToolRefs...)
+	inventory.reserveGenerated(canonical)
+	objects = append(objects, canonical, original.DeepCopy())
 	return objects, nil
 }
 
@@ -310,68 +312,40 @@ func migratableLegacyTool(meta metav1.ObjectMeta, tool agentsv1alpha1.AgentRunTo
 		ObjectMeta: migratedObjectMeta(meta, name),
 		Spec: agentsv1alpha1.AgentToolSpec{
 			Description:   tool.Description,
-			Executable:    agentsv1alpha1.AgentToolExecutable{Name: tool.Name, Path: tool.Name},
+			Executable:    agentsv1alpha1.AgentToolExecutable{Name: name, Path: name},
 			SetupScript:   tool.SetupScript,
 			VerifyCommand: append([]string(nil), tool.VerifyCommand...),
 		},
 	}, true
 }
 
-func (inventory *migrationInventory) migrateRunProfileSpec(spec *agentsv1alpha1.AgentRunProfileSpec) bool {
-	hadCanonicalSkills := spec.Capabilities != nil && spec.Capabilities.Skills != nil
-	hadCanonicalTools := spec.Capabilities != nil && spec.Capabilities.Tools != nil
-	changed := false
-	if spec.Capabilities == nil {
-		spec.Capabilities = &agentsv1alpha1.AgentCapabilitiesSpec{}
-	}
-	if spec.SkillSets != nil && !hadCanonicalSkills {
-		spec.Capabilities.Skills = &agentsv1alpha1.AgentSkillCapabilityComposition{Mode: agentsv1alpha1.AgentCapabilityCompositionMode(spec.SkillSets.Mode), Overrides: append([]agentsv1alpha1.AgentSkillOverrideSpec(nil), spec.SkillSets.Overrides...)}
-		for index := range spec.SkillSets.Refs {
-			ref := spec.SkillSets.Refs[index]
-			spec.Capabilities.Skills.Selections = append(spec.Capabilities.Skills.Selections, agentsv1alpha1.AgentSkillSelection{SkillSetRef: ref.DeepCopy()})
-		}
-		spec.SkillSets = nil
-		changed = true
-	}
-	if spec.ToolSets != nil && !hadCanonicalTools {
-		legacyTools := canonicalToolsFromLegacy(spec.ToolSets)
-		if spec.Capabilities.Tools == nil {
-			spec.Capabilities.Tools = legacyTools
-		} else {
-			spec.Capabilities.Tools.Selections = append(spec.Capabilities.Tools.Selections, legacyTools.Selections...)
-			if legacyTools.Mode == agentsv1alpha1.AgentCapabilityCompositionReplace {
-				spec.Capabilities.Tools.Mode = legacyTools.Mode
-			}
-		}
-		spec.ToolSets = nil
-		changed = true
-	}
-	if !changed && spec.Capabilities != nil && spec.Capabilities.Skills == nil && spec.Capabilities.Tools == nil && spec.Capabilities.MCPServers == nil {
-		spec.Capabilities = nil
-	}
-	return changed
-}
-
-func canonicalToolsFromLegacy(legacy *agentsv1alpha1.AgentToolCompositionSpec) *agentsv1alpha1.AgentToolCapabilityComposition {
-	out := &agentsv1alpha1.AgentToolCapabilityComposition{Mode: agentsv1alpha1.AgentCapabilityCompositionMode(legacy.Mode)}
-	for index := range legacy.Refs {
-		out.Selections = append(out.Selections, agentsv1alpha1.AgentToolSelection{ToolSetRef: legacy.Refs[index].DeepCopy()})
-	}
-	return out
-}
-
 func (inventory *migrationInventory) reserveGenerated(object metav1.Object) bool {
+	if !inventory.canReserveGenerated(object) {
+		return false
+	}
 	runtimeObject := object.(runtime.Object)
 	kind := runtimeObject.GetObjectKind().GroupVersionKind().Kind
 	key := compositionGeneratedKey(kind, object.GetNamespace(), object.GetName())
-	if _, ok := inventory.existing[key]; ok {
-		return false
-	}
-	if _, ok := inventory.generated[key]; ok {
-		return false
-	}
 	inventory.generated[key] = runtimeObject
 	return true
+}
+
+func (inventory *migrationInventory) canReserveGenerated(object metav1.Object) bool {
+	runtimeObject := object.(runtime.Object)
+	kind := runtimeObject.GetObjectKind().GroupVersionKind().Kind
+	key := compositionGeneratedKey(kind, object.GetNamespace(), object.GetName())
+	_, inputExists := inventory.existing[key]
+	_, generatedExists := inventory.generated[key]
+	return !inputExists && !generatedExists
+}
+
+func canonicalMigrationName(name string) string {
+	const suffix = "-canonical"
+	name = strings.TrimSpace(name)
+	if len(name)+len(suffix) <= 63 {
+		return name + suffix
+	}
+	return strings.TrimRight(name[:63-len(suffix)], "-") + suffix
 }
 
 func compositionGeneratedKey(kind, namespace, name string) string {
@@ -431,53 +405,4 @@ func safeRelativePath(path string) bool {
 		}
 	}
 	return true
-}
-
-func patchSetComposition(original *unstructured.Unstructured, legacyKey string, legacy any, refsKey string, refs any) (*unstructured.Unstructured, error) {
-	out := original.DeepCopy()
-	if err := setSpecField(out, legacyKey, legacy); err != nil {
-		return nil, err
-	}
-	if err := setSpecField(out, refsKey, refs); err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func patchProfileComposition(original *unstructured.Unstructured, spec *agentsv1alpha1.AgentRunProfileSpec) (*unstructured.Unstructured, error) {
-	out := original.DeepCopy()
-	for _, field := range []struct {
-		name  string
-		value any
-	}{
-		{name: "skillSets", value: spec.SkillSets},
-		{name: "toolSets", value: spec.ToolSets},
-		{name: "capabilities", value: spec.Capabilities},
-	} {
-		if err := setSpecField(out, field.name, field.value); err != nil {
-			return nil, err
-		}
-	}
-	return out, nil
-}
-
-func setSpecField(object *unstructured.Unstructured, name string, value any) error {
-	if value == nil {
-		unstructured.RemoveNestedField(object.Object, "spec", name)
-		return nil
-	}
-	reflected := reflect.ValueOf(value)
-	if (reflected.Kind() == reflect.Pointer || reflected.Kind() == reflect.Slice) && reflected.IsNil() || reflected.Kind() == reflect.Slice && reflected.Len() == 0 {
-		unstructured.RemoveNestedField(object.Object, "spec", name)
-		return nil
-	}
-	body, err := json.Marshal(value)
-	if err != nil {
-		return fmt.Errorf("encode migrated spec.%s: %w", name, err)
-	}
-	var normalized any
-	if err := json.Unmarshal(body, &normalized); err != nil {
-		return fmt.Errorf("normalize migrated spec.%s: %w", name, err)
-	}
-	return unstructured.SetNestedField(object.Object, normalized, "spec", name)
 }

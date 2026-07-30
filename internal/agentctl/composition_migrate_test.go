@@ -19,12 +19,6 @@ spec:
     - name: evidence
       description: Review evidence.
       content: Read concrete files.
-    - name: branch-sourced
-      sourceRefs:
-        - github:
-            repository: org/private
-            ref: main
-            path: SKILL.md
   tools:
     - name: evidence-check
       setupScript: install-evidence-check
@@ -80,23 +74,23 @@ spec:
 		"kind: AgentSkill\n",
 		"name: evidence",
 		"name: evidence-check",
+		"name: reviewer-canonical",
+		"name: query-tools-canonical",
 		"skillRefs:",
 		"kind: AgentTool\n",
 		"name: query",
 		"toolRefs:",
-		"capabilities:",
-		"skillSetRef:",
-		"toolSetRef:",
+		"skillSets:",
+		"toolSets:",
 		"systemPrompt: Preserve this inline overlay.",
 		"subagents:",
-		"ref: main",
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("migrated YAML missing %q:\n%s", want, body)
 		}
 	}
-	if strings.Contains(body, "skillSets:") || strings.Contains(body, "toolSets:") {
-		t.Fatalf("legacy profile composition remained in migrated output:\n%s", body)
+	if strings.Contains(body, "capabilities:") {
+		t.Fatalf("migrator must not silently move profile selectors into a later precedence layer:\n%s", body)
 	}
 	for _, unwanted := range []string{"backend: {}", "resources: {}", "spiffeWorkloadAPI: {}", "scope: {}"} {
 		if strings.Contains(body, unwanted) {
@@ -106,7 +100,7 @@ spec:
 	if firstSkill, set := strings.Index(body, "kind: AgentSkill\n"), strings.Index(body, "kind: AgentSkillSet\n"); firstSkill < 0 || set < 0 || firstSkill > set {
 		t.Fatalf("atomic skill must precede migrated set:\n%s", body)
 	}
-	if strings.Count(body, "name: evidence-check") != 1 || !strings.Contains(body, "setupScript: install-evidence-check") {
+	if strings.Count(body, "name: evidence-check") < 1 || !strings.Contains(body, "setupScript: install-evidence-check") {
 		t.Fatalf("embedded AgentSkillSet tools must remain as compatibility inputs:\n%s", body)
 	}
 }
@@ -149,8 +143,8 @@ spec:
 		t.Fatalf("migrate colliding names: %v", err)
 	}
 	body := app.Out.(*bytes.Buffer).String()
-	if strings.Count(body, "kind: AgentSkill\n") != 1 || !strings.Contains(body, "name: A B") || !strings.Contains(body, "name: a-b") {
-		t.Fatalf("invalid legacy identity should remain embedded while the valid identity migrates:\n%s", body)
+	if strings.Contains(body, "kind: AgentSkill\n") || !strings.Contains(body, "name: A B") || !strings.Contains(body, "name: a-b") {
+		t.Fatalf("a partially convertible set must remain entirely unchanged:\n%s", body)
 	}
 }
 

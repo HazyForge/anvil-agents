@@ -44,16 +44,19 @@ The caller needs only the Kubernetes verbs used by each command:
 ## Plan A Legacy Composition Migration
 
 `composition migrate` is deliberately non-mutating. It reads YAML, emits
-deterministic atomic resources, canonical set refs, and profile
-`capabilities` to stdout, and never constructs a Kubernetes client:
+deterministic atomic resources and parallel `-canonical` set candidates, and
+never constructs a Kubernetes client:
 
 ```bash
 anvil-agentctl composition migrate -f legacy-agents.yaml -o yaml \
   > canonical-agents.yaml
 ```
 
-Review and commit the output through the normal GitOps workflow. The command
-does not update live objects or rewrite append-only AgentRuns. Legacy tools
+Review and commit the output through the normal GitOps workflow. Original
+sets, profiles, and append-only AgentRuns remain unchanged so existing
+consumers keep their exact precedence and ordering. Switch a profile to the
+parallel canonical sets only after its run producers also use canonical
+selectors. Legacy tools
 without an acquisition/setup contract or argv verification, and skills whose
 remote sources are not immutable Markdown packages, stay embedded as
 compatibility inputs instead of receiving a guessed or lossy contract.
