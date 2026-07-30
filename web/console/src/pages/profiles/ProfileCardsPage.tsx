@@ -89,10 +89,23 @@ export function ProfileCardsPage({
     }
     const name = doc.metadata.name;
     const description = String(doc.spec?.description ?? "");
-    const ok = window.confirm(
-      `Start a new AgentRun for profile ${name} in ${namespace}?\n\nThis creates an append-only run immediately (not a schedule tick).`,
+    const prompt = window.prompt(
+      [
+        `Review the prompt for a new append-only AgentRun.`,
+        `Namespace: ${namespace}`,
+        `Profile: ${name}`,
+        `Purpose: manual`,
+        `Source: ConsoleCard/profile-${name}`,
+        "",
+        `Choose Cancel to leave without creating a run.`,
+      ].join("\n"),
+      defaultPromptForProfile(name, description),
     );
-    if (!ok) {
+    if (prompt === null) {
+      return;
+    }
+    if (!prompt.trim()) {
+      setError("Run prompt cannot be empty");
       return;
     }
     setRunningName(name);
@@ -102,7 +115,7 @@ export function ProfileCardsPage({
       const run = await createAgentRun(token, namespace, {
         generateName: `console-${name.replace(/[^a-z0-9-]/gi, "").slice(0, 40)}-`.toLowerCase(),
         profileName: name,
-        prompt: defaultPromptForProfile(name, description),
+        prompt: prompt.trim(),
         purpose: "manual",
         sourceKind: "ConsoleCard",
         sourceName: `profile-${name}`,

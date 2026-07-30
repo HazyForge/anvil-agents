@@ -64,6 +64,10 @@ export interface ResolvedComposition {
   harnessProfileRef?: ResolvedObjectRef;
   skillSetRefs?: ResolvedObjectRef[];
   toolSetRefs?: ResolvedObjectRef[];
+  skillRefs?: ResolvedObjectRef[];
+  toolRefs?: ResolvedObjectRef[];
+  mcpSetRefs?: ResolvedObjectRef[];
+  mcpServerRefs?: ResolvedObjectRef[];
   scope?: {
     application?: string;
     applicationTarget?: string;

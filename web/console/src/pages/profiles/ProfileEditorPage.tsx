@@ -248,30 +248,53 @@ export function ProfileEditorPage({ token, namespace: activeNamespace, writeEnab
   const [toolDocs, setToolDocs] = useState<CompositionDocument[]>([]);
   const [mcpServerDocs, setMCPServerDocs] = useState<CompositionDocument[]>([]);
   const [mcpSetDocs, setMCPSetDocs] = useState<CompositionDocument[]>([]);
+  const [pickerLoadWarning, setPickerLoadWarning] = useState<string | null>(null);
 
   useEffect(() => {
     if (!namespace || !token) {
       return;
     }
     const controller = new AbortController();
-    void Promise.all([
-      listComposition(token, namespace, "agent-harness-profiles", 200, controller.signal),
-      listComposition(token, namespace, "agent-skill-sets", 200, controller.signal),
-      listComposition(token, namespace, "agent-tool-sets", 200, controller.signal),
-      listComposition(token, namespace, "agent-skills", 200, controller.signal),
-      listComposition(token, namespace, "agent-tools", 200, controller.signal),
-      listComposition(token, namespace, "agent-mcp-servers", 200, controller.signal),
-      listComposition(token, namespace, "agent-mcp-sets", 200, controller.signal),
-    ])
-      .then(([h, s, t, skills, tools, mcpServers, mcpSets]) => {
-        setHarnessDocs(h);
-        setSkillSetDocs(s);
-        setToolSetDocs(t);
-        setSkillDocs(skills); setToolDocs(tools); setMCPServerDocs(mcpServers); setMCPSetDocs(mcpSets);
-      })
-      .catch(() => {
-        // card grid will show empty; selected names still render as orphan cards
+    const loads = [
+      ["harness profiles", "agent-harness-profiles"],
+      ["skill sets", "agent-skill-sets"],
+      ["tool sets", "agent-tool-sets"],
+      ["skills", "agent-skills"],
+      ["tools", "agent-tools"],
+      ["MCP servers", "agent-mcp-servers"],
+      ["MCP sets", "agent-mcp-sets"],
+    ] as const;
+    const setters: Array<(docs: CompositionDocument[]) => void> = [
+      setHarnessDocs,
+      setSkillSetDocs,
+      setToolSetDocs,
+      setSkillDocs,
+      setToolDocs,
+      setMCPServerDocs,
+      setMCPSetDocs,
+    ];
+    setPickerLoadWarning(null);
+    void Promise.allSettled(
+      loads.map(([, route]) => listComposition(token, namespace, route, 200, controller.signal)),
+    ).then((results) => {
+      if (controller.signal.aborted) {
+        return;
+      }
+      const failures: string[] = [];
+      results.forEach((result, index) => {
+        if (result.status === "fulfilled") {
+          setters[index](result.value);
+          return;
+        }
+        setters[index]([]);
+        failures.push(loads[index][0]);
       });
+      setPickerLoadWarning(
+        failures.length > 0
+          ? `Some capability pickers could not be loaded: ${failures.join(", ")}. Available kinds remain selectable.`
+          : null,
+      );
+    });
     return () => controller.abort();
   }, [token, namespace]);
 
@@ -513,6 +536,7 @@ export function ProfileEditorPage({ token, namespace: activeNamespace, writeEnab
 
       {error ? <div className="banner banner-error">{error}</div> : null}
       {info ? <div className="banner banner-ok">{info}</div> : null}
+      {pickerLoadWarning ? <div className="banner banner-warn">{pickerLoadWarning}</div> : null}
       {loading ? <div className="empty">Loading…</div> : null}
 
       {!loading ? (
