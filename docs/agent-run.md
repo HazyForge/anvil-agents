@@ -14,8 +14,12 @@ The operator owns these resources:
 | `AgentRun` | namespaced | Immutable request and controller-owned execution status |
 | `AgentRunProfile` | namespaced | Reusable role, scope, policy, and composition defaults |
 | `AgentHarnessProfile` | namespaced | Reusable backend and Kubernetes execution envelope |
-| `AgentSkillSet` | namespaced | Reusable backend-neutral instruction and persona pack |
-| `AgentToolSet` | namespaced | Reusable external tool setup and verification contracts |
+| `AgentSkill` | namespaced | One Markdown-only instruction package |
+| `AgentSkillSet` | namespaced | Ordered collection of atomic skills |
+| `AgentTool` | namespaced | One executable acquisition and verification contract |
+| `AgentToolSet` | namespaced | Ordered collection of atomic tools |
+| `AgentMCPServer` | namespaced | One secret-free stdio or Streamable HTTP MCP contract |
+| `AgentMCPSet` | namespaced | Ordered collection of MCP servers |
 | `AgentSchedule` | namespaced | Interval and manual child-run creation |
 | `AgentRunControl` | cluster | Pause or allow launches for an opaque application key |
 | `AgentDataVolume` | namespaced | Durable PVC lifecycle and expansion-only resizing |
@@ -29,8 +33,8 @@ looks up another API group.
 ## Run lifecycle
 
 An `AgentRun` resolves its optional `AgentRunProfile`, selected
-`AgentHarnessProfile`, and ordered `AgentSkillSet` and `AgentToolSet`
-references, validates
+`AgentHarnessProfile`, and ordered atomic or set capability references,
+validates
 credentials and durable volume references, writes a payload ConfigMap, records
 the payload UID/digest and normalized Job execution digest in status, then
 records a create-attempt timestamp immediately before creating one Job. The Job
@@ -64,7 +68,7 @@ Profiles contain durable role, scope, and policy defaults plus references to a
 runtime and capability packs. Run-local non-empty and non-zero compatibility
 fields override profile values; lists use field-specific append/deduplication
 rules. Use a harness-profile swap when inherited false/zero runtime values must
-be cleared. All profile, harness, skill-set, and tool-set references are
+be cleared. All profile, harness, atomic capability, and set references are
 namespace-local.
 See
 [Agent Composition](composition.md) for precedence, atomic harness swaps, skill

@@ -9,15 +9,17 @@ AgentRun that can install tools, follow skills, contact a human, and open PRs.
 | --- | --- |
 | **AgentRunProfile** | Role, scope, standing system prompt, intent, composition refs |
 | **AgentHarnessProfile** (optional) | Backend image, SA, secrets, volumes, limits |
-| **AgentSkillSet** | When/how instructions (may reference image tools) |
-| **AgentToolSet** | Runtime install of tools (`setupScript` + `verifyCommand`) |
+| **AgentSkill** / **AgentSkillSet** | Markdown instructions / ordered skill refs |
+| **AgentTool** / **AgentToolSet** | One executable contract / ordered tool refs |
+| **AgentMCPServer** / **AgentMCPSet** | One secret-free MCP connection / ordered server refs |
 | **AgentSchedule** | Cadence that creates append-only AgentRuns |
 | **AgentRun** | One immutable execution (append-only) |
 
 **ToolSets vs skills**
 
-- **ToolSet** = install something at runtime (e.g. `go install` anvil-hotline).
+- **Tool** = install or acquire one executable (e.g. `go install` anvil-hotline).
 - **Skill** = teach when/how to use a tool (including tools already on the image).
+- **Set** = preserve an explicit ordered selection of one atomic resource kind.
 
 **Human communications**
 
@@ -64,40 +66,47 @@ Injected env:
 
 ## Minimal workable agent (checklist)
 
-### 1. ToolSet (only if install is needed)
+### 1. Tool and ToolSet (only if install is needed)
 
 ```yaml
 apiVersion: control.anvil.hazyforge.io/v1alpha1
-kind: AgentToolSet
+kind: AgentTool
 metadata:
-  name: human-comms
+  name: anvil-hotline
   namespace: my-app
 spec:
-  tools:
-    - name: anvil-hotline
-      setupScript: |
-        set -eu
-        install_dir="${HOME}/.local/bin"
-        mkdir -p "${install_dir}"
-        export PATH="${install_dir}:${PATH}"
-        GOBIN="${install_dir}" CGO_ENABLED=0 \
-          go install github.com/hazyforge/anvil-hotline/cmd/anvil-hotline@v0.1.0
-      verifyCommand: [bash, -lc, 'export PATH="$HOME/.local/bin:$PATH"; anvil-hotline --help']
+  executable: { name: anvil-hotline, path: anvil-hotline }
+  setupScript: |
+    GOBIN="${ANVIL_AGENT_TOOL_BIN_DIR}" CGO_ENABLED=0 \
+      go install github.com/hazyforge/anvil-hotline/cmd/anvil-hotline@v0.1.0
+  verifyCommand: [anvil-hotline, --help]
+---
+apiVersion: control.anvil.hazyforge.io/v1alpha1
+kind: AgentToolSet
+metadata: { name: human-comms, namespace: my-app }
+spec:
+  toolRefs: [{ name: anvil-hotline }]
 ```
 
-### 2. SkillSet (usage + domain analysis)
+### 2. Skill and SkillSet (usage + domain analysis)
 
 ```yaml
 apiVersion: control.anvil.hazyforge.io/v1alpha1
-kind: AgentSkillSet
+kind: AgentSkill
 metadata:
   name: my-analysis
   namespace: my-app
 spec:
-  skills:
-    - name: my-analysis
-      content: |
-        Analyze evidence first. Propose one bounded change. Cite paths.
+  inline:
+    skillMD: |
+      # Analysis
+      Analyze evidence first. Propose one bounded change. Cite paths.
+---
+apiVersion: control.anvil.hazyforge.io/v1alpha1
+kind: AgentSkillSet
+metadata: { name: my-analysis, namespace: my-app }
+spec:
+  skillRefs: [{ name: my-analysis }]
 ```
 
 ### 3. Profile
@@ -117,10 +126,13 @@ spec:
       name: org/repo
       destinationBranch: master
       allowedBranches: [master]
-  skillSets:
-    refs: [{ name: my-analysis }, { name: human-comms }]
-  toolSets:
-    refs: [{ name: human-comms }]
+  capabilities:
+    skills:
+      selections:
+        - skillSetRef: { name: my-analysis }
+    tools:
+      selections:
+        - toolSetRef: { name: human-comms }
   harness:
     intent: proposeChange
     systemPrompt: |

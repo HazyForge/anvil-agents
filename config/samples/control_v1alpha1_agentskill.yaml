@@ -1,0 +1,18 @@
+apiVersion: control.anvil.hazyforge.io/v1alpha1
+kind: AgentSkill
+metadata:
+  name: evidence-backed-review
+  namespace: agents
+spec:
+  description: Review repository behavior from current source and tests.
+  inline:
+    skillMD: |
+      # Evidence-backed review
+
+      Cite concrete file paths and distinguish confirmed defects from risks.
+    references:
+      - path: references/checklist.md
+        content: |
+          # Checklist
+
+          Verify behavior with the narrowest relevant test before reporting it.

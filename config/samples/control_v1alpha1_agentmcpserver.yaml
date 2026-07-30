@@ -1,0 +1,17 @@
+apiVersion: control.anvil.hazyforge.io/v1alpha1
+kind: AgentMCPServer
+metadata:
+  name: organization-runbooks
+  namespace: agents
+spec:
+  description: Read-only organization runbook search.
+  transport:
+    streamableHTTP:
+      endpoint: https://mcp.example.test/v1
+      headers:
+        - name: Authorization
+          envVar: ORGANIZATION_MCP_AUTHORIZATION
+      requiredEnv:
+        - ORGANIZATION_MCP_AUTHORIZATION
+  toolAllowlist:
+    - search_runbooks

@@ -137,7 +137,7 @@ export const COMPOSITION_KINDS: CompositionKindInfo[] = [
     title: "Skill sets",
     plural: "skill sets",
     route: "skill-sets",
-    description: "Backend-neutral instruction packs and personas",
+    description: "Ordered collections of atomic skills",
     category: "collection",
   },
   {
@@ -146,7 +146,7 @@ export const COMPOSITION_KINDS: CompositionKindInfo[] = [
     title: "Tool sets",
     plural: "tool sets",
     route: "tool-sets",
-    description: "Setup scripts and verify contracts (code-execution authority)",
+    description: "Ordered collections of atomic tools (code-execution authority)",
     category: "collection",
     danger: true,
   },

@@ -39,6 +39,27 @@ The caller needs only the Kubernetes verbs used by each command:
 | `auth grok\|xai reauth` | same as codex reauth; staging key is `GROK_AUTH_JSON` |
 | `auth grok\|xai logout` | same as codex logout for Grok durable homes |
 | `self report` | none (writes local status JSONL / pod log only) |
+| `composition migrate` | none; reads local YAML and writes a plan to stdout |
+
+## Plan A Legacy Composition Migration
+
+`composition migrate` is deliberately non-mutating. It reads YAML, emits
+deterministic atomic resources, canonical set refs, and profile
+`capabilities` to stdout, and never constructs a Kubernetes client:
+
+```bash
+anvil-agentctl composition migrate -f legacy-agents.yaml -o yaml \
+  > canonical-agents.yaml
+```
+
+Review and commit the output through the normal GitOps workflow. The command
+does not update live objects or rewrite append-only AgentRuns. Legacy tools
+without an acquisition/setup contract or argv verification, and skills whose
+remote sources are not immutable Markdown packages, stay embedded as
+compatibility inputs instead of receiving a guessed or lossy contract.
+Tools embedded in an `AgentSkillSet` also stay embedded because extracting a
+cross-kind dependency cannot preserve consumers that are absent from the
+input. Move those tools explicitly after reviewing every consumer.
 
 ## Create An Append-Only Run
 

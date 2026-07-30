@@ -20,6 +20,11 @@ import {
   getScreenshotUrl,
   mergePresentationAnnotations,
 } from "../../utils/icons";
+import {
+  preserveCapabilitySelections,
+  preserveNamedReference,
+  preserveOrderedNamedReferences,
+} from "./profileReferenceMerge";
 
 interface Props {
   token: string;
@@ -30,6 +35,10 @@ interface Props {
 function arrayLen(spec: Record<string, unknown>, key: string): number {
   const value = spec[key];
   return Array.isArray(value) ? value.length : 0;
+}
+
+function objectValue(value: unknown): Record<string, unknown> {
+  return typeof value === "object" && value ? (value as Record<string, unknown>) : {};
 }
 
 function harnessMeta(doc: CompositionDocument): string | undefined {
@@ -364,37 +373,64 @@ export function ProfileEditorPage({ token, namespace: activeNamespace, writeEnab
         ...(doc.spec ?? {}),
         ...spec,
       };
+      if (!form.description.trim()) {
+        delete mergedSpec.description;
+      }
       if (!form.harnessProfileName.trim()) {
         delete mergedSpec.harnessProfileRef;
+	  } else {
+		mergedSpec.harnessProfileRef = preserveNamedReference(doc.spec?.harnessProfileRef, form.harnessProfileName.trim());
       }
-      if (form.skillSetNames.length === 0) {
-        delete mergedSpec.skillSets;
-      }
-      if (form.toolSetNames.length === 0) {
-        delete mergedSpec.toolSets;
-      }
-      if (!form.skillMode && !form.skillSelections.length && !form.skillOverrides.length && !form.toolMode && !form.toolSelections.length && !form.mcpMode && !form.mcpSelections.length) {
-        delete mergedSpec.capabilities;
-      }
+
+      const mergeLegacyRefs = (key: "skillSets" | "toolSets", hasRefs: boolean) => {
+        const prior = objectValue(doc.spec?.[key]);
+        const next = { ...prior, ...objectValue(spec[key]) };
+		if (!hasRefs) delete next.refs;
+		else next.refs = preserveOrderedNamedReferences(prior.refs, key === "skillSets" ? uniqueNames(form.skillSetNames) : uniqueNames(form.toolSetNames));
+        if (Object.keys(next).length) mergedSpec[key] = next;
+        else delete mergedSpec[key];
+      };
+      mergeLegacyRefs("skillSets", form.skillSetNames.length > 0);
+      mergeLegacyRefs("toolSets", form.toolSetNames.length > 0);
+
+      const priorCapabilities = objectValue(doc.spec?.capabilities);
+      const nextCapabilities: Record<string, unknown> = { ...priorCapabilities };
+      const builtCapabilities = objectValue(spec.capabilities);
+      const mergeCapability = (
+        key: "skills" | "tools" | "mcpServers",
+        mode: string,
+        selections: CapabilitySelection[],
+        overrides?: unknown[],
+      ) => {
+        const next = { ...objectValue(priorCapabilities[key]), ...objectValue(builtCapabilities[key]) };
+        if (!mode) delete next.mode;
+		if (!selections.length) delete next.selections;
+		else {
+			const keys = key === "skills" ? ["skillRef", "skillSetRef"] : key === "tools" ? ["toolRef", "toolSetRef"] : ["serverRef", "mcpSetRef"];
+			next.selections = preserveCapabilitySelections(objectValue(priorCapabilities[key]).selections, selections, keys[0], keys[1]);
+		}
+        if (overrides && !overrides.length) delete next.overrides;
+        if (Object.keys(next).length) nextCapabilities[key] = next;
+        else delete nextCapabilities[key];
+      };
+      mergeCapability("skills", form.skillMode, form.skillSelections, form.skillOverrides);
+      mergeCapability("tools", form.toolMode, form.toolSelections);
+      mergeCapability("mcpServers", form.mcpMode, form.mcpSelections);
+      if (Object.keys(nextCapabilities).length) mergedSpec.capabilities = nextCapabilities;
+      else delete mergedSpec.capabilities;
+
       // Keep existing harness fields (backend/image/etc) while applying intent/systemPrompt.
-      if (typeof doc.spec?.harness === "object" && doc.spec.harness) {
-        const prior = doc.spec.harness as Record<string, unknown>;
-        const nextHarness = {
-          ...prior,
-          ...((spec.harness as Record<string, unknown> | undefined) ?? {}),
-        };
-        if (!form.intent) {
-          delete nextHarness.intent;
-        }
-        if (!form.systemPrompt.trim()) {
-          delete nextHarness.systemPrompt;
-        }
-        if (Object.keys(nextHarness).length > 0) {
-          mergedSpec.harness = nextHarness;
-        } else {
-          delete mergedSpec.harness;
-        }
-      }
+      const nextHarness = { ...objectValue(doc.spec?.harness), ...objectValue(spec.harness) };
+      if (!form.intent) delete nextHarness.intent;
+      if (!form.systemPrompt.trim()) delete nextHarness.systemPrompt;
+      if (Object.keys(nextHarness).length) mergedSpec.harness = nextHarness;
+      else delete mergedSpec.harness;
+
+      const nextScope = { ...objectValue(doc.spec?.scope), ...objectValue(spec.scope) };
+      if (!form.applicationName.trim()) delete nextScope.applicationRef;
+	  else nextScope.applicationRef = preserveNamedReference(objectValue(doc.spec?.scope).applicationRef, form.applicationName.trim());
+      if (Object.keys(nextScope).length) mergedSpec.scope = nextScope;
+      else delete mergedSpec.scope;
       const updated = await updateComposition(
         token,
         namespace,

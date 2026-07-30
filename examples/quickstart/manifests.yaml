@@ -65,15 +65,37 @@ spec:
         memory: 64Mi
 ---
 apiVersion: control.anvil.hazyforge.io/v1alpha1
+kind: AgentSkill
+metadata:
+  name: inspect-mounted-payload
+  namespace: agents-quickstart
+spec:
+  description: Instructions for validating the mounted run contract.
+  inline:
+    skillMD: Read the mounted prompt and context before reporting success.
+---
+apiVersion: control.anvil.hazyforge.io/v1alpha1
 kind: AgentSkillSet
 metadata:
   name: demo-contract
   namespace: agents-quickstart
 spec:
   description: Instructions for validating the mounted run contract.
-  skills:
+  skillRefs:
     - name: inspect-mounted-payload
-      content: Read the mounted prompt and context before reporting success.
+---
+apiVersion: control.anvil.hazyforge.io/v1alpha1
+kind: AgentTool
+metadata:
+  name: inspect-context
+  namespace: agents-quickstart
+spec:
+  description: Verify the immutable AgentRun context payload exists.
+  executable:
+    name: inspect-context
+    path: inspect-context
+  setupScript: ':'
+  verifyCommand: ["/bin/sh", "-c", "test -s \"${ANVIL_AGENT_RUN_CONTEXT_FILE}\""]
 ---
 apiVersion: control.anvil.hazyforge.io/v1alpha1
 kind: AgentToolSet
@@ -82,9 +104,8 @@ metadata:
   namespace: agents-quickstart
 spec:
   description: Tool contract included in the resolved quickstart snapshot.
-  tools:
+  toolRefs:
     - name: inspect-context
-      verifyCommand: ["/bin/sh", "-c", "test -s \"${ANVIL_AGENT_RUN_CONTEXT_FILE}\""]
 ---
 apiVersion: control.anvil.hazyforge.io/v1alpha1
 kind: AgentRunProfile
@@ -97,12 +118,15 @@ spec:
     summary: Validate the standalone AgentRun execution contract.
   harnessProfileRef:
     name: demo-runtime
-  skillSets:
-    refs:
-      - name: demo-contract
-  toolSets:
-    refs:
-      - name: demo-tools
+  capabilities:
+    skills:
+      selections:
+        - skillSetRef:
+            name: demo-contract
+    tools:
+      selections:
+        - toolSetRef:
+            name: demo-tools
   harness:
     intent: observe
     systemPrompt: Read the mounted payload and emit one structured decision.
@@ -119,11 +143,12 @@ spec:
     name: quickstart
   profileRef:
     name: demo
-  skillSets:
-    overrides:
-      - name: inspect-mounted-payload
-        operation: Augment
-        content: Include the resolved composition in the context check.
+  capabilities:
+    skills:
+      overrides:
+        - name: inspect-mounted-payload
+          operation: Augment
+          content: Include the resolved composition in the context check.
   prompt: Prove the custom harness payload and status contract works.
   scope:
     applicationRef:

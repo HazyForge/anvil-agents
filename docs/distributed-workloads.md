@@ -81,8 +81,8 @@ worker pools.
 A custom harness can request extended resources such as a GPU when the cluster
 has the matching device plugin and nodes. Keep those provider- and
 machine-specific requirements in a separate harness profile so the same
-`AgentRunProfile`, `AgentSkillSet`, and `AgentToolSet` can move between ordinary and specialized
-workers.
+`AgentRunProfile` and atomic-or-set capability selections can move between
+ordinary and specialized workers.
 
 ## Permit Parallel Lanes
 

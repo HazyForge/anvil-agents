@@ -288,7 +288,7 @@ func (server *Server) securityHeaders(next http.Handler) http.Handler {
 		} else {
 			// Console SPA: same-origin assets/API plus OIDC issuer for discovery
 			// and token exchange (Authorization Code + PKCE).
-			connect := []string{"'self'"}
+			connect := []string{"'self'", "https://api.github.com"}
 			if issuerOrigin := oidcIssuerOrigin(server.config.OIDC.Issuer); issuerOrigin != "" {
 				connect = append(connect, issuerOrigin)
 			}
