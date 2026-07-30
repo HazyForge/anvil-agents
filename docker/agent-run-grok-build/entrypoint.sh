@@ -85,6 +85,7 @@ seed_grok_auth_home() {
 }
 
 seed_grok_auth_home
+anvil_prepare_native_mcp_projection "${ANVIL_AGENT_RUN_BACKEND:-grokBuild}"
 
 anvil_configure_github_auth
 

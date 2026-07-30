@@ -44,6 +44,26 @@ than inline YAML. Tool contracts normally live in `AgentToolSet`; the skill
 that teaches an agent when to use them remains in `AgentSkillSet`. Selecting a
 tool set does not grant the credentials that its tool may need.
 
+`execution.toolCache` may mount a dedicated `AgentDataVolume`; without it, each
+run receives an `emptyDir`. The current runtime treats that location as
+untrusted acquisition workspace rather than an executable cache. Every
+structured tool is reacquired from its pinned source,
+integrity-checked, and installed into an ephemeral per-run root before use;
+the runner never executes or reuses an extracted tree from the persistent
+mount. This intentionally gives up cache hits until the runtime has a trusted
+raw-artifact digest chain or a separately privileged cache writer. Custom
+setup scripts still receive the cache path for compatibility; because they are
+explicit arbitrary-code escape hatches, anything they place there has only
+their setup-script authority and is never reused by structured acquisition.
+
+Native MCP configuration is also projected per run. Codex, Grok Build, and
+Hermes receive an ephemeral config home whose non-config entries link back to
+the selected durable home, preserving authentication and profile state without
+sharing the mutable MCP config file. OpenClaw keeps its durable state directory
+and uses a per-run `OPENCLAW_CONFIG_PATH`; OpenCode uses a per-run
+`OPENCODE_CONFIG`. This prevents concurrent AgentRuns that share a durable home
+from overwriting one another's runtime-managed MCP declarations.
+
 Run profiles created before the composition API may still contain inline
 backend and execution settings. When a run selects a different
 `harnessProfileRef`, those profile-inline runtime fields are deliberately not

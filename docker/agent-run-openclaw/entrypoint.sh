@@ -113,7 +113,9 @@ scope. Do not store credentials.
 EOF
 fi
 
-if [[ ! -f "${openclaw_state}/openclaw.json" && -n "${OPENAI_API_KEY:-}" ]]; then
+anvil_prepare_native_mcp_projection "${ANVIL_AGENT_RUN_BACKEND:-openClaw}"
+
+if [[ ! -f "${OPENCLAW_CONFIG_PATH}" && -n "${OPENAI_API_KEY:-}" ]]; then
 	openclaw onboard --non-interactive --accept-risk \
 		--mode local \
 		--auth-choice openai-api-key \
@@ -134,7 +136,7 @@ if [[ -z "${openclaw_model}" ]]; then
 	openclaw_model="openai/gpt-5.5"
 fi
 
-if [[ ! -f "${openclaw_state}/openclaw.json" && "${openclaw_provider}" == "xai" && -n "${XAI_API_KEY:-}" ]]; then
+if [[ ! -f "${OPENCLAW_CONFIG_PATH}" && "${openclaw_provider}" == "xai" && -n "${XAI_API_KEY:-}" ]]; then
 	openclaw onboard --non-interactive --accept-risk \
 		--mode local \
 		--auth-choice xai-api-key \

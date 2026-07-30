@@ -62,6 +62,107 @@ anvil_verify_legacy_tools() {
 	done < <(jq -r '.[] | @base64' <<< "${tools_json}")
 }
 
+anvil_initialize_capability_paths() {
+	export ANVIL_AGENT_TOOL_CACHE_ROOT="${ANVIL_AGENT_TOOL_CACHE_ROOT:-/tmp/anvil-agent-tool-cache}"
+	export ANVIL_AGENT_CAPABILITIES_ROOT="${ANVIL_AGENT_CAPABILITIES_ROOT:-/tmp/anvil-agent-capabilities}"
+	export ANVIL_AGENT_TOOL_INSTALL_ROOT="${ANVIL_AGENT_TOOL_INSTALL_ROOT:-${ANVIL_AGENT_CAPABILITIES_ROOT}/install}"
+	export ANVIL_AGENT_TOOL_BIN_DIR="${ANVIL_AGENT_TOOL_BIN_DIR:-${ANVIL_AGENT_CAPABILITIES_ROOT}/bin}"
+	case ":${PATH}:" in
+		*":${ANVIL_AGENT_TOOL_BIN_DIR}:"*) ;;
+		*) export PATH="${ANVIL_AGENT_TOOL_BIN_DIR}:${PATH}" ;;
+	esac
+	mkdir -p \
+		"${ANVIL_AGENT_CAPABILITIES_ROOT}" \
+		"${ANVIL_AGENT_TOOL_INSTALL_ROOT}" \
+		"${ANVIL_AGENT_TOOL_BIN_DIR}"
+}
+
+anvil_copy_native_projection_file() {
+	local source_file="$1"
+	local destination_file="$2"
+	[[ -f "${source_file}" ]] || return 0
+	mkdir -p "$(dirname "${destination_file}")"
+	cp -pL -- "${source_file}" "${destination_file}"
+	chmod 0600 "${destination_file}"
+}
+
+anvil_link_native_projection_home() {
+	local source_home="$1"
+	local destination_home="$2"
+	local excluded_name="$3"
+	[[ -d "${source_home}" ]] || return 0
+	while IFS= read -r -d '' source_entry; do
+		local entry_name="${source_entry##*/}"
+		[[ "${entry_name}" != "${excluded_name}" ]] || continue
+		ln -s -- "${source_entry}" "${destination_home}/${entry_name}"
+	done < <(find "${source_home}" -mindepth 1 -maxdepth 1 -print0)
+}
+
+anvil_prepare_native_mcp_projection() {
+	local backend="$1"
+	anvil_initialize_capability_paths
+
+	local projection_id="${backend}:${ANVIL_AGENT_CAPABILITIES_ROOT}"
+	if [[ "${ANVIL_AGENT_NATIVE_MCP_PROJECTION_ID:-}" == "${projection_id}" ]]; then
+		return 0
+	fi
+
+	local native_root="${ANVIL_AGENT_CAPABILITIES_ROOT}/native/${backend}"
+	mkdir -p "${native_root}"
+	chmod 0700 "${native_root}"
+	case "${backend}" in
+		codex)
+			local shared_codex_home="${CODEX_HOME:-/codex-home}"
+			anvil_link_native_projection_home "${shared_codex_home}" "${native_root}" config.toml
+			anvil_copy_native_projection_file "${shared_codex_home}/config.toml" "${native_root}/config.toml"
+			export ANVIL_AGENT_SHARED_CODEX_HOME="${shared_codex_home}"
+			export CODEX_HOME="${native_root}"
+			;;
+		grokBuild)
+			local shared_grok_home="${GROK_HOME:-${HOME}/.grok}"
+			anvil_link_native_projection_home "${shared_grok_home}" "${native_root}" config.toml
+			anvil_copy_native_projection_file "${shared_grok_home}/config.toml" "${native_root}/config.toml"
+			export ANVIL_AGENT_SHARED_GROK_HOME="${shared_grok_home}"
+			export GROK_HOME="${native_root}"
+			;;
+		hermesAgent)
+			local shared_hermes_home="${HERMES_HOME:-${HOME}/.hermes}"
+			# Hermes stores memory, sessions, skills, provider credentials, and
+			# other profile state beside config.yaml. Preserve that durable home
+			# through links while keeping only the mutable native config run-local.
+			mkdir -p \
+				"${shared_hermes_home}/cron" \
+				"${shared_hermes_home}/home" \
+				"${shared_hermes_home}/logs" \
+				"${shared_hermes_home}/memories" \
+				"${shared_hermes_home}/sessions" \
+				"${shared_hermes_home}/skills"
+			anvil_link_native_projection_home "${shared_hermes_home}" "${native_root}" config.yaml
+			anvil_copy_native_projection_file "${shared_hermes_home}/config.yaml" "${native_root}/config.yaml"
+			export ANVIL_AGENT_SHARED_HERMES_HOME="${shared_hermes_home}"
+			export HERMES_HOME="${native_root}"
+			;;
+		openClaw)
+			local shared_openclaw_state="${OPENCLAW_STATE_DIR:-${HOME}/.openclaw}"
+			local shared_openclaw_config="${OPENCLAW_CONFIG_PATH:-${shared_openclaw_state}/openclaw.json}"
+			anvil_copy_native_projection_file "${shared_openclaw_config}" "${native_root}/openclaw.json"
+			export ANVIL_AGENT_SHARED_OPENCLAW_CONFIG_PATH="${shared_openclaw_config}"
+			export OPENCLAW_CONFIG_PATH="${native_root}/openclaw.json"
+			;;
+		openCode)
+			export OPENCODE_CONFIG="${native_root}/opencode.json"
+			;;
+		piAgent)
+			# ConfigureNativeMCP rejects Pi until the image carries an audited
+			# MCP client extension. Keep even its sentinel run-local.
+			;;
+		*)
+			return 1
+			;;
+	esac
+	export ANVIL_AGENT_NATIVE_MCP_PROJECTION_ID="${projection_id}"
+}
+
 anvil_native_mcp_config_path() {
 	local backend="$1"
 	case "${backend}" in
@@ -75,15 +176,15 @@ anvil_native_mcp_config_path() {
 			printf '%s/config.yaml\n' "${HERMES_HOME:-${HOME}/.hermes}"
 			;;
 		openClaw)
-			printf '%s/openclaw.json\n' "${OPENCLAW_STATE_DIR:-${HOME}/.openclaw}"
+			printf '%s\n' "${OPENCLAW_CONFIG_PATH:-${ANVIL_AGENT_CAPABILITIES_ROOT}/native/openClaw/openclaw.json}"
 			;;
 		openCode)
-			printf '%s/opencode.json\n' "${ANVIL_AGENT_CAPABILITIES_ROOT}"
+			printf '%s\n' "${OPENCODE_CONFIG:-${ANVIL_AGENT_CAPABILITIES_ROOT}/native/openCode/opencode.json}"
 			;;
 		piAgent)
 			# ConfigureNativeMCP deliberately rejects Pi until the image carries
 			# an audited MCP client extension.
-			printf '%s/pi-mcp.unsupported\n' "${ANVIL_AGENT_CAPABILITIES_ROOT}"
+			printf '%s/native/piAgent/pi-mcp.unsupported\n' "${ANVIL_AGENT_CAPABILITIES_ROOT}"
 			;;
 		*)
 			return 1
@@ -98,12 +199,11 @@ anvil_prepare_capabilities() {
 	local mcp_manifest="${ANVIL_AGENT_RUN_MCP_MANIFEST_FILE:-}"
 	local capability_command="${ANVIL_AGENT_CAPABILITIES_COMMAND:-anvil-agent-capabilities}"
 
-	export ANVIL_AGENT_TOOL_CACHE_ROOT="${ANVIL_AGENT_TOOL_CACHE_ROOT:-/tmp/anvil-agent-tool-cache}"
-	export ANVIL_AGENT_CAPABILITIES_ROOT="${ANVIL_AGENT_CAPABILITIES_ROOT:-/tmp/anvil-agent-capabilities}"
-	export ANVIL_AGENT_TOOL_INSTALL_ROOT="${ANVIL_AGENT_TOOL_INSTALL_ROOT:-${ANVIL_AGENT_CAPABILITIES_ROOT}/install}"
-	export ANVIL_AGENT_TOOL_BIN_DIR="${ANVIL_AGENT_TOOL_BIN_DIR:-${ANVIL_AGENT_CAPABILITIES_ROOT}/bin}"
-	export PATH="${ANVIL_AGENT_TOOL_BIN_DIR}:${PATH}"
-	mkdir -p "${ANVIL_AGENT_CAPABILITIES_ROOT}"
+	anvil_initialize_capability_paths
+	if ! anvil_prepare_native_mcp_projection "${backend}"; then
+		echo "ANVIL_AGENT_RUN_MCP_BACKEND_UNSUPPORTED backend=${backend}" >&2
+		return 1
+	fi
 
 	echo "ANVIL_AGENT_RUN_CAPABILITY_PREFLIGHT_START"
 	anvil_capability_status info capability-preflight "Preparing AgentRun capabilities."
@@ -169,10 +269,6 @@ anvil_prepare_capabilities() {
 		anvil_capability_status error mcp-configure "AgentRun MCP native configuration failed."
 		return 1
 	fi
-	if [[ "${backend}" == "openCode" ]]; then
-		export OPENCODE_CONFIG="${native_config}"
-	fi
-
 	echo "ANVIL_AGENT_RUN_CAPABILITY_PREFLIGHT_COMPLETE"
 	anvil_capability_status info capability-preflight "AgentRun capabilities are ready."
 }

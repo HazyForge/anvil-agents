@@ -69,6 +69,7 @@ if [[ -n "${CODEX_AUTH_JSON:-}" && ! -f "${HERMES_HOME}/auth.json" ]]; then
 		printf '%s' "${hermes_auth_json}" > "${HERMES_HOME}/auth.json"
 	fi
 fi
+anvil_prepare_native_mcp_projection "${ANVIL_AGENT_RUN_BACKEND:-hermesAgent}"
 
 anvil_configure_github_auth
 
