@@ -80,7 +80,7 @@ else
 		case "${crd}" in
 			# Keep the pre-composition / pre-AdverseSignal / pre-AuthSession baseline
 			# at seven kinds so the upgrade path still exercises CRD growth.
-			*_agentharnessprofiles.yaml|*_agentskillsets.yaml|*_agenttoolsets.yaml|*_adversesignals.yaml|*_agentauthsessions.yaml) continue ;;
+			*_agentharnessprofiles.yaml|*_agentskills.yaml|*_agentskillsets.yaml|*_agenttools.yaml|*_agenttoolsets.yaml|*_agentmcpservers.yaml|*_agentmcpsets.yaml|*_adversesignals.yaml|*_agentauthsessions.yaml) continue ;;
 		esac
 		resource="$(kubectl --context "${kube_context}" apply --filename "${crd}" --output=name)"
 		kubectl --context "${kube_context}" label "${resource}" \
@@ -105,8 +105,8 @@ helm --kube-context "${kube_context}" upgrade anvil-agents "${root_dir}/charts/a
 	--set image.pullPolicy=Never >/dev/null
 
 upgraded_count="$(kubectl --context "${kube_context}" get crd --output=name | rg -c 'control\.anvil\.hazyforge\.io')"
-[[ "${upgraded_count}" -eq 12 ]] || {
-	echo "upgrade rendered ${upgraded_count} agent CRDs, want 12" >&2
+[[ "${upgraded_count}" -eq 16 ]] || {
+	echo "upgrade rendered ${upgraded_count} agent CRDs, want 16" >&2
 	exit 1
 }
 kubectl --context "${kube_context}" get agentrunprofile legacy-review --namespace agents-upgrade >/dev/null
@@ -115,8 +115,8 @@ kubectl --context "${kube_context}" apply --filename "${root_dir}/hack/fixtures/
 
 helm --kube-context "${kube_context}" uninstall anvil-agents --namespace anvil-agents-system >/dev/null
 retained_count="$(kubectl --context "${kube_context}" get crd --output=name | rg -c 'control\.anvil\.hazyforge\.io')"
-[[ "${retained_count}" -eq 12 ]] || {
-	echo "upgrade uninstall retained ${retained_count} agent CRDs, want 12" >&2
+[[ "${retained_count}" -eq 16 ]] || {
+	echo "upgrade uninstall retained ${retained_count} agent CRDs, want 16" >&2
 	exit 1
 }
 for resource in \
@@ -128,4 +128,4 @@ for resource in \
 	kubectl --context "${kube_context}" get "${resource}" --namespace agents-upgrade >/dev/null
 done
 
-printf 'Seven-to-twelve CRD Helm upgrade contract passed\n'
+printf 'Seven-to-sixteen CRD Helm upgrade contract passed\n'
