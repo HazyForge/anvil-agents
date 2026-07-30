@@ -183,8 +183,9 @@ Look for:
 ## GitOps ownership
 
 Objects labeled `control.anvil.hazyforge.io/ownership: gitops` may only be
-mutated by Argo CD in production clusters. Use `ownership: operator` for live
-experiments, then promote complete YAML under `.hazyforge/agents/`.
+mutated by the configured GitOps controller in production clusters. Use
+`ownership: operator` for live experiments, then promote complete YAML into
+the consumer's deployment repository.
 
 ## Safety defaults
 
@@ -201,4 +202,5 @@ Hazy Trade ships:
 - `hazy-trade-docs-code-steward` profile + daily schedule
 - `hazy-trade-commit-docs-analysis` skill
 
-See `.hazyforge/agents/` in `HazyForge/hazy-trade`.
+Consumers may use a repo-local `.hazyforge/agents/` integration convention or
+another GitOps layout; that deployment choice is outside this runtime repo.

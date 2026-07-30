@@ -31,6 +31,7 @@ export default function App() {
   const [authError, setAuthError] = useState<string | null>(null);
   const [compositionRead, setCompositionRead] = useState(false);
   const [compositionWrite, setCompositionWrite] = useState(false);
+  const [createRunEnabled, setCreateRunEnabled] = useState(false);
   /** Avoid catch-all redirect until /api/v1/ui-config finishes — deep links like /harness-profiles/new must not bounce to /. */
   const [configReady, setConfigReady] = useState(false);
 
@@ -46,6 +47,7 @@ export default function App() {
         setProductTitle(config.productTitle);
         setCompositionRead(config.composition.readEnabled);
         setCompositionWrite(config.composition.writeEnabled);
+        setCreateRunEnabled(config.runs.createEnabled);
         if (config.defaultNamespaces.length > 0) {
           setNamespaces((prev) => {
             const next = uniqueNamespaces([...config.defaultNamespaces, ...prev]);
@@ -200,6 +202,7 @@ export default function App() {
                               token={token}
                               namespace={activeNamespace}
                               writeEnabled={compositionWrite}
+                              createRunEnabled={createRunEnabled}
                             />
                           }
                         />
@@ -220,6 +223,7 @@ export default function App() {
                               token={token}
                               namespace={activeNamespace}
                               writeEnabled={compositionWrite}
+                              createRunEnabled={createRunEnabled}
                             />
                           }
                         />

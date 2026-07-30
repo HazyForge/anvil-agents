@@ -90,14 +90,10 @@ full provider-neutral configuration and access-token contract.
 
 Keep the initial safe stage in the consumer deployment: `replicaCount: 0`,
 `crds.install: true`, and immutable references for the controller plus six
-runner images before scaling the controller. This repository retains Hazy
-Forge's optional consumer values and manifests under
-`.hazyforge/clusters/anvil-primaris/`. The Anvil Primaris repository owns the
-supporting remote ApplicationSet discovery under
-`manifests/bases/argocd-remote-apps` and its cluster instance configuration.
-Neither layer is a portable runtime prerequisite. Other consumers should keep identity,
-credentials, routes, storage, placement, image pins, and application policy in
-their own deployment layer.
+runner images before scaling the controller. The Anvil Primaris repository owns
+its values, manifests, application discovery, identity, credentials, routes,
+storage, placement, image pins, and application policy. Other consumers should
+keep the same cluster-specific concerns in their own deployment layer.
 
 ## Storage compatibility
 

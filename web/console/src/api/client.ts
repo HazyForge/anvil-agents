@@ -1,4 +1,13 @@
-import type { AgentRunListResponse, AgentRunView, APIErrorBody } from "./types";
+import type {
+  AgentRunArchiveListResponse,
+  AgentRunArchiveItem,
+  AgentRunListResponse,
+  AgentRunPurgeRequest,
+  AgentRunPurgeResponse,
+  AgentRunView,
+  APIErrorBody,
+  UIConfigRuns,
+} from "./types";
 
 export class APIError extends Error {
   readonly status: number;
@@ -107,4 +116,89 @@ export function eventsURL(namespace: string, name: string, tailLines = 200): str
   return apiURL(
     `/api/v1/namespaces/${encodeURIComponent(namespace)}/agent-runs/${encodeURIComponent(name)}/events?${params}`,
   );
+}
+
+export async function purgeAgentRuns(
+  token: string,
+  namespace: string,
+  body: AgentRunPurgeRequest,
+  signal?: AbortSignal,
+): Promise<AgentRunPurgeResponse> {
+  const response = await apiFetch(
+    `/api/v1/namespaces/${encodeURIComponent(namespace)}/agent-runs/purge`,
+    token,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+      signal,
+    },
+  );
+  if (!response.ok) {
+    throw await readAPIError(response);
+  }
+  return (await response.json()) as AgentRunPurgeResponse;
+}
+
+export async function listAgentRunArchives(
+  token: string,
+  namespace: string,
+  limit = 50,
+  signal?: AbortSignal,
+): Promise<AgentRunArchiveItem[]> {
+  const params = new URLSearchParams({ limit: String(limit) });
+  const response = await apiFetch(
+    `/api/v1/namespaces/${encodeURIComponent(namespace)}/agent-run-archives?${params}`,
+    token,
+    { signal },
+  );
+  if (!response.ok) {
+    throw await readAPIError(response);
+  }
+  const body = (await response.json()) as AgentRunArchiveListResponse;
+  return body.items ?? [];
+}
+
+export async function getUIConfig(signal?: AbortSignal): Promise<{ runs?: UIConfigRuns }> {
+  const response = await fetch(apiURL("/ui-config.json"), { signal });
+  if (!response.ok) {
+    throw new APIError(response.status, `http_${response.status}`, response.statusText);
+  }
+  return (await response.json()) as { runs?: UIConfigRuns };
+}
+
+export type CreateAgentRunBody = {
+  generateName?: string;
+  name?: string;
+  prompt: string;
+  profileName: string;
+  harnessProfileName?: string;
+  skillSetNames?: string[];
+  toolSetNames?: string[];
+  intent?: string;
+  purpose?: string;
+  sourceKind?: string;
+  sourceName?: string;
+};
+
+export async function createAgentRun(
+  token: string,
+  namespace: string,
+  body: CreateAgentRunBody,
+  signal?: AbortSignal,
+): Promise<AgentRunView> {
+  const response = await apiFetch(
+    `/api/v1/namespaces/${encodeURIComponent(namespace)}/agent-runs`,
+    token,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+      signal,
+    },
+  );
+  if (!response.ok) {
+    throw await readAPIError(response);
+  }
+  return (await response.json()) as AgentRunView;
 }

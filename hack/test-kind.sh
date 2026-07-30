@@ -46,9 +46,6 @@ done < <(find "${root_dir}/config/samples" "${root_dir}/examples" \
 	-type f -name '*.yaml' \
 	! -path "${root_dir}/examples/judge-kind/*" \
 	! -name '*-values.yaml' ! -name 'zitadel-values.yaml' | sort)
-kubectl --context "${kube_context}" apply --dry-run=server \
-	--kustomize "${root_dir}/.hazyforge/agents" >/dev/null
-
 helm --kube-context "${kube_context}" uninstall anvil-agents --namespace anvil-agents-system >/dev/null
 expected_crds=(
 	adversesignals.control.anvil.hazyforge.io

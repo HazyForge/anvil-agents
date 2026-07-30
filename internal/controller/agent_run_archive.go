@@ -39,6 +39,22 @@ func (s *lazyAgentRunArchiveStore) ArchiveAgentRun(ctx context.Context, record a
 	return store.ArchiveAgentRun(ctx, record)
 }
 
+func (s *lazyAgentRunArchiveStore) ListAgentRunArchives(ctx context.Context, namespace string, limit int) ([]archive.AgentRunArchiveListItem, error) {
+	store, err := s.open(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return store.ListAgentRunArchives(ctx, namespace, limit)
+}
+
+func (s *lazyAgentRunArchiveStore) HasAgentRunArchive(ctx context.Context, namespace, name, uid string) (bool, error) {
+	store, err := s.open(ctx)
+	if err != nil {
+		return false, err
+	}
+	return store.HasAgentRunArchive(ctx, namespace, name, uid)
+}
+
 func (s *lazyAgentRunArchiveStore) Close() {
 	s.mu.Lock()
 	defer s.mu.Unlock()

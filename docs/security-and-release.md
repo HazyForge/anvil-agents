@@ -5,11 +5,9 @@ practical**, running on **public GitHub Actions minutes** (no paid SaaS, no
 Primaris lifecycle coupling). Anyone can open the Actions tab and inspect
 check runs, job summaries, artifacts, and the Security tab.
 
-Primaris only **installs** this operator:
-
-```text
-.hazyforge/clusters/anvil-primaris/namespace/anvil-agents-system/
-```
+Consumer deployment repositories install this operator from the published OCI
+chart and immutable image references. Their cluster-specific release and
+promotion workflows are separate from this public security program.
 
 ## Free scanners (security.yml)
 

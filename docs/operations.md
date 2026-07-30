@@ -183,8 +183,6 @@ The Make release targets are deliberately split:
   matching release assets.
 - `make release-local-all VERSION=vX.Y.Z` runs `release-tag-push`,
   `release-local`, and `release-github` in sequence.
-- `make release-pin-deploy VERSION=vX.Y.Z` rewrites the first-party Anvil
-  Primaris deployment values from `dist/images-vX.Y.Z.lock.tsv`.
 
 `hack/package-chart.sh` still supports a convenient version-tagged development
 package. Pass `--image-lock dist/images-vX.Y.Z.lock.tsv` when assembling an
