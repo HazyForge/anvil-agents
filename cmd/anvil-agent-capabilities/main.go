@@ -95,6 +95,7 @@ func runToolInstall(args []string, stdout io.Writer) error {
 	flags.SetOutput(io.Discard)
 	manifestPath := flags.String("manifest", "", "normalized tool manifest")
 	cacheRoot := flags.String("cache-root", "", "content-addressed cache root")
+	installRoot := flags.String("install-root", "", "per-run tool install root")
 	binDir := flags.String("bin-dir", "", "per-run executable directory")
 	osName := flags.String("os", runtime.GOOS, "runner operating system")
 	arch := flags.String("arch", runtime.GOARCH, "runner architecture")
@@ -117,10 +118,11 @@ func runToolInstall(args []string, stdout io.Writer) error {
 		},
 	}
 	installed, err := runnercapabilities.InstallTools(ctx, manifest, runnercapabilities.InstallOptions{
-		CacheRoot:  *cacheRoot,
-		BinDir:     *binDir,
-		Platform:   runnercapabilities.Platform{OS: *osName, Arch: *arch},
-		HTTPClient: client,
+		CacheRoot:   *cacheRoot,
+		InstallRoot: *installRoot,
+		BinDir:      *binDir,
+		Platform:    runnercapabilities.Platform{OS: *osName, Arch: *arch},
+		HTTPClient:  client,
 	})
 	if err != nil {
 		return err

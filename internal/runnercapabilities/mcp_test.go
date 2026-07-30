@@ -4,11 +4,16 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
+	"path/filepath"
+	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -33,9 +38,49 @@ func TestPreflightMCPStdio(t *testing.T) {
 	}
 }
 
+func TestPreflightMCPStdioCleansDescendantProcesses(t *testing.T) {
+	pidFile := filepath.Join(t.TempDir(), "child.pid")
+	t.Setenv("MCP_TEST_HELPER", "1")
+	t.Setenv("MCP_TEST_CHILD_PID_FILE", pidFile)
+	manifest := MCPManifest{{Name: "forking", Transport: MCPTransport{Stdio: &MCPStdio{
+		Command: []string{os.Args[0], "-test.run=TestMCPStdioHelper", "--"},
+	}}}}
+	if _, err := PreflightMCP(context.Background(), "codex", manifest, MCPPreflightOptions{Timeout: 3 * time.Second}); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(pidFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(string(raw)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		err = syscall.Kill(pid, 0)
+		if errors.Is(err, syscall.ESRCH) {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("stdio preflight descendant %d survived cleanup: %v", pid, err)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
 func TestMCPStdioHelper(t *testing.T) {
 	if os.Getenv("MCP_TEST_HELPER") != "1" {
 		return
+	}
+	if pidFile := os.Getenv("MCP_TEST_CHILD_PID_FILE"); pidFile != "" {
+		child := exec.Command("sleep", "60")
+		if err := child.Start(); err != nil {
+			os.Exit(4)
+		}
+		if err := os.WriteFile(pidFile, []byte(strconv.Itoa(child.Process.Pid)), 0o600); err != nil {
+			os.Exit(5)
+		}
 	}
 	reader := bufio.NewScanner(os.Stdin)
 	encoder := json.NewEncoder(os.Stdout)

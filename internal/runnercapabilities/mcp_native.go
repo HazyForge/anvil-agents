@@ -35,6 +35,7 @@ func ConfigureNativeMCP(backend, path string, manifest MCPManifest) error {
 		}
 	}
 	var contents []byte
+	var stateTransaction *managedMCPStateTransaction
 	var err error
 	switch backend {
 	case "codex":
@@ -50,9 +51,9 @@ func ConfigureNativeMCP(backend, path string, manifest MCPManifest) error {
 			contents, err = configureTOML(path, rendered)
 		}
 	case "hermesAgent":
-		contents, err = configureHermesYAML(path, manifest)
+		contents, stateTransaction, err = configureHermesYAML(path, manifest)
 	case "openClaw":
-		contents, err = configureOpenClawJSON(path, manifest)
+		contents, stateTransaction, err = configureOpenClawJSON(path, manifest)
 	case "openCode":
 		var rendered map[string]any
 		rendered, err = renderOpenCodeMCP(manifest)
@@ -70,7 +71,18 @@ func ConfigureNativeMCP(backend, path string, manifest MCPManifest) error {
 	if err != nil {
 		return err
 	}
-	return writeAtomicConfig(path, append(contents, '\n'))
+	if stateTransaction != nil {
+		if err := stateTransaction.begin(); err != nil {
+			return err
+		}
+	}
+	if err := writeAtomicConfig(path, append(contents, '\n')); err != nil {
+		return err
+	}
+	if stateTransaction != nil {
+		return stateTransaction.commit()
+	}
+	return nil
 }
 
 func configureTOML(path string, rendered []byte) ([]byte, error) {
@@ -172,20 +184,20 @@ func renderGrokMCP(manifest MCPManifest) ([]byte, error) {
 	return out.Bytes(), nil
 }
 
-func configureHermesYAML(path string, manifest MCPManifest) ([]byte, error) {
+func configureHermesYAML(path string, manifest MCPManifest) ([]byte, *managedMCPStateTransaction, error) {
 	root := map[string]any{}
 	if raw, err := os.ReadFile(path); err == nil && len(bytes.TrimSpace(raw)) > 0 {
 		if err := yaml.Unmarshal(raw, &root); err != nil {
-			return nil, errors.New("parse Hermes native config")
+			return nil, nil, errors.New("parse Hermes native config")
 		}
 	} else if err != nil && !errors.Is(err, os.ErrNotExist) {
-		return nil, errors.New("read Hermes native config")
+		return nil, nil, errors.New("read Hermes native config")
 	}
 	servers, err := existingObjectMap(root["mcp_servers"])
 	if err != nil {
-		return nil, errors.New("Hermes native mcp_servers is not an object")
+		return nil, nil, errors.New("Hermes native mcp_servers is not an object")
 	}
-	if err := replaceManagedMCPServers(path, servers, manifest, func(server MCPServer) map[string]any {
+	transaction, err := replaceManagedMCPServers(path, servers, manifest, func(server MCPServer) map[string]any {
 		entry := map[string]any{"enabled": true}
 		if stdio := server.Transport.Stdio; stdio != nil {
 			entry["command"] = stdio.Command[0]
@@ -205,35 +217,37 @@ func configureHermesYAML(path string, manifest MCPManifest) ([]byte, error) {
 			entry["tools"] = map[string]any{"include": server.ToolAllowlist}
 		}
 		return entry
-	}); err != nil {
-		return nil, err
+	})
+	if err != nil {
+		return nil, nil, err
 	}
 	if len(servers) == 0 {
 		delete(root, "mcp_servers")
 	} else {
 		root["mcp_servers"] = servers
 	}
-	return yaml.Marshal(root)
+	contents, err := yaml.Marshal(root)
+	return contents, transaction, err
 }
 
-func configureOpenClawJSON(path string, manifest MCPManifest) ([]byte, error) {
+func configureOpenClawJSON(path string, manifest MCPManifest) ([]byte, *managedMCPStateTransaction, error) {
 	root := map[string]any{}
 	if raw, err := os.ReadFile(path); err == nil && len(bytes.TrimSpace(raw)) > 0 {
 		if err := json.Unmarshal(raw, &root); err != nil {
-			return nil, errors.New("parse OpenClaw native config")
+			return nil, nil, errors.New("parse OpenClaw native config")
 		}
 	} else if err != nil && !errors.Is(err, os.ErrNotExist) {
-		return nil, errors.New("read OpenClaw native config")
+		return nil, nil, errors.New("read OpenClaw native config")
 	}
 	mcp, err := existingObjectMap(root["mcp"])
 	if err != nil {
-		return nil, errors.New("OpenClaw native mcp is not an object")
+		return nil, nil, errors.New("OpenClaw native mcp is not an object")
 	}
 	servers, err := existingObjectMap(mcp["servers"])
 	if err != nil {
-		return nil, errors.New("OpenClaw native mcp.servers is not an object")
+		return nil, nil, errors.New("OpenClaw native mcp.servers is not an object")
 	}
-	if err := replaceManagedMCPServers(path, servers, manifest, func(server MCPServer) map[string]any {
+	transaction, err := replaceManagedMCPServers(path, servers, manifest, func(server MCPServer) map[string]any {
 		entry := map[string]any{}
 		if stdio := server.Transport.Stdio; stdio != nil {
 			entry["command"] = stdio.Command[0]
@@ -254,8 +268,9 @@ func configureOpenClawJSON(path string, manifest MCPManifest) ([]byte, error) {
 			entry["toolFilter"] = map[string]any{"include": server.ToolAllowlist}
 		}
 		return entry
-	}); err != nil {
-		return nil, err
+	})
+	if err != nil {
+		return nil, nil, err
 	}
 	if len(servers) == 0 {
 		delete(mcp, "servers")
@@ -267,7 +282,8 @@ func configureOpenClawJSON(path string, manifest MCPManifest) ([]byte, error) {
 	} else {
 		root["mcp"] = mcp
 	}
-	return json.MarshalIndent(root, "", "  ")
+	contents, err := json.MarshalIndent(root, "", "  ")
+	return contents, transaction, err
 }
 
 func existingObjectMap(value any) (map[string]any, error) {
@@ -281,15 +297,76 @@ func existingObjectMap(value any) (map[string]any, error) {
 	return object, nil
 }
 
-func replaceManagedMCPServers(path string, servers map[string]any, manifest MCPManifest, render func(MCPServer) map[string]any) error {
-	statePath := path + ".anvil-mcp-managed.json"
-	managed := []string{}
-	if raw, err := os.ReadFile(statePath); err == nil && len(bytes.TrimSpace(raw)) > 0 {
-		if err := json.Unmarshal(raw, &managed); err != nil {
-			return errors.New("parse native MCP managed state")
+type managedMCPState struct {
+	Version  int      `json:"version"`
+	Pending  bool     `json:"pending,omitempty"`
+	Managed  []string `json:"managed,omitempty"`
+	Previous []string `json:"previous,omitempty"`
+	Desired  []string `json:"desired,omitempty"`
+}
+
+type managedMCPStateTransaction struct {
+	path     string
+	previous []string
+	desired  []string
+}
+
+func (transaction *managedMCPStateTransaction) write(state managedMCPState) error {
+	raw, err := json.Marshal(state)
+	if err != nil {
+		return errors.New("encode native MCP managed state")
+	}
+	if err := writeAtomicConfig(transaction.path, append(raw, '\n')); err != nil {
+		return errors.New("write native MCP managed state")
+	}
+	return nil
+}
+
+func (transaction *managedMCPStateTransaction) begin() error {
+	return transaction.write(managedMCPState{Version: 1, Pending: true, Previous: transaction.previous, Desired: transaction.desired})
+}
+
+func (transaction *managedMCPStateTransaction) commit() error {
+	return transaction.write(managedMCPState{Version: 1, Managed: transaction.desired})
+}
+
+func readManagedMCPNames(statePath string) ([]string, error) {
+	raw, err := os.ReadFile(statePath)
+	if errors.Is(err, os.ErrNotExist) || (err == nil && len(bytes.TrimSpace(raw)) == 0) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, errors.New("read native MCP managed state")
+	}
+	var legacy []string
+	if json.Unmarshal(raw, &legacy) == nil && legacy != nil {
+		return legacy, nil
+	}
+	var state managedMCPState
+	if err := json.Unmarshal(raw, &state); err != nil || state.Version != 1 {
+		return nil, errors.New("parse native MCP managed state")
+	}
+	names := append([]string(nil), state.Managed...)
+	if state.Pending {
+		names = append(names, state.Previous...)
+		names = append(names, state.Desired...)
+	}
+	seen := map[string]struct{}{}
+	result := make([]string, 0, len(names))
+	for _, name := range names {
+		if _, exists := seen[name]; !exists {
+			seen[name] = struct{}{}
+			result = append(result, name)
 		}
-	} else if err != nil && !errors.Is(err, os.ErrNotExist) {
-		return errors.New("read native MCP managed state")
+	}
+	return result, nil
+}
+
+func replaceManagedMCPServers(path string, servers map[string]any, manifest MCPManifest, render func(MCPServer) map[string]any) (*managedMCPStateTransaction, error) {
+	statePath := path + ".anvil-mcp-managed.json"
+	managed, err := readManagedMCPNames(statePath)
+	if err != nil {
+		return nil, err
 	}
 	for _, name := range managed {
 		delete(servers, name)
@@ -297,19 +374,12 @@ func replaceManagedMCPServers(path string, servers map[string]any, manifest MCPM
 	next := make([]string, 0, len(manifest))
 	for _, server := range manifest {
 		if _, exists := servers[server.Name]; exists {
-			return fmt.Errorf("native config already contains unmanaged MCP server %q", server.Name)
+			return nil, fmt.Errorf("native config already contains unmanaged MCP server %q", server.Name)
 		}
 		servers[server.Name] = render(server)
 		next = append(next, server.Name)
 	}
-	state, err := json.Marshal(next)
-	if err != nil {
-		return errors.New("encode native MCP managed state")
-	}
-	if err := writeAtomicConfig(statePath, append(state, '\n')); err != nil {
-		return errors.New("write native MCP managed state")
-	}
-	return nil
+	return &managedMCPStateTransaction{path: statePath, previous: managed, desired: next}, nil
 }
 
 func renderOpenCodeMCP(manifest MCPManifest) (map[string]any, error) {

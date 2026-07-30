@@ -115,9 +115,10 @@ anvil_prepare_capabilities() {
 			return 1
 		fi
 		if ! "${capability_command}" tools install \
-			--manifest "${tool_manifest}" \
-			--cache-root "${ANVIL_AGENT_TOOL_CACHE_ROOT}" \
-			--bin-dir "${ANVIL_AGENT_TOOL_BIN_DIR}"; then
+				--manifest "${tool_manifest}" \
+				--cache-root "${ANVIL_AGENT_TOOL_CACHE_ROOT}" \
+				--install-root "${ANVIL_AGENT_TOOL_INSTALL_ROOT}" \
+				--bin-dir "${ANVIL_AGENT_TOOL_BIN_DIR}"; then
 			anvil_capability_status error tool-acquisition "AgentRun tool acquisition failed."
 			return 1
 		fi

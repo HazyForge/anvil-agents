@@ -167,3 +167,39 @@ func TestNativeMCPManagedProjectionIsClearedWithoutRemovingUnmanagedConfig(t *te
 		})
 	}
 }
+
+func TestNativeMCPRecoversPendingManagedStateTransaction(t *testing.T) {
+	for _, backend := range []string{"hermesAgent", "openClaw"} {
+		t.Run(backend, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "config")
+			var config string
+			if backend == "hermesAgent" {
+				config = "mcp_servers:\n  old-managed:\n    command: stale\n  unmanaged:\n    command: keep\n"
+			} else {
+				config = `{"mcp":{"servers":{"old-managed":{"command":"stale"},"unmanaged":{"command":"keep"}}}}`
+			}
+			if err := os.WriteFile(path, []byte(config), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			pending := `{"version":1,"pending":true,"previous":["old-managed"],"desired":["new-managed"]}`
+			if err := os.WriteFile(path+".anvil-mcp-managed.json", []byte(pending), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if err := ConfigureNativeMCP(backend, path, MCPManifest{}); err != nil {
+				t.Fatal(err)
+			}
+			raw, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			text := string(raw)
+			if strings.Contains(text, "old-managed") || strings.Contains(text, "new-managed") || !strings.Contains(text, "unmanaged") {
+				t.Fatalf("pending transaction recovery produced stale config:\n%s", text)
+			}
+			stateRaw, err := os.ReadFile(path + ".anvil-mcp-managed.json")
+			if err != nil || strings.Contains(string(stateRaw), `"pending":true`) {
+				t.Fatalf("managed state was not committed: %s err=%v", stateRaw, err)
+			}
+		})
+	}
+}

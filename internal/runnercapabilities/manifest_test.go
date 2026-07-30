@@ -28,7 +28,6 @@ func structuredInlineTool(t *testing.T, name, executable, script string) Tool {
 	tool.SpecDigest = digest
 	return tool
 }
-
 func structuredHTTPTool(t *testing.T, name, executable, url string, body []byte, format controlv1alpha1.AgentToolArchiveFormat, executablePath string) Tool {
 	t.Helper()
 	sum := sha256.Sum256(body)
@@ -42,12 +41,24 @@ func structuredHTTPTool(t *testing.T, name, executable, url string, body []byte,
 		}}}},
 		VerifyCommand: []string{executable, "--version"},
 	}
+	if executablePath != "" {
+		tool.Executable.Path = executablePath
+	}
 	digest, err := ComputeToolSpecDigest(tool)
 	if err != nil {
 		t.Fatal(err)
 	}
 	tool.SpecDigest = digest
 	return tool
+}
+
+func TestToolManifestRejectsArtifactExecutablePathMismatch(t *testing.T) {
+	tool := structuredHTTPTool(t, "query", "query", "https://example.test/query.tgz", []byte("archive"), controlv1alpha1.AgentToolArchiveTarGZ, "dist/query")
+	tool.Executable.Path = "bin/query"
+	tool.SpecDigest, _ = ComputeToolSpecDigest(tool)
+	if err := (ToolManifest{tool}).Validate(); err == nil || !strings.Contains(err.Error(), "must equal executable.path") {
+		t.Fatalf("path mismatch error = %v", err)
+	}
 }
 
 func TestParseToolManifestExactResolvedShape(t *testing.T) {

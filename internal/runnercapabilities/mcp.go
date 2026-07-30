@@ -14,6 +14,7 @@ import (
 	"os/exec"
 	"regexp"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -269,6 +270,10 @@ func preflightMCPStdio(ctx context.Context, server MCPServer) ([]string, error) 
 		return nil, err
 	}
 	command := exec.CommandContext(ctx, transport.Command[0], transport.Command[1:]...)
+	// MCP launchers such as npx commonly fork the real server. Put the whole
+	// preflight subtree in its own process group so cleanup cannot leave an
+	// orphaned server running beside the backend's native MCP client.
+	command.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	stdin, err := command.StdinPipe()
 	if err != nil {
 		return nil, errors.New("open stdio input")
@@ -284,7 +289,7 @@ func preflightMCPStdio(ctx context.Context, server MCPServer) ([]string, error) 
 	defer func() {
 		_ = stdin.Close()
 		if command.Process != nil {
-			_ = command.Process.Kill()
+			_ = syscall.Kill(-command.Process.Pid, syscall.SIGKILL)
 		}
 		_ = command.Wait()
 	}()

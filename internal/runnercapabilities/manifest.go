@@ -168,7 +168,7 @@ func (tool Tool) validate() error {
 	if !validPrefixedSHA256(tool.SpecDigest) {
 		return errors.New("specDigest must be a lowercase sha256 digest")
 	}
-	if err := validateSource(tool.Source); err != nil {
+	if err := validateSource(tool.Source, tool.Executable.Path); err != nil {
 		return err
 	}
 	want, err := ComputeToolSpecDigest(tool)
@@ -181,7 +181,7 @@ func (tool Tool) validate() error {
 	return nil
 }
 
-func validateSource(source *controlv1alpha1.AgentToolSource) error {
+func validateSource(source *controlv1alpha1.AgentToolSource, executablePath string) error {
 	count := 0
 	if source.HTTPArtifact != nil {
 		count++
@@ -231,6 +231,9 @@ func validateSource(source *controlv1alpha1.AgentToolSource) error {
 			if err := validateRelativePath(artifact.ExecutablePath); err != nil {
 				return fmt.Errorf("source.ociArtifact.artifacts[%d].executablePath: %w", index, err)
 			}
+			if artifact.ExecutablePath != executablePath {
+				return fmt.Errorf("source.ociArtifact.artifacts[%d].executablePath must equal executable.path", index)
+			}
 		}
 		return nil
 	}
@@ -264,6 +267,9 @@ func validateSource(source *controlv1alpha1.AgentToolSource) error {
 		case controlv1alpha1.AgentToolArchiveTarGZ, controlv1alpha1.AgentToolArchiveZip:
 			if err := validateRelativePath(artifact.ExecutablePath); err != nil {
 				return fmt.Errorf("source.httpArtifact.artifacts[%d].executablePath: %w", index, err)
+			}
+			if artifact.ExecutablePath != executablePath {
+				return fmt.Errorf("source.httpArtifact.artifacts[%d].executablePath must equal executable.path", index)
 			}
 		default:
 			return fmt.Errorf("source.httpArtifact.artifacts[%d].format %q is unsupported", index, artifact.Format)

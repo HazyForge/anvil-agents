@@ -52,7 +52,7 @@ exit 0
 	}
 }
 
-func TestInstallHTTPFormatsAndReuse(t *testing.T) {
+func TestInstallHTTPFormatsAlwaysRevalidatesPinnedSource(t *testing.T) {
 	binary := []byte("#!/bin/sh\nexit 0\n")
 	tarGz := makeTarGz(t, tar.Header{Name: "nested/tool", Mode: 0o644, Size: int64(len(binary)), Typeflag: tar.TypeReg}, binary)
 	zipBody := makeZip(t, "nested/tool", 0o644, binary)
@@ -68,7 +68,9 @@ func TestInstallHTTPFormatsAndReuse(t *testing.T) {
 		{name: "zip", format: controlv1alpha1.AgentToolArchiveZip, body: zipBody, executablePath: "nested/tool"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
+			var requests atomic.Int32
 			server := httptest.NewTLSServer(http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) {
+				requests.Add(1)
 				_, _ = response.Write(test.body)
 			}))
 			defer server.Close()
@@ -86,12 +88,13 @@ func TestInstallHTTPFormatsAndReuse(t *testing.T) {
 				t.Fatal(err)
 			}
 			options.BinDir = filepath.Join(root, "bin-2")
+			options.InstallRoot = filepath.Join(root, "install-2")
 			second, err := InstallTools(context.Background(), ToolManifest{tool}, options)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if len(first) != 1 || len(second) != 1 || first[0].Reused || !second[0].Reused {
-				t.Fatalf("unexpected reuse results: first=%#v second=%#v", first, second)
+			if len(first) != 1 || len(second) != 1 || first[0].Reused || second[0].Reused || requests.Load() != 2 {
+				t.Fatalf("unexpected revalidation results: first=%#v second=%#v requests=%d", first, second, requests.Load())
 			}
 		})
 	}
@@ -99,7 +102,7 @@ func TestInstallHTTPFormatsAndReuse(t *testing.T) {
 
 func TestInstallDigestPinnedOCIArtifact(t *testing.T) {
 	executable := []byte("#!/bin/sh\nexit 0\n")
-	layer := makeTar(t, tar.Header{Name: "opt/tool", Mode: 0o644, Size: int64(len(executable)), Typeflag: tar.TypeReg}, executable)
+	layer := makeTar(t, tar.Header{Name: "bin/oci", Mode: 0o644, Size: int64(len(executable)), Typeflag: tar.TypeReg}, executable)
 	layerDigest := sha256Hex(layer)
 	manifestBytes, err := json.Marshal(map[string]any{
 		"schemaVersion": 2,
@@ -128,7 +131,7 @@ func TestInstallDigestPinnedOCIArtifact(t *testing.T) {
 		Name: "oci", Description: "OCI tool",
 		Executable: &controlv1alpha1.AgentToolExecutable{Name: "oci", Path: "bin/oci"},
 		Source: &controlv1alpha1.AgentToolSource{OCIArtifact: &controlv1alpha1.AgentToolOCIArtifactSource{Artifacts: []controlv1alpha1.AgentToolOCIArtifact{{
-			Platform: controlv1alpha1.AgentToolPlatform{OS: "linux", Arch: "amd64"}, Reference: reference, ExecutablePath: "opt/tool",
+			Platform: controlv1alpha1.AgentToolPlatform{OS: "linux", Arch: "amd64"}, Reference: reference, ExecutablePath: "bin/oci",
 		}}}},
 		VerifyCommand: []string{"oci", "--version"},
 	}
@@ -186,7 +189,8 @@ func TestConcurrentCachePopulationPublishesCompleteWinner(t *testing.T) {
 			<-start
 			results[index], errorsByWorker[index] = InstallTools(context.Background(), ToolManifest{tool}, InstallOptions{
 				CacheRoot: cacheRoot, BinDir: filepath.Join(root, fmt.Sprintf("bin-%d", index)),
-				Platform: Platform{OS: "linux", Arch: "amd64"}, HTTPClient: server.Client(),
+				InstallRoot: filepath.Join(root, fmt.Sprintf("install-%d", index)),
+				Platform:    Platform{OS: "linux", Arch: "amd64"}, HTTPClient: server.Client(),
 			})
 		}(index)
 	}
@@ -203,39 +207,32 @@ func TestConcurrentCachePopulationPublishesCompleteWinner(t *testing.T) {
 	if requests.Load() < 1 {
 		t.Fatal("artifact was never downloaded")
 	}
-	completion, err := validateCompletedCache(results[0][0].CachePath, tool.SpecDigest, "linux-amd64", tool.Executable.Path, "sha256:"+tool.Source.HTTPArtifact.Artifacts[0].SHA256)
-	if err != nil || completion.ExecutablePath == "" {
-		t.Fatalf("published cache is incomplete: completion=%#v err=%v", completion, err)
+	if requests.Load() != workers {
+		t.Fatalf("source requests = %d, want %d safe revalidations", requests.Load(), workers)
 	}
 }
 
-func TestCacheTamperingAndIncompleteEntriesFailClosed(t *testing.T) {
+func TestForgedPersistentCacheIsNeverExecuted(t *testing.T) {
 	tool := structuredInlineTool(t, "cached", "cached", "exit 0\n")
 	root := t.TempDir()
 	options := InstallOptions{
 		CacheRoot: filepath.Join(root, "cache"), BinDir: filepath.Join(root, "bin-1"),
 		Platform: Platform{OS: "linux", Arch: "amd64"},
 	}
+	forged := filepath.Join(options.CacheRoot, tool.Name, "linux-amd64", strings.Replace(tool.SpecDigest, ":", "-", 1))
+	if err := os.MkdirAll(filepath.Join(forged, "bin"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(forged, "bin", "cached"), []byte("#!/bin/sh\nexit 91\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	installed, err := InstallTools(context.Background(), ToolManifest{tool}, options)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(installed[0].ExecutablePath, []byte("tampered"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	options.BinDir = filepath.Join(root, "bin-2")
-	if _, err := InstallTools(context.Background(), ToolManifest{tool}, options); err == nil || !strings.Contains(err.Error(), "checksum mismatch") {
-		t.Fatalf("tampered cache error = %v", err)
-	}
-
-	other := structuredInlineTool(t, "incomplete", "incomplete", "exit 0\n")
-	incomplete := filepath.Join(options.CacheRoot, other.Name, "linux-amd64", strings.Replace(other.SpecDigest, ":", "-", 1))
-	if err := os.MkdirAll(incomplete, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	options.BinDir = filepath.Join(root, "bin-3")
-	if _, err := InstallTools(context.Background(), ToolManifest{other}, options); err == nil {
-		t.Fatal("expected incomplete cache entry to fail closed")
+	raw, err := os.ReadFile(installed[0].ExecutablePath)
+	if err != nil || strings.Contains(string(raw), "exit 91") {
+		t.Fatalf("forged cache reached per-run install: %q err=%v", raw, err)
 	}
 }
 
