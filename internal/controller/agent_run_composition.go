@@ -49,6 +49,10 @@ func (r *AgentRunReconciler) resolveAgentRunComposition(ctx context.Context, obj
 	if err != nil || phase != "" {
 		return effective, nil, phase, reason, message, err
 	}
+	canonical, phase, reason, message, err := r.resolveCanonicalCapabilities(ctx, reader, obj, profile, effective, capabilities, resolvedSkillSets, resolvedToolSets)
+	if err != nil || phase != "" {
+		return effective, nil, phase, reason, message, err
+	}
 
 	// Inline v1alpha1 entries remain the final compatibility overlay. Later
 	// entries with the same name intentionally replace set-provided entries.
@@ -61,9 +65,15 @@ func (r *AgentRunReconciler) resolveAgentRunComposition(ctx context.Context, obj
 	for _, subagent := range effective.Spec.Harness.Subagents {
 		capabilities.upsertSubagent(subagent)
 	}
+	for _, server := range effective.Spec.Harness.MCPServers {
+		if reason, message := capabilities.overlayMCPServer(server); reason != "" {
+			return effective, nil, controlv1alpha1.AgentRunPhaseFailed, reason, message, nil
+		}
+	}
 	effective.Spec.Harness.SkillInjections = capabilities.skills
 	effective.Spec.Harness.Tools = capabilities.tools
 	effective.Spec.Harness.Subagents = capabilities.subagents
+	effective.Spec.Harness.MCPServers = capabilities.mcpServers
 
 	status := &controlv1alpha1.AgentRunResolvedCompositionStatus{}
 	if profile != nil {
@@ -73,15 +83,46 @@ func (r *AgentRunReconciler) resolveAgentRunComposition(ctx context.Context, obj
 		status.HarnessProfileRef = resolvedObjectReferenceStatus(harnessProfile, digestJSON(harnessProfile.Spec))
 	}
 	for _, skillSet := range resolvedSkillSets {
-		status.SkillSetRefs = append(status.SkillSetRefs, *resolvedObjectReferenceStatus(skillSet, digestJSON(skillSet.Spec)))
+		if legacySkillSetStillContributes(skillSet, canonical) {
+			status.SkillSetRefs = append(status.SkillSetRefs, *resolvedObjectReferenceStatus(skillSet, digestJSON(skillSet.Spec)))
+		}
 	}
-	for _, toolSet := range resolvedToolSets {
-		status.ToolSetRefs = append(status.ToolSetRefs, *resolvedObjectReferenceStatus(toolSet, digestJSON(toolSet.Spec)))
+	if !canonical.replacedTools {
+		for _, toolSet := range resolvedToolSets {
+			status.ToolSetRefs = append(status.ToolSetRefs, *resolvedObjectReferenceStatus(toolSet, digestJSON(toolSet.Spec)))
+		}
+	}
+	for _, skillSet := range canonical.skillSets {
+		status.SkillSetRefs = appendResolvedReferenceOnce(status.SkillSetRefs, skillSet, digestJSON(skillSet.Spec))
+	}
+	for _, toolSet := range canonical.toolSets {
+		status.ToolSetRefs = appendResolvedReferenceOnce(status.ToolSetRefs, toolSet, digestJSON(toolSet.Spec))
+	}
+	for _, skill := range canonical.skills {
+		status.SkillRefs = appendResolvedReferenceOnce(status.SkillRefs, skill, digestJSON(skill.Spec))
+	}
+	for _, tool := range canonical.tools {
+		status.ToolRefs = appendResolvedReferenceOnce(status.ToolRefs, tool, digestJSON(tool.Spec))
+	}
+	for _, mcpSet := range canonical.mcpSets {
+		status.MCPSetRefs = appendResolvedReferenceOnce(status.MCPSetRefs, mcpSet, digestJSON(mcpSet.Spec))
+	}
+	for _, server := range canonical.mcpServers {
+		status.MCPServerRefs = appendResolvedReferenceOnce(status.MCPServerRefs, server, digestJSON(server.Spec))
 	}
 	status.Scope = agentRunResolvedScopeStatus(effective.Spec.Scope)
 	status.EffectiveDigest = digestJSON(effective.Spec)
 	effective.Status.ResolvedComposition = status.DeepCopy()
 	return effective, status, "", "", "", nil
+}
+
+func legacySkillSetStillContributes(skillSet *controlv1alpha1.AgentSkillSet, canonical resolvedCanonicalCapabilities) bool {
+	if skillSet == nil {
+		return false
+	}
+	return (!canonical.replacedSkills && (len(skillSet.Spec.Skills) > 0 || len(skillSet.Spec.SkillRefs) > 0)) ||
+		(!canonical.replacedTools && len(skillSet.Spec.Tools) > 0) ||
+		len(skillSet.Spec.Subagents) > 0
 }
 
 func agentRunResolvedScopeStatus(scope controlv1alpha1.AgentRunScopeSpec) *controlv1alpha1.AgentRunResolvedScopeStatus {
@@ -218,6 +259,84 @@ func agentRunMergeToolComposition(profile, run *controlv1alpha1.AgentToolComposi
 	return out
 }
 
+func agentRunMergeCapabilities(profile, run *controlv1alpha1.AgentCapabilitiesSpec) *controlv1alpha1.AgentCapabilitiesSpec {
+	if profile == nil && run == nil {
+		return nil
+	}
+	out := &controlv1alpha1.AgentCapabilitiesSpec{}
+	if profile != nil {
+		out = profile.DeepCopy()
+	}
+	if run == nil {
+		return out
+	}
+	out.Skills = mergeCanonicalSkillComposition(out.Skills, run.Skills)
+	out.Tools = mergeCanonicalToolComposition(out.Tools, run.Tools)
+	out.MCPServers = mergeCanonicalMCPComposition(out.MCPServers, run.MCPServers)
+	return out
+}
+
+func mergeCanonicalSkillComposition(profile, run *controlv1alpha1.AgentSkillCapabilityComposition) *controlv1alpha1.AgentSkillCapabilityComposition {
+	if profile == nil && run == nil {
+		return nil
+	}
+	if run != nil && run.Mode == controlv1alpha1.AgentCapabilityCompositionReplace {
+		return run.DeepCopy()
+	}
+	out := &controlv1alpha1.AgentSkillCapabilityComposition{}
+	if profile != nil {
+		out = profile.DeepCopy()
+	}
+	if run != nil {
+		out.Selections = append(out.Selections, run.Selections...)
+		out.Overrides = append(out.Overrides, run.Overrides...)
+		if run.Mode != "" {
+			out.Mode = run.Mode
+		}
+	}
+	return out
+}
+
+func mergeCanonicalToolComposition(profile, run *controlv1alpha1.AgentToolCapabilityComposition) *controlv1alpha1.AgentToolCapabilityComposition {
+	if profile == nil && run == nil {
+		return nil
+	}
+	if run != nil && run.Mode == controlv1alpha1.AgentCapabilityCompositionReplace {
+		return run.DeepCopy()
+	}
+	out := &controlv1alpha1.AgentToolCapabilityComposition{}
+	if profile != nil {
+		out = profile.DeepCopy()
+	}
+	if run != nil {
+		out.Selections = append(out.Selections, run.Selections...)
+		if run.Mode != "" {
+			out.Mode = run.Mode
+		}
+	}
+	return out
+}
+
+func mergeCanonicalMCPComposition(profile, run *controlv1alpha1.AgentMCPCapabilityComposition) *controlv1alpha1.AgentMCPCapabilityComposition {
+	if profile == nil && run == nil {
+		return nil
+	}
+	if run != nil && run.Mode == controlv1alpha1.AgentCapabilityCompositionReplace {
+		return run.DeepCopy()
+	}
+	out := &controlv1alpha1.AgentMCPCapabilityComposition{}
+	if profile != nil {
+		out = profile.DeepCopy()
+	}
+	if run != nil {
+		out.Selections = append(out.Selections, run.Selections...)
+		if run.Mode != "" {
+			out.Mode = run.Mode
+		}
+	}
+	return out
+}
+
 func (r *AgentRunReconciler) resolveAgentSkillComposition(ctx context.Context, reader client.Reader, obj *controlv1alpha1.AgentRun, profile *controlv1alpha1.AgentRunProfile, effective *controlv1alpha1.AgentRun, capabilities *agentRunCapabilities) ([]*controlv1alpha1.AgentSkillSet, controlv1alpha1.AgentRunPhase, string, string, error) {
 	var profileComposition *controlv1alpha1.AgentSkillCompositionSpec
 	if profile != nil {
@@ -336,13 +455,368 @@ func (r *AgentRunReconciler) resolveAgentToolComposition(ctx context.Context, re
 	return resolved, "", "", "", nil
 }
 
+type resolvedCanonicalCapabilities struct {
+	skillSets      []*controlv1alpha1.AgentSkillSet
+	toolSets       []*controlv1alpha1.AgentToolSet
+	skills         []*controlv1alpha1.AgentSkill
+	tools          []*controlv1alpha1.AgentTool
+	mcpSets        []*controlv1alpha1.AgentMCPSet
+	mcpServers     []*controlv1alpha1.AgentMCPServer
+	replacedSkills bool
+	replacedTools  bool
+	replacedMCP    bool
+}
+
+func (r *AgentRunReconciler) resolveCanonicalCapabilities(
+	ctx context.Context,
+	reader client.Reader,
+	obj *controlv1alpha1.AgentRun,
+	profile *controlv1alpha1.AgentRunProfile,
+	effective *controlv1alpha1.AgentRun,
+	capabilities *agentRunCapabilities,
+	legacySkillSets []*controlv1alpha1.AgentSkillSet,
+	legacyToolSets []*controlv1alpha1.AgentToolSet,
+) (resolvedCanonicalCapabilities, controlv1alpha1.AgentRunPhase, string, string, error) {
+	resolved := resolvedCanonicalCapabilities{}
+	var profileCapabilities *controlv1alpha1.AgentCapabilitiesSpec
+	if profile != nil {
+		profileCapabilities = profile.Spec.Capabilities
+	}
+	runCapabilities := obj.Spec.Capabilities
+	effective.Spec.Capabilities = agentRunMergeCapabilities(profileCapabilities, runCapabilities)
+
+	seenSkillSets := objectKeys(legacySkillSets)
+	seenToolSets := objectKeys(legacyToolSets)
+	seenSkills := map[string]struct{}{}
+	seenTools := map[string]struct{}{}
+	seenMCPsets := map[string]struct{}{}
+	seenMCPServers := map[string]struct{}{}
+
+	// A set selected through the deprecated profile/run fields may already use
+	// its canonical atomic refs. Expand those refs before canonical profile/run
+	// layers so migration can update sets independently without changing old
+	// consumers, while still preserving the documented legacy-first order.
+	for _, set := range legacySkillSets {
+		for index := range set.Spec.SkillRefs {
+			skill, phase, reason, message, err := resolveAtomicSkill(ctx, reader, obj.Namespace, &set.Spec.SkillRefs[index], seenSkills)
+			if err != nil || phase != "" {
+				return resolved, phase, reason, message, err
+			}
+			if reason, message := capabilities.applyAtomicSkill(skill); reason != "" {
+				return resolved, controlv1alpha1.AgentRunPhaseFailed, reason, message, nil
+			}
+			resolved.skills = append(resolved.skills, skill)
+		}
+	}
+	for _, set := range legacyToolSets {
+		for index := range set.Spec.ToolRefs {
+			tool, phase, reason, message, err := resolveAtomicTool(ctx, reader, obj.Namespace, &set.Spec.ToolRefs[index], seenTools)
+			if err != nil || phase != "" {
+				return resolved, phase, reason, message, err
+			}
+			if reason, message := capabilities.applyAtomicTool(tool); reason != "" {
+				return resolved, controlv1alpha1.AgentRunPhaseFailed, reason, message, nil
+			}
+			resolved.tools = append(resolved.tools, tool)
+		}
+	}
+
+	applySkills := func(layer *controlv1alpha1.AgentSkillCapabilityComposition) (controlv1alpha1.AgentRunPhase, string, string, error) {
+		if layer == nil {
+			return "", "", "", nil
+		}
+		if layer.Mode == controlv1alpha1.AgentCapabilityCompositionReplace {
+			capabilities.resetSkills()
+			seenSkills = map[string]struct{}{}
+			seenSkillSets = map[string]struct{}{}
+			resolved.skills = nil
+			resolved.skillSets = nil
+			resolved.replacedSkills = true
+		}
+		for _, selection := range layer.Selections {
+			switch {
+			case selection.SkillRef != nil && selection.SkillSetRef == nil:
+				skill, phase, reason, message, err := resolveAtomicSkill(ctx, reader, obj.Namespace, selection.SkillRef, seenSkills)
+				if err != nil || phase != "" {
+					return phase, reason, message, err
+				}
+				if reason, message := capabilities.applyAtomicSkill(skill); reason != "" {
+					return controlv1alpha1.AgentRunPhaseFailed, reason, message, nil
+				}
+				resolved.skills = append(resolved.skills, skill)
+			case selection.SkillSetRef != nil && selection.SkillRef == nil:
+				set, phase, reason, message, err := resolveSkillSet(ctx, reader, obj.Namespace, selection.SkillSetRef, seenSkillSets)
+				if err != nil || phase != "" {
+					return phase, reason, message, err
+				}
+				if reason, message := capabilities.applySkillSet(set); reason != "" {
+					return controlv1alpha1.AgentRunPhaseFailed, reason, message, nil
+				}
+				resolved.skillSets = append(resolved.skillSets, set)
+				for index := range set.Spec.SkillRefs {
+					skill, phase, reason, message, err := resolveAtomicSkill(ctx, reader, obj.Namespace, &set.Spec.SkillRefs[index], seenSkills)
+					if err != nil || phase != "" {
+						return phase, reason, message, err
+					}
+					if reason, message := capabilities.applyAtomicSkill(skill); reason != "" {
+						return controlv1alpha1.AgentRunPhaseFailed, reason, message, nil
+					}
+					resolved.skills = append(resolved.skills, skill)
+				}
+			default:
+				return controlv1alpha1.AgentRunPhaseFailed, "InvalidSkillSelection", "capabilities.skills.selections entries must set exactly one of skillRef or skillSetRef.", nil
+			}
+		}
+		if reason, message := capabilities.applyOverrides(layer.Overrides); reason != "" {
+			return controlv1alpha1.AgentRunPhaseFailed, reason, message, nil
+		}
+		return "", "", "", nil
+	}
+
+	applyTools := func(layer *controlv1alpha1.AgentToolCapabilityComposition) (controlv1alpha1.AgentRunPhase, string, string, error) {
+		if layer == nil {
+			return "", "", "", nil
+		}
+		if layer.Mode == controlv1alpha1.AgentCapabilityCompositionReplace {
+			capabilities.resetTools()
+			seenTools = map[string]struct{}{}
+			seenToolSets = map[string]struct{}{}
+			resolved.tools = nil
+			resolved.toolSets = nil
+			resolved.replacedTools = true
+		}
+		for _, selection := range layer.Selections {
+			switch {
+			case selection.ToolRef != nil && selection.ToolSetRef == nil:
+				tool, phase, reason, message, err := resolveAtomicTool(ctx, reader, obj.Namespace, selection.ToolRef, seenTools)
+				if err != nil || phase != "" {
+					return phase, reason, message, err
+				}
+				if reason, message := capabilities.applyAtomicTool(tool); reason != "" {
+					return controlv1alpha1.AgentRunPhaseFailed, reason, message, nil
+				}
+				resolved.tools = append(resolved.tools, tool)
+			case selection.ToolSetRef != nil && selection.ToolRef == nil:
+				set, phase, reason, message, err := resolveToolSet(ctx, reader, obj.Namespace, selection.ToolSetRef, seenToolSets)
+				if err != nil || phase != "" {
+					return phase, reason, message, err
+				}
+				if reason, message := capabilities.applyToolSet(set); reason != "" {
+					return controlv1alpha1.AgentRunPhaseFailed, reason, message, nil
+				}
+				resolved.toolSets = append(resolved.toolSets, set)
+				for index := range set.Spec.ToolRefs {
+					tool, phase, reason, message, err := resolveAtomicTool(ctx, reader, obj.Namespace, &set.Spec.ToolRefs[index], seenTools)
+					if err != nil || phase != "" {
+						return phase, reason, message, err
+					}
+					if reason, message := capabilities.applyAtomicTool(tool); reason != "" {
+						return controlv1alpha1.AgentRunPhaseFailed, reason, message, nil
+					}
+					resolved.tools = append(resolved.tools, tool)
+				}
+			default:
+				return controlv1alpha1.AgentRunPhaseFailed, "InvalidToolSelection", "capabilities.tools.selections entries must set exactly one of toolRef or toolSetRef.", nil
+			}
+		}
+		return "", "", "", nil
+	}
+
+	applyMCP := func(layer *controlv1alpha1.AgentMCPCapabilityComposition) (controlv1alpha1.AgentRunPhase, string, string, error) {
+		if layer == nil {
+			return "", "", "", nil
+		}
+		if layer.Mode == controlv1alpha1.AgentCapabilityCompositionReplace {
+			capabilities.resetMCPServers()
+			seenMCPsets = map[string]struct{}{}
+			seenMCPServers = map[string]struct{}{}
+			resolved.mcpSets = nil
+			resolved.mcpServers = nil
+			resolved.replacedMCP = true
+		}
+		for _, selection := range layer.Selections {
+			switch {
+			case selection.ServerRef != nil && selection.MCPSetRef == nil:
+				server, phase, reason, message, err := resolveMCPServer(ctx, reader, obj.Namespace, selection.ServerRef, seenMCPServers)
+				if err != nil || phase != "" {
+					return phase, reason, message, err
+				}
+				if reason, message := capabilities.applyMCPServer(server); reason != "" {
+					return controlv1alpha1.AgentRunPhaseFailed, reason, message, nil
+				}
+				resolved.mcpServers = append(resolved.mcpServers, server)
+			case selection.MCPSetRef != nil && selection.ServerRef == nil:
+				set, phase, reason, message, err := resolveMCPSet(ctx, reader, obj.Namespace, selection.MCPSetRef, seenMCPsets)
+				if err != nil || phase != "" {
+					return phase, reason, message, err
+				}
+				resolved.mcpSets = append(resolved.mcpSets, set)
+				for index := range set.Spec.ServerRefs {
+					server, phase, reason, message, err := resolveMCPServer(ctx, reader, obj.Namespace, &set.Spec.ServerRefs[index], seenMCPServers)
+					if err != nil || phase != "" {
+						return phase, reason, message, err
+					}
+					if reason, message := capabilities.applyMCPServer(server); reason != "" {
+						return controlv1alpha1.AgentRunPhaseFailed, reason, message, nil
+					}
+					resolved.mcpServers = append(resolved.mcpServers, server)
+				}
+			default:
+				return controlv1alpha1.AgentRunPhaseFailed, "InvalidMCPSelection", "capabilities.mcpServers.selections entries must set exactly one of serverRef or mcpSetRef.", nil
+			}
+		}
+		return "", "", "", nil
+	}
+
+	for _, layer := range []*controlv1alpha1.AgentCapabilitiesSpec{profileCapabilities, runCapabilities} {
+		if layer == nil {
+			continue
+		}
+		if phase, reason, message, err := applySkills(layer.Skills); err != nil || phase != "" {
+			return resolved, phase, reason, message, err
+		}
+		if phase, reason, message, err := applyTools(layer.Tools); err != nil || phase != "" {
+			return resolved, phase, reason, message, err
+		}
+		if phase, reason, message, err := applyMCP(layer.MCPServers); err != nil || phase != "" {
+			return resolved, phase, reason, message, err
+		}
+	}
+	return resolved, "", "", "", nil
+}
+
+func objectKeys[T client.Object](objects []T) map[string]struct{} {
+	out := map[string]struct{}{}
+	for _, obj := range objects {
+		out[obj.GetNamespace()+"/"+obj.GetName()] = struct{}{}
+	}
+	return out
+}
+
+func resolveReferenceIdentity(namespace string, ref *controlv1alpha1.NamespacedObjectReference, kind string, seen map[string]struct{}) (client.ObjectKey, controlv1alpha1.AgentRunPhase, string, string) {
+	if ref == nil || strings.TrimSpace(ref.Name) == "" {
+		return client.ObjectKey{}, controlv1alpha1.AgentRunPhaseFailed, "Invalid" + kind + "Ref", kind + " ref name must be set."
+	}
+	refNamespace := firstNonEmpty(strings.TrimSpace(ref.Namespace), namespace)
+	if refNamespace != namespace {
+		return client.ObjectKey{}, controlv1alpha1.AgentRunPhaseFailed, "CrossNamespace" + kind + "Ref", kind + " refs must stay in the AgentRun namespace."
+	}
+	key := refNamespace + "/" + strings.TrimSpace(ref.Name)
+	if _, exists := seen[key]; exists {
+		return client.ObjectKey{}, controlv1alpha1.AgentRunPhaseFailed, "Duplicate" + kind + "Ref", kind + " " + key + " is selected more than once."
+	}
+	seen[key] = struct{}{}
+	return client.ObjectKey{Namespace: refNamespace, Name: strings.TrimSpace(ref.Name)}, "", "", ""
+}
+
+func resolveAtomicSkill(ctx context.Context, reader client.Reader, namespace string, ref *controlv1alpha1.NamespacedObjectReference, seen map[string]struct{}) (*controlv1alpha1.AgentSkill, controlv1alpha1.AgentRunPhase, string, string, error) {
+	key, phase, reason, message := resolveReferenceIdentity(namespace, ref, "Skill", seen)
+	if phase != "" {
+		return nil, phase, reason, message, nil
+	}
+	obj := &controlv1alpha1.AgentSkill{}
+	if err := reader.Get(ctx, key, obj); err != nil {
+		if apierrors.IsNotFound(err) {
+			return nil, controlv1alpha1.AgentRunPhaseNeedsHuman, "SkillNotFound", fmt.Sprintf("AgentSkill %s was not found.", key.String()), nil
+		}
+		return nil, "", "", "", err
+	}
+	return obj, "", "", "", nil
+}
+
+func resolveAtomicTool(ctx context.Context, reader client.Reader, namespace string, ref *controlv1alpha1.NamespacedObjectReference, seen map[string]struct{}) (*controlv1alpha1.AgentTool, controlv1alpha1.AgentRunPhase, string, string, error) {
+	key, phase, reason, message := resolveReferenceIdentity(namespace, ref, "Tool", seen)
+	if phase != "" {
+		return nil, phase, reason, message, nil
+	}
+	obj := &controlv1alpha1.AgentTool{}
+	if err := reader.Get(ctx, key, obj); err != nil {
+		if apierrors.IsNotFound(err) {
+			return nil, controlv1alpha1.AgentRunPhaseNeedsHuman, "ToolNotFound", fmt.Sprintf("AgentTool %s was not found.", key.String()), nil
+		}
+		return nil, "", "", "", err
+	}
+	return obj, "", "", "", nil
+}
+
+func resolveMCPServer(ctx context.Context, reader client.Reader, namespace string, ref *controlv1alpha1.NamespacedObjectReference, seen map[string]struct{}) (*controlv1alpha1.AgentMCPServer, controlv1alpha1.AgentRunPhase, string, string, error) {
+	key, phase, reason, message := resolveReferenceIdentity(namespace, ref, "MCPServer", seen)
+	if phase != "" {
+		return nil, phase, reason, message, nil
+	}
+	obj := &controlv1alpha1.AgentMCPServer{}
+	if err := reader.Get(ctx, key, obj); err != nil {
+		if apierrors.IsNotFound(err) {
+			return nil, controlv1alpha1.AgentRunPhaseNeedsHuman, "MCPServerNotFound", fmt.Sprintf("AgentMCPServer %s was not found.", key.String()), nil
+		}
+		return nil, "", "", "", err
+	}
+	return obj, "", "", "", nil
+}
+
+func resolveSkillSet(ctx context.Context, reader client.Reader, namespace string, ref *controlv1alpha1.NamespacedObjectReference, seen map[string]struct{}) (*controlv1alpha1.AgentSkillSet, controlv1alpha1.AgentRunPhase, string, string, error) {
+	key, phase, reason, message := resolveReferenceIdentity(namespace, ref, "SkillSet", seen)
+	if phase != "" {
+		return nil, phase, reason, message, nil
+	}
+	obj := &controlv1alpha1.AgentSkillSet{}
+	if err := reader.Get(ctx, key, obj); err != nil {
+		if apierrors.IsNotFound(err) {
+			return nil, controlv1alpha1.AgentRunPhaseNeedsHuman, "SkillSetNotFound", fmt.Sprintf("AgentSkillSet %s was not found.", key.String()), nil
+		}
+		return nil, "", "", "", err
+	}
+	return obj, "", "", "", nil
+}
+
+func resolveToolSet(ctx context.Context, reader client.Reader, namespace string, ref *controlv1alpha1.NamespacedObjectReference, seen map[string]struct{}) (*controlv1alpha1.AgentToolSet, controlv1alpha1.AgentRunPhase, string, string, error) {
+	key, phase, reason, message := resolveReferenceIdentity(namespace, ref, "ToolSet", seen)
+	if phase != "" {
+		return nil, phase, reason, message, nil
+	}
+	obj := &controlv1alpha1.AgentToolSet{}
+	if err := reader.Get(ctx, key, obj); err != nil {
+		if apierrors.IsNotFound(err) {
+			return nil, controlv1alpha1.AgentRunPhaseNeedsHuman, "ToolSetNotFound", fmt.Sprintf("AgentToolSet %s was not found.", key.String()), nil
+		}
+		return nil, "", "", "", err
+	}
+	return obj, "", "", "", nil
+}
+
+func resolveMCPSet(ctx context.Context, reader client.Reader, namespace string, ref *controlv1alpha1.NamespacedObjectReference, seen map[string]struct{}) (*controlv1alpha1.AgentMCPSet, controlv1alpha1.AgentRunPhase, string, string, error) {
+	key, phase, reason, message := resolveReferenceIdentity(namespace, ref, "MCPSet", seen)
+	if phase != "" {
+		return nil, phase, reason, message, nil
+	}
+	obj := &controlv1alpha1.AgentMCPSet{}
+	if err := reader.Get(ctx, key, obj); err != nil {
+		if apierrors.IsNotFound(err) {
+			return nil, controlv1alpha1.AgentRunPhaseNeedsHuman, "MCPSetNotFound", fmt.Sprintf("AgentMCPSet %s was not found.", key.String()), nil
+		}
+		return nil, "", "", "", err
+	}
+	return obj, "", "", "", nil
+}
+
+func appendResolvedReferenceOnce[T client.Object](refs []controlv1alpha1.AgentRunResolvedObjectReferenceStatus, obj T, digest string) []controlv1alpha1.AgentRunResolvedObjectReferenceStatus {
+	for _, ref := range refs {
+		if ref.Namespace == obj.GetNamespace() && ref.Name == obj.GetName() {
+			return refs
+		}
+	}
+	return append(refs, *resolvedObjectReferenceStatus(obj, digest))
+}
+
 type agentRunCapabilities struct {
 	skills          []controlv1alpha1.AgentRunSkillInjectionSpec
 	tools           []controlv1alpha1.AgentRunToolSpec
 	subagents       []controlv1alpha1.AgentRunSubagentSpec
+	mcpServers      []controlv1alpha1.AgentRunMCPServerSpec
 	skillIndexes    map[string]int
 	toolIndexes     map[string]int
 	subagentIndexes map[string]int
+	mcpIndexes      map[string]int
 }
 
 func newAgentRunCapabilities() *agentRunCapabilities {
@@ -350,6 +824,7 @@ func newAgentRunCapabilities() *agentRunCapabilities {
 		skillIndexes:    map[string]int{},
 		toolIndexes:     map[string]int{},
 		subagentIndexes: map[string]int{},
+		mcpIndexes:      map[string]int{},
 	}
 }
 
@@ -416,6 +891,115 @@ func (c *agentRunCapabilities) applyToolSet(toolSet *controlv1alpha1.AgentToolSe
 		c.upsertTool(tool)
 	}
 	return "", ""
+}
+
+func (c *agentRunCapabilities) applyAtomicSkill(skill *controlv1alpha1.AgentSkill) (string, string) {
+	if skill == nil || strings.TrimSpace(skill.Name) == "" {
+		return "InvalidSkillName", "AgentSkill name must not be empty."
+	}
+	injection, reason, message := agentRunSkillFromAtomic(skill)
+	if reason != "" {
+		return reason, message
+	}
+	c.upsertSkill(injection)
+	return "", ""
+}
+
+func agentRunSkillFromAtomic(skill *controlv1alpha1.AgentSkill) (controlv1alpha1.AgentRunSkillInjectionSpec, string, string) {
+	out := controlv1alpha1.AgentRunSkillInjectionSpec{Name: strings.TrimSpace(skill.Name), Description: skill.Spec.Description}
+	switch {
+	case skill.Spec.Inline != nil && skill.Spec.GitHub == nil:
+		parts := []string{strings.TrimSpace(skill.Spec.Inline.SkillMD)}
+		seenPaths := map[string]struct{}{}
+		for _, reference := range skill.Spec.Inline.References {
+			path := strings.TrimSpace(reference.Path)
+			if !safeMarkdownPath(path) {
+				return out, "InvalidSkillReferencePath", fmt.Sprintf("AgentSkill %s/%s contains unsafe non-Markdown reference path %q.", skill.Namespace, skill.Name, path)
+			}
+			if _, exists := seenPaths[path]; exists {
+				return out, "DuplicateSkillReferencePath", fmt.Sprintf("AgentSkill %s/%s contains duplicate reference path %q.", skill.Namespace, skill.Name, path)
+			}
+			seenPaths[path] = struct{}{}
+			parts = append(parts, "## Reference: "+path, strings.TrimSpace(reference.Content))
+		}
+		out.Content = strings.Join(parts, "\n\n")
+	case skill.Spec.GitHub != nil && skill.Spec.Inline == nil:
+		source := skill.Spec.GitHub
+		if !safeSkillMDPath(source.Path) {
+			return out, "InvalidSkillSourcePath", fmt.Sprintf("AgentSkill %s/%s github.path must safely name SKILL.md.", skill.Namespace, skill.Name)
+		}
+		paths := append([]string{source.Path}, source.ReferencePaths...)
+		seenPaths := map[string]struct{}{}
+		for _, path := range paths {
+			path = strings.TrimSpace(path)
+			if !safeMarkdownPath(path) {
+				return out, "InvalidSkillReferencePath", fmt.Sprintf("AgentSkill %s/%s contains unsafe non-Markdown reference path %q.", skill.Namespace, skill.Name, path)
+			}
+			if _, exists := seenPaths[path]; exists {
+				return out, "DuplicateSkillReferencePath", fmt.Sprintf("AgentSkill %s/%s contains duplicate reference path %q.", skill.Namespace, skill.Name, path)
+			}
+			seenPaths[path] = struct{}{}
+			out.SourceRefs = append(out.SourceRefs, controlv1alpha1.AgentRunSkillSourceRef{GitHub: &controlv1alpha1.AgentRunGitHubSkillSourceSpec{
+				Repository: source.Repository,
+				Ref:        source.Ref,
+				Path:       path,
+				APIBaseURL: source.APIBaseURL,
+			}})
+		}
+	default:
+		return out, "InvalidSkillSource", fmt.Sprintf("AgentSkill %s/%s must set exactly one of inline or github.", skill.Namespace, skill.Name)
+	}
+	return out, "", ""
+}
+
+func safeMarkdownPath(path string) bool {
+	path = strings.TrimSpace(path)
+	if path == "" || strings.HasPrefix(path, "/") || !strings.HasSuffix(strings.ToLower(path), ".md") {
+		return false
+	}
+	for _, part := range strings.Split(path, "/") {
+		if part == "" || part == "." || part == ".." {
+			return false
+		}
+	}
+	return true
+}
+
+func safeSkillMDPath(path string) bool {
+	return safeMarkdownPath(path) && (path == "SKILL.md" || strings.HasSuffix(path, "/SKILL.md"))
+}
+
+func (c *agentRunCapabilities) applyAtomicTool(tool *controlv1alpha1.AgentTool) (string, string) {
+	if tool == nil || strings.TrimSpace(tool.Name) == "" {
+		return "InvalidToolName", "AgentTool name must not be empty."
+	}
+	resolved := controlv1alpha1.AgentRunToolSpec{
+		Name:          strings.TrimSpace(tool.Name),
+		Description:   tool.Spec.Description,
+		Executable:    tool.Spec.Executable.DeepCopy(),
+		Source:        tool.Spec.Source.DeepCopy(),
+		SetupScript:   tool.Spec.SetupScript,
+		VerifyCommand: append([]string(nil), tool.Spec.VerifyCommand...),
+		SpecDigest:    digestJSON(tool.Spec),
+	}
+	if index, exists := c.toolIndexes[resolved.Name]; exists && !reflect.DeepEqual(c.tools[index], resolved) {
+		return "ConflictingToolName", fmt.Sprintf("Selected capability resources define conflicting tool %q contracts.", resolved.Name)
+	}
+	c.upsertTool(resolved)
+	return "", ""
+}
+
+func (c *agentRunCapabilities) applyMCPServer(server *controlv1alpha1.AgentMCPServer) (string, string) {
+	if server == nil || strings.TrimSpace(server.Name) == "" {
+		return "InvalidMCPServerName", "AgentMCPServer name must not be empty."
+	}
+	return c.upsertMCPServer(controlv1alpha1.AgentRunMCPServerSpec{
+		Name:          strings.TrimSpace(server.Name),
+		Description:   server.Spec.Description,
+		Transport:     *server.Spec.Transport.DeepCopy(),
+		ToolAllowlist: append([]string(nil), server.Spec.ToolAllowlist...),
+		SpecDigest:    digestJSON(server.Spec),
+	})
 }
 
 func (c *agentRunCapabilities) applyOverrides(overrides []controlv1alpha1.AgentSkillOverrideSpec) (string, string) {
@@ -516,6 +1100,51 @@ func (c *agentRunCapabilities) upsertSubagent(subagent controlv1alpha1.AgentRunS
 	}
 	c.subagentIndexes[name] = len(c.subagents)
 	c.subagents = append(c.subagents, *subagent.DeepCopy())
+}
+
+func (c *agentRunCapabilities) upsertMCPServer(server controlv1alpha1.AgentRunMCPServerSpec) (string, string) {
+	name := strings.TrimSpace(server.Name)
+	if name == "" {
+		return "InvalidMCPServerName", "MCP server name must not be empty."
+	}
+	if index, exists := c.mcpIndexes[name]; exists {
+		if !reflect.DeepEqual(c.mcpServers[index], server) {
+			return "ConflictingMCPServerName", fmt.Sprintf("Selected capability resources define conflicting MCP server %q contracts.", name)
+		}
+		return "", ""
+	}
+	c.mcpIndexes[name] = len(c.mcpServers)
+	c.mcpServers = append(c.mcpServers, *server.DeepCopy())
+	return "", ""
+}
+
+func (c *agentRunCapabilities) overlayMCPServer(server controlv1alpha1.AgentRunMCPServerSpec) (string, string) {
+	name := strings.TrimSpace(server.Name)
+	if name == "" {
+		return "InvalidMCPServerName", "MCP server name must not be empty."
+	}
+	if index, exists := c.mcpIndexes[name]; exists {
+		c.mcpServers[index] = *server.DeepCopy()
+		return "", ""
+	}
+	c.mcpIndexes[name] = len(c.mcpServers)
+	c.mcpServers = append(c.mcpServers, *server.DeepCopy())
+	return "", ""
+}
+
+func (c *agentRunCapabilities) resetSkills() {
+	c.skills = nil
+	c.skillIndexes = map[string]int{}
+}
+
+func (c *agentRunCapabilities) resetTools() {
+	c.tools = nil
+	c.toolIndexes = map[string]int{}
+}
+
+func (c *agentRunCapabilities) resetMCPServers() {
+	c.mcpServers = nil
+	c.mcpIndexes = map[string]int{}
 }
 
 func deepCopyNamespacedObjectReference(ref *controlv1alpha1.NamespacedObjectReference) *controlv1alpha1.NamespacedObjectReference {

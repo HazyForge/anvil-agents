@@ -22,6 +22,11 @@ fail() {
   exit 1
 }
 
+if grep -R -n -E '”|“' "${root_dir}/api" "${root_dir}/config/crd/bases" "${root_dir}/charts/anvil-agents/templates/crds.yaml" >"${tmp_dir}/unicode-cel.txt"; then
+  cat "${tmp_dir}/unicode-cel.txt" >&2
+  fail "capability CEL contains Unicode quote characters"
+fi
+
 expect_template_failure() {
   local name="$1"
   shift
@@ -60,9 +65,9 @@ fi
 if grep -Eq '^kind: CustomResourceDefinition$' "${tmp_dir}/without-crds.yaml"; then
   fail "CRDs rendered while crds.install=false"
 fi
-[[ "$(grep -c 'helm.sh/resource-policy: keep' "${tmp_dir}/disabled.yaml")" -eq 12 ]] || fail "all twelve CRDs must be retained on Helm uninstall"
-[[ "$(grep -c 'argocd.argoproj.io/sync-options: Prune=false' "${tmp_dir}/disabled.yaml")" -eq 12 ]] || fail "all twelve CRDs must be retained during Argo ownership transfer"
-for crd in agentharnessprofiles agentskillsets agenttoolsets adversesignals; do
+[[ "$(grep -c 'helm.sh/resource-policy: keep' "${tmp_dir}/disabled.yaml")" -eq 16 ]] || fail "all sixteen CRDs must be retained on Helm uninstall"
+[[ "$(grep -c 'argocd.argoproj.io/sync-options: Prune=false' "${tmp_dir}/disabled.yaml")" -eq 16 ]] || fail "all sixteen CRDs must be retained during Argo ownership transfer"
+for crd in agentharnessprofiles agentskills agentskillsets agenttools agenttoolsets agentmcpservers agentmcpsets adversesignals; do
   grep -Eq "name: ${crd}\.control\.anvil\.hazyforge\.io" "${tmp_dir}/disabled.yaml" || fail "${crd} CRD was not rendered"
 done
 grep -q 'harnessProfileRef:' "${tmp_dir}/disabled.yaml" || fail "composition harnessProfileRef schema is missing"
@@ -72,7 +77,7 @@ grep -q 'maxRunsPerDay:' "${tmp_dir}/disabled.yaml" || fail "AgentSchedule daily
 grep -q 'name: adversesignals.control.anvil.hazyforge.io' "${tmp_dir}/disabled.yaml" || fail "AdverseSignal CRD is missing"
 grep -q 'AdverseSignal spec is immutable' "${tmp_dir}/disabled.yaml" || fail "AdverseSignal immutability validation is missing"
 helm template "${release}" "${chart}" --show-only templates/clusterrole.yaml >"${tmp_dir}/controller-rbac.yaml"
-for resource in agentharnessprofiles agentskillsets agenttoolsets; do
+for resource in agentharnessprofiles agentskills agentskillsets agenttools agenttoolsets agentmcpservers agentmcpsets; do
   grep -q "${resource}" "${tmp_dir}/controller-rbac.yaml" || fail "controller RBAC is missing ${resource}"
 done
 grep -q 'adversesignals' "${tmp_dir}/controller-rbac.yaml" || fail "controller RBAC is missing adversesignals"

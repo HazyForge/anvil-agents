@@ -40,8 +40,13 @@ type AgentToolSetSpec struct {
 	// Description explains what integration this tool set exposes.
 	// +optional
 	Description string `json:"description,omitempty"`
+	// ToolRefs is the canonical ordered collection of atomic AgentTools.
+	// +kubebuilder:validation:MaxItems=64
+	// +optional
+	ToolRefs []NamespacedObjectReference `json:"toolRefs,omitempty"`
 	// Tools are materialized into compatible agent harnesses in declaration
 	// order.
+	// Deprecated: use toolRefs.
 	// +kubebuilder:validation:MaxItems=32
 	// +optional
 	Tools []AgentRunToolSpec `json:"tools,omitempty"`
