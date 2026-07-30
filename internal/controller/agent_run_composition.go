@@ -35,6 +35,9 @@ func (r *AgentRunReconciler) resolveAgentRunComposition(ctx context.Context, obj
 	if err != nil || phase != "" {
 		return effective, nil, phase, reason, message, err
 	}
+	if obj.Spec.Harness.Execution.ToolCache != nil || (profile != nil && profile.Spec.Harness.Execution.ToolCache != nil) {
+		return effective, nil, controlv1alpha1.AgentRunPhaseFailed, "ToolCacheMustBeHarnessOwned", "toolCache may be selected only by AgentHarnessProfile.spec.execution.", nil
+	}
 	effective.Spec.HarnessProfileRef = deepCopyNamespacedObjectReference(harnessRef)
 	if harnessProfile != nil {
 		effective.Spec.Harness = agentRunHarnessWithProfile(profile, obj, harnessProfile)
