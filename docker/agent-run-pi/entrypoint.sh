@@ -22,6 +22,7 @@ pi_xai_extension="${ANVIL_PI_XAI_EXTENSION:-/usr/local/lib/node_modules/pi-xai-o
 
 source /opt/anvil-agent-run/lib/github-auth.sh
 source /opt/anvil-agent-run/lib/repository-checkout.sh
+source /opt/anvil-agent-run/lib/capabilities.sh
 
 mkdir -p "$(dirname "${status_file}")" "${pi_agent_dir}" "${pi_session_dir}" "${pi_home}/.grok" "${workdir}"
 : > "${status_file}"
@@ -95,59 +96,6 @@ workspace_empty() {
 	[[ -z "$(find . -mindepth 1 -maxdepth 1 -print -quit)" ]]
 }
 
-run_tool_setup() {
-	local ran_any="false"
-	if [[ -n "${tool_setup_files}" ]]; then
-		echo "ANVIL_AGENT_RUN_TOOL_SETUP_START"
-		anvil-agent-status progress --stage tool-setup --summary "Preparing AgentRun tools." >/dev/null || true
-		while IFS= read -r tool_file; do
-			if [[ -z "${tool_file}" ]]; then
-				continue
-			fi
-			if [[ ! -f "${tool_file}" ]]; then
-				echo "ANVIL_AGENT_RUN_TOOL_SETUP_MISSING file=${tool_file}" >&2
-				exit 1
-			fi
-			echo "ANVIL_AGENT_RUN_TOOL_SETUP_SOURCE file=$(basename "${tool_file}")"
-			# shellcheck source=/dev/null
-			. "${tool_file}"
-			cd "${workdir}"
-			ran_any="true"
-		done <<< "${tool_setup_files}"
-	fi
-
-	if [[ -n "${tools_json}" ]]; then
-		if command -v jq >/dev/null 2>&1 && command -v base64 >/dev/null 2>&1; then
-			while IFS= read -r encoded_tool; do
-				if [[ -z "${encoded_tool}" ]]; then
-					continue
-				fi
-				local tool_json
-				local tool_name
-				local verify_count
-				tool_json="$(printf '%s' "${encoded_tool}" | base64 -d)"
-				tool_name="$(jq -r '.name // "unnamed"' <<< "${tool_json}")"
-				verify_count="$(jq -r '(.verifyCommand // []) | length' <<< "${tool_json}")"
-				if [[ "${verify_count}" == "0" ]]; then
-					continue
-				fi
-				mapfile -t verify_command < <(jq -r '.verifyCommand[]' <<< "${tool_json}")
-				echo "ANVIL_AGENT_RUN_TOOL_VERIFY_START name=${tool_name}"
-				"${verify_command[@]}"
-				echo "ANVIL_AGENT_RUN_TOOL_VERIFY_OK name=${tool_name}"
-				ran_any="true"
-			done < <(jq -r '.[] | @base64' <<< "${tools_json}")
-		else
-			echo "ANVIL_AGENT_RUN_TOOL_VERIFY_SKIPPED reason=missing-jq-or-base64"
-		fi
-	fi
-
-	if [[ "${ran_any}" == "true" ]]; then
-		echo "ANVIL_AGENT_RUN_TOOL_SETUP_COMPLETE"
-		anvil-agent-status progress --stage tool-setup --summary "AgentRun tools are ready." >/dev/null || true
-	fi
-}
-
 if truthy "${ANVIL_AGENT_RUN_AUTO_CLONE_REPO:-true}" && [[ ! -d .git ]]; then
 	if [[ -n "${repository_url}" ]]; then
 		if workspace_empty; then
@@ -170,7 +118,7 @@ if [[ -d .git && -n "${repository_ref}" ]]; then
 	anvil_checkout_repository_ref "${repository_ref}" || exit $?
 fi
 
-run_tool_setup
+anvil_prepare_capabilities "${workdir}" "${ANVIL_AGENT_RUN_BACKEND:-piAgent}"
 
 combined_prompt="$(mktemp)"
 {
