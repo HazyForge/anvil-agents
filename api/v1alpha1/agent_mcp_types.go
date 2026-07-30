@@ -4,7 +4,7 @@ import metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 // AgentMCPStdioTransport launches an MCP server as a child process. The first
 // argv entry must be supplied by a selected AgentTool or the harness image.
-// +kubebuilder:validation:XValidation:rule="self.command.all(a, a != ”)",message="command arguments must not be empty"
+// +kubebuilder:validation:XValidation:rule="self.command.all(a, a != '')",message="command arguments must not be empty"
 // +kubebuilder:validation:XValidation:rule="!has(self.requiredEnv) || (self.requiredEnv.all(e, e.matches('^[A-Z_][A-Z0-9_]*$')) && self.requiredEnv.all(e, self.requiredEnv.filter(x, x == e).size() == 1))",message="requiredEnv must contain unique environment-variable names"
 type AgentMCPStdioTransport struct {
 	// Command is the complete argv vector; shell evaluation is never used.
@@ -55,7 +55,7 @@ type AgentMCPTransport struct {
 }
 
 // AgentMCPServerSpec defines one secret-free MCP server contract.
-// +kubebuilder:validation:XValidation:rule="!has(self.toolAllowlist) || (self.toolAllowlist.all(t, t != ”) && self.toolAllowlist.all(t, self.toolAllowlist.filter(x, x == t).size() == 1))",message="toolAllowlist must contain unique non-empty tool names"
+// +kubebuilder:validation:XValidation:rule="!has(self.toolAllowlist) || (self.toolAllowlist.all(t, t != '') && self.toolAllowlist.all(t, self.toolAllowlist.filter(x, x == t).size() == 1))",message="toolAllowlist must contain unique non-empty tool names"
 type AgentMCPServerSpec struct {
 	// Description explains the server's bounded purpose.
 	// +optional

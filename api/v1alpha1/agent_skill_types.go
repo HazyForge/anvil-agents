@@ -4,7 +4,7 @@ import metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 // AgentSkillMarkdownReference is one optional Markdown reference shipped with
 // an inline AgentSkill. Paths are relative to the skill package root.
-// +kubebuilder:validation:XValidation:rule="!self.path.startsWith('/') && self.path.split('/').all(p, p != ” && p != '.' && p != '..') && self.path.endsWith('.md')",message="path must be a safe relative Markdown path"
+// +kubebuilder:validation:XValidation:rule="!self.path.startsWith('/') && self.path.split('/').all(p, p != '' && p != '.' && p != '..') && self.path.endsWith('.md')",message="path must be a safe relative Markdown path"
 type AgentSkillMarkdownReference struct {
 	// Path is the package-relative Markdown path.
 	// +kubebuilder:validation:MinLength=1
@@ -32,8 +32,8 @@ type AgentSkillInlineSource struct {
 // GitHub repository. Path must name SKILL.md; ReferencePaths may name only
 // additional Markdown files below the same repository commit.
 // +kubebuilder:validation:XValidation:rule="self.path == 'SKILL.md' || self.path.endsWith('/SKILL.md')",message="path must name SKILL.md"
-// +kubebuilder:validation:XValidation:rule="!self.path.startsWith('/') && self.path.split('/').all(p, p != ” && p != '.' && p != '..')",message="path must be a safe relative path"
-// +kubebuilder:validation:XValidation:rule="!has(self.referencePaths) || self.referencePaths.all(p, p != ” && !p.startsWith('/') && p.split('/').all(s, s != ” && s != '.' && s != '..') && p.endsWith('.md') && p != 'SKILL.md' && !p.endsWith('/SKILL.md'))",message="referencePaths must contain only safe relative non-SKILL Markdown paths"
+// +kubebuilder:validation:XValidation:rule="!self.path.startsWith('/') && self.path.split('/').all(p, p != '' && p != '.' && p != '..')",message="path must be a safe relative path"
+// +kubebuilder:validation:XValidation:rule="!has(self.referencePaths) || self.referencePaths.all(p, p != '' && !p.startsWith('/') && p.split('/').all(s, s != '' && s != '.' && s != '..') && p.endsWith('.md') && p != 'SKILL.md' && !p.endsWith('/SKILL.md'))",message="referencePaths must contain only safe relative non-SKILL Markdown paths"
 // +kubebuilder:validation:XValidation:rule="!has(self.referencePaths) || self.referencePaths.all(p, self.referencePaths.filter(q, q == p).size() == 1)",message="referencePaths must not contain duplicates"
 type AgentSkillGitHubSource struct {
 	// Repository is owner/name.

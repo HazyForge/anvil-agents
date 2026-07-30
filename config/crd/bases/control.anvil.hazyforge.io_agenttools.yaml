@@ -70,7 +70,7 @@ spec:
                 x-kubernetes-validations:
                 - message: path must be a safe relative path
                   rule: '!self.path.startsWith(''/'') && self.path.split(''/'').all(p,
-                    p != ” && p != ''.'' && p != ''..'')'
+                    p != '''' && p != ''.'' && p != ''..'')'
               setupScript:
                 description: |-
                   SetupScript is the unrestricted compatibility escape hatch. It runs with
@@ -143,9 +143,9 @@ spec:
                               and a safe relative path for archives
                             rule: (self.format == 'binary' && !has(self.executablePath))
                               || (self.format != 'binary' && has(self.executablePath)
-                              && self.executablePath != ” && !self.executablePath.startsWith('/')
-                              && self.executablePath.split('/').all(p, p != ” && p
-                              != '.' && p != '..'))
+                              && self.executablePath != '' && !self.executablePath.startsWith('/')
+                              && self.executablePath.split('/').all(p, p != '' &&
+                              p != '.' && p != '..'))
                         maxItems: 16
                         minItems: 1
                         type: array
@@ -182,7 +182,7 @@ spec:
                     type: object
                     x-kubernetes-validations:
                     - message: interpreter arguments must not be empty
-                      rule: self.interpreter.all(a, a != ”)
+                      rule: self.interpreter.all(a, a != '')
                   ociArtifact:
                     properties:
                       artifacts:
@@ -231,7 +231,7 @@ spec:
                           x-kubernetes-validations:
                           - message: executablePath must be a safe relative path
                             rule: '!self.executablePath.startsWith(''/'') && self.executablePath.split(''/'').all(p,
-                              p != ” && p != ''.'' && p != ''..'')'
+                              p != '''' && p != ''.'' && p != ''..'')'
                         maxItems: 16
                         minItems: 1
                         type: array
@@ -262,9 +262,9 @@ spec:
             x-kubernetes-validations:
             - message: exactly one of source or setupScript must be set
               rule: has(self.source) != (has(self.setupScript) && self.setupScript
-                != ”)
+                != '')
             - message: verifyCommand arguments must not be empty
-              rule: self.verifyCommand.all(a, a != ”)
+              rule: self.verifyCommand.all(a, a != '')
         required:
         - spec
         type: object

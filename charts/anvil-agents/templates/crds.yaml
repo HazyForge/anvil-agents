@@ -2644,7 +2644,7 @@ spec:
                                       type: object
                                       x-kubernetes-validations:
                                       - message: command arguments must not be empty
-                                        rule: self.command.all(a, a != ”)
+                                        rule: self.command.all(a, a != '')
                                       - message: requiredEnv must contain unique environment-variable
                                           names
                                         rule: '!has(self.requiredEnv) || (self.requiredEnv.all(e,
@@ -2864,7 +2864,7 @@ spec:
                                   x-kubernetes-validations:
                                   - message: path must be a safe relative path
                                     rule: '!self.path.startsWith(''/'') && self.path.split(''/'').all(p,
-                                      p != ” && p != ''.'' && p != ''..'')'
+                                      p != '''' && p != ''.'' && p != ''..'')'
                                 name:
                                   description: Name is a stable tool identifier such
                                     as kbctl.
@@ -2948,9 +2948,9 @@ spec:
                                                 path for archives
                                               rule: (self.format == 'binary' && !has(self.executablePath))
                                                 || (self.format != 'binary' && has(self.executablePath)
-                                                && self.executablePath != ” && !self.executablePath.startsWith('/')
+                                                && self.executablePath != '' && !self.executablePath.startsWith('/')
                                                 && self.executablePath.split('/').all(p,
-                                                p != ” && p != '.' && p != '..'))
+                                                p != '' && p != '.' && p != '..'))
                                           maxItems: 16
                                           minItems: 1
                                           type: array
@@ -2990,7 +2990,7 @@ spec:
                                       x-kubernetes-validations:
                                       - message: interpreter arguments must not be
                                           empty
-                                        rule: self.interpreter.all(a, a != ”)
+                                        rule: self.interpreter.all(a, a != '')
                                     ociArtifact:
                                       properties:
                                         artifacts:
@@ -3044,7 +3044,7 @@ spec:
                                                 relative path
                                               rule: '!self.executablePath.startsWith(''/'')
                                                 && self.executablePath.split(''/'').all(p,
-                                                p != ” && p != ''.'' && p != ''..'')'
+                                                p != '''' && p != ''.'' && p != ''..'')'
                                           maxItems: 16
                                           minItems: 1
                                           type: array
@@ -6738,7 +6738,7 @@ spec:
                     type: object
                     x-kubernetes-validations:
                     - message: command arguments must not be empty
-                      rule: self.command.all(a, a != ”)
+                      rule: self.command.all(a, a != '')
                     - message: requiredEnv must contain unique environment-variable
                         names
                       rule: '!has(self.requiredEnv) || (self.requiredEnv.all(e, e.matches(''^[A-Z_][A-Z0-9_]*$''))
@@ -6803,7 +6803,7 @@ spec:
             type: object
             x-kubernetes-validations:
             - message: toolAllowlist must contain unique non-empty tool names
-              rule: '!has(self.toolAllowlist) || (self.toolAllowlist.all(t, t != ”)
+              rule: '!has(self.toolAllowlist) || (self.toolAllowlist.all(t, t != '''')
                 && self.toolAllowlist.all(t, self.toolAllowlist.filter(x, x == t).size()
                 == 1))'
         required:
@@ -9652,7 +9652,7 @@ spec:
                               type: object
                               x-kubernetes-validations:
                               - message: command arguments must not be empty
-                                rule: self.command.all(a, a != ”)
+                                rule: self.command.all(a, a != '')
                               - message: requiredEnv must contain unique environment-variable
                                   names
                                 rule: '!has(self.requiredEnv) || (self.requiredEnv.all(e,
@@ -9864,7 +9864,7 @@ spec:
                           x-kubernetes-validations:
                           - message: path must be a safe relative path
                             rule: '!self.path.startsWith(''/'') && self.path.split(''/'').all(p,
-                              p != ” && p != ''.'' && p != ''..'')'
+                              p != '''' && p != ''.'' && p != ''..'')'
                         name:
                           description: Name is a stable tool identifier such as kbctl.
                           minLength: 1
@@ -9944,9 +9944,9 @@ spec:
                                         artifacts and a safe relative path for archives
                                       rule: (self.format == 'binary' && !has(self.executablePath))
                                         || (self.format != 'binary' && has(self.executablePath)
-                                        && self.executablePath != ” && !self.executablePath.startsWith('/')
+                                        && self.executablePath != '' && !self.executablePath.startsWith('/')
                                         && self.executablePath.split('/').all(p, p
-                                        != ” && p != '.' && p != '..'))
+                                        != '' && p != '.' && p != '..'))
                                   maxItems: 16
                                   minItems: 1
                                   type: array
@@ -9983,7 +9983,7 @@ spec:
                               type: object
                               x-kubernetes-validations:
                               - message: interpreter arguments must not be empty
-                                rule: self.interpreter.all(a, a != ”)
+                                rule: self.interpreter.all(a, a != '')
                             ociArtifact:
                               properties:
                                 artifacts:
@@ -10035,7 +10035,7 @@ spec:
                                         path
                                       rule: '!self.executablePath.startsWith(''/'')
                                         && self.executablePath.split(''/'').all(p,
-                                        p != ” && p != ''.'' && p != ''..'')'
+                                        p != '''' && p != ''.'' && p != ''..'')'
                                   maxItems: 16
                                   minItems: 1
                                   type: array
@@ -12986,7 +12986,7 @@ spec:
                               type: object
                               x-kubernetes-validations:
                               - message: command arguments must not be empty
-                                rule: self.command.all(a, a != ”)
+                                rule: self.command.all(a, a != '')
                               - message: requiredEnv must contain unique environment-variable
                                   names
                                 rule: '!has(self.requiredEnv) || (self.requiredEnv.all(e,
@@ -13198,7 +13198,7 @@ spec:
                           x-kubernetes-validations:
                           - message: path must be a safe relative path
                             rule: '!self.path.startsWith(''/'') && self.path.split(''/'').all(p,
-                              p != ” && p != ''.'' && p != ''..'')'
+                              p != '''' && p != ''.'' && p != ''..'')'
                         name:
                           description: Name is a stable tool identifier such as kbctl.
                           minLength: 1
@@ -13278,9 +13278,9 @@ spec:
                                         artifacts and a safe relative path for archives
                                       rule: (self.format == 'binary' && !has(self.executablePath))
                                         || (self.format != 'binary' && has(self.executablePath)
-                                        && self.executablePath != ” && !self.executablePath.startsWith('/')
+                                        && self.executablePath != '' && !self.executablePath.startsWith('/')
                                         && self.executablePath.split('/').all(p, p
-                                        != ” && p != '.' && p != '..'))
+                                        != '' && p != '.' && p != '..'))
                                   maxItems: 16
                                   minItems: 1
                                   type: array
@@ -13317,7 +13317,7 @@ spec:
                               type: object
                               x-kubernetes-validations:
                               - message: interpreter arguments must not be empty
-                                rule: self.interpreter.all(a, a != ”)
+                                rule: self.interpreter.all(a, a != '')
                             ociArtifact:
                               properties:
                                 artifacts:
@@ -13369,7 +13369,7 @@ spec:
                                         path
                                       rule: '!self.executablePath.startsWith(''/'')
                                         && self.executablePath.split(''/'').all(p,
-                                        p != ” && p != ''.'' && p != ''..'')'
+                                        p != '''' && p != ''.'' && p != ''..'')'
                                   maxItems: 16
                                   minItems: 1
                                   type: array
@@ -16967,7 +16967,7 @@ spec:
                                   type: object
                                   x-kubernetes-validations:
                                   - message: command arguments must not be empty
-                                    rule: self.command.all(a, a != ”)
+                                    rule: self.command.all(a, a != '')
                                   - message: requiredEnv must contain unique environment-variable
                                       names
                                     rule: '!has(self.requiredEnv) || (self.requiredEnv.all(e,
@@ -17185,7 +17185,7 @@ spec:
                               x-kubernetes-validations:
                               - message: path must be a safe relative path
                                 rule: '!self.path.startsWith(''/'') && self.path.split(''/'').all(p,
-                                  p != ” && p != ''.'' && p != ''..'')'
+                                  p != '''' && p != ''.'' && p != ''..'')'
                             name:
                               description: Name is a stable tool identifier such as
                                 kbctl.
@@ -17267,9 +17267,9 @@ spec:
                                             for archives
                                           rule: (self.format == 'binary' && !has(self.executablePath))
                                             || (self.format != 'binary' && has(self.executablePath)
-                                            && self.executablePath != ” && !self.executablePath.startsWith('/')
+                                            && self.executablePath != '' && !self.executablePath.startsWith('/')
                                             && self.executablePath.split('/').all(p,
-                                            p != ” && p != '.' && p != '..'))
+                                            p != '' && p != '.' && p != '..'))
                                       maxItems: 16
                                       minItems: 1
                                       type: array
@@ -17308,7 +17308,7 @@ spec:
                                   type: object
                                   x-kubernetes-validations:
                                   - message: interpreter arguments must not be empty
-                                    rule: self.interpreter.all(a, a != ”)
+                                    rule: self.interpreter.all(a, a != '')
                                 ociArtifact:
                                   properties:
                                     artifacts:
@@ -17360,7 +17360,7 @@ spec:
                                             path
                                           rule: '!self.executablePath.startsWith(''/'')
                                             && self.executablePath.split(''/'').all(p,
-                                            p != ” && p != ''.'' && p != ''..'')'
+                                            p != '''' && p != ''.'' && p != ''..'')'
                                       maxItems: 16
                                       minItems: 1
                                       type: array
@@ -20392,7 +20392,7 @@ spec:
                                         type: object
                                         x-kubernetes-validations:
                                         - message: command arguments must not be empty
-                                          rule: self.command.all(a, a != ”)
+                                          rule: self.command.all(a, a != '')
                                         - message: requiredEnv must contain unique
                                             environment-variable names
                                           rule: '!has(self.requiredEnv) || (self.requiredEnv.all(e,
@@ -20612,7 +20612,7 @@ spec:
                                     x-kubernetes-validations:
                                     - message: path must be a safe relative path
                                       rule: '!self.path.startsWith(''/'') && self.path.split(''/'').all(p,
-                                        p != ” && p != ''.'' && p != ''..'')'
+                                        p != '''' && p != ''.'' && p != ''..'')'
                                   name:
                                     description: Name is a stable tool identifier
                                       such as kbctl.
@@ -20698,9 +20698,10 @@ spec:
                                                 rule: (self.format == 'binary' &&
                                                   !has(self.executablePath)) || (self.format
                                                   != 'binary' && has(self.executablePath)
-                                                  && self.executablePath != ” && !self.executablePath.startsWith('/')
+                                                  && self.executablePath != '' &&
+                                                  !self.executablePath.startsWith('/')
                                                   && self.executablePath.split('/').all(p,
-                                                  p != ” && p != '.' && p != '..'))
+                                                  p != '' && p != '.' && p != '..'))
                                             maxItems: 16
                                             minItems: 1
                                             type: array
@@ -20740,7 +20741,7 @@ spec:
                                         x-kubernetes-validations:
                                         - message: interpreter arguments must not
                                             be empty
-                                          rule: self.interpreter.all(a, a != ”)
+                                          rule: self.interpreter.all(a, a != '')
                                       ociArtifact:
                                         properties:
                                           artifacts:
@@ -20794,7 +20795,8 @@ spec:
                                                   safe relative path
                                                 rule: '!self.executablePath.startsWith(''/'')
                                                   && self.executablePath.split(''/'').all(p,
-                                                  p != ” && p != ''.'' && p != ''..'')'
+                                                  p != '''' && p != ''.'' && p !=
+                                                  ''..'')'
                                             maxItems: 16
                                             minItems: 1
                                             type: array
@@ -21511,13 +21513,13 @@ spec:
                   rule: self.path == 'SKILL.md' || self.path.endsWith('/SKILL.md')
                 - message: path must be a safe relative path
                   rule: '!self.path.startsWith(''/'') && self.path.split(''/'').all(p,
-                    p != ” && p != ''.'' && p != ''..'')'
+                    p != '''' && p != ''.'' && p != ''..'')'
                 - message: referencePaths must contain only safe relative non-SKILL
                     Markdown paths
                   rule: '!has(self.referencePaths) || self.referencePaths.all(p, p
-                    != ” && !p.startsWith(''/'') && p.split(''/'').all(s, s != ” &&
-                    s != ''.'' && s != ''..'') && p.endsWith(''.md'') && p != ''SKILL.md''
-                    && !p.endsWith(''/SKILL.md''))'
+                    != '''' && !p.startsWith(''/'') && p.split(''/'').all(s, s !=
+                    '''' && s != ''.'' && s != ''..'') && p.endsWith(''.md'') && p
+                    != ''SKILL.md'' && !p.endsWith(''/SKILL.md''))'
                 - message: referencePaths must not contain duplicates
                   rule: '!has(self.referencePaths) || self.referencePaths.all(p, self.referencePaths.filter(q,
                     q == p).size() == 1)'
@@ -21546,7 +21548,7 @@ spec:
                       x-kubernetes-validations:
                       - message: path must be a safe relative Markdown path
                         rule: '!self.path.startsWith(''/'') && self.path.split(''/'').all(p,
-                          p != ” && p != ''.'' && p != ''..'') && self.path.endsWith(''.md'')'
+                          p != '''' && p != ''.'' && p != ''..'') && self.path.endsWith(''.md'')'
                     maxItems: 64
                     type: array
                   skillMD:
@@ -21787,7 +21789,7 @@ spec:
                       x-kubernetes-validations:
                       - message: path must be a safe relative path
                         rule: '!self.path.startsWith(''/'') && self.path.split(''/'').all(p,
-                          p != ” && p != ''.'' && p != ''..'')'
+                          p != '''' && p != ''.'' && p != ''..'')'
                     name:
                       description: Name is a stable tool identifier such as kbctl.
                       minLength: 1
@@ -21867,9 +21869,9 @@ spec:
                                     artifacts and a safe relative path for archives
                                   rule: (self.format == 'binary' && !has(self.executablePath))
                                     || (self.format != 'binary' && has(self.executablePath)
-                                    && self.executablePath != ” && !self.executablePath.startsWith('/')
+                                    && self.executablePath != '' && !self.executablePath.startsWith('/')
                                     && self.executablePath.split('/').all(p, p !=
-                                    ” && p != '.' && p != '..'))
+                                    '' && p != '.' && p != '..'))
                               maxItems: 16
                               minItems: 1
                               type: array
@@ -21906,7 +21908,7 @@ spec:
                           type: object
                           x-kubernetes-validations:
                           - message: interpreter arguments must not be empty
-                            rule: self.interpreter.all(a, a != ”)
+                            rule: self.interpreter.all(a, a != '')
                         ociArtifact:
                           properties:
                             artifacts:
@@ -21956,7 +21958,7 @@ spec:
                                 - message: executablePath must be a safe relative
                                     path
                                   rule: '!self.executablePath.startsWith(''/'') &&
-                                    self.executablePath.split(''/'').all(p, p != ”
+                                    self.executablePath.split(''/'').all(p, p != ''''
                                     && p != ''.'' && p != ''..'')'
                               maxItems: 16
                               minItems: 1
@@ -22072,7 +22074,7 @@ spec:
                 x-kubernetes-validations:
                 - message: path must be a safe relative path
                   rule: '!self.path.startsWith(''/'') && self.path.split(''/'').all(p,
-                    p != ” && p != ''.'' && p != ''..'')'
+                    p != '''' && p != ''.'' && p != ''..'')'
               setupScript:
                 description: |-
                   SetupScript is the unrestricted compatibility escape hatch. It runs with
@@ -22145,9 +22147,9 @@ spec:
                               and a safe relative path for archives
                             rule: (self.format == 'binary' && !has(self.executablePath))
                               || (self.format != 'binary' && has(self.executablePath)
-                              && self.executablePath != ” && !self.executablePath.startsWith('/')
-                              && self.executablePath.split('/').all(p, p != ” && p
-                              != '.' && p != '..'))
+                              && self.executablePath != '' && !self.executablePath.startsWith('/')
+                              && self.executablePath.split('/').all(p, p != '' &&
+                              p != '.' && p != '..'))
                         maxItems: 16
                         minItems: 1
                         type: array
@@ -22184,7 +22186,7 @@ spec:
                     type: object
                     x-kubernetes-validations:
                     - message: interpreter arguments must not be empty
-                      rule: self.interpreter.all(a, a != ”)
+                      rule: self.interpreter.all(a, a != '')
                   ociArtifact:
                     properties:
                       artifacts:
@@ -22233,7 +22235,7 @@ spec:
                           x-kubernetes-validations:
                           - message: executablePath must be a safe relative path
                             rule: '!self.executablePath.startsWith(''/'') && self.executablePath.split(''/'').all(p,
-                              p != ” && p != ''.'' && p != ''..'')'
+                              p != '''' && p != ''.'' && p != ''..'')'
                         maxItems: 16
                         minItems: 1
                         type: array
@@ -22264,9 +22266,9 @@ spec:
             x-kubernetes-validations:
             - message: exactly one of source or setupScript must be set
               rule: has(self.source) != (has(self.setupScript) && self.setupScript
-                != ”)
+                != '')
             - message: verifyCommand arguments must not be empty
-              rule: self.verifyCommand.all(a, a != ”)
+              rule: self.verifyCommand.all(a, a != '')
         required:
         - spec
         type: object
@@ -22376,7 +22378,7 @@ spec:
                       x-kubernetes-validations:
                       - message: path must be a safe relative path
                         rule: '!self.path.startsWith(''/'') && self.path.split(''/'').all(p,
-                          p != ” && p != ''.'' && p != ''..'')'
+                          p != '''' && p != ''.'' && p != ''..'')'
                     name:
                       description: Name is a stable tool identifier such as kbctl.
                       minLength: 1
@@ -22456,9 +22458,9 @@ spec:
                                     artifacts and a safe relative path for archives
                                   rule: (self.format == 'binary' && !has(self.executablePath))
                                     || (self.format != 'binary' && has(self.executablePath)
-                                    && self.executablePath != ” && !self.executablePath.startsWith('/')
+                                    && self.executablePath != '' && !self.executablePath.startsWith('/')
                                     && self.executablePath.split('/').all(p, p !=
-                                    ” && p != '.' && p != '..'))
+                                    '' && p != '.' && p != '..'))
                               maxItems: 16
                               minItems: 1
                               type: array
@@ -22495,7 +22497,7 @@ spec:
                           type: object
                           x-kubernetes-validations:
                           - message: interpreter arguments must not be empty
-                            rule: self.interpreter.all(a, a != ”)
+                            rule: self.interpreter.all(a, a != '')
                         ociArtifact:
                           properties:
                             artifacts:
@@ -22545,7 +22547,7 @@ spec:
                                 - message: executablePath must be a safe relative
                                     path
                                   rule: '!self.executablePath.startsWith(''/'') &&
-                                    self.executablePath.split(''/'').all(p, p != ”
+                                    self.executablePath.split(''/'').all(p, p != ''''
                                     && p != ''.'' && p != ''..'')'
                               maxItems: 16
                               minItems: 1

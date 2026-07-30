@@ -83,7 +83,7 @@ spec:
                     type: object
                     x-kubernetes-validations:
                     - message: command arguments must not be empty
-                      rule: self.command.all(a, a != ”)
+                      rule: self.command.all(a, a != '')
                     - message: requiredEnv must contain unique environment-variable
                         names
                       rule: '!has(self.requiredEnv) || (self.requiredEnv.all(e, e.matches(''^[A-Z_][A-Z0-9_]*$''))
@@ -148,7 +148,7 @@ spec:
             type: object
             x-kubernetes-validations:
             - message: toolAllowlist must contain unique non-empty tool names
-              rule: '!has(self.toolAllowlist) || (self.toolAllowlist.all(t, t != ”)
+              rule: '!has(self.toolAllowlist) || (self.toolAllowlist.all(t, t != '''')
                 && self.toolAllowlist.all(t, self.toolAllowlist.filter(x, x == t).size()
                 == 1))'
         required:

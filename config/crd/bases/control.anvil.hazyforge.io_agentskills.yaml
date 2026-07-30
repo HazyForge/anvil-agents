@@ -88,13 +88,13 @@ spec:
                   rule: self.path == 'SKILL.md' || self.path.endsWith('/SKILL.md')
                 - message: path must be a safe relative path
                   rule: '!self.path.startsWith(''/'') && self.path.split(''/'').all(p,
-                    p != ” && p != ''.'' && p != ''..'')'
+                    p != '''' && p != ''.'' && p != ''..'')'
                 - message: referencePaths must contain only safe relative non-SKILL
                     Markdown paths
                   rule: '!has(self.referencePaths) || self.referencePaths.all(p, p
-                    != ” && !p.startsWith(''/'') && p.split(''/'').all(s, s != ” &&
-                    s != ''.'' && s != ''..'') && p.endsWith(''.md'') && p != ''SKILL.md''
-                    && !p.endsWith(''/SKILL.md''))'
+                    != '''' && !p.startsWith(''/'') && p.split(''/'').all(s, s !=
+                    '''' && s != ''.'' && s != ''..'') && p.endsWith(''.md'') && p
+                    != ''SKILL.md'' && !p.endsWith(''/SKILL.md''))'
                 - message: referencePaths must not contain duplicates
                   rule: '!has(self.referencePaths) || self.referencePaths.all(p, self.referencePaths.filter(q,
                     q == p).size() == 1)'
@@ -123,7 +123,7 @@ spec:
                       x-kubernetes-validations:
                       - message: path must be a safe relative Markdown path
                         rule: '!self.path.startsWith(''/'') && self.path.split(''/'').all(p,
-                          p != ” && p != ''.'' && p != ''..'') && self.path.endsWith(''.md'')'
+                          p != '''' && p != ''.'' && p != ''..'') && self.path.endsWith(''.md'')'
                     maxItems: 64
                     type: array
                   skillMD:
