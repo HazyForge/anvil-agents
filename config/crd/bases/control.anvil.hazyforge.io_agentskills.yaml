@@ -1,0 +1,152 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.19.0
+  name: agentskills.control.anvil.hazyforge.io
+spec:
+  group: control.anvil.hazyforge.io
+  names:
+    kind: AgentSkill
+    listKind: AgentSkillList
+    plural: agentskills
+    shortNames:
+    - agskill
+    singular: agentskill
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.description
+      name: Description
+      type: string
+    - jsonPath: .spec.github.repository
+      name: Source
+      type: string
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: AgentSkillSpec defines one Markdown-only instruction package.
+            properties:
+              description:
+                description: Description explains when the skill should be selected.
+                type: string
+              github:
+                description: GitHub selects an immutable Markdown package by commit.
+                properties:
+                  apiBaseURL:
+                    description: |-
+                      APIBaseURL overrides the GitHub API base for an allowlisted GitHub
+                      Enterprise host. Empty uses https://api.github.com.
+                    pattern: ^https://[^/?#]+(?:/[^?#]*)?$
+                    type: string
+                  path:
+                    description: Path is the repository-relative path to SKILL.md.
+                    minLength: 1
+                    type: string
+                  ref:
+                    description: Ref is an immutable Git commit object ID.
+                    pattern: ^([0-9a-fA-F]{40}|[0-9a-fA-F]{64})$
+                    type: string
+                  referencePaths:
+                    description: ReferencePaths are additional Markdown-only package
+                      documents.
+                    items:
+                      type: string
+                    maxItems: 64
+                    type: array
+                  repository:
+                    description: Repository is owner/name.
+                    pattern: ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$
+                    type: string
+                required:
+                - path
+                - ref
+                - repository
+                type: object
+                x-kubernetes-validations:
+                - message: path must name SKILL.md
+                  rule: self.path == 'SKILL.md' || self.path.endsWith('/SKILL.md')
+                - message: path must be a safe relative path
+                  rule: '!self.path.startsWith(''/'') && self.path.split(''/'').all(p,
+                    p != ” && p != ''.'' && p != ''..'')'
+                - message: referencePaths must contain only safe relative non-SKILL
+                    Markdown paths
+                  rule: '!has(self.referencePaths) || self.referencePaths.all(p, p
+                    != ” && !p.startsWith(''/'') && p.split(''/'').all(s, s != ” &&
+                    s != ''.'' && s != ''..'') && p.endsWith(''.md'') && p != ''SKILL.md''
+                    && !p.endsWith(''/SKILL.md''))'
+                - message: referencePaths must not contain duplicates
+                  rule: '!has(self.referencePaths) || self.referencePaths.all(p, self.referencePaths.filter(q,
+                    q == p).size() == 1)'
+              inline:
+                description: Inline embeds the Markdown package in the CR.
+                properties:
+                  references:
+                    description: References are optional Markdown documents in package-relative
+                      order.
+                    items:
+                      description: |-
+                        AgentSkillMarkdownReference is one optional Markdown reference shipped with
+                        an inline AgentSkill. Paths are relative to the skill package root.
+                      properties:
+                        content:
+                          description: Content is the Markdown document body.
+                          type: string
+                        path:
+                          description: Path is the package-relative Markdown path.
+                          minLength: 1
+                          type: string
+                      required:
+                      - content
+                      - path
+                      type: object
+                      x-kubernetes-validations:
+                      - message: path must be a safe relative Markdown path
+                        rule: '!self.path.startsWith(''/'') && self.path.split(''/'').all(p,
+                          p != ” && p != ''.'' && p != ''..'') && self.path.endsWith(''.md'')'
+                    maxItems: 64
+                    type: array
+                  skillMD:
+                    description: SkillMD is the complete SKILL.md document.
+                    minLength: 1
+                    type: string
+                required:
+                - skillMD
+                type: object
+                x-kubernetes-validations:
+                - message: references must not contain another SKILL.md
+                  rule: '!has(self.references) || self.references.all(r, r.path !=
+                    ''SKILL.md'' && !r.path.endsWith(''/SKILL.md''))'
+                - message: references must not contain duplicate paths
+                  rule: '!has(self.references) || self.references.all(r, self.references.filter(q,
+                    q.path == r.path).size() == 1)'
+            type: object
+            x-kubernetes-validations:
+            - message: exactly one of inline or github must be set
+              rule: has(self.inline) != has(self.github)
+        required:
+        - spec
+        type: object
+    served: true
+    storage: true
+    subresources: {}

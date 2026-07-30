@@ -52,9 +52,28 @@ spec:
                 description: Description explains when this capability pack should
                   be selected.
                 type: string
+              skillRefs:
+                description: SkillRefs is the canonical ordered collection of atomic
+                  AgentSkills.
+                items:
+                  description: |-
+                    NamespacedObjectReference identifies a Kubernetes object without importing
+                    another API group. Namespace may be omitted where same-namespace resolution
+                    is part of the containing resource contract.
+                  properties:
+                    name:
+                      type: string
+                    namespace:
+                      type: string
+                  required:
+                  - name
+                  type: object
+                maxItems: 64
+                type: array
               skills:
-                description: Skills are named instruction packs materialized for the
-                  selected harness.
+                description: |-
+                  Skills are named instruction packs materialized for the selected harness.
+                  Deprecated: use skillRefs.
                 items:
                   properties:
                     content:
@@ -128,8 +147,10 @@ spec:
                 maxItems: 64
                 type: array
               subagents:
-                description: Subagents are named delegated personas used by skills
-                  in this set.
+                description: |-
+                  Subagents are named delegated personas used by skills in this set.
+                  Deprecated: keep persona composition in the profile/harness compatibility
+                  fields until a dedicated canonical role model is introduced.
                 items:
                   properties:
                     description:
@@ -163,12 +184,33 @@ spec:
                 description: |-
                   Tools are legacy setup and verification contracts required by this skill
                   set. Prefer AgentToolSet when a tool has an independent lifecycle.
+                  Deprecated: author a separate AgentTool and select it explicitly.
                 items:
                   properties:
                     description:
                       description: Description explains what this tool is for during
                         the run.
                       type: string
+                    executable:
+                      description: Executable is populated for canonical AgentTool
+                        resources.
+                      properties:
+                        name:
+                          description: Name is the command name exposed on PATH.
+                          pattern: ^[A-Za-z0-9][A-Za-z0-9._-]*$
+                          type: string
+                        path:
+                          description: Path is a safe relative executable path.
+                          minLength: 1
+                          type: string
+                      required:
+                      - name
+                      - path
+                      type: object
+                      x-kubernetes-validations:
+                      - message: path must be a safe relative path
+                        rule: '!self.path.startsWith(''/'') && self.path.split(''/'').all(p,
+                          p != ” && p != ''.'' && p != ''..'')'
                     name:
                       description: Name is a stable tool identifier such as kbctl.
                       minLength: 1
@@ -180,6 +222,185 @@ spec:
                         The script runs in the agent workdir as the agent container user. Keep it
                         idempotent, install into writable agent data volumes or the workdir, and
                         pass credentials through envSecretRefs instead of inline script text.
+                      type: string
+                    source:
+                      description: Source is the structured acquisition plan for a
+                        canonical AgentTool.
+                      properties:
+                        httpArtifact:
+                          properties:
+                            artifacts:
+                              description: Artifacts must contain at most one entry
+                                for each platform.
+                              items:
+                                description: AgentToolHTTPArtifact is one integrity-pinned
+                                  HTTP artifact variant.
+                                properties:
+                                  executablePath:
+                                    description: |-
+                                      ExecutablePath is the safe relative file path inside an archive. It is
+                                      empty only for format=binary.
+                                    type: string
+                                  format:
+                                    description: Format controls safe extraction.
+                                    enum:
+                                    - binary
+                                    - tar.gz
+                                    - zip
+                                    type: string
+                                  platform:
+                                    description: AgentToolPlatform selects one runner
+                                      operating system and architecture.
+                                    properties:
+                                      arch:
+                                        description: Arch is the Go-style CPU architecture
+                                          name.
+                                        enum:
+                                        - amd64
+                                        - arm64
+                                        type: string
+                                      os:
+                                        description: OS is the Go-style operating
+                                          system name.
+                                        enum:
+                                        - linux
+                                        - darwin
+                                        type: string
+                                    required:
+                                    - arch
+                                    - os
+                                    type: object
+                                  sha256:
+                                    description: SHA256 is the expected lowercase
+                                      artifact digest.
+                                    pattern: ^[a-f0-9]{64}$
+                                    type: string
+                                  url:
+                                    description: URL must use HTTPS.
+                                    pattern: ^https://[^[:space:]]+$
+                                    type: string
+                                required:
+                                - format
+                                - platform
+                                - sha256
+                                - url
+                                type: object
+                                x-kubernetes-validations:
+                                - message: executablePath must be empty for binary
+                                    artifacts and a safe relative path for archives
+                                  rule: (self.format == 'binary' && !has(self.executablePath))
+                                    || (self.format != 'binary' && has(self.executablePath)
+                                    && self.executablePath != ” && !self.executablePath.startsWith('/')
+                                    && self.executablePath.split('/').all(p, p !=
+                                    ” && p != '.' && p != '..'))
+                              maxItems: 16
+                              minItems: 1
+                              type: array
+                          required:
+                          - artifacts
+                          type: object
+                          x-kubernetes-validations:
+                          - message: artifacts must not contain duplicate platforms
+                            rule: self.artifacts.all(a, self.artifacts.filter(b, b.platform.os
+                              == a.platform.os && b.platform.arch == a.platform.arch).size()
+                              == 1)
+                        inlineScript:
+                          description: |-
+                            AgentToolInlineScript is a complete executable script installed as the
+                            declared executable. It is distinct from setupScript, which is an
+                            unrestricted environment-mutating compatibility escape hatch.
+                          properties:
+                            interpreter:
+                              description: |-
+                                Interpreter is an argv-form interpreter prefix, for example
+                                ["/usr/bin/env", "bash"].
+                              items:
+                                type: string
+                              maxItems: 8
+                              minItems: 1
+                              type: array
+                            script:
+                              description: Script is the executable script body.
+                              minLength: 1
+                              type: string
+                          required:
+                          - interpreter
+                          - script
+                          type: object
+                          x-kubernetes-validations:
+                          - message: interpreter arguments must not be empty
+                            rule: self.interpreter.all(a, a != ”)
+                        ociArtifact:
+                          properties:
+                            artifacts:
+                              description: Artifacts must contain at most one entry
+                                for each platform.
+                              items:
+                                description: AgentToolOCIArtifact is one digest-pinned
+                                  OCI artifact variant.
+                                properties:
+                                  executablePath:
+                                    description: ExecutablePath is the safe relative
+                                      executable path in the artifact.
+                                    minLength: 1
+                                    type: string
+                                  platform:
+                                    description: AgentToolPlatform selects one runner
+                                      operating system and architecture.
+                                    properties:
+                                      arch:
+                                        description: Arch is the Go-style CPU architecture
+                                          name.
+                                        enum:
+                                        - amd64
+                                        - arm64
+                                        type: string
+                                      os:
+                                        description: OS is the Go-style operating
+                                          system name.
+                                        enum:
+                                        - linux
+                                        - darwin
+                                        type: string
+                                    required:
+                                    - arch
+                                    - os
+                                    type: object
+                                  reference:
+                                    description: Reference must include a sha256 digest.
+                                    pattern: ^[^[:space:]@]+@sha256:[a-f0-9]{64}$
+                                    type: string
+                                required:
+                                - executablePath
+                                - platform
+                                - reference
+                                type: object
+                                x-kubernetes-validations:
+                                - message: executablePath must be a safe relative
+                                    path
+                                  rule: '!self.executablePath.startsWith(''/'') &&
+                                    self.executablePath.split(''/'').all(p, p != ”
+                                    && p != ''.'' && p != ''..'')'
+                              maxItems: 16
+                              minItems: 1
+                              type: array
+                          required:
+                          - artifacts
+                          type: object
+                          x-kubernetes-validations:
+                          - message: artifacts must not contain duplicate platforms
+                            rule: self.artifacts.all(a, self.artifacts.filter(b, b.platform.os
+                              == a.platform.os && b.platform.arch == a.platform.arch).size()
+                              == 1)
+                      type: object
+                      x-kubernetes-validations:
+                      - message: exactly one tool source must be set
+                        rule: '(has(self.httpArtifact) ? 1 : 0) + (has(self.ociArtifact)
+                          ? 1 : 0) + (has(self.inlineScript) ? 1 : 0) == 1'
+                    specDigest:
+                      description: |-
+                        SpecDigest is the canonical AgentTool spec digest used for
+                        content-addressed cache paths. The resolver owns this field.
                       type: string
                     verifyCommand:
                       description: |-

@@ -15,8 +15,12 @@ func TestCompositionResourcesAreRegistered(t *testing.T) {
 	}
 	for _, object := range []runtime.Object{
 		&AgentHarnessProfile{}, &AgentHarnessProfileList{},
+		&AgentSkill{}, &AgentSkillList{},
 		&AgentSkillSet{}, &AgentSkillSetList{},
+		&AgentTool{}, &AgentToolList{},
 		&AgentToolSet{}, &AgentToolSetList{},
+		&AgentMCPServer{}, &AgentMCPServerList{},
+		&AgentMCPSet{}, &AgentMCPSetList{},
 		&AdverseSignal{}, &AdverseSignalList{},
 	} {
 		gvks, _, err := scheme.ObjectKinds(object)
@@ -46,6 +50,11 @@ func TestCompositionDeepCopyDoesNotAliasOverrides(t *testing.T) {
 		ToolSets: &AgentToolCompositionSpec{
 			Refs: []NamespacedObjectReference{{Name: "knowledge-tools"}},
 		},
+		Capabilities: &AgentCapabilitiesSpec{
+			Skills:     &AgentSkillCapabilityComposition{Selections: []AgentSkillSelection{{SkillRef: &NamespacedObjectReference{Name: "atomic-review"}}}},
+			Tools:      &AgentToolCapabilityComposition{Selections: []AgentToolSelection{{ToolRef: &NamespacedObjectReference{Name: "query"}}}},
+			MCPServers: &AgentMCPCapabilityComposition{Selections: []AgentMCPSelection{{ServerRef: &NamespacedObjectReference{Name: "knowledge"}}}},
+		},
 	}}
 	copy := run.DeepCopy()
 	copy.Spec.HarnessProfileRef.Name = "pi-standard"
@@ -53,6 +62,9 @@ func TestCompositionDeepCopyDoesNotAliasOverrides(t *testing.T) {
 	copy.Spec.SkillSets.Overrides[0].Paths[0] = "docs/security.md"
 	copy.Spec.SkillSets.Overrides[0].SourceRefs[0].GitHub.Path = "security.md"
 	copy.Spec.ToolSets.Refs[0].Name = "issue-tools"
+	copy.Spec.Capabilities.Skills.Selections[0].SkillRef.Name = "atomic-incident"
+	copy.Spec.Capabilities.Tools.Selections[0].ToolRef.Name = "issue-query"
+	copy.Spec.Capabilities.MCPServers.Selections[0].ServerRef.Name = "runbooks"
 
 	if got := run.Spec.HarnessProfileRef.Name; got != "codex-standard" {
 		t.Fatalf("source harness ref mutated to %q", got)
@@ -68,5 +80,14 @@ func TestCompositionDeepCopyDoesNotAliasOverrides(t *testing.T) {
 	}
 	if got := run.Spec.ToolSets.Refs[0].Name; got != "knowledge-tools" {
 		t.Fatalf("source tool set ref mutated to %q", got)
+	}
+	if got := run.Spec.Capabilities.Skills.Selections[0].SkillRef.Name; got != "atomic-review" {
+		t.Fatalf("source atomic skill ref mutated to %q", got)
+	}
+	if got := run.Spec.Capabilities.Tools.Selections[0].ToolRef.Name; got != "query" {
+		t.Fatalf("source atomic tool ref mutated to %q", got)
+	}
+	if got := run.Spec.Capabilities.MCPServers.Selections[0].ServerRef.Name; got != "knowledge" {
+		t.Fatalf("source MCP server ref mutated to %q", got)
 	}
 }

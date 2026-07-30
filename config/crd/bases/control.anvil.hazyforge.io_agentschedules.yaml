@@ -123,6 +123,248 @@ spec:
                   RunTemplate is copied into each scheduled AgentRun. The controller fills
                   purpose, sourceRef, trigger, and scheduleRef defaults when they are empty.
                 properties:
+                  capabilities:
+                    description: |-
+                      Capabilities is the canonical ordered capability selection. A run-level
+                      Replace clears inherited legacy and canonical selections for that kind;
+                      inline harness compatibility entries remain the final overlay.
+                    properties:
+                      mcpServers:
+                        properties:
+                          mode:
+                            description: |-
+                              AgentCapabilityCompositionMode controls whether one canonical composition
+                              layer appends to or replaces inherited legacy and canonical selections.
+                            enum:
+                            - Append
+                            - Replace
+                            type: string
+                          selections:
+                            items:
+                              description: AgentMCPSelection is an ordered union of
+                                one server or MCP set.
+                              properties:
+                                mcpSetRef:
+                                  description: |-
+                                    NamespacedObjectReference identifies a Kubernetes object without importing
+                                    another API group. Namespace may be omitted where same-namespace resolution
+                                    is part of the containing resource contract.
+                                  properties:
+                                    name:
+                                      type: string
+                                    namespace:
+                                      type: string
+                                  required:
+                                  - name
+                                  type: object
+                                serverRef:
+                                  description: |-
+                                    NamespacedObjectReference identifies a Kubernetes object without importing
+                                    another API group. Namespace may be omitted where same-namespace resolution
+                                    is part of the containing resource contract.
+                                  properties:
+                                    name:
+                                      type: string
+                                    namespace:
+                                      type: string
+                                  required:
+                                  - name
+                                  type: object
+                              type: object
+                              x-kubernetes-validations:
+                              - message: exactly one of serverRef or mcpSetRef must
+                                  be set
+                                rule: has(self.serverRef) != has(self.mcpSetRef)
+                            maxItems: 64
+                            type: array
+                        type: object
+                      skills:
+                        properties:
+                          mode:
+                            description: |-
+                              AgentCapabilityCompositionMode controls whether one canonical composition
+                              layer appends to or replaces inherited legacy and canonical selections.
+                            enum:
+                            - Append
+                            - Replace
+                            type: string
+                          overrides:
+                            description: Overrides apply after this layer's selections.
+                            items:
+                              description: |-
+                                AgentSkillOverrideSpec changes one resolved skill for a profile or run
+                                without mutating the referenced AgentSkillSet. Explicit operations avoid the
+                                ambiguous null and list semantics of generic JSON merge patches.
+                              properties:
+                                content:
+                                  description: |-
+                                    Content supplies complete content for Add or Replace and is appended under
+                                    a local-override heading for Augment.
+                                  type: string
+                                description:
+                                  description: |-
+                                    Description replaces the description for Augment and supplies it for Add
+                                    or Replace. Disable rejects all content fields.
+                                  type: string
+                                name:
+                                  description: Name is the stable skill identity to
+                                    add, augment, replace, or disable.
+                                  minLength: 1
+                                  type: string
+                                operation:
+                                  description: Operation defines how the supplied
+                                    fields affect the named skill.
+                                  enum:
+                                  - Add
+                                  - Augment
+                                  - Replace
+                                  - Disable
+                                  type: string
+                                paths:
+                                  description: |-
+                                    Paths replace the path list for Replace and append uniquely for Add or
+                                    Augment.
+                                  items:
+                                    type: string
+                                  type: array
+                                sourceRefs:
+                                  description: |-
+                                    SourceRefs replace the source list for Replace and append for Add or
+                                    Augment.
+                                  items:
+                                    properties:
+                                      github:
+                                        description: GitHub downloads one file from
+                                          the GitHub Contents API.
+                                        properties:
+                                          apiBaseURL:
+                                            description: |-
+                                              APIBaseURL overrides the GitHub API base URL for GitHub Enterprise.
+                                              Empty defaults to https://api.github.com. The operator must explicitly
+                                              allowlist the host and requires HTTPS unless test-only insecure access is
+                                              enabled at process startup.
+                                            type: string
+                                          path:
+                                            description: Path is the repository-relative
+                                              file path to download.
+                                            minLength: 1
+                                            type: string
+                                          ref:
+                                            description: Ref is the full immutable
+                                              Git commit object ID used to resolve
+                                              the source.
+                                            pattern: ^([0-9a-fA-F]{40}|[0-9a-fA-F]{64})$
+                                            type: string
+                                          repository:
+                                            description: |-
+                                              Repository is the owner/name GitHub repository, for example
+                                              example/agent-skills.
+                                            minLength: 1
+                                            type: string
+                                        required:
+                                        - path
+                                        - ref
+                                        - repository
+                                        type: object
+                                    type: object
+                                  type: array
+                              required:
+                              - name
+                              - operation
+                              type: object
+                            maxItems: 64
+                            type: array
+                          selections:
+                            description: Selections resolve atomics and sets in declaration
+                              order.
+                            items:
+                              description: AgentSkillSelection is an ordered union
+                                of one atomic skill or skill set.
+                              properties:
+                                skillRef:
+                                  description: |-
+                                    NamespacedObjectReference identifies a Kubernetes object without importing
+                                    another API group. Namespace may be omitted where same-namespace resolution
+                                    is part of the containing resource contract.
+                                  properties:
+                                    name:
+                                      type: string
+                                    namespace:
+                                      type: string
+                                  required:
+                                  - name
+                                  type: object
+                                skillSetRef:
+                                  description: |-
+                                    NamespacedObjectReference identifies a Kubernetes object without importing
+                                    another API group. Namespace may be omitted where same-namespace resolution
+                                    is part of the containing resource contract.
+                                  properties:
+                                    name:
+                                      type: string
+                                    namespace:
+                                      type: string
+                                  required:
+                                  - name
+                                  type: object
+                              type: object
+                              x-kubernetes-validations:
+                              - message: exactly one of skillRef or skillSetRef must
+                                  be set
+                                rule: has(self.skillRef) != has(self.skillSetRef)
+                            maxItems: 64
+                            type: array
+                        type: object
+                      tools:
+                        properties:
+                          mode:
+                            description: |-
+                              AgentCapabilityCompositionMode controls whether one canonical composition
+                              layer appends to or replaces inherited legacy and canonical selections.
+                            enum:
+                            - Append
+                            - Replace
+                            type: string
+                          selections:
+                            items:
+                              description: AgentToolSelection is an ordered union
+                                of one atomic tool or tool set.
+                              properties:
+                                toolRef:
+                                  description: |-
+                                    NamespacedObjectReference identifies a Kubernetes object without importing
+                                    another API group. Namespace may be omitted where same-namespace resolution
+                                    is part of the containing resource contract.
+                                  properties:
+                                    name:
+                                      type: string
+                                    namespace:
+                                      type: string
+                                  required:
+                                  - name
+                                  type: object
+                                toolSetRef:
+                                  description: |-
+                                    NamespacedObjectReference identifies a Kubernetes object without importing
+                                    another API group. Namespace may be omitted where same-namespace resolution
+                                    is part of the containing resource contract.
+                                  properties:
+                                    name:
+                                      type: string
+                                    namespace:
+                                      type: string
+                                  required:
+                                  - name
+                                  type: object
+                              type: object
+                              x-kubernetes-validations:
+                              - message: exactly one of toolRef or toolSetRef must
+                                  be set
+                                rule: has(self.toolRef) != has(self.toolSetRef)
+                            maxItems: 64
+                            type: array
+                        type: object
+                    type: object
                   docs:
                     description: Docs tells the harness which docs/runtime surfaces
                       must be kept aligned.
@@ -2272,6 +2514,37 @@ spec:
                                   type: string
                               type: object
                             type: array
+                          toolCache:
+                            description: |-
+                              ToolCache selects a dedicated writable AgentDataVolume for structured
+                              tool acquisition. Empty uses a per-run emptyDir. The cache is mounted at a
+                              reserved path and never reused as a model authentication home.
+                            properties:
+                              mountPath:
+                                description: MountPath overrides the AgentDataVolume
+                                  default mount path for this run.
+                                type: string
+                              name:
+                                description: Name references an AgentDataVolume in
+                                  the AgentRun namespace.
+                                minLength: 1
+                                type: string
+                              namespace:
+                                description: |-
+                                  Namespace must be empty or the AgentRun namespace. Cross-namespace
+                                  volume mounts are intentionally not supported.
+                                type: string
+                              readOnly:
+                                description: ReadOnly mounts the durable data volume
+                                  read-only for this run.
+                                type: boolean
+                              subPath:
+                                description: SubPath optionally mounts a subdirectory
+                                  of the AgentDataVolume PVC.
+                                type: string
+                            required:
+                            - name
+                            type: object
                           ttlSecondsAfterFinished:
                             description: |-
                               TTLSecondsAfterFinished controls Job cleanup. Empty keeps the Job until
@@ -2294,6 +2567,126 @@ spec:
                         - proposeChange
                         - cleanup
                         type: string
+                      mcpServers:
+                        description: |-
+                          MCPServers is the normalized resolved MCP manifest. Canonical callers
+                          select MCP resources through spec.capabilities; direct entries are an
+                          inline compatibility overlay and therefore resolve last.
+                        items:
+                          description: |-
+                            AgentRunMCPServerSpec is the normalized, secret-free MCP manifest consumed
+                            by runner adapters.
+                          properties:
+                            description:
+                              type: string
+                            name:
+                              type: string
+                            specDigest:
+                              description: SpecDigest records the selected AgentMCPServer
+                                spec digest.
+                              type: string
+                            toolAllowlist:
+                              items:
+                                type: string
+                              type: array
+                            transport:
+                              description: AgentMCPTransport is an exclusive MCP transport
+                                union.
+                              properties:
+                                stdio:
+                                  description: |-
+                                    AgentMCPStdioTransport launches an MCP server as a child process. The first
+                                    argv entry must be supplied by a selected AgentTool or the harness image.
+                                  properties:
+                                    command:
+                                      description: Command is the complete argv vector;
+                                        shell evaluation is never used.
+                                      items:
+                                        type: string
+                                      maxItems: 64
+                                      minItems: 1
+                                      type: array
+                                    requiredEnv:
+                                      description: RequiredEnv lists environment-variable
+                                        names that must exist at preflight.
+                                      items:
+                                        type: string
+                                      maxItems: 64
+                                      type: array
+                                  required:
+                                  - command
+                                  type: object
+                                  x-kubernetes-validations:
+                                  - message: command arguments must not be empty
+                                    rule: self.command.all(a, a != ”)
+                                  - message: requiredEnv must contain unique environment-variable
+                                      names
+                                    rule: '!has(self.requiredEnv) || (self.requiredEnv.all(e,
+                                      e.matches(''^[A-Z_][A-Z0-9_]*$'')) && self.requiredEnv.all(e,
+                                      self.requiredEnv.filter(x, x == e).size() ==
+                                      1))'
+                                streamableHTTP:
+                                  description: AgentMCPStreamableHTTPTransport connects
+                                    to a Streamable HTTP MCP endpoint.
+                                  properties:
+                                    endpoint:
+                                      description: Endpoint must use HTTPS and cannot
+                                        contain embedded credentials.
+                                      pattern: ^https://[^@/?#]+(?::[0-9]+)?(?:/[^?#]*)?$
+                                      type: string
+                                    headers:
+                                      description: |-
+                                        Headers map header names to environment variables; values never appear in
+                                        the CR or immutable payload.
+                                      items:
+                                        description: |-
+                                          AgentMCPHTTPHeader maps a non-secret HTTP header name to an environment
+                                          variable populated by the harness identity/credential envelope.
+                                        properties:
+                                          envVar:
+                                            pattern: ^[A-Z_][A-Z0-9_]*$
+                                            type: string
+                                          name:
+                                            pattern: ^[A-Za-z0-9][A-Za-z0-9-]*$
+                                            type: string
+                                        required:
+                                        - envVar
+                                        - name
+                                        type: object
+                                      maxItems: 32
+                                      type: array
+                                    requiredEnv:
+                                      description: |-
+                                        RequiredEnv lists additional environment-variable names required by the
+                                        server integration.
+                                      items:
+                                        type: string
+                                      maxItems: 64
+                                      type: array
+                                  required:
+                                  - endpoint
+                                  type: object
+                                  x-kubernetes-validations:
+                                  - message: header names must be unique
+                                    rule: '!has(self.headers) || self.headers.all(h,
+                                      self.headers.filter(x, x.name == h.name).size()
+                                      == 1)'
+                                  - message: requiredEnv must contain unique environment-variable
+                                      names
+                                    rule: '!has(self.requiredEnv) || (self.requiredEnv.all(e,
+                                      e.matches(''^[A-Z_][A-Z0-9_]*$'')) && self.requiredEnv.all(e,
+                                      self.requiredEnv.filter(x, x == e).size() ==
+                                      1))'
+                              type: object
+                              x-kubernetes-validations:
+                              - message: exactly one of stdio or streamableHTTP must
+                                  be set
+                                rule: has(self.stdio) != has(self.streamableHTTP)
+                          required:
+                          - name
+                          - transport
+                          type: object
+                        type: array
                       skillInjections:
                         description: |-
                           SkillInjections are backend-neutral instruction packs selected for this
@@ -2422,6 +2815,28 @@ spec:
                               description: Description explains what this tool is
                                 for during the run.
                               type: string
+                            executable:
+                              description: Executable is populated for canonical AgentTool
+                                resources.
+                              properties:
+                                name:
+                                  description: Name is the command name exposed on
+                                    PATH.
+                                  pattern: ^[A-Za-z0-9][A-Za-z0-9._-]*$
+                                  type: string
+                                path:
+                                  description: Path is a safe relative executable
+                                    path.
+                                  minLength: 1
+                                  type: string
+                              required:
+                              - name
+                              - path
+                              type: object
+                              x-kubernetes-validations:
+                              - message: path must be a safe relative path
+                                rule: '!self.path.startsWith(''/'') && self.path.split(''/'').all(p,
+                                  p != ” && p != ''.'' && p != ''..'')'
                             name:
                               description: Name is a stable tool identifier such as
                                 kbctl.
@@ -2434,6 +2849,190 @@ spec:
                                 The script runs in the agent workdir as the agent container user. Keep it
                                 idempotent, install into writable agent data volumes or the workdir, and
                                 pass credentials through envSecretRefs instead of inline script text.
+                              type: string
+                            source:
+                              description: Source is the structured acquisition plan
+                                for a canonical AgentTool.
+                              properties:
+                                httpArtifact:
+                                  properties:
+                                    artifacts:
+                                      description: Artifacts must contain at most
+                                        one entry for each platform.
+                                      items:
+                                        description: AgentToolHTTPArtifact is one
+                                          integrity-pinned HTTP artifact variant.
+                                        properties:
+                                          executablePath:
+                                            description: |-
+                                              ExecutablePath is the safe relative file path inside an archive. It is
+                                              empty only for format=binary.
+                                            type: string
+                                          format:
+                                            description: Format controls safe extraction.
+                                            enum:
+                                            - binary
+                                            - tar.gz
+                                            - zip
+                                            type: string
+                                          platform:
+                                            description: AgentToolPlatform selects
+                                              one runner operating system and architecture.
+                                            properties:
+                                              arch:
+                                                description: Arch is the Go-style
+                                                  CPU architecture name.
+                                                enum:
+                                                - amd64
+                                                - arm64
+                                                type: string
+                                              os:
+                                                description: OS is the Go-style operating
+                                                  system name.
+                                                enum:
+                                                - linux
+                                                - darwin
+                                                type: string
+                                            required:
+                                            - arch
+                                            - os
+                                            type: object
+                                          sha256:
+                                            description: SHA256 is the expected lowercase
+                                              artifact digest.
+                                            pattern: ^[a-f0-9]{64}$
+                                            type: string
+                                          url:
+                                            description: URL must use HTTPS.
+                                            pattern: ^https://[^[:space:]]+$
+                                            type: string
+                                        required:
+                                        - format
+                                        - platform
+                                        - sha256
+                                        - url
+                                        type: object
+                                        x-kubernetes-validations:
+                                        - message: executablePath must be empty for
+                                            binary artifacts and a safe relative path
+                                            for archives
+                                          rule: (self.format == 'binary' && !has(self.executablePath))
+                                            || (self.format != 'binary' && has(self.executablePath)
+                                            && self.executablePath != ” && !self.executablePath.startsWith('/')
+                                            && self.executablePath.split('/').all(p,
+                                            p != ” && p != '.' && p != '..'))
+                                      maxItems: 16
+                                      minItems: 1
+                                      type: array
+                                  required:
+                                  - artifacts
+                                  type: object
+                                  x-kubernetes-validations:
+                                  - message: artifacts must not contain duplicate
+                                      platforms
+                                    rule: self.artifacts.all(a, self.artifacts.filter(b,
+                                      b.platform.os == a.platform.os && b.platform.arch
+                                      == a.platform.arch).size() == 1)
+                                inlineScript:
+                                  description: |-
+                                    AgentToolInlineScript is a complete executable script installed as the
+                                    declared executable. It is distinct from setupScript, which is an
+                                    unrestricted environment-mutating compatibility escape hatch.
+                                  properties:
+                                    interpreter:
+                                      description: |-
+                                        Interpreter is an argv-form interpreter prefix, for example
+                                        ["/usr/bin/env", "bash"].
+                                      items:
+                                        type: string
+                                      maxItems: 8
+                                      minItems: 1
+                                      type: array
+                                    script:
+                                      description: Script is the executable script
+                                        body.
+                                      minLength: 1
+                                      type: string
+                                  required:
+                                  - interpreter
+                                  - script
+                                  type: object
+                                  x-kubernetes-validations:
+                                  - message: interpreter arguments must not be empty
+                                    rule: self.interpreter.all(a, a != ”)
+                                ociArtifact:
+                                  properties:
+                                    artifacts:
+                                      description: Artifacts must contain at most
+                                        one entry for each platform.
+                                      items:
+                                        description: AgentToolOCIArtifact is one digest-pinned
+                                          OCI artifact variant.
+                                        properties:
+                                          executablePath:
+                                            description: ExecutablePath is the safe
+                                              relative executable path in the artifact.
+                                            minLength: 1
+                                            type: string
+                                          platform:
+                                            description: AgentToolPlatform selects
+                                              one runner operating system and architecture.
+                                            properties:
+                                              arch:
+                                                description: Arch is the Go-style
+                                                  CPU architecture name.
+                                                enum:
+                                                - amd64
+                                                - arm64
+                                                type: string
+                                              os:
+                                                description: OS is the Go-style operating
+                                                  system name.
+                                                enum:
+                                                - linux
+                                                - darwin
+                                                type: string
+                                            required:
+                                            - arch
+                                            - os
+                                            type: object
+                                          reference:
+                                            description: Reference must include a
+                                              sha256 digest.
+                                            pattern: ^[^[:space:]@]+@sha256:[a-f0-9]{64}$
+                                            type: string
+                                        required:
+                                        - executablePath
+                                        - platform
+                                        - reference
+                                        type: object
+                                        x-kubernetes-validations:
+                                        - message: executablePath must be a safe relative
+                                            path
+                                          rule: '!self.executablePath.startsWith(''/'')
+                                            && self.executablePath.split(''/'').all(p,
+                                            p != ” && p != ''.'' && p != ''..'')'
+                                      maxItems: 16
+                                      minItems: 1
+                                      type: array
+                                  required:
+                                  - artifacts
+                                  type: object
+                                  x-kubernetes-validations:
+                                  - message: artifacts must not contain duplicate
+                                      platforms
+                                    rule: self.artifacts.all(a, self.artifacts.filter(b,
+                                      b.platform.os == a.platform.os && b.platform.arch
+                                      == a.platform.arch).size() == 1)
+                              type: object
+                              x-kubernetes-validations:
+                              - message: exactly one tool source must be set
+                                rule: '(has(self.httpArtifact) ? 1 : 0) + (has(self.ociArtifact)
+                                  ? 1 : 0) + (has(self.inlineScript) ? 1 : 0) == 1'
+                            specDigest:
+                              description: |-
+                                SpecDigest is the canonical AgentTool spec digest used for
+                                content-addressed cache paths. The resolver owns this field.
                               type: string
                             verifyCommand:
                               description: |-
@@ -2921,6 +3520,249 @@ spec:
                       description: Template is copied into each AgentRun created from
                         this template.
                       properties:
+                        capabilities:
+                          description: |-
+                            Capabilities is the canonical ordered capability selection. A run-level
+                            Replace clears inherited legacy and canonical selections for that kind;
+                            inline harness compatibility entries remain the final overlay.
+                          properties:
+                            mcpServers:
+                              properties:
+                                mode:
+                                  description: |-
+                                    AgentCapabilityCompositionMode controls whether one canonical composition
+                                    layer appends to or replaces inherited legacy and canonical selections.
+                                  enum:
+                                  - Append
+                                  - Replace
+                                  type: string
+                                selections:
+                                  items:
+                                    description: AgentMCPSelection is an ordered union
+                                      of one server or MCP set.
+                                    properties:
+                                      mcpSetRef:
+                                        description: |-
+                                          NamespacedObjectReference identifies a Kubernetes object without importing
+                                          another API group. Namespace may be omitted where same-namespace resolution
+                                          is part of the containing resource contract.
+                                        properties:
+                                          name:
+                                            type: string
+                                          namespace:
+                                            type: string
+                                        required:
+                                        - name
+                                        type: object
+                                      serverRef:
+                                        description: |-
+                                          NamespacedObjectReference identifies a Kubernetes object without importing
+                                          another API group. Namespace may be omitted where same-namespace resolution
+                                          is part of the containing resource contract.
+                                        properties:
+                                          name:
+                                            type: string
+                                          namespace:
+                                            type: string
+                                        required:
+                                        - name
+                                        type: object
+                                    type: object
+                                    x-kubernetes-validations:
+                                    - message: exactly one of serverRef or mcpSetRef
+                                        must be set
+                                      rule: has(self.serverRef) != has(self.mcpSetRef)
+                                  maxItems: 64
+                                  type: array
+                              type: object
+                            skills:
+                              properties:
+                                mode:
+                                  description: |-
+                                    AgentCapabilityCompositionMode controls whether one canonical composition
+                                    layer appends to or replaces inherited legacy and canonical selections.
+                                  enum:
+                                  - Append
+                                  - Replace
+                                  type: string
+                                overrides:
+                                  description: Overrides apply after this layer's
+                                    selections.
+                                  items:
+                                    description: |-
+                                      AgentSkillOverrideSpec changes one resolved skill for a profile or run
+                                      without mutating the referenced AgentSkillSet. Explicit operations avoid the
+                                      ambiguous null and list semantics of generic JSON merge patches.
+                                    properties:
+                                      content:
+                                        description: |-
+                                          Content supplies complete content for Add or Replace and is appended under
+                                          a local-override heading for Augment.
+                                        type: string
+                                      description:
+                                        description: |-
+                                          Description replaces the description for Augment and supplies it for Add
+                                          or Replace. Disable rejects all content fields.
+                                        type: string
+                                      name:
+                                        description: Name is the stable skill identity
+                                          to add, augment, replace, or disable.
+                                        minLength: 1
+                                        type: string
+                                      operation:
+                                        description: Operation defines how the supplied
+                                          fields affect the named skill.
+                                        enum:
+                                        - Add
+                                        - Augment
+                                        - Replace
+                                        - Disable
+                                        type: string
+                                      paths:
+                                        description: |-
+                                          Paths replace the path list for Replace and append uniquely for Add or
+                                          Augment.
+                                        items:
+                                          type: string
+                                        type: array
+                                      sourceRefs:
+                                        description: |-
+                                          SourceRefs replace the source list for Replace and append for Add or
+                                          Augment.
+                                        items:
+                                          properties:
+                                            github:
+                                              description: GitHub downloads one file
+                                                from the GitHub Contents API.
+                                              properties:
+                                                apiBaseURL:
+                                                  description: |-
+                                                    APIBaseURL overrides the GitHub API base URL for GitHub Enterprise.
+                                                    Empty defaults to https://api.github.com. The operator must explicitly
+                                                    allowlist the host and requires HTTPS unless test-only insecure access is
+                                                    enabled at process startup.
+                                                  type: string
+                                                path:
+                                                  description: Path is the repository-relative
+                                                    file path to download.
+                                                  minLength: 1
+                                                  type: string
+                                                ref:
+                                                  description: Ref is the full immutable
+                                                    Git commit object ID used to resolve
+                                                    the source.
+                                                  pattern: ^([0-9a-fA-F]{40}|[0-9a-fA-F]{64})$
+                                                  type: string
+                                                repository:
+                                                  description: |-
+                                                    Repository is the owner/name GitHub repository, for example
+                                                    example/agent-skills.
+                                                  minLength: 1
+                                                  type: string
+                                              required:
+                                              - path
+                                              - ref
+                                              - repository
+                                              type: object
+                                          type: object
+                                        type: array
+                                    required:
+                                    - name
+                                    - operation
+                                    type: object
+                                  maxItems: 64
+                                  type: array
+                                selections:
+                                  description: Selections resolve atomics and sets
+                                    in declaration order.
+                                  items:
+                                    description: AgentSkillSelection is an ordered
+                                      union of one atomic skill or skill set.
+                                    properties:
+                                      skillRef:
+                                        description: |-
+                                          NamespacedObjectReference identifies a Kubernetes object without importing
+                                          another API group. Namespace may be omitted where same-namespace resolution
+                                          is part of the containing resource contract.
+                                        properties:
+                                          name:
+                                            type: string
+                                          namespace:
+                                            type: string
+                                        required:
+                                        - name
+                                        type: object
+                                      skillSetRef:
+                                        description: |-
+                                          NamespacedObjectReference identifies a Kubernetes object without importing
+                                          another API group. Namespace may be omitted where same-namespace resolution
+                                          is part of the containing resource contract.
+                                        properties:
+                                          name:
+                                            type: string
+                                          namespace:
+                                            type: string
+                                        required:
+                                        - name
+                                        type: object
+                                    type: object
+                                    x-kubernetes-validations:
+                                    - message: exactly one of skillRef or skillSetRef
+                                        must be set
+                                      rule: has(self.skillRef) != has(self.skillSetRef)
+                                  maxItems: 64
+                                  type: array
+                              type: object
+                            tools:
+                              properties:
+                                mode:
+                                  description: |-
+                                    AgentCapabilityCompositionMode controls whether one canonical composition
+                                    layer appends to or replaces inherited legacy and canonical selections.
+                                  enum:
+                                  - Append
+                                  - Replace
+                                  type: string
+                                selections:
+                                  items:
+                                    description: AgentToolSelection is an ordered
+                                      union of one atomic tool or tool set.
+                                    properties:
+                                      toolRef:
+                                        description: |-
+                                          NamespacedObjectReference identifies a Kubernetes object without importing
+                                          another API group. Namespace may be omitted where same-namespace resolution
+                                          is part of the containing resource contract.
+                                        properties:
+                                          name:
+                                            type: string
+                                          namespace:
+                                            type: string
+                                        required:
+                                        - name
+                                        type: object
+                                      toolSetRef:
+                                        description: |-
+                                          NamespacedObjectReference identifies a Kubernetes object without importing
+                                          another API group. Namespace may be omitted where same-namespace resolution
+                                          is part of the containing resource contract.
+                                        properties:
+                                          name:
+                                            type: string
+                                          namespace:
+                                            type: string
+                                        required:
+                                        - name
+                                        type: object
+                                    type: object
+                                    x-kubernetes-validations:
+                                    - message: exactly one of toolRef or toolSetRef
+                                        must be set
+                                      rule: has(self.toolRef) != has(self.toolSetRef)
+                                  maxItems: 64
+                                  type: array
+                              type: object
+                          type: object
                         docs:
                           description: Docs tells the harness which docs/runtime surfaces
                             must be kept aligned.
@@ -5097,6 +5939,37 @@ spec:
                                         type: string
                                     type: object
                                   type: array
+                                toolCache:
+                                  description: |-
+                                    ToolCache selects a dedicated writable AgentDataVolume for structured
+                                    tool acquisition. Empty uses a per-run emptyDir. The cache is mounted at a
+                                    reserved path and never reused as a model authentication home.
+                                  properties:
+                                    mountPath:
+                                      description: MountPath overrides the AgentDataVolume
+                                        default mount path for this run.
+                                      type: string
+                                    name:
+                                      description: Name references an AgentDataVolume
+                                        in the AgentRun namespace.
+                                      minLength: 1
+                                      type: string
+                                    namespace:
+                                      description: |-
+                                        Namespace must be empty or the AgentRun namespace. Cross-namespace
+                                        volume mounts are intentionally not supported.
+                                      type: string
+                                    readOnly:
+                                      description: ReadOnly mounts the durable data
+                                        volume read-only for this run.
+                                      type: boolean
+                                    subPath:
+                                      description: SubPath optionally mounts a subdirectory
+                                        of the AgentDataVolume PVC.
+                                      type: string
+                                  required:
+                                  - name
+                                  type: object
                                 ttlSecondsAfterFinished:
                                   description: |-
                                     TTLSecondsAfterFinished controls Job cleanup. Empty keeps the Job until
@@ -5119,6 +5992,126 @@ spec:
                               - proposeChange
                               - cleanup
                               type: string
+                            mcpServers:
+                              description: |-
+                                MCPServers is the normalized resolved MCP manifest. Canonical callers
+                                select MCP resources through spec.capabilities; direct entries are an
+                                inline compatibility overlay and therefore resolve last.
+                              items:
+                                description: |-
+                                  AgentRunMCPServerSpec is the normalized, secret-free MCP manifest consumed
+                                  by runner adapters.
+                                properties:
+                                  description:
+                                    type: string
+                                  name:
+                                    type: string
+                                  specDigest:
+                                    description: SpecDigest records the selected AgentMCPServer
+                                      spec digest.
+                                    type: string
+                                  toolAllowlist:
+                                    items:
+                                      type: string
+                                    type: array
+                                  transport:
+                                    description: AgentMCPTransport is an exclusive
+                                      MCP transport union.
+                                    properties:
+                                      stdio:
+                                        description: |-
+                                          AgentMCPStdioTransport launches an MCP server as a child process. The first
+                                          argv entry must be supplied by a selected AgentTool or the harness image.
+                                        properties:
+                                          command:
+                                            description: Command is the complete argv
+                                              vector; shell evaluation is never used.
+                                            items:
+                                              type: string
+                                            maxItems: 64
+                                            minItems: 1
+                                            type: array
+                                          requiredEnv:
+                                            description: RequiredEnv lists environment-variable
+                                              names that must exist at preflight.
+                                            items:
+                                              type: string
+                                            maxItems: 64
+                                            type: array
+                                        required:
+                                        - command
+                                        type: object
+                                        x-kubernetes-validations:
+                                        - message: command arguments must not be empty
+                                          rule: self.command.all(a, a != ”)
+                                        - message: requiredEnv must contain unique
+                                            environment-variable names
+                                          rule: '!has(self.requiredEnv) || (self.requiredEnv.all(e,
+                                            e.matches(''^[A-Z_][A-Z0-9_]*$'')) &&
+                                            self.requiredEnv.all(e, self.requiredEnv.filter(x,
+                                            x == e).size() == 1))'
+                                      streamableHTTP:
+                                        description: AgentMCPStreamableHTTPTransport
+                                          connects to a Streamable HTTP MCP endpoint.
+                                        properties:
+                                          endpoint:
+                                            description: Endpoint must use HTTPS and
+                                              cannot contain embedded credentials.
+                                            pattern: ^https://[^@/?#]+(?::[0-9]+)?(?:/[^?#]*)?$
+                                            type: string
+                                          headers:
+                                            description: |-
+                                              Headers map header names to environment variables; values never appear in
+                                              the CR or immutable payload.
+                                            items:
+                                              description: |-
+                                                AgentMCPHTTPHeader maps a non-secret HTTP header name to an environment
+                                                variable populated by the harness identity/credential envelope.
+                                              properties:
+                                                envVar:
+                                                  pattern: ^[A-Z_][A-Z0-9_]*$
+                                                  type: string
+                                                name:
+                                                  pattern: ^[A-Za-z0-9][A-Za-z0-9-]*$
+                                                  type: string
+                                              required:
+                                              - envVar
+                                              - name
+                                              type: object
+                                            maxItems: 32
+                                            type: array
+                                          requiredEnv:
+                                            description: |-
+                                              RequiredEnv lists additional environment-variable names required by the
+                                              server integration.
+                                            items:
+                                              type: string
+                                            maxItems: 64
+                                            type: array
+                                        required:
+                                        - endpoint
+                                        type: object
+                                        x-kubernetes-validations:
+                                        - message: header names must be unique
+                                          rule: '!has(self.headers) || self.headers.all(h,
+                                            self.headers.filter(x, x.name == h.name).size()
+                                            == 1)'
+                                        - message: requiredEnv must contain unique
+                                            environment-variable names
+                                          rule: '!has(self.requiredEnv) || (self.requiredEnv.all(e,
+                                            e.matches(''^[A-Z_][A-Z0-9_]*$'')) &&
+                                            self.requiredEnv.all(e, self.requiredEnv.filter(x,
+                                            x == e).size() == 1))'
+                                    type: object
+                                    x-kubernetes-validations:
+                                    - message: exactly one of stdio or streamableHTTP
+                                        must be set
+                                      rule: has(self.stdio) != has(self.streamableHTTP)
+                                required:
+                                - name
+                                - transport
+                                type: object
+                              type: array
                             skillInjections:
                               description: |-
                                 SkillInjections are backend-neutral instruction packs selected for this
@@ -5249,6 +6242,28 @@ spec:
                                     description: Description explains what this tool
                                       is for during the run.
                                     type: string
+                                  executable:
+                                    description: Executable is populated for canonical
+                                      AgentTool resources.
+                                    properties:
+                                      name:
+                                        description: Name is the command name exposed
+                                          on PATH.
+                                        pattern: ^[A-Za-z0-9][A-Za-z0-9._-]*$
+                                        type: string
+                                      path:
+                                        description: Path is a safe relative executable
+                                          path.
+                                        minLength: 1
+                                        type: string
+                                    required:
+                                    - name
+                                    - path
+                                    type: object
+                                    x-kubernetes-validations:
+                                    - message: path must be a safe relative path
+                                      rule: '!self.path.startsWith(''/'') && self.path.split(''/'').all(p,
+                                        p != ” && p != ''.'' && p != ''..'')'
                                   name:
                                     description: Name is a stable tool identifier
                                       such as kbctl.
@@ -5261,6 +6276,198 @@ spec:
                                       The script runs in the agent workdir as the agent container user. Keep it
                                       idempotent, install into writable agent data volumes or the workdir, and
                                       pass credentials through envSecretRefs instead of inline script text.
+                                    type: string
+                                  source:
+                                    description: Source is the structured acquisition
+                                      plan for a canonical AgentTool.
+                                    properties:
+                                      httpArtifact:
+                                        properties:
+                                          artifacts:
+                                            description: Artifacts must contain at
+                                              most one entry for each platform.
+                                            items:
+                                              description: AgentToolHTTPArtifact is
+                                                one integrity-pinned HTTP artifact
+                                                variant.
+                                              properties:
+                                                executablePath:
+                                                  description: |-
+                                                    ExecutablePath is the safe relative file path inside an archive. It is
+                                                    empty only for format=binary.
+                                                  type: string
+                                                format:
+                                                  description: Format controls safe
+                                                    extraction.
+                                                  enum:
+                                                  - binary
+                                                  - tar.gz
+                                                  - zip
+                                                  type: string
+                                                platform:
+                                                  description: AgentToolPlatform selects
+                                                    one runner operating system and
+                                                    architecture.
+                                                  properties:
+                                                    arch:
+                                                      description: Arch is the Go-style
+                                                        CPU architecture name.
+                                                      enum:
+                                                      - amd64
+                                                      - arm64
+                                                      type: string
+                                                    os:
+                                                      description: OS is the Go-style
+                                                        operating system name.
+                                                      enum:
+                                                      - linux
+                                                      - darwin
+                                                      type: string
+                                                  required:
+                                                  - arch
+                                                  - os
+                                                  type: object
+                                                sha256:
+                                                  description: SHA256 is the expected
+                                                    lowercase artifact digest.
+                                                  pattern: ^[a-f0-9]{64}$
+                                                  type: string
+                                                url:
+                                                  description: URL must use HTTPS.
+                                                  pattern: ^https://[^[:space:]]+$
+                                                  type: string
+                                              required:
+                                              - format
+                                              - platform
+                                              - sha256
+                                              - url
+                                              type: object
+                                              x-kubernetes-validations:
+                                              - message: executablePath must be empty
+                                                  for binary artifacts and a safe
+                                                  relative path for archives
+                                                rule: (self.format == 'binary' &&
+                                                  !has(self.executablePath)) || (self.format
+                                                  != 'binary' && has(self.executablePath)
+                                                  && self.executablePath != ” && !self.executablePath.startsWith('/')
+                                                  && self.executablePath.split('/').all(p,
+                                                  p != ” && p != '.' && p != '..'))
+                                            maxItems: 16
+                                            minItems: 1
+                                            type: array
+                                        required:
+                                        - artifacts
+                                        type: object
+                                        x-kubernetes-validations:
+                                        - message: artifacts must not contain duplicate
+                                            platforms
+                                          rule: self.artifacts.all(a, self.artifacts.filter(b,
+                                            b.platform.os == a.platform.os && b.platform.arch
+                                            == a.platform.arch).size() == 1)
+                                      inlineScript:
+                                        description: |-
+                                          AgentToolInlineScript is a complete executable script installed as the
+                                          declared executable. It is distinct from setupScript, which is an
+                                          unrestricted environment-mutating compatibility escape hatch.
+                                        properties:
+                                          interpreter:
+                                            description: |-
+                                              Interpreter is an argv-form interpreter prefix, for example
+                                              ["/usr/bin/env", "bash"].
+                                            items:
+                                              type: string
+                                            maxItems: 8
+                                            minItems: 1
+                                            type: array
+                                          script:
+                                            description: Script is the executable
+                                              script body.
+                                            minLength: 1
+                                            type: string
+                                        required:
+                                        - interpreter
+                                        - script
+                                        type: object
+                                        x-kubernetes-validations:
+                                        - message: interpreter arguments must not
+                                            be empty
+                                          rule: self.interpreter.all(a, a != ”)
+                                      ociArtifact:
+                                        properties:
+                                          artifacts:
+                                            description: Artifacts must contain at
+                                              most one entry for each platform.
+                                            items:
+                                              description: AgentToolOCIArtifact is
+                                                one digest-pinned OCI artifact variant.
+                                              properties:
+                                                executablePath:
+                                                  description: ExecutablePath is the
+                                                    safe relative executable path
+                                                    in the artifact.
+                                                  minLength: 1
+                                                  type: string
+                                                platform:
+                                                  description: AgentToolPlatform selects
+                                                    one runner operating system and
+                                                    architecture.
+                                                  properties:
+                                                    arch:
+                                                      description: Arch is the Go-style
+                                                        CPU architecture name.
+                                                      enum:
+                                                      - amd64
+                                                      - arm64
+                                                      type: string
+                                                    os:
+                                                      description: OS is the Go-style
+                                                        operating system name.
+                                                      enum:
+                                                      - linux
+                                                      - darwin
+                                                      type: string
+                                                  required:
+                                                  - arch
+                                                  - os
+                                                  type: object
+                                                reference:
+                                                  description: Reference must include
+                                                    a sha256 digest.
+                                                  pattern: ^[^[:space:]@]+@sha256:[a-f0-9]{64}$
+                                                  type: string
+                                              required:
+                                              - executablePath
+                                              - platform
+                                              - reference
+                                              type: object
+                                              x-kubernetes-validations:
+                                              - message: executablePath must be a
+                                                  safe relative path
+                                                rule: '!self.executablePath.startsWith(''/'')
+                                                  && self.executablePath.split(''/'').all(p,
+                                                  p != ” && p != ''.'' && p != ''..'')'
+                                            maxItems: 16
+                                            minItems: 1
+                                            type: array
+                                        required:
+                                        - artifacts
+                                        type: object
+                                        x-kubernetes-validations:
+                                        - message: artifacts must not contain duplicate
+                                            platforms
+                                          rule: self.artifacts.all(a, self.artifacts.filter(b,
+                                            b.platform.os == a.platform.os && b.platform.arch
+                                            == a.platform.arch).size() == 1)
+                                    type: object
+                                    x-kubernetes-validations:
+                                    - message: exactly one tool source must be set
+                                      rule: '(has(self.httpArtifact) ? 1 : 0) + (has(self.ociArtifact)
+                                        ? 1 : 0) + (has(self.inlineScript) ? 1 : 0)
+                                        == 1'
+                                  specDigest:
+                                    description: |-
+                                      SpecDigest is the canonical AgentTool spec digest used for
+                                      content-addressed cache paths. The resolver owns this field.
                                     type: string
                                   verifyCommand:
                                     description: |-

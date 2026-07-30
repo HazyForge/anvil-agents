@@ -1,0 +1,273 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.19.0
+  name: agenttools.control.anvil.hazyforge.io
+spec:
+  group: control.anvil.hazyforge.io
+  names:
+    kind: AgentTool
+    listKind: AgentToolList
+    plural: agenttools
+    shortNames:
+    - agtool
+    singular: agenttool
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.executable.name
+      name: Executable
+      type: string
+    - jsonPath: .spec.description
+      name: Description
+      type: string
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: AgentToolSpec defines one executable acquisition contract.
+            properties:
+              description:
+                description: Description explains what the executable does.
+                type: string
+              executable:
+                description: |-
+                  AgentToolExecutable identifies the command published into the per-run bin
+                  directory and its relative path inside the content-addressed install root.
+                properties:
+                  name:
+                    description: Name is the command name exposed on PATH.
+                    pattern: ^[A-Za-z0-9][A-Za-z0-9._-]*$
+                    type: string
+                  path:
+                    description: Path is a safe relative executable path.
+                    minLength: 1
+                    type: string
+                required:
+                - name
+                - path
+                type: object
+                x-kubernetes-validations:
+                - message: path must be a safe relative path
+                  rule: '!self.path.startsWith(''/'') && self.path.split(''/'').all(p,
+                    p != ” && p != ''.'' && p != ''..'')'
+              setupScript:
+                description: |-
+                  SetupScript is the unrestricted compatibility escape hatch. It runs with
+                  the same authority as the consuming AgentRun and is composition-write
+                  code-execution authority.
+                type: string
+              source:
+                description: Source is the preferred structured acquisition contract.
+                properties:
+                  httpArtifact:
+                    properties:
+                      artifacts:
+                        description: Artifacts must contain at most one entry for
+                          each platform.
+                        items:
+                          description: AgentToolHTTPArtifact is one integrity-pinned
+                            HTTP artifact variant.
+                          properties:
+                            executablePath:
+                              description: |-
+                                ExecutablePath is the safe relative file path inside an archive. It is
+                                empty only for format=binary.
+                              type: string
+                            format:
+                              description: Format controls safe extraction.
+                              enum:
+                              - binary
+                              - tar.gz
+                              - zip
+                              type: string
+                            platform:
+                              description: AgentToolPlatform selects one runner operating
+                                system and architecture.
+                              properties:
+                                arch:
+                                  description: Arch is the Go-style CPU architecture
+                                    name.
+                                  enum:
+                                  - amd64
+                                  - arm64
+                                  type: string
+                                os:
+                                  description: OS is the Go-style operating system
+                                    name.
+                                  enum:
+                                  - linux
+                                  - darwin
+                                  type: string
+                              required:
+                              - arch
+                              - os
+                              type: object
+                            sha256:
+                              description: SHA256 is the expected lowercase artifact
+                                digest.
+                              pattern: ^[a-f0-9]{64}$
+                              type: string
+                            url:
+                              description: URL must use HTTPS.
+                              pattern: ^https://[^[:space:]]+$
+                              type: string
+                          required:
+                          - format
+                          - platform
+                          - sha256
+                          - url
+                          type: object
+                          x-kubernetes-validations:
+                          - message: executablePath must be empty for binary artifacts
+                              and a safe relative path for archives
+                            rule: (self.format == 'binary' && !has(self.executablePath))
+                              || (self.format != 'binary' && has(self.executablePath)
+                              && self.executablePath != ” && !self.executablePath.startsWith('/')
+                              && self.executablePath.split('/').all(p, p != ” && p
+                              != '.' && p != '..'))
+                        maxItems: 16
+                        minItems: 1
+                        type: array
+                    required:
+                    - artifacts
+                    type: object
+                    x-kubernetes-validations:
+                    - message: artifacts must not contain duplicate platforms
+                      rule: self.artifacts.all(a, self.artifacts.filter(b, b.platform.os
+                        == a.platform.os && b.platform.arch == a.platform.arch).size()
+                        == 1)
+                  inlineScript:
+                    description: |-
+                      AgentToolInlineScript is a complete executable script installed as the
+                      declared executable. It is distinct from setupScript, which is an
+                      unrestricted environment-mutating compatibility escape hatch.
+                    properties:
+                      interpreter:
+                        description: |-
+                          Interpreter is an argv-form interpreter prefix, for example
+                          ["/usr/bin/env", "bash"].
+                        items:
+                          type: string
+                        maxItems: 8
+                        minItems: 1
+                        type: array
+                      script:
+                        description: Script is the executable script body.
+                        minLength: 1
+                        type: string
+                    required:
+                    - interpreter
+                    - script
+                    type: object
+                    x-kubernetes-validations:
+                    - message: interpreter arguments must not be empty
+                      rule: self.interpreter.all(a, a != ”)
+                  ociArtifact:
+                    properties:
+                      artifacts:
+                        description: Artifacts must contain at most one entry for
+                          each platform.
+                        items:
+                          description: AgentToolOCIArtifact is one digest-pinned OCI
+                            artifact variant.
+                          properties:
+                            executablePath:
+                              description: ExecutablePath is the safe relative executable
+                                path in the artifact.
+                              minLength: 1
+                              type: string
+                            platform:
+                              description: AgentToolPlatform selects one runner operating
+                                system and architecture.
+                              properties:
+                                arch:
+                                  description: Arch is the Go-style CPU architecture
+                                    name.
+                                  enum:
+                                  - amd64
+                                  - arm64
+                                  type: string
+                                os:
+                                  description: OS is the Go-style operating system
+                                    name.
+                                  enum:
+                                  - linux
+                                  - darwin
+                                  type: string
+                              required:
+                              - arch
+                              - os
+                              type: object
+                            reference:
+                              description: Reference must include a sha256 digest.
+                              pattern: ^[^[:space:]@]+@sha256:[a-f0-9]{64}$
+                              type: string
+                          required:
+                          - executablePath
+                          - platform
+                          - reference
+                          type: object
+                          x-kubernetes-validations:
+                          - message: executablePath must be a safe relative path
+                            rule: '!self.executablePath.startsWith(''/'') && self.executablePath.split(''/'').all(p,
+                              p != ” && p != ''.'' && p != ''..'')'
+                        maxItems: 16
+                        minItems: 1
+                        type: array
+                    required:
+                    - artifacts
+                    type: object
+                    x-kubernetes-validations:
+                    - message: artifacts must not contain duplicate platforms
+                      rule: self.artifacts.all(a, self.artifacts.filter(b, b.platform.os
+                        == a.platform.os && b.platform.arch == a.platform.arch).size()
+                        == 1)
+                type: object
+                x-kubernetes-validations:
+                - message: exactly one tool source must be set
+                  rule: '(has(self.httpArtifact) ? 1 : 0) + (has(self.ociArtifact)
+                    ? 1 : 0) + (has(self.inlineScript) ? 1 : 0) == 1'
+              verifyCommand:
+                description: VerifyCommand is an argv-form post-install check.
+                items:
+                  type: string
+                maxItems: 32
+                minItems: 1
+                type: array
+            required:
+            - executable
+            - verifyCommand
+            type: object
+            x-kubernetes-validations:
+            - message: exactly one of source or setupScript must be set
+              rule: has(self.source) != (has(self.setupScript) && self.setupScript
+                != ”)
+            - message: verifyCommand arguments must not be empty
+              rule: self.verifyCommand.all(a, a != ”)
+        required:
+        - spec
+        type: object
+    served: true
+    storage: true
+    subresources: {}

@@ -10,16 +10,24 @@ type AgentSkillSetSpec struct {
 	// Description explains when this capability pack should be selected.
 	// +optional
 	Description string `json:"description,omitempty"`
+	// SkillRefs is the canonical ordered collection of atomic AgentSkills.
+	// +kubebuilder:validation:MaxItems=64
+	// +optional
+	SkillRefs []NamespacedObjectReference `json:"skillRefs,omitempty"`
 	// Skills are named instruction packs materialized for the selected harness.
+	// Deprecated: use skillRefs.
 	// +kubebuilder:validation:MaxItems=64
 	// +optional
 	Skills []AgentRunSkillInjectionSpec `json:"skills,omitempty"`
 	// Tools are legacy setup and verification contracts required by this skill
 	// set. Prefer AgentToolSet when a tool has an independent lifecycle.
+	// Deprecated: author a separate AgentTool and select it explicitly.
 	// +kubebuilder:validation:MaxItems=32
 	// +optional
 	Tools []AgentRunToolSpec `json:"tools,omitempty"`
 	// Subagents are named delegated personas used by skills in this set.
+	// Deprecated: keep persona composition in the profile/harness compatibility
+	// fields until a dedicated canonical role model is introduced.
 	// +kubebuilder:validation:MaxItems=32
 	// +optional
 	Subagents []AgentRunSubagentSpec `json:"subagents,omitempty"`
