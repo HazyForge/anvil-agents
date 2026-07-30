@@ -160,6 +160,9 @@ for resource in agentskills agenttools agentmcpservers agentmcpsets; do
   grep -q "${resource}" "${tmp_dir}/rbac-composition-read.yaml" || fail "composition read RBAC missing ${resource}"
 done
 grep -q 'agentrunprofiles' "${tmp_dir}/rbac-composition-read.yaml" || fail "composition read RBAC missing agentrunprofiles"
+if grep -q 'agentauthsessions' "${tmp_dir}/rbac-composition-read.yaml"; then
+  fail "generic composition RBAC must not expose AgentAuthSession"
+fi
 if grep -Eq 'verbs:.*create| - create' "${tmp_dir}/rbac-composition-read.yaml"; then
   fail "composition read RBAC must not grant create"
 fi

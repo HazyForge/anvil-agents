@@ -54,9 +54,6 @@ type compositionKind struct {
 	NewObject   func() client.Object
 	NewList     func() client.ObjectList
 	HasStatus   bool
-	// AppendOnly blocks composition create/update/delete. Operator tools
-	// (anvil-agentctl) own lifecycle; the console only browses cards.
-	AppendOnly bool
 }
 
 var compositionKinds = map[string]compositionKind{
@@ -121,16 +118,6 @@ var compositionKinds = map[string]compositionKind{
 		NewObject:   func() client.Object { return &agentsv1alpha1.AgentDataVolume{} },
 		NewList:     func() client.ObjectList { return &agentsv1alpha1.AgentDataVolumeList{} },
 		HasStatus:   true,
-	},
-	// AgentAuthSession is append-only maintenance intent (reauth/logout). Controllers
-	// block AgentRuns while a session is active on a mounted data volume.
-	"agent-auth-sessions": {
-		PathSegment: "agent-auth-sessions",
-		Kind:        "AgentAuthSession",
-		NewObject:   func() client.Object { return &agentsv1alpha1.AgentAuthSession{} },
-		NewList:     func() client.ObjectList { return &agentsv1alpha1.AgentAuthSessionList{} },
-		HasStatus:   true,
-		AppendOnly:  true,
 	},
 }
 
@@ -238,11 +225,6 @@ func (server *Server) handleCompositionCreate(writer http.ResponseWriter, reques
 	if !ok {
 		return
 	}
-	if kind.AppendOnly {
-		writeAPIError(writer, http.StatusForbidden, "append_only",
-			"AgentAuthSession objects are append-only operator intents; create them with anvil-agentctl auth, not the composition write API")
-		return
-	}
 	if !server.config.Composition.WriteEnabled {
 		writeAPIError(writer, http.StatusNotFound, "composition_write_disabled", "composition write is disabled")
 		return
@@ -313,11 +295,6 @@ func (server *Server) handleCompositionCreate(writer http.ResponseWriter, reques
 func (server *Server) handleCompositionUpdate(writer http.ResponseWriter, request *http.Request, pathSegment string) {
 	kind, principal, ok := server.authorizeCompositionKind(writer, request, pathSegment, PermissionCompositionWrite)
 	if !ok {
-		return
-	}
-	if kind.AppendOnly {
-		writeAPIError(writer, http.StatusForbidden, "append_only",
-			"AgentAuthSession specs are immutable; create a new session with anvil-agentctl auth")
 		return
 	}
 	if !server.config.Composition.WriteEnabled {
@@ -434,11 +411,6 @@ func (server *Server) handleCompositionUpdate(writer http.ResponseWriter, reques
 func (server *Server) handleCompositionDelete(writer http.ResponseWriter, request *http.Request, pathSegment string) {
 	kind, principal, ok := server.authorizeCompositionKind(writer, request, pathSegment, PermissionCompositionWrite)
 	if !ok {
-		return
-	}
-	if kind.AppendOnly {
-		writeAPIError(writer, http.StatusForbidden, "append_only",
-			"AgentAuthSession objects are not deleted through the composition API")
 		return
 	}
 	if !server.config.Composition.WriteEnabled {
@@ -651,12 +623,6 @@ func objectListItems(list client.ObjectList) []client.Object {
 		}
 		return out
 	case *agentsv1alpha1.AgentDataVolumeList:
-		out := make([]client.Object, len(typed.Items))
-		for i := range typed.Items {
-			out[i] = &typed.Items[i]
-		}
-		return out
-	case *agentsv1alpha1.AgentAuthSessionList:
 		out := make([]client.Object, len(typed.Items))
 		for i := range typed.Items {
 			out[i] = &typed.Items[i]

@@ -106,6 +106,7 @@ image-checks:
 	./hack/build-images.sh --check
 
 helm-lint:
+	bash ./hack/test-crd-install-surfaces.sh
 	./hack/test-api-chart.sh
 	./hack/test-archive-chart.sh
 
@@ -172,6 +173,7 @@ verify-runner-contract:
 	@bash -n hack/create-github-release.sh
 	@bash -n hack/local-release_test.sh
 	@bash -n hack/test-api-chart.sh
+	@bash -n hack/test-crd-install-surfaces.sh
 	@bash -n hack/test-archive-chart.sh
 	@bash -n hack/test-archive-postgres.sh
 	@bash -n hack/package-chart.sh
@@ -227,6 +229,7 @@ verify-runner-contract:
 	@hack/publish-images_test.sh
 	@hack/publish-release_test.sh
 	@hack/local-release_test.sh
+	@bash hack/test-crd-install-surfaces.sh
 	@hack/test-kind-upgrade-cleanup.sh
 	@hack/test-runner-repository-checkout.sh
 	@hack/test-opencode-runner.sh

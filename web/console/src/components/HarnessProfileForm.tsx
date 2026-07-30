@@ -4,7 +4,6 @@ import {
   type HarnessForm,
   type HarnessBackendKind,
 } from "../pages/library/harnessForm";
-import { RelatedAuthSessionCards } from "./RelatedAuthSessionCards";
 import { StringChipList } from "./StringChipList";
 
 interface Props {
@@ -12,9 +11,6 @@ interface Props {
   disabled?: boolean;
   isCreate: boolean;
   dataVolumeNames: string[];
-  /** When set, show AgentAuthSession cards for the selected durable homes. */
-  token?: string;
-  namespace?: string;
   onChange: <K extends keyof HarnessForm>(key: K, value: HarnessForm[K]) => void;
 }
 
@@ -23,8 +19,6 @@ export function HarnessProfileForm({
   disabled,
   isCreate,
   dataVolumeNames,
-  token,
-  namespace,
   onChange,
 }: Props) {
   const kindMeta = useMemo(
@@ -331,15 +325,6 @@ export function HarnessProfileForm({
         </select>
         <p className="field-help">Dedicated AgentDataVolume for content-addressed structured tool artifacts. Never reuse a model authentication home.</p>
       </label>
-
-      {token && namespace ? (
-        <RelatedAuthSessionCards
-          token={token}
-          namespace={namespace}
-          dataVolumeNames={form.dataVolumeNames}
-          title="Auth sessions for selected data volumes"
-        />
-      ) : null}
 
       <StringChipList
         label="Image pull secrets"

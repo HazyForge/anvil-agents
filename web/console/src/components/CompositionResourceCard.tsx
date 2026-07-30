@@ -1,9 +1,6 @@
 import { Link } from "react-router-dom";
 import type { CompositionDocument } from "../api/types.composition";
-import {
-  authSessionIsActive,
-  compositionCardSummary,
-} from "../utils/compositionSummary";
+import { compositionCardSummary } from "../utils/compositionSummary";
 import { formatTime } from "../utils/format";
 import { getIconUrl, getScreenshotUrl, resolveIconSrc } from "../utils/icons";
 import { CompositionAvatar } from "./IconPicker";
@@ -59,13 +56,10 @@ export function CompositionResourceCard({
   const screenshot = resolveIconSrc(getScreenshotUrl(doc.metadata.annotations));
   const href = `/ns/${encodeURIComponent(namespace)}/${kindRoute}/${encodeURIComponent(doc.metadata.name)}`;
   const sizeClass = size === "lg" ? "agent-card-lg" : "agent-card-library";
-  const activeAuth = doc.kind === "AgentAuthSession" && authSessionIsActive(doc);
-  const phase =
-    doc.kind === "AgentAuthSession" ? String(doc.status?.phase ?? "Pending") : "";
 
   return (
     <article
-      className={`agent-card ${sizeClass}${activeAuth ? " auth-session-card-active" : ""}`}
+      className={`agent-card ${sizeClass}`}
       role="button"
       tabIndex={0}
       onClick={onOpen}
@@ -86,19 +80,13 @@ export function CompositionResourceCard({
         <div className="agent-card-heading">
           <div className="chip-row" style={{ marginBottom: "0.15rem" }}>
             <span className="chip chip-mute">{doc.kind}</span>
-            {phase ? (
-              <span className={`chip ${activeAuth ? "chip-warn" : "chip-mute"}`}>{phase}</span>
-            ) : null}
             <ManagementChip doc={doc} />
           </div>
           <h2 className="agent-card-title mono">{doc.metadata.name}</h2>
         </div>
       </header>
       <p className="agent-card-desc">
-        {description ||
-          (doc.kind === "AgentAuthSession"
-            ? compositionCardSummary(doc)
-            : "No description.")}
+        {description || "No description."}
       </p>
       <div className="agent-card-meta mono">{compositionCardSummary(doc)}</div>
       <div className="agent-card-meta">
