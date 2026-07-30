@@ -7,7 +7,7 @@ RELEASE_OUTPUT ?= dist
 RELEASE_CHART_REGISTRY ?=
 RELEASE_REPO ?= HazyForge/anvil-agents
 
-.PHONY: generate manifests test verify verify-runner-contract security security-govulncheck security-gosec security-trivy security-all build console-build console-typecheck console-embed console-embed-restore docker-build images image-checks helm-lint archive-postgres-integration chart-package release-tag release-tag-push release-local release-publish release-github release-local-all judge-prerequisites judge-kind-e2e kind-upgrade-e2e kind-e2e
+.PHONY: generate manifests test test-openclaw-auth-image verify verify-runner-contract security security-govulncheck security-gosec security-trivy security-all build console-build console-typecheck console-embed console-embed-restore docker-build images image-checks helm-lint archive-postgres-integration chart-package release-tag release-tag-push release-local release-publish release-github release-local-all judge-prerequisites judge-kind-e2e kind-upgrade-e2e kind-e2e
 
 generate:
 	$(CONTROLLER_GEN) object paths=./api/...
@@ -25,6 +25,12 @@ manifests: generate
 
 test:
 	go test ./...
+
+# Executes the exact embedded OpenClaw auth runtime against the reviewed,
+# digest-pinned OpenClaw image and its native plugin SDK. This is opt-in because
+# it requires Docker and registry access.
+test-openclaw-auth-image:
+	ANVIL_RUN_OPENCLAW_IMAGE_TEST=true go test ./internal/controller -run '^TestAgentAuthOpenClawPinnedImageLifecycle$$' -count=1 -v
 
 # Local mirrors of the public GitHub Actions security program
 # (.github/workflows/security.yml). Not part of consumer deployment lifecycle.

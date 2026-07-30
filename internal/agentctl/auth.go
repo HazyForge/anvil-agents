@@ -24,6 +24,8 @@ const (
 	codexAuthSeedKey           = "CODEX_AUTH_SEED_ID"
 	grokAuthJSONKey            = "GROK_AUTH_JSON"
 	grokAuthSeedKey            = "GROK_AUTH_SEED_ID"
+	openClawAuthProfilesKey    = "OPENCLAW_AUTH_PROFILES_JSON"
+	openClawAuthSeedKey        = "OPENCLAW_AUTH_SEED_ID"
 	xaiAPIKeyKey               = "XAI_API_KEY"
 	openaiAPIKeyKey            = "OPENAI_API_KEY"
 	authStagingOwnerLabel      = "control.anvil.hazyforge.io/agent-auth-staging-for"
@@ -38,6 +40,8 @@ type authProviderProfile struct {
 	DefaultAuthFileHint string
 	DisplayName         string
 	Component           string
+	RequiresAgentID     bool
+	DefaultAuthMode     agentsv1alpha1.AgentRunProviderAuthMode
 }
 
 func resolveAuthProvider(name string) (authProviderProfile, error) {
@@ -64,8 +68,20 @@ func resolveAuthProvider(name string) (authProviderProfile, error) {
 			DisplayName:         "xAI Grok",
 			Component:           "grok-auth-staging",
 		}, nil
+	case "openclaw", "claw":
+		return authProviderProfile{
+			CLIName:             "openclaw",
+			Provider:            agentsv1alpha1.AgentAuthSessionProviderOpenClaw,
+			AuthJSONKey:         openClawAuthProfilesKey,
+			SeedKey:             openClawAuthSeedKey,
+			DefaultAuthFileHint: "openclaw-auth-profiles.json",
+			DisplayName:         "OpenClaw",
+			Component:           "openclaw-auth-staging",
+			RequiresAgentID:     true,
+			DefaultAuthMode:     agentsv1alpha1.AgentRunProviderAuthModeOAuth,
+		}, nil
 	default:
-		return authProviderProfile{}, fmt.Errorf("unknown auth provider %q (want codex|openai or grok|xai)", name)
+		return authProviderProfile{}, fmt.Errorf("unknown auth provider %q (want codex|openai, grok|xai, or openclaw|claw)", name)
 	}
 }
 
@@ -119,6 +135,8 @@ func (app App) runAuth(ctx context.Context, kubeOptions KubeOptions, args []stri
 		return app.authProviderReauth(ctx, kubeOptions, profile, args[2:])
 	case "logout":
 		return app.authProviderLogout(ctx, kubeOptions, profile, args[2:])
+	case "verify":
+		return app.authProviderVerify(ctx, kubeOptions, profile, args[2:])
 	case "help":
 		writeAuthProviderUsage(app.Out, profile)
 		return nil
@@ -129,9 +147,10 @@ func (app App) runAuth(ctx context.Context, kubeOptions KubeOptions, args []stri
 }
 
 func writeAuthUsage(writer io.Writer) {
-	fmt.Fprintln(writer, "Auth commands: codex (openai), grok (xai)")
+	fmt.Fprintln(writer, "Auth commands: codex (openai), grok (xai), openclaw (claw)")
 	writeAuthProviderUsage(writer, mustAuthProfile("codex"))
 	writeAuthProviderUsage(writer, mustAuthProfile("grok"))
+	writeAuthProviderUsage(writer, mustAuthProfile("openclaw"))
 }
 
 func mustAuthProfile(name string) authProviderProfile {
@@ -143,19 +162,32 @@ func mustAuthProfile(name string) authProviderProfile {
 }
 
 func writeAuthProviderUsage(writer io.Writer, profile authProviderProfile) {
-	fmt.Fprintf(writer, "%s auth commands: diagnose, reauth, logout\n", profile.DisplayName)
-	fmt.Fprintf(writer, "  anvil-agentctl auth %s diagnose -n NS --data-volume NAME [--bootstrap-secret NAME] [--auth-file PATH]\n", profile.CLIName)
-	fmt.Fprintf(writer, "  anvil-agentctl auth %s reauth -n NS --data-volume NAME --auth-file PATH [--bootstrap-secret NAME]\n", profile.CLIName)
-	fmt.Fprintf(writer, "  anvil-agentctl auth %s logout -n NS --data-volume NAME --confirm-volume NAME\n", profile.CLIName)
+	fmt.Fprintf(writer, "%s auth commands: diagnose, verify, reauth, logout\n", profile.DisplayName)
+	agentFlag := ""
+	sessionAuthFlag := ""
+	if profile.RequiresAgentID {
+		agentFlag = " --agent-id ID --model-provider PROVIDER"
+		sessionAuthFlag = agentFlag + " [--auth-mode oauth|apiKey]"
+	}
+	fmt.Fprintf(writer, "  anvil-agentctl auth %s diagnose -n NS --data-volume NAME%s [--bootstrap-secret NAME] [--auth-file PATH]\n", profile.CLIName, agentFlag)
+	fmt.Fprintf(writer, "  anvil-agentctl auth %s verify -n NS --data-volume NAME%s\n", profile.CLIName, sessionAuthFlag)
+	if profile.RequiresAgentID {
+		fmt.Fprintf(writer, "  anvil-agentctl auth %s reauth -n NS --data-volume NAME --agent-id ID --model-provider PROVIDER --auth-file PATH [--auth-mode oauth|apiKey] [--bootstrap-secret NAME]\n", profile.CLIName)
+	} else {
+		fmt.Fprintf(writer, "  anvil-agentctl auth %s reauth -n NS --data-volume NAME --auth-file PATH [--bootstrap-secret NAME]\n", profile.CLIName)
+	}
+	fmt.Fprintf(writer, "  anvil-agentctl auth %s logout -n NS --data-volume NAME%s --confirm-volume NAME\n", profile.CLIName, sessionAuthFlag)
 }
 
 func (app App) authProviderDiagnose(ctx context.Context, kubeOptions KubeOptions, profile authProviderProfile, args []string) error {
-	var namespace, dataVolume, bootstrapSecret, authFile, output string
+	var namespace, dataVolume, bootstrapSecret, authFile, output, agentID, modelProvider string
 	flags := newCommandFlags(fmt.Sprintf("auth %s diagnose", profile.CLIName), app.Err)
 	flags.StringVarP(&namespace, "namespace", "n", "", "Namespace (required).")
 	flags.StringVar(&dataVolume, "data-volume", "", "AgentDataVolume name that holds the durable auth home.")
 	flags.StringVar(&bootstrapSecret, "bootstrap-secret", "", "Optional bootstrap Secret name.")
-	flags.StringVar(&authFile, "auth-file", "", fmt.Sprintf("Optional local auth.json (for example %s).", profile.DefaultAuthFileHint))
+	flags.StringVar(&authFile, "auth-file", "", fmt.Sprintf("Optional local auth file (for example %s).", profile.DefaultAuthFileHint))
+	flags.StringVar(&agentID, "agent-id", "", "OpenClaw agent ID (required for openClaw).")
+	flags.StringVar(&modelProvider, "model-provider", "", "OpenClaw credential provider (required for openClaw; for example xai).")
 	flags.StringVarP(&output, "output", "o", "summary", "Output format: summary or json.")
 	if err := flags.Parse(args); err != nil {
 		return err
@@ -164,8 +196,16 @@ func (app App) authProviderDiagnose(ctx context.Context, kubeOptions KubeOptions
 		return &usageError{message: fmt.Sprintf("auth %s diagnose does not accept positional arguments", profile.CLIName)}
 	}
 	namespace = strings.TrimSpace(namespace)
+	agentID = strings.TrimSpace(agentID)
+	modelProvider = strings.TrimSpace(modelProvider)
 	if namespace == "" {
 		return &usageError{message: "--namespace is required"}
+	}
+	if profile.RequiresAgentID && agentID == "" {
+		return &usageError{message: "--agent-id is required for openClaw"}
+	}
+	if profile.RequiresAgentID && modelProvider == "" {
+		return &usageError{message: "--model-provider is required for openClaw"}
 	}
 	if output != "summary" && output != "json" {
 		return &usageError{message: `--output must be "summary" or "json"`}
@@ -181,6 +221,12 @@ func (app App) authProviderDiagnose(ctx context.Context, kubeOptions KubeOptions
 		"cliName":   profile.CLIName,
 		"healthy":   true,
 		"findings":  []string{},
+	}
+	if agentID != "" {
+		report["agentID"] = agentID
+	}
+	if modelProvider != "" {
+		report["modelProvider"] = modelProvider
 	}
 	findings := make([]string, 0)
 	unhealthy := false
@@ -223,20 +269,24 @@ func (app App) authProviderDiagnose(ctx context.Context, kubeOptions KubeOptions
 			hasSeed := len(secret.Data[profile.SeedKey]) > 0
 			hasAPIKey := profile.APIKeyKey != "" && len(secret.Data[profile.APIKeyKey]) > 0
 			entry := map[string]any{
-				"name":               name,
-				"present":            true,
-				"keys":               keys,
-				"hasAuthJSON":        hasAuth,
-				"authJSONKey":        profile.AuthJSONKey,
-				"hasSeedID":          hasSeed,
-				"hasAPIKey":          hasAPIKey,
-				"apiKeyKey":          profile.APIKeyKey,
-				"managedByESO":       managedByESO,
-				"resourceVersion":    secret.ResourceVersion,
+				"name":            name,
+				"present":         true,
+				"keys":            keys,
+				"hasAuthJSON":     hasAuth,
+				"authJSONKey":     profile.AuthJSONKey,
+				"hasSeedID":       hasSeed,
+				"hasAPIKey":       hasAPIKey,
+				"apiKeyKey":       profile.APIKeyKey,
+				"managedByESO":    managedByESO,
+				"resourceVersion": secret.ResourceVersion,
 			}
 			if !hasAuth && !hasAPIKey {
 				unhealthy = true
-				findings = append(findings, fmt.Sprintf("bootstrap secret %s is missing both %s and %s", name, profile.AuthJSONKey, profile.APIKeyKey))
+				if profile.APIKeyKey == "" {
+					findings = append(findings, fmt.Sprintf("bootstrap secret %s is missing %s", name, profile.AuthJSONKey))
+				} else {
+					findings = append(findings, fmt.Sprintf("bootstrap secret %s is missing both %s and %s", name, profile.AuthJSONKey, profile.APIKeyKey))
+				}
 			} else if !hasAuth && hasAPIKey {
 				findings = append(findings, fmt.Sprintf("bootstrap secret %s has %s (apiKey mode); durable OAuth home reauth is not required for that mode", name, profile.APIKeyKey))
 			}
@@ -279,6 +329,10 @@ func (app App) authProviderDiagnose(ctx context.Context, kubeOptions KubeOptions
 				unhealthy = true
 				findings = append(findings, fmt.Sprintf("data volume %s phase is %s", name, valueOrDash(string(volume.Status.Phase))))
 			}
+			if string(volume.Spec.Backend) != string(profile.Provider) {
+				unhealthy = true
+				findings = append(findings, fmt.Sprintf("data volume %s backend %s does not match auth provider %s", name, valueOrDash(string(volume.Spec.Backend)), profile.Provider))
+			}
 		}
 		sessions, err := backend.ListAuthSessions(ctx, namespace)
 		if err != nil {
@@ -304,12 +358,20 @@ func (app App) authProviderDiagnose(ctx context.Context, kubeOptions KubeOptions
 		findings = append(findings, "durable home not inspected; pass --data-volume to include AgentDataVolume status")
 	}
 
-	findings = append(findings, "durable auth.json is authoritative once present; secret refresh alone does not overwrite it")
+	findings = append(findings, "durable auth is authoritative once present; secret refresh alone does not overwrite it")
 	switch profile.Provider {
 	case agentsv1alpha1.AgentAuthSessionProviderCodex:
 		findings = append(findings, "OpenAI path: after local `codex login --device-auth`, run auth codex reauth with ~/.codex/auth.json")
 	case agentsv1alpha1.AgentAuthSessionProviderGrokBuild:
 		findings = append(findings, "xAI path: seed OAuth from local ~/.grok/auth.json via auth grok reauth, or supply XAI_API_KEY for apiKey mode")
+		findings = append(findings, "Grok Build ~/.grok/auth.json is incompatible with OpenClaw profile stores")
+	case agentsv1alpha1.AgentAuthSessionProviderOpenClaw:
+		findings = append(findings, "OpenClaw path: current operational mode is OAuth; reauth stages a version=1 profile store (OPENCLAW_AUTH_PROFILES_JSON), not openclaw.json or a database")
+		findings = append(findings, "API-key profile import is structurally supported via --auth-mode apiKey; this CLI never provisions an API key into a manifest")
+		findings = append(findings, "Grok Build ~/.grok/auth.json is incompatible; use an OpenClaw auth profile-store JSON for --auth-file")
+		if agentID != "" {
+			findings = append(findings, "agentID="+agentID+" must match the harness openClaw.agentId")
+		}
 	}
 	report["findings"] = findings
 	report["healthy"] = !unhealthy
@@ -339,15 +401,21 @@ type diagnosedUnhealthyError struct {
 func (err *diagnosedUnhealthyError) Error() string { return err.message }
 
 func (app App) authProviderReauth(ctx context.Context, kubeOptions KubeOptions, profile authProviderProfile, args []string) error {
-	var namespace, dataVolume, bootstrapSecret, authFile, output string
+	var namespace, dataVolume, bootstrapSecret, authFile, output, agentID, authMode, modelProvider string
 	var timeout, waitForIdle time.Duration
 	timeout = 5 * time.Minute
 	waitForIdle = 10 * time.Minute
+	if profile.DefaultAuthMode != "" {
+		authMode = string(profile.DefaultAuthMode)
+	}
 	flags := newCommandFlags(fmt.Sprintf("auth %s reauth", profile.CLIName), app.Err)
 	flags.StringVarP(&namespace, "namespace", "n", "", "Namespace (required).")
 	flags.StringVar(&dataVolume, "data-volume", "", "AgentDataVolume name for the durable auth home (required).")
 	flags.StringVar(&bootstrapSecret, "bootstrap-secret", "", "Optional CLI-owned seed Secret to update after success.")
-	flags.StringVar(&authFile, "auth-file", "", fmt.Sprintf("Local auth.json (for example %s) (required).", profile.DefaultAuthFileHint))
+	flags.StringVar(&authFile, "auth-file", "", fmt.Sprintf("Local auth file (for example %s) (required).", profile.DefaultAuthFileHint))
+	flags.StringVar(&agentID, "agent-id", "", "OpenClaw agent ID (required for openClaw; must match harness agentId).")
+	flags.StringVar(&modelProvider, "model-provider", "", "OpenClaw credential provider (required for openClaw; for example xai).")
+	flags.StringVar(&authMode, "auth-mode", authMode, "Auth mode written into AgentAuthSession (oauth or apiKey). Defaults to oauth for openClaw.")
 	flags.DurationVar(&timeout, "timeout", timeout, "How long to wait for the AgentAuthSession to finish.")
 	flags.DurationVar(&waitForIdle, "wait-for-idle", waitForIdle, "Reserved for operators; the controller waits for active runs independently.")
 	flags.StringVarP(&output, "output", "o", "summary", "Output format: summary or json.")
@@ -360,8 +428,23 @@ func (app App) authProviderReauth(ctx context.Context, kubeOptions KubeOptions, 
 	namespace = strings.TrimSpace(namespace)
 	dataVolume = strings.TrimSpace(dataVolume)
 	authFile = strings.TrimSpace(authFile)
+	agentID = strings.TrimSpace(agentID)
+	authMode = strings.TrimSpace(authMode)
+	modelProvider = strings.TrimSpace(modelProvider)
 	if namespace == "" || dataVolume == "" || authFile == "" {
 		return &usageError{message: "--namespace, --data-volume, and --auth-file are required"}
+	}
+	if profile.RequiresAgentID && agentID == "" {
+		return &usageError{message: "--agent-id is required for openClaw"}
+	}
+	if profile.RequiresAgentID && modelProvider == "" {
+		return &usageError{message: "--model-provider is required for openClaw"}
+	}
+	if authMode != "" && authMode != string(agentsv1alpha1.AgentRunProviderAuthModeOAuth) && authMode != string(agentsv1alpha1.AgentRunProviderAuthModeAPIKey) {
+		return &usageError{message: `--auth-mode must be "oauth" or "apiKey"`}
+	}
+	if profile.RequiresAgentID && authMode == "" {
+		authMode = string(agentsv1alpha1.AgentRunProviderAuthModeOAuth)
 	}
 	_ = waitForIdle
 
@@ -369,8 +452,14 @@ func (app App) authProviderReauth(ctx context.Context, kubeOptions KubeOptions, 
 	if err != nil {
 		return fmt.Errorf("read auth file: %w", err)
 	}
-	if summary := summarizeProviderAuthBytes(profile, body); !summary.ValidJSON {
+	summary := summarizeProviderAuthBytes(profile, body)
+	if !summary.ValidJSON {
 		return fmt.Errorf("auth file is not valid %s auth JSON: %s", profile.DisplayName, summary.Error)
+	}
+	if profile.Provider == agentsv1alpha1.AgentAuthSessionProviderOpenClaw {
+		if err := validateOpenClawAuthFileForMode(body, agentsv1alpha1.AgentRunProviderAuthMode(authMode), modelProvider); err != nil {
+			return fmt.Errorf("auth file: %w", err)
+		}
 	} else if !summary.HasRefreshToken && !summary.HasAPIKey {
 		return fmt.Errorf("auth file has neither refresh material nor API key for %s", profile.DisplayName)
 	}
@@ -436,6 +525,15 @@ func (app App) authProviderReauth(ctx context.Context, kubeOptions KubeOptions, 
 			SeedID:           seedID,
 		},
 	}
+	if authMode != "" {
+		session.Spec.AuthMode = agentsv1alpha1.AgentRunProviderAuthMode(authMode)
+	}
+	if agentID != "" {
+		session.Spec.AgentID = agentID
+	}
+	if modelProvider != "" {
+		session.Spec.ModelProvider = modelProvider
+	}
 	if name := strings.TrimSpace(bootstrapSecret); name != "" {
 		session.Spec.BootstrapSecretRef = &corev1.LocalObjectReference{Name: name}
 		session.Spec.BootstrapSecretKey = profile.AuthJSONKey
@@ -453,12 +551,18 @@ func (app App) authProviderReauth(ctx context.Context, kubeOptions KubeOptions, 
 }
 
 func (app App) authProviderLogout(ctx context.Context, kubeOptions KubeOptions, profile authProviderProfile, args []string) error {
-	var namespace, dataVolume, confirmVolume, output string
+	var namespace, dataVolume, confirmVolume, output, agentID, authMode, modelProvider string
 	var timeout time.Duration = 2 * time.Minute
+	if profile.DefaultAuthMode != "" {
+		authMode = string(profile.DefaultAuthMode)
+	}
 	flags := newCommandFlags(fmt.Sprintf("auth %s logout", profile.CLIName), app.Err)
 	flags.StringVarP(&namespace, "namespace", "n", "", "Namespace (required).")
 	flags.StringVar(&dataVolume, "data-volume", "", "AgentDataVolume name (required).")
 	flags.StringVar(&confirmVolume, "confirm-volume", "", "Must equal --data-volume to confirm durable logout.")
+	flags.StringVar(&agentID, "agent-id", "", "OpenClaw agent ID (required for openClaw).")
+	flags.StringVar(&modelProvider, "model-provider", "", "OpenClaw credential provider (required for openClaw; for example xai).")
+	flags.StringVar(&authMode, "auth-mode", authMode, "Auth mode recorded on the session for openClaw (oauth or apiKey).")
 	flags.DurationVar(&timeout, "timeout", timeout, "How long to wait for the AgentAuthSession to finish.")
 	flags.StringVarP(&output, "output", "o", "summary", "Output format: summary or json.")
 	if err := flags.Parse(args); err != nil {
@@ -470,11 +574,23 @@ func (app App) authProviderLogout(ctx context.Context, kubeOptions KubeOptions, 
 	namespace = strings.TrimSpace(namespace)
 	dataVolume = strings.TrimSpace(dataVolume)
 	confirmVolume = strings.TrimSpace(confirmVolume)
+	agentID = strings.TrimSpace(agentID)
+	authMode = strings.TrimSpace(authMode)
+	modelProvider = strings.TrimSpace(modelProvider)
 	if namespace == "" || dataVolume == "" {
 		return &usageError{message: "--namespace and --data-volume are required"}
 	}
 	if confirmVolume != dataVolume {
 		return &usageError{message: "--confirm-volume must exactly match --data-volume"}
+	}
+	if profile.RequiresAgentID && agentID == "" {
+		return &usageError{message: "--agent-id is required for openClaw"}
+	}
+	if profile.RequiresAgentID && modelProvider == "" {
+		return &usageError{message: "--model-provider is required for openClaw"}
+	}
+	if profile.RequiresAgentID && authMode == "" {
+		authMode = string(agentsv1alpha1.AgentRunProviderAuthModeOAuth)
 	}
 
 	backend, err := app.Factory(kubeOptions)
@@ -501,6 +617,97 @@ func (app App) authProviderLogout(ctx context.Context, kubeOptions KubeOptions, 
 			Action:        agentsv1alpha1.AgentAuthSessionActionLogout,
 			DataVolumeRef: corev1.LocalObjectReference{Name: dataVolume},
 		},
+	}
+	if agentID != "" {
+		session.Spec.AgentID = agentID
+	}
+	if authMode != "" {
+		session.Spec.AuthMode = agentsv1alpha1.AgentRunProviderAuthMode(authMode)
+	}
+	if modelProvider != "" {
+		session.Spec.ModelProvider = modelProvider
+	}
+	if err := backend.CreateAuthSession(ctx, session); err != nil {
+		return err
+	}
+	final, err := app.waitAuthSession(ctx, backend, namespace, sessionName, timeout)
+	if err != nil {
+		return err
+	}
+	return writeAuthSessionResult(app.Out, final, output)
+}
+
+func (app App) authProviderVerify(ctx context.Context, kubeOptions KubeOptions, profile authProviderProfile, args []string) error {
+	var namespace, dataVolume, output, agentID, authMode, modelProvider string
+	var timeout time.Duration = 2 * time.Minute
+	if profile.DefaultAuthMode != "" {
+		authMode = string(profile.DefaultAuthMode)
+	}
+	flags := newCommandFlags(fmt.Sprintf("auth %s verify", profile.CLIName), app.Err)
+	flags.StringVarP(&namespace, "namespace", "n", "", "Namespace (required).")
+	flags.StringVar(&dataVolume, "data-volume", "", "AgentDataVolume name (required).")
+	flags.StringVar(&agentID, "agent-id", "", "OpenClaw agent ID (required for openClaw).")
+	flags.StringVar(&modelProvider, "model-provider", "", "OpenClaw credential provider (required for openClaw; for example xai).")
+	flags.StringVar(&authMode, "auth-mode", authMode, "Auth mode recorded on the session for openClaw (oauth or apiKey).")
+	flags.DurationVar(&timeout, "timeout", timeout, "How long to wait for the AgentAuthSession to finish.")
+	flags.StringVarP(&output, "output", "o", "summary", "Output format: summary or json.")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	if flags.NArg() != 0 {
+		return &usageError{message: fmt.Sprintf("auth %s verify does not accept positional arguments", profile.CLIName)}
+	}
+	namespace = strings.TrimSpace(namespace)
+	dataVolume = strings.TrimSpace(dataVolume)
+	agentID = strings.TrimSpace(agentID)
+	authMode = strings.TrimSpace(authMode)
+	modelProvider = strings.TrimSpace(modelProvider)
+	if namespace == "" || dataVolume == "" {
+		return &usageError{message: "--namespace and --data-volume are required"}
+	}
+	if profile.RequiresAgentID && agentID == "" {
+		return &usageError{message: "--agent-id is required for openClaw"}
+	}
+	if profile.RequiresAgentID && modelProvider == "" {
+		return &usageError{message: "--model-provider is required for openClaw"}
+	}
+	if profile.RequiresAgentID && authMode == "" {
+		authMode = string(agentsv1alpha1.AgentRunProviderAuthModeOAuth)
+	}
+
+	backend, err := app.Factory(kubeOptions)
+	if err != nil {
+		return err
+	}
+	if _, err := backend.GetDataVolume(ctx, namespace, dataVolume); err != nil {
+		return err
+	}
+	sessionName := authSessionName(string(profile.Provider)+"-verify", dataVolume)
+	session := &agentsv1alpha1.AgentAuthSession{
+		TypeMeta: metav1.TypeMeta{APIVersion: agentsv1alpha1.GroupVersion.String(), Kind: "AgentAuthSession"},
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      sessionName,
+			Namespace: namespace,
+			Labels: map[string]string{
+				"app.kubernetes.io/managed-by":                   "anvil-agentctl",
+				"control.anvil.hazyforge.io/agent-auth-provider": string(profile.Provider),
+				"control.anvil.hazyforge.io/agent-auth-action":   "verify",
+			},
+		},
+		Spec: agentsv1alpha1.AgentAuthSessionSpec{
+			Provider:      profile.Provider,
+			Action:        agentsv1alpha1.AgentAuthSessionActionVerify,
+			DataVolumeRef: corev1.LocalObjectReference{Name: dataVolume},
+		},
+	}
+	if agentID != "" {
+		session.Spec.AgentID = agentID
+	}
+	if authMode != "" {
+		session.Spec.AuthMode = agentsv1alpha1.AgentRunProviderAuthMode(authMode)
+	}
+	if modelProvider != "" {
+		session.Spec.ModelProvider = modelProvider
 	}
 	if err := backend.CreateAuthSession(ctx, session); err != nil {
 		return err
@@ -574,9 +781,123 @@ func summarizeProviderAuthBytes(profile authProviderProfile, body []byte) provid
 	switch profile.Provider {
 	case agentsv1alpha1.AgentAuthSessionProviderGrokBuild:
 		return summarizeGrokAuthBytes(body)
+	case agentsv1alpha1.AgentAuthSessionProviderOpenClaw:
+		return summarizeOpenClawAuthBytes(body)
 	default:
 		return summarizeCodexAuthBytesOnly(body)
 	}
+}
+
+func summarizeOpenClawAuthBytes(body []byte) providerAuthSummary {
+	summary := providerAuthSummary{Provider: string(agentsv1alpha1.AgentAuthSessionProviderOpenClaw)}
+	var store struct {
+		Version  int                    `json:"version"`
+		Profiles map[string]interface{} `json:"profiles"`
+	}
+	if err := json.Unmarshal(body, &store); err != nil {
+		summary.Error = "invalid JSON"
+		return summary
+	}
+	if store.Version != 1 {
+		summary.Error = "version must be 1"
+		return summary
+	}
+	if len(store.Profiles) == 0 {
+		summary.Error = "profiles must be non-empty"
+		return summary
+	}
+	summary.ValidJSON = true
+	summary.EntryCount = len(store.Profiles)
+	var seenType string
+	for _, value := range store.Profiles {
+		entry, ok := value.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		credType := strings.ToLower(strings.TrimSpace(fmt.Sprint(entry["type"])))
+		if credType == "<nil>" {
+			credType = ""
+		}
+		if credType == "" {
+			credType = strings.ToLower(strings.TrimSpace(fmt.Sprint(entry["credentialType"])))
+			if credType == "<nil>" {
+				credType = ""
+			}
+		}
+		switch credType {
+		case "oauth":
+			summary.HasAccessToken = summary.HasAccessToken || strings.TrimSpace(fmt.Sprint(entry["access"])) != "" && fmt.Sprint(entry["access"]) != "<nil>"
+			summary.HasRefreshToken = summary.HasRefreshToken || strings.TrimSpace(fmt.Sprint(entry["refresh"])) != "" && fmt.Sprint(entry["refresh"]) != "<nil>"
+			if summary.AuthMode == "" {
+				summary.AuthMode = "oauth"
+			}
+		case "api_key", "apikey":
+			hasKey := strings.TrimSpace(fmt.Sprint(entry["key"])) != "" && fmt.Sprint(entry["key"]) != "<nil>"
+			hasKeyRef := validOpenClawAuthKeyRef(entry["keyRef"])
+			summary.HasAPIKey = summary.HasAPIKey || hasKey || hasKeyRef
+			if summary.AuthMode == "" {
+				summary.AuthMode = "apiKey"
+			}
+			credType = "api_key"
+		}
+		if seenType == "" {
+			seenType = credType
+		} else if seenType != credType && credType != "" {
+			summary.Error = "mixed credential types"
+			summary.ValidJSON = false
+			return summary
+		}
+	}
+	return summary
+}
+
+func validateOpenClawAuthFileForMode(body []byte, mode agentsv1alpha1.AgentRunProviderAuthMode, modelProvider string) error {
+	summary := summarizeOpenClawAuthBytes(body)
+	if !summary.ValidJSON {
+		return fmt.Errorf("%s", firstNonEmpty(summary.Error, "invalid OpenClaw profile store"))
+	}
+	switch mode {
+	case agentsv1alpha1.AgentRunProviderAuthModeOAuth:
+		if summary.AuthMode != "oauth" || !summary.HasRefreshToken || !summary.HasAccessToken {
+			return fmt.Errorf("authMode oauth requires oauth profiles with access and refresh")
+		}
+	case agentsv1alpha1.AgentRunProviderAuthModeAPIKey:
+		if summary.AuthMode != "apiKey" || !summary.HasAPIKey {
+			return fmt.Errorf("authMode apiKey requires api_key profiles with key material")
+		}
+	default:
+		return fmt.Errorf("authMode must be oauth or apiKey")
+	}
+	var store struct {
+		Profiles map[string]map[string]interface{} `json:"profiles"`
+	}
+	if err := json.Unmarshal(body, &store); err != nil {
+		return fmt.Errorf("invalid OpenClaw profile store")
+	}
+	expectedProvider := strings.TrimSpace(modelProvider)
+	if expectedProvider == "" {
+		return fmt.Errorf("modelProvider is required")
+	}
+	for id, profile := range store.Profiles {
+		provider := strings.TrimSpace(fmt.Sprint(profile["provider"]))
+		if provider == "<nil>" {
+			provider = ""
+		}
+		if provider != expectedProvider {
+			return fmt.Errorf("profile %q provider %q does not match modelProvider %q", id, provider, expectedProvider)
+		}
+	}
+	return nil
+}
+
+func validOpenClawAuthKeyRef(value interface{}) bool {
+	ref, ok := value.(map[string]interface{})
+	if !ok {
+		return false
+	}
+	return strings.TrimSpace(fmt.Sprint(ref["source"])) == "env" &&
+		strings.TrimSpace(fmt.Sprint(ref["provider"])) != "" && fmt.Sprint(ref["provider"]) != "<nil>" &&
+		strings.TrimSpace(fmt.Sprint(ref["id"])) != "" && fmt.Sprint(ref["id"]) != "<nil>"
 }
 
 func summarizeCodexAuthBytesOnly(body []byte) providerAuthSummary {
@@ -731,4 +1052,3 @@ func authStagingSecretName(sessionName string) string {
 	}
 	return name
 }
-

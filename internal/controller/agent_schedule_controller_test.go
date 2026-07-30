@@ -670,7 +670,10 @@ func TestAgentScheduleDailyRunBudgetIncludesTerminalRunsAndManualNudges(t *testi
 	schedule.Spec.MaxRunsPerDay = 1
 	schedule.Annotations = map[string]string{controlv1alpha1.AgentScheduleRunNowAnnotation: "manual-over-budget"}
 	schedule.Status = controlv1alpha1.AgentScheduleStatus{ObservedGeneration: 1, NextRunAt: &due}
-	existing := testScheduledAgentRun("platform-health-today", now.Add(-time.Hour))
+	// Keep the fixture inside the current UTC day even when the test runs during
+	// the first hour after midnight; the exact age is irrelevant to this budget
+	// assertion.
+	existing := testScheduledAgentRun("platform-health-today", now)
 	existing.Status.Phase = controlv1alpha1.AgentRunPhaseSucceeded
 
 	reconciler := &AgentScheduleReconciler{

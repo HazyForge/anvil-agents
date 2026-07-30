@@ -69,7 +69,9 @@ the certified submission contract.
 - `AgentSchedule`: interval and manual run creation across named templates.
 - `AgentRunControl`: cluster-wide pause and concurrency policy by scope key.
 - `AgentDataVolume` and `VolumeProfile`: explicit durable PVC-backed state.
-- `AgentAuthSession`: operator-driven durable Codex auth reauth/logout sessions.
+- `AgentAuthSession`: operator-driven durable auth reauth/logout/verify sessions
+  for Codex, Grok Build, and OpenClaw (OAuth operational path; OpenClaw api_key
+  profile import is supported without putting keys in manifests).
 - `AdverseSituation`: deduplicated event buffers with optional responders.
 - `AdverseSignal`: immutable, provider-neutral adverse evidence from any app.
 - `anvil-agents-api`: optional OIDC-protected summaries, live SSE logs, and the

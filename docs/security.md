@@ -42,12 +42,22 @@ is backfilled by the controller; new executions record both immediately.
 Structured CLI views escape terminal control characters; the explicit
 `run logs` stream remains raw.
 
-Codex auth maintenance uses append-only `AgentAuthSession` objects. The CLI
-creates a short-lived staging Secret and session; the controller creates one
-fixed maintenance Job with `automountServiceAccountToken: false`, no caller-
-selected image/command/mount, and credential env that is never logged. Bootstrap
-Secret updates refuse ExternalSecret-managed targets. Untrusted AgentRuns may
-call `self report` only and never create auth sessions or mutate Secrets.
+Provider auth maintenance uses append-only `AgentAuthSession` objects (Codex,
+Grok Build, and OpenClaw). The CLI creates a short-lived staging Secret and
+session for `reauth` only; `verify` and `logout` never stage credentials. The
+controller creates one fixed maintenance Job with
+`automountServiceAccountToken: false`, no caller-selected image/command/mount,
+and credential env that is never logged. Reauth projects only the provider's
+exact staging key, never the entire Secret. OpenClaw sessions bind the selected
+agent, model provider, and auth mode; a strict, symlink-safe parser resolves the
+registered agent directory without launching the OpenClaw CLI or volume-owned
+plugins while credentials are present. OpenClaw Jobs use the OpenClaw runner
+image with UID/GID/fsGroup `1000` and `fsGroupChangePolicy=OnRootMismatch`;
+Codex/Grok Jobs retain `10001`. OpenClaw reauth writes only the selected
+agent's canonical auth profile store via the OpenClaw SDK and never replaces
+SQLite databases or prints secrets. Bootstrap Secret updates refuse
+ExternalSecret-managed targets. Untrusted AgentRuns may call `self report` only
+and never create auth sessions or mutate Secrets.
 
 Creating an `AdverseSignal` is incident-trigger authority for enabled
 `AdverseSituation` responders in that namespace. A write-only reporter role
