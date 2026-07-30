@@ -52,9 +52,12 @@ spec:
                   ToolAllowlist restricts the MCP tool names exposed to the model. Empty
                   allows all tools reported by tools/list.
                 items:
+                  maxLength: 253
+                  minLength: 1
                   type: string
-                maxItems: 256
+                maxItems: 64
                 type: array
+                x-kubernetes-list-type: set
               transport:
                 description: AgentMCPTransport is an exclusive MCP transport union.
                 properties:
@@ -67,6 +70,8 @@ spec:
                         description: Command is the complete argv vector; shell evaluation
                           is never used.
                         items:
+                          maxLength: 1024
+                          minLength: 1
                           type: string
                         maxItems: 64
                         minItems: 1
@@ -75,20 +80,15 @@ spec:
                         description: RequiredEnv lists environment-variable names
                           that must exist at preflight.
                         items:
+                          maxLength: 253
+                          pattern: ^[A-Z_][A-Z0-9_]*$
                           type: string
                         maxItems: 64
                         type: array
+                        x-kubernetes-list-type: set
                     required:
                     - command
                     type: object
-                    x-kubernetes-validations:
-                    - message: command arguments must not be empty
-                      rule: self.command.all(a, a != '')
-                    - message: requiredEnv must contain unique environment-variable
-                        names
-                      rule: '!has(self.requiredEnv) || (self.requiredEnv.all(e, e.matches(''^[A-Z_][A-Z0-9_]*$''))
-                        && self.requiredEnv.all(e, self.requiredEnv.filter(x, x ==
-                        e).size() == 1))'
                   streamableHTTP:
                     description: AgentMCPStreamableHTTPTransport connects to a Streamable
                       HTTP MCP endpoint.
@@ -96,6 +96,7 @@ spec:
                       endpoint:
                         description: Endpoint must use HTTPS and cannot contain embedded
                           credentials.
+                        maxLength: 4096
                         pattern: ^https://[^@/?#]+(?::[0-9]+)?(?:/[^?#]*)?$
                         type: string
                       headers:
@@ -108,9 +109,11 @@ spec:
                             variable populated by the harness identity/credential envelope.
                           properties:
                             envVar:
+                              maxLength: 253
                               pattern: ^[A-Z_][A-Z0-9_]*$
                               type: string
                             name:
+                              maxLength: 253
                               pattern: ^[A-Za-z0-9][A-Za-z0-9-]*$
                               type: string
                           required:
@@ -119,26 +122,23 @@ spec:
                           type: object
                         maxItems: 32
                         type: array
+                        x-kubernetes-list-map-keys:
+                        - name
+                        x-kubernetes-list-type: map
                       requiredEnv:
                         description: |-
                           RequiredEnv lists additional environment-variable names required by the
                           server integration.
                         items:
+                          maxLength: 253
+                          pattern: ^[A-Z_][A-Z0-9_]*$
                           type: string
                         maxItems: 64
                         type: array
+                        x-kubernetes-list-type: set
                     required:
                     - endpoint
                     type: object
-                    x-kubernetes-validations:
-                    - message: header names must be unique
-                      rule: '!has(self.headers) || self.headers.all(h, self.headers.filter(x,
-                        x.name == h.name).size() == 1)'
-                    - message: requiredEnv must contain unique environment-variable
-                        names
-                      rule: '!has(self.requiredEnv) || (self.requiredEnv.all(e, e.matches(''^[A-Z_][A-Z0-9_]*$''))
-                        && self.requiredEnv.all(e, self.requiredEnv.filter(x, x ==
-                        e).size() == 1))'
                 type: object
                 x-kubernetes-validations:
                 - message: exactly one of stdio or streamableHTTP must be set
@@ -146,11 +146,6 @@ spec:
             required:
             - transport
             type: object
-            x-kubernetes-validations:
-            - message: toolAllowlist must contain unique non-empty tool names
-              rule: '!has(self.toolAllowlist) || (self.toolAllowlist.all(t, t != '''')
-                && self.toolAllowlist.all(t, self.toolAllowlist.filter(x, x == t).size()
-                == 1))'
         required:
         - spec
         type: object

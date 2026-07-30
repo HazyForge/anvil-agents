@@ -22,6 +22,11 @@ fail() {
   exit 1
 }
 
+if grep -R -n -E '”|“' "${root_dir}/api" "${root_dir}/config/crd/bases" "${root_dir}/charts/anvil-agents/templates/crds.yaml" >"${tmp_dir}/unicode-cel.txt"; then
+  cat "${tmp_dir}/unicode-cel.txt" >&2
+  fail "capability CEL contains Unicode quote characters"
+fi
+
 expect_template_failure() {
   local name="$1"
   shift

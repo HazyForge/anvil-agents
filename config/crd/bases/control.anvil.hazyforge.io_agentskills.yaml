@@ -57,11 +57,14 @@ spec:
                     description: |-
                       APIBaseURL overrides the GitHub API base for an allowlisted GitHub
                       Enterprise host. Empty uses https://api.github.com.
+                    maxLength: 2048
                     pattern: ^https://[^/?#]+(?:/[^?#]*)?$
                     type: string
                   path:
                     description: Path is the repository-relative path to SKILL.md.
+                    maxLength: 253
                     minLength: 1
+                    pattern: ^(?:[A-Za-z0-9_-][A-Za-z0-9._-]*|\.[A-Za-z0-9_-][A-Za-z0-9._-]*|\.\.[A-Za-z0-9._-]+)(?:/(?:[A-Za-z0-9_-][A-Za-z0-9._-]*|\.[A-Za-z0-9_-][A-Za-z0-9._-]*|\.\.[A-Za-z0-9._-]+))*$
                     type: string
                   ref:
                     description: Ref is an immutable Git commit object ID.
@@ -71,11 +74,14 @@ spec:
                     description: ReferencePaths are additional Markdown-only package
                       documents.
                     items:
+                      maxLength: 253
+                      pattern: ^(?:[A-Za-z0-9_-][A-Za-z0-9._-]*|\.[A-Za-z0-9_-][A-Za-z0-9._-]*|\.\.[A-Za-z0-9._-]+)(?:/(?:[A-Za-z0-9_-][A-Za-z0-9._-]*|\.[A-Za-z0-9_-][A-Za-z0-9._-]*|\.\.[A-Za-z0-9._-]+))*$
                       type: string
                     maxItems: 64
                     type: array
                   repository:
                     description: Repository is owner/name.
+                    maxLength: 512
                     pattern: ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$
                     type: string
                 required:
@@ -86,15 +92,9 @@ spec:
                 x-kubernetes-validations:
                 - message: path must name SKILL.md
                   rule: self.path == 'SKILL.md' || self.path.endsWith('/SKILL.md')
-                - message: path must be a safe relative path
-                  rule: '!self.path.startsWith(''/'') && self.path.split(''/'').all(p,
-                    p != '''' && p != ''.'' && p != ''..'')'
-                - message: referencePaths must contain only safe relative non-SKILL
-                    Markdown paths
-                  rule: '!has(self.referencePaths) || self.referencePaths.all(p, p
-                    != '''' && !p.startsWith(''/'') && p.split(''/'').all(s, s !=
-                    '''' && s != ''.'' && s != ''..'') && p.endsWith(''.md'') && p
-                    != ''SKILL.md'' && !p.endsWith(''/SKILL.md''))'
+                - message: referencePaths must contain only non-SKILL Markdown paths
+                  rule: '!has(self.referencePaths) || self.referencePaths.all(p, p.endsWith(''.md'')
+                    && p != ''SKILL.md'' && !p.endsWith(''/SKILL.md''))'
                 - message: referencePaths must not contain duplicates
                   rule: '!has(self.referencePaths) || self.referencePaths.all(p, self.referencePaths.filter(q,
                     q == p).size() == 1)'
@@ -111,23 +111,26 @@ spec:
                       properties:
                         content:
                           description: Content is the Markdown document body.
+                          maxLength: 1048576
                           type: string
                         path:
                           description: Path is the package-relative Markdown path.
+                          maxLength: 253
                           minLength: 1
+                          pattern: ^(?:[A-Za-z0-9_-][A-Za-z0-9._-]*|\.[A-Za-z0-9_-][A-Za-z0-9._-]*|\.\.[A-Za-z0-9._-]+)(?:/(?:[A-Za-z0-9_-][A-Za-z0-9._-]*|\.[A-Za-z0-9_-][A-Za-z0-9._-]*|\.\.[A-Za-z0-9._-]+))*$
                           type: string
                       required:
                       - content
                       - path
                       type: object
                       x-kubernetes-validations:
-                      - message: path must be a safe relative Markdown path
-                        rule: '!self.path.startsWith(''/'') && self.path.split(''/'').all(p,
-                          p != '''' && p != ''.'' && p != ''..'') && self.path.endsWith(''.md'')'
+                      - message: path must be a Markdown path
+                        rule: self.path.endsWith('.md')
                     maxItems: 64
                     type: array
                   skillMD:
                     description: SkillMD is the complete SKILL.md document.
+                    maxLength: 1048576
                     minLength: 1
                     type: string
                 required:

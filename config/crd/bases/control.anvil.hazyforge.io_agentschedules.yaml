@@ -2602,6 +2602,8 @@ spec:
                                       description: Command is the complete argv vector;
                                         shell evaluation is never used.
                                       items:
+                                        maxLength: 1024
+                                        minLength: 1
                                         type: string
                                       maxItems: 64
                                       minItems: 1
@@ -2610,21 +2612,15 @@ spec:
                                       description: RequiredEnv lists environment-variable
                                         names that must exist at preflight.
                                       items:
+                                        maxLength: 253
+                                        pattern: ^[A-Z_][A-Z0-9_]*$
                                         type: string
                                       maxItems: 64
                                       type: array
+                                      x-kubernetes-list-type: set
                                   required:
                                   - command
                                   type: object
-                                  x-kubernetes-validations:
-                                  - message: command arguments must not be empty
-                                    rule: self.command.all(a, a != '')
-                                  - message: requiredEnv must contain unique environment-variable
-                                      names
-                                    rule: '!has(self.requiredEnv) || (self.requiredEnv.all(e,
-                                      e.matches(''^[A-Z_][A-Z0-9_]*$'')) && self.requiredEnv.all(e,
-                                      self.requiredEnv.filter(x, x == e).size() ==
-                                      1))'
                                 streamableHTTP:
                                   description: AgentMCPStreamableHTTPTransport connects
                                     to a Streamable HTTP MCP endpoint.
@@ -2632,6 +2628,7 @@ spec:
                                     endpoint:
                                       description: Endpoint must use HTTPS and cannot
                                         contain embedded credentials.
+                                      maxLength: 4096
                                       pattern: ^https://[^@/?#]+(?::[0-9]+)?(?:/[^?#]*)?$
                                       type: string
                                     headers:
@@ -2644,9 +2641,11 @@ spec:
                                           variable populated by the harness identity/credential envelope.
                                         properties:
                                           envVar:
+                                            maxLength: 253
                                             pattern: ^[A-Z_][A-Z0-9_]*$
                                             type: string
                                           name:
+                                            maxLength: 253
                                             pattern: ^[A-Za-z0-9][A-Za-z0-9-]*$
                                             type: string
                                         required:
@@ -2655,28 +2654,23 @@ spec:
                                         type: object
                                       maxItems: 32
                                       type: array
+                                      x-kubernetes-list-map-keys:
+                                      - name
+                                      x-kubernetes-list-type: map
                                     requiredEnv:
                                       description: |-
                                         RequiredEnv lists additional environment-variable names required by the
                                         server integration.
                                       items:
+                                        maxLength: 253
+                                        pattern: ^[A-Z_][A-Z0-9_]*$
                                         type: string
                                       maxItems: 64
                                       type: array
+                                      x-kubernetes-list-type: set
                                   required:
                                   - endpoint
                                   type: object
-                                  x-kubernetes-validations:
-                                  - message: header names must be unique
-                                    rule: '!has(self.headers) || self.headers.all(h,
-                                      self.headers.filter(x, x.name == h.name).size()
-                                      == 1)'
-                                  - message: requiredEnv must contain unique environment-variable
-                                      names
-                                    rule: '!has(self.requiredEnv) || (self.requiredEnv.all(e,
-                                      e.matches(''^[A-Z_][A-Z0-9_]*$'')) && self.requiredEnv.all(e,
-                                      self.requiredEnv.filter(x, x == e).size() ==
-                                      1))'
                               type: object
                               x-kubernetes-validations:
                               - message: exactly one of stdio or streamableHTTP must
@@ -2822,21 +2816,20 @@ spec:
                                 name:
                                   description: Name is the command name exposed on
                                     PATH.
+                                  maxLength: 253
                                   pattern: ^[A-Za-z0-9][A-Za-z0-9._-]*$
                                   type: string
                                 path:
                                   description: Path is a safe relative executable
                                     path.
+                                  maxLength: 253
                                   minLength: 1
+                                  pattern: ^(?:[A-Za-z0-9_-][A-Za-z0-9._-]*|\.[A-Za-z0-9_-][A-Za-z0-9._-]*|\.\.[A-Za-z0-9._-]+)(?:/(?:[A-Za-z0-9_-][A-Za-z0-9._-]*|\.[A-Za-z0-9_-][A-Za-z0-9._-]*|\.\.[A-Za-z0-9._-]+))*$
                                   type: string
                               required:
                               - name
                               - path
                               type: object
-                              x-kubernetes-validations:
-                              - message: path must be a safe relative path
-                                rule: '!self.path.startsWith(''/'') && self.path.split(''/'').all(p,
-                                  p != '''' && p != ''.'' && p != ''..'')'
                             name:
                               description: Name is a stable tool identifier such as
                                 kbctl.
@@ -2867,6 +2860,8 @@ spec:
                                             description: |-
                                               ExecutablePath is the safe relative file path inside an archive. It is
                                               empty only for format=binary.
+                                            maxLength: 253
+                                            pattern: ^(?:[A-Za-z0-9_-][A-Za-z0-9._-]*|\.[A-Za-z0-9_-][A-Za-z0-9._-]*|\.\.[A-Za-z0-9._-]+)(?:/(?:[A-Za-z0-9_-][A-Za-z0-9._-]*|\.[A-Za-z0-9_-][A-Za-z0-9._-]*|\.\.[A-Za-z0-9._-]+))*$
                                             type: string
                                           format:
                                             description: Format controls safe extraction.
@@ -2885,6 +2880,7 @@ spec:
                                                 enum:
                                                 - amd64
                                                 - arm64
+                                                maxLength: 16
                                                 type: string
                                               os:
                                                 description: OS is the Go-style operating
@@ -2892,6 +2888,7 @@ spec:
                                                 enum:
                                                 - linux
                                                 - darwin
+                                                maxLength: 16
                                                 type: string
                                             required:
                                             - arch
@@ -2904,6 +2901,7 @@ spec:
                                             type: string
                                           url:
                                             description: URL must use HTTPS.
+                                            maxLength: 4096
                                             pattern: ^https://[^[:space:]]+$
                                             type: string
                                         required:
@@ -2914,25 +2912,15 @@ spec:
                                         type: object
                                         x-kubernetes-validations:
                                         - message: executablePath must be empty for
-                                            binary artifacts and a safe relative path
-                                            for archives
+                                            binary artifacts and set for archives
                                           rule: (self.format == 'binary' && !has(self.executablePath))
-                                            || (self.format != 'binary' && has(self.executablePath)
-                                            && self.executablePath != '' && !self.executablePath.startsWith('/')
-                                            && self.executablePath.split('/').all(p,
-                                            p != '' && p != '.' && p != '..'))
-                                      maxItems: 16
+                                            || (self.format != 'binary' && has(self.executablePath))
+                                      maxItems: 4
                                       minItems: 1
                                       type: array
                                   required:
                                   - artifacts
                                   type: object
-                                  x-kubernetes-validations:
-                                  - message: artifacts must not contain duplicate
-                                      platforms
-                                    rule: self.artifacts.all(a, self.artifacts.filter(b,
-                                      b.platform.os == a.platform.os && b.platform.arch
-                                      == a.platform.arch).size() == 1)
                                 inlineScript:
                                   description: |-
                                     AgentToolInlineScript is a complete executable script installed as the
@@ -2944,6 +2932,8 @@ spec:
                                         Interpreter is an argv-form interpreter prefix, for example
                                         ["/usr/bin/env", "bash"].
                                       items:
+                                        maxLength: 4096
+                                        minLength: 1
                                         type: string
                                       maxItems: 8
                                       minItems: 1
@@ -2951,15 +2941,13 @@ spec:
                                     script:
                                       description: Script is the executable script
                                         body.
+                                      maxLength: 1048576
                                       minLength: 1
                                       type: string
                                   required:
                                   - interpreter
                                   - script
                                   type: object
-                                  x-kubernetes-validations:
-                                  - message: interpreter arguments must not be empty
-                                    rule: self.interpreter.all(a, a != '')
                                 ociArtifact:
                                   properties:
                                     artifacts:
@@ -2972,7 +2960,9 @@ spec:
                                           executablePath:
                                             description: ExecutablePath is the safe
                                               relative executable path in the artifact.
+                                            maxLength: 253
                                             minLength: 1
+                                            pattern: ^(?:[A-Za-z0-9_-][A-Za-z0-9._-]*|\.[A-Za-z0-9_-][A-Za-z0-9._-]*|\.\.[A-Za-z0-9._-]+)(?:/(?:[A-Za-z0-9_-][A-Za-z0-9._-]*|\.[A-Za-z0-9_-][A-Za-z0-9._-]*|\.\.[A-Za-z0-9._-]+))*$
                                             type: string
                                           platform:
                                             description: AgentToolPlatform selects
@@ -2984,6 +2974,7 @@ spec:
                                                 enum:
                                                 - amd64
                                                 - arm64
+                                                maxLength: 16
                                                 type: string
                                               os:
                                                 description: OS is the Go-style operating
@@ -2991,6 +2982,7 @@ spec:
                                                 enum:
                                                 - linux
                                                 - darwin
+                                                maxLength: 16
                                                 type: string
                                             required:
                                             - arch
@@ -2999,6 +2991,7 @@ spec:
                                           reference:
                                             description: Reference must include a
                                               sha256 digest.
+                                            maxLength: 4096
                                             pattern: ^[^[:space:]@]+@sha256:[a-f0-9]{64}$
                                             type: string
                                         required:
@@ -3006,24 +2999,12 @@ spec:
                                         - platform
                                         - reference
                                         type: object
-                                        x-kubernetes-validations:
-                                        - message: executablePath must be a safe relative
-                                            path
-                                          rule: '!self.executablePath.startsWith(''/'')
-                                            && self.executablePath.split(''/'').all(p,
-                                            p != '''' && p != ''.'' && p != ''..'')'
-                                      maxItems: 16
+                                      maxItems: 4
                                       minItems: 1
                                       type: array
                                   required:
                                   - artifacts
                                   type: object
-                                  x-kubernetes-validations:
-                                  - message: artifacts must not contain duplicate
-                                      platforms
-                                    rule: self.artifacts.all(a, self.artifacts.filter(b,
-                                      b.platform.os == a.platform.os && b.platform.arch
-                                      == a.platform.arch).size() == 1)
                               type: object
                               x-kubernetes-validations:
                               - message: exactly one tool source must be set
@@ -6027,6 +6008,8 @@ spec:
                                             description: Command is the complete argv
                                               vector; shell evaluation is never used.
                                             items:
+                                              maxLength: 1024
+                                              minLength: 1
                                               type: string
                                             maxItems: 64
                                             minItems: 1
@@ -6035,21 +6018,15 @@ spec:
                                             description: RequiredEnv lists environment-variable
                                               names that must exist at preflight.
                                             items:
+                                              maxLength: 253
+                                              pattern: ^[A-Z_][A-Z0-9_]*$
                                               type: string
                                             maxItems: 64
                                             type: array
+                                            x-kubernetes-list-type: set
                                         required:
                                         - command
                                         type: object
-                                        x-kubernetes-validations:
-                                        - message: command arguments must not be empty
-                                          rule: self.command.all(a, a != '')
-                                        - message: requiredEnv must contain unique
-                                            environment-variable names
-                                          rule: '!has(self.requiredEnv) || (self.requiredEnv.all(e,
-                                            e.matches(''^[A-Z_][A-Z0-9_]*$'')) &&
-                                            self.requiredEnv.all(e, self.requiredEnv.filter(x,
-                                            x == e).size() == 1))'
                                       streamableHTTP:
                                         description: AgentMCPStreamableHTTPTransport
                                           connects to a Streamable HTTP MCP endpoint.
@@ -6057,6 +6034,7 @@ spec:
                                           endpoint:
                                             description: Endpoint must use HTTPS and
                                               cannot contain embedded credentials.
+                                            maxLength: 4096
                                             pattern: ^https://[^@/?#]+(?::[0-9]+)?(?:/[^?#]*)?$
                                             type: string
                                           headers:
@@ -6069,9 +6047,11 @@ spec:
                                                 variable populated by the harness identity/credential envelope.
                                               properties:
                                                 envVar:
+                                                  maxLength: 253
                                                   pattern: ^[A-Z_][A-Z0-9_]*$
                                                   type: string
                                                 name:
+                                                  maxLength: 253
                                                   pattern: ^[A-Za-z0-9][A-Za-z0-9-]*$
                                                   type: string
                                               required:
@@ -6080,28 +6060,23 @@ spec:
                                               type: object
                                             maxItems: 32
                                             type: array
+                                            x-kubernetes-list-map-keys:
+                                            - name
+                                            x-kubernetes-list-type: map
                                           requiredEnv:
                                             description: |-
                                               RequiredEnv lists additional environment-variable names required by the
                                               server integration.
                                             items:
+                                              maxLength: 253
+                                              pattern: ^[A-Z_][A-Z0-9_]*$
                                               type: string
                                             maxItems: 64
                                             type: array
+                                            x-kubernetes-list-type: set
                                         required:
                                         - endpoint
                                         type: object
-                                        x-kubernetes-validations:
-                                        - message: header names must be unique
-                                          rule: '!has(self.headers) || self.headers.all(h,
-                                            self.headers.filter(x, x.name == h.name).size()
-                                            == 1)'
-                                        - message: requiredEnv must contain unique
-                                            environment-variable names
-                                          rule: '!has(self.requiredEnv) || (self.requiredEnv.all(e,
-                                            e.matches(''^[A-Z_][A-Z0-9_]*$'')) &&
-                                            self.requiredEnv.all(e, self.requiredEnv.filter(x,
-                                            x == e).size() == 1))'
                                     type: object
                                     x-kubernetes-validations:
                                     - message: exactly one of stdio or streamableHTTP
@@ -6249,21 +6224,20 @@ spec:
                                       name:
                                         description: Name is the command name exposed
                                           on PATH.
+                                        maxLength: 253
                                         pattern: ^[A-Za-z0-9][A-Za-z0-9._-]*$
                                         type: string
                                       path:
                                         description: Path is a safe relative executable
                                           path.
+                                        maxLength: 253
                                         minLength: 1
+                                        pattern: ^(?:[A-Za-z0-9_-][A-Za-z0-9._-]*|\.[A-Za-z0-9_-][A-Za-z0-9._-]*|\.\.[A-Za-z0-9._-]+)(?:/(?:[A-Za-z0-9_-][A-Za-z0-9._-]*|\.[A-Za-z0-9_-][A-Za-z0-9._-]*|\.\.[A-Za-z0-9._-]+))*$
                                         type: string
                                     required:
                                     - name
                                     - path
                                     type: object
-                                    x-kubernetes-validations:
-                                    - message: path must be a safe relative path
-                                      rule: '!self.path.startsWith(''/'') && self.path.split(''/'').all(p,
-                                        p != '''' && p != ''.'' && p != ''..'')'
                                   name:
                                     description: Name is a stable tool identifier
                                       such as kbctl.
@@ -6295,6 +6269,8 @@ spec:
                                                   description: |-
                                                     ExecutablePath is the safe relative file path inside an archive. It is
                                                     empty only for format=binary.
+                                                  maxLength: 253
+                                                  pattern: ^(?:[A-Za-z0-9_-][A-Za-z0-9._-]*|\.[A-Za-z0-9_-][A-Za-z0-9._-]*|\.\.[A-Za-z0-9._-]+)(?:/(?:[A-Za-z0-9_-][A-Za-z0-9._-]*|\.[A-Za-z0-9_-][A-Za-z0-9._-]*|\.\.[A-Za-z0-9._-]+))*$
                                                   type: string
                                                 format:
                                                   description: Format controls safe
@@ -6315,6 +6291,7 @@ spec:
                                                       enum:
                                                       - amd64
                                                       - arm64
+                                                      maxLength: 16
                                                       type: string
                                                     os:
                                                       description: OS is the Go-style
@@ -6322,6 +6299,7 @@ spec:
                                                       enum:
                                                       - linux
                                                       - darwin
+                                                      maxLength: 16
                                                       type: string
                                                   required:
                                                   - arch
@@ -6334,6 +6312,7 @@ spec:
                                                   type: string
                                                 url:
                                                   description: URL must use HTTPS.
+                                                  maxLength: 4096
                                                   pattern: ^https://[^[:space:]]+$
                                                   type: string
                                               required:
@@ -6344,27 +6323,17 @@ spec:
                                               type: object
                                               x-kubernetes-validations:
                                               - message: executablePath must be empty
-                                                  for binary artifacts and a safe
-                                                  relative path for archives
+                                                  for binary artifacts and set for
+                                                  archives
                                                 rule: (self.format == 'binary' &&
                                                   !has(self.executablePath)) || (self.format
-                                                  != 'binary' && has(self.executablePath)
-                                                  && self.executablePath != '' &&
-                                                  !self.executablePath.startsWith('/')
-                                                  && self.executablePath.split('/').all(p,
-                                                  p != '' && p != '.' && p != '..'))
-                                            maxItems: 16
+                                                  != 'binary' && has(self.executablePath))
+                                            maxItems: 4
                                             minItems: 1
                                             type: array
                                         required:
                                         - artifacts
                                         type: object
-                                        x-kubernetes-validations:
-                                        - message: artifacts must not contain duplicate
-                                            platforms
-                                          rule: self.artifacts.all(a, self.artifacts.filter(b,
-                                            b.platform.os == a.platform.os && b.platform.arch
-                                            == a.platform.arch).size() == 1)
                                       inlineScript:
                                         description: |-
                                           AgentToolInlineScript is a complete executable script installed as the
@@ -6376,6 +6345,8 @@ spec:
                                               Interpreter is an argv-form interpreter prefix, for example
                                               ["/usr/bin/env", "bash"].
                                             items:
+                                              maxLength: 4096
+                                              minLength: 1
                                               type: string
                                             maxItems: 8
                                             minItems: 1
@@ -6383,16 +6354,13 @@ spec:
                                           script:
                                             description: Script is the executable
                                               script body.
+                                            maxLength: 1048576
                                             minLength: 1
                                             type: string
                                         required:
                                         - interpreter
                                         - script
                                         type: object
-                                        x-kubernetes-validations:
-                                        - message: interpreter arguments must not
-                                            be empty
-                                          rule: self.interpreter.all(a, a != '')
                                       ociArtifact:
                                         properties:
                                           artifacts:
@@ -6406,7 +6374,9 @@ spec:
                                                   description: ExecutablePath is the
                                                     safe relative executable path
                                                     in the artifact.
+                                                  maxLength: 253
                                                   minLength: 1
+                                                  pattern: ^(?:[A-Za-z0-9_-][A-Za-z0-9._-]*|\.[A-Za-z0-9_-][A-Za-z0-9._-]*|\.\.[A-Za-z0-9._-]+)(?:/(?:[A-Za-z0-9_-][A-Za-z0-9._-]*|\.[A-Za-z0-9_-][A-Za-z0-9._-]*|\.\.[A-Za-z0-9._-]+))*$
                                                   type: string
                                                 platform:
                                                   description: AgentToolPlatform selects
@@ -6419,6 +6389,7 @@ spec:
                                                       enum:
                                                       - amd64
                                                       - arm64
+                                                      maxLength: 16
                                                       type: string
                                                     os:
                                                       description: OS is the Go-style
@@ -6426,6 +6397,7 @@ spec:
                                                       enum:
                                                       - linux
                                                       - darwin
+                                                      maxLength: 16
                                                       type: string
                                                   required:
                                                   - arch
@@ -6434,6 +6406,7 @@ spec:
                                                 reference:
                                                   description: Reference must include
                                                     a sha256 digest.
+                                                  maxLength: 4096
                                                   pattern: ^[^[:space:]@]+@sha256:[a-f0-9]{64}$
                                                   type: string
                                               required:
@@ -6441,25 +6414,12 @@ spec:
                                               - platform
                                               - reference
                                               type: object
-                                              x-kubernetes-validations:
-                                              - message: executablePath must be a
-                                                  safe relative path
-                                                rule: '!self.executablePath.startsWith(''/'')
-                                                  && self.executablePath.split(''/'').all(p,
-                                                  p != '''' && p != ''.'' && p !=
-                                                  ''..'')'
-                                            maxItems: 16
+                                            maxItems: 4
                                             minItems: 1
                                             type: array
                                         required:
                                         - artifacts
                                         type: object
-                                        x-kubernetes-validations:
-                                        - message: artifacts must not contain duplicate
-                                            platforms
-                                          rule: self.artifacts.all(a, self.artifacts.filter(b,
-                                            b.platform.os == a.platform.os && b.platform.arch
-                                            == a.platform.arch).size() == 1)
                                     type: object
                                     x-kubernetes-validations:
                                     - message: exactly one tool source must be set
