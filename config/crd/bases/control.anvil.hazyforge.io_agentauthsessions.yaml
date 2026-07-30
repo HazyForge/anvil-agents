@@ -59,16 +59,39 @@ spec:
               Credential bytes never appear in the spec; reauth mounts a short-lived staging Secret.
             properties:
               action:
-                description: Action selects whether to import fresh credentials or
-                  clear durable login state.
+                description: |-
+                  Action selects whether to import fresh credentials, clear durable login
+                  state, or verify existing provider-native auth without mutation.
                 enum:
                 - reauth
                 - logout
+                - verify
+                type: string
+              agentID:
+                description: |-
+                  AgentID is the OpenClaw agent identity whose auth store is maintained.
+                  Required for provider=openClaw and forbidden for other providers. Must
+                  match the harness OpenClaw AgentID (DNS label). The maintenance Job
+                  resolves the registered agent's agentDir by strictly parsing the
+                  volume-owned openclaw.json without loading plugins or concatenating an
+                  assumed database path.
+                maxLength: 63
+                pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                type: string
+              authMode:
+                description: |-
+                  AuthMode records how the staged or existing credentials authenticate.
+                  Required for provider=openClaw (oauth is the current operational path;
+                  apiKey is accepted for valid OpenClaw api_key profile import). Optional
+                  for codex/grokBuild for backward compatibility.
+                enum:
+                - apiKey
+                - oauth
                 type: string
               bootstrapSecretKey:
                 description: |-
                   BootstrapSecretKey is the key written into the bootstrap Secret. Defaults to CODEX_AUTH_JSON
-                  for codex and GROK_AUTH_JSON for grokBuild.
+                  for codex, GROK_AUTH_JSON for grokBuild, and OPENCLAW_AUTH_PROFILES_JSON for openClaw.
                 type: string
               bootstrapSecretRef:
                 description: |-
@@ -101,24 +124,36 @@ spec:
                     type: string
                 type: object
                 x-kubernetes-map-type: atomic
+              modelProvider:
+                description: |-
+                  ModelProvider identifies the credential provider inside the selected
+                  OpenClaw agent store (for example xai). Required for provider=openClaw
+                  and forbidden for other providers so an unrelated OAuth profile cannot
+                  satisfy an auth receipt.
+                maxLength: 63
+                pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                type: string
               provider:
                 description: Provider selects the harness-specific durable auth layout.
                 enum:
                 - codex
                 - grokBuild
+                - openClaw
                 type: string
               seedID:
                 description: |-
-                  SeedID is an opaque marker written next to durable auth.json so runners can reseed only
-                  when operators deliberately change the seed. Required for reauth.
+                  SeedID is an opaque marker written next to durable auth state so runners can reseed only
+                  when operators deliberately change the seed. Required for reauth; forbidden for logout/verify.
                 maxLength: 128
                 pattern: ^[A-Za-z0-9._:-]+$
                 type: string
               stagingSecretRef:
                 description: |-
                   StagingSecretRef names a same-namespace Secret that holds provider auth bytes for reauth.
-                  Codex expects CODEX_AUTH_JSON; grokBuild expects GROK_AUTH_JSON. The controller mounts it
+                  Codex expects CODEX_AUTH_JSON; grokBuild expects GROK_AUTH_JSON; openClaw expects
+                  OPENCLAW_AUTH_PROFILES_JSON (version=1 profile store). The controller mounts it
                   read-only and deletes it after a successful reauth when it is session-owned.
+                  Forbidden for logout and verify.
                 properties:
                   name:
                     default: ""
@@ -152,6 +187,33 @@ spec:
             - message: spec.seedID is required when action is reauth
               rule: self.action != 'reauth' || (has(self.seedID) && size(self.seedID)
                 > 0)
+            - message: spec.stagingSecretRef is forbidden when action is logout or
+                verify
+              rule: '!(self.action == ''logout'' || self.action == ''verify'') ||
+                !has(self.stagingSecretRef)'
+            - message: spec.seedID is forbidden when action is logout or verify
+              rule: '!(self.action == ''logout'' || self.action == ''verify'') ||
+                !has(self.seedID) || size(self.seedID) == 0'
+            - message: spec.bootstrapSecretRef is allowed only when action is reauth
+              rule: self.action == 'reauth' || !has(self.bootstrapSecretRef)
+            - message: spec.bootstrapSecretKey is allowed only when action is reauth
+              rule: self.action == 'reauth' || !has(self.bootstrapSecretKey) || size(self.bootstrapSecretKey)
+                == 0
+            - message: spec.agentID is required when provider is openClaw
+              rule: self.provider != 'openClaw' || (has(self.agentID) && size(self.agentID)
+                > 0)
+            - message: spec.authMode is required when provider is openClaw
+              rule: self.provider != 'openClaw' || (has(self.authMode) && size(self.authMode)
+                > 0)
+            - message: spec.modelProvider is required when provider is openClaw
+              rule: self.provider != 'openClaw' || (has(self.modelProvider) && size(self.modelProvider)
+                > 0)
+            - message: spec.agentID is forbidden unless provider is openClaw
+              rule: self.provider == 'openClaw' || !has(self.agentID) || size(self.agentID)
+                == 0
+            - message: spec.modelProvider is forbidden unless provider is openClaw
+              rule: self.provider == 'openClaw' || !has(self.modelProvider) || size(self.modelProvider)
+                == 0
           status:
             description: AgentAuthSessionStatus records verified volume identity,
               Job progress, and terminal outcome.
