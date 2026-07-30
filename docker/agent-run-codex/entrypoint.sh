@@ -21,6 +21,7 @@ repository_ref="${ANVIL_AGENT_RUN_REPOSITORY_REF:-}"
 github_host="${ANVIL_GITHUB_HOST:-github.com}"
 
 source /opt/anvil-agent-run/lib/repository-checkout.sh
+source /opt/anvil-agent-run/lib/capabilities.sh
 
 mkdir -p "$(dirname "${status_file}")"
 : > "${status_file}"
@@ -219,63 +220,6 @@ configure_codex_home() {
 	codex_config_set_string "model_verbosity" "${ANVIL_CODEX_VERBOSITY}"
 }
 
-run_tool_setup() {
-	local ran_any="false"
-	if [[ -n "${tool_setup_files}" ]]; then
-		echo "ANVIL_AGENT_RUN_TOOL_SETUP_START"
-		if command -v anvil-agent-status >/dev/null 2>&1; then
-			anvil-agent-status progress --stage tool-setup --summary "Preparing AgentRun tools." >/dev/null || true
-		fi
-		while IFS= read -r tool_file; do
-			if [[ -z "${tool_file}" ]]; then
-				continue
-			fi
-			if [[ ! -f "${tool_file}" ]]; then
-				echo "ANVIL_AGENT_RUN_TOOL_SETUP_MISSING file=${tool_file}" >&2
-				exit 1
-			fi
-			echo "ANVIL_AGENT_RUN_TOOL_SETUP_SOURCE file=$(basename "${tool_file}")"
-			# shellcheck source=/dev/null
-			. "${tool_file}"
-			cd "${workdir}"
-			ran_any="true"
-		done <<< "${tool_setup_files}"
-	fi
-
-	if [[ -n "${tools_json}" ]]; then
-		if command -v jq >/dev/null 2>&1 && command -v base64 >/dev/null 2>&1; then
-			while IFS= read -r encoded_tool; do
-				if [[ -z "${encoded_tool}" ]]; then
-					continue
-				fi
-				local tool_json
-				local tool_name
-				local verify_count
-				tool_json="$(printf '%s' "${encoded_tool}" | base64 -d)"
-				tool_name="$(jq -r '.name // "unnamed"' <<< "${tool_json}")"
-				verify_count="$(jq -r '(.verifyCommand // []) | length' <<< "${tool_json}")"
-				if [[ "${verify_count}" == "0" ]]; then
-					continue
-				fi
-				mapfile -t verify_command < <(jq -r '.verifyCommand[]' <<< "${tool_json}")
-				echo "ANVIL_AGENT_RUN_TOOL_VERIFY_START name=${tool_name}"
-				"${verify_command[@]}"
-				echo "ANVIL_AGENT_RUN_TOOL_VERIFY_OK name=${tool_name}"
-				ran_any="true"
-			done < <(jq -r '.[] | @base64' <<< "${tools_json}")
-		else
-			echo "ANVIL_AGENT_RUN_TOOL_VERIFY_SKIPPED reason=missing-jq-or-base64"
-		fi
-	fi
-
-	if [[ "${ran_any}" == "true" ]]; then
-		echo "ANVIL_AGENT_RUN_TOOL_SETUP_COMPLETE"
-		if command -v anvil-agent-status >/dev/null 2>&1; then
-			anvil-agent-status progress --stage tool-setup --summary "AgentRun tools are ready." >/dev/null || true
-		fi
-	fi
-}
-
 github_preflight
 configure_codex_home
 
@@ -301,7 +245,7 @@ if [[ -d .git && -n "${repository_ref}" ]]; then
 	anvil_checkout_repository_ref "${repository_ref}" || exit $?
 fi
 
-run_tool_setup
+anvil_prepare_capabilities "${workdir}" "${ANVIL_AGENT_RUN_BACKEND:-codex}"
 
 combined_prompt="$(mktemp)"
 {

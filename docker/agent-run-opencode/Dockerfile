@@ -22,9 +22,12 @@ RUN --mount=type=cache,target=/go/pkg/mod go mod download
 COPY api/ ./api/
 COPY internal/ ./internal/
 COPY cmd/anvil-agentctl/ ./cmd/anvil-agentctl/
+COPY cmd/anvil-agent-capabilities/ ./cmd/anvil-agent-capabilities/
 RUN --mount=type=cache,target=/root/.cache/go-build \
 	CGO_ENABLED=0 GOOS="${TARGETOS}" GOARCH="${TARGETARCH}" \
-	go build -trimpath -ldflags="-s -w" -o /out/anvil-agentctl ./cmd/anvil-agentctl
+	go build -trimpath -ldflags="-s -w" -o /out/anvil-agentctl ./cmd/anvil-agentctl \
+	&& CGO_ENABLED=0 GOOS="${TARGETOS}" GOARCH="${TARGETARCH}" \
+	go build -trimpath -ldflags="-s -w" -o /out/anvil-agent-capabilities ./cmd/anvil-agent-capabilities
 
 FROM debian:bookworm-slim
 
@@ -90,13 +93,17 @@ COPY docker/agent-run-codex/anvil-agent-status /usr/local/bin/anvil-agent-status
 COPY docker/agent-run-codex/anvil-observability /usr/local/bin/anvil-observability
 COPY docker/agent-run-common/github-auth.sh /opt/anvil-agent-run/lib/github-auth.sh
 COPY docker/agent-run-common/repository-checkout.sh /opt/anvil-agent-run/lib/repository-checkout.sh
+COPY docker/agent-run-common/capabilities.sh /opt/anvil-agent-run/lib/capabilities.sh
 COPY docker/agent-run-opencode/args.sh /opt/anvil-agent-run/lib/opencode-args.sh
 COPY docker/agent-run-opencode/entrypoint.sh /usr/local/bin/anvil-agent-run-opencode
 COPY --from=agent-feedback-builder /out/anvil-hotline /usr/local/bin/anvil-hotline
 COPY --from=agent-feedback-builder /out/anvil-agent-feedback /usr/local/bin/anvil-agent-feedback
 COPY --from=agent-feedback-builder /out/anvil-agentctl /usr/local/bin/anvil-agentctl
+COPY --from=agent-feedback-builder /out/anvil-agent-capabilities /usr/local/bin/anvil-agent-capabilities
 
 RUN chmod 0755 /usr/local/bin/anvil-agent-run-opencode \
+	/usr/local/bin/anvil-agent-capabilities \
+	/opt/anvil-agent-run/lib/capabilities.sh \
 	&& chmod 0755 /usr/local/bin/anvil-agent-status \
 	&& chmod 0755 /usr/local/bin/anvil-observability \
 	&& chmod 0755 /usr/local/bin/anvil-hotline \
