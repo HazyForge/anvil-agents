@@ -5,16 +5,5 @@ metadata:
   namespace: agents
 spec:
   description: Small repository inspection commands shared by agent roles.
-  tools:
+  toolRefs:
     - name: repository-status
-      description: Show the checked-out revision and working-tree status.
-      setupScript: |
-        mkdir -p .anvil-tools
-        cat > .anvil-tools/repository-status <<'SCRIPT'
-        #!/usr/bin/env sh
-        set -eu
-        git rev-parse HEAD
-        git status --short
-        SCRIPT
-        chmod 0700 .anvil-tools/repository-status
-      verifyCommand: [".anvil-tools/repository-status"]

@@ -8,9 +8,8 @@ controller status reasons.
 The v1alpha1 project is community-supported without a guaranteed response or
 backport window. Consumer deployment questions should identify the external
 values or GitOps repository that owns cluster identity, credentials, routing,
-storage, placement, and image pins. The repository-local `.hazyforge` build and
-test contracts and optional `.hazyforge/clusters/anvil-primaris/` consumer
-overlay support Hazy Forge's own deployment; they are examples and maintainer
-configuration, not portable operator requirements.
+storage, placement, and image pins. This repository supplies the portable
+source, chart, images, examples, public security program, and release
+artifacts; it does not carry Hazy Forge cluster deployment configuration.
 
 Security reports follow [SECURITY.md](SECURITY.md), never public issues.

@@ -5,7 +5,7 @@ agent loops on Kubernetes. It turns independent, heavyweight agent work into
 schedulable Jobs, so repository builds, test suites, security analysis,
 indexing, migrations, and long research loops can use the CPU and memory of a
 cluster instead of competing on one workstation. Declarative runs, composable
-profiles, skill sets, tool sets, schedules, and event streams become isolated
+profiles, atomic skills/tools/MCP servers, ordered sets, schedules, and event streams become isolated
 Jobs, and each run can select Codex, OpenCode, Hermes Agent, OpenClaw, Grok
 Build, Pi, or a custom harness.
 
@@ -22,10 +22,10 @@ Run/Profile/Harness/Skills/Schedule      Kubernetes Job
 
 Kubernetes provides scheduling, isolation, and distribution. Explicit
 `AgentDataVolume` resources and external services provide durable memory.
-Run profiles provide reusable role and policy. Harness, skill, and tool sets
-let operators change the runtime, instructions, and external integrations on
-independent lifecycles. The operator does not require Anvil Primaris, Anvil
-Hub, or another Hazy Forge control plane.
+Run profiles provide reusable role and policy. Harnesses, atomic capabilities,
+and their ordered sets let operators change runtime, instructions,
+executables, and MCP connections on independent lifecycles. The operator does
+not require Anvil Primaris, Anvil Hub, or another Hazy Forge control plane.
 
 The branded API group `control.anvil.hazyforge.io/v1alpha1` is retained as a
 stable API identity and for migration compatibility. Application and target
@@ -64,12 +64,15 @@ the certified submission contract.
 - `AgentRun`: one append-only execution record and one harness Job.
 - `AgentRunProfile`: reusable role, scope, policy, and composition defaults.
 - `AgentHarnessProfile`: reusable backend and Kubernetes execution envelope.
-- `AgentSkillSet`: reusable skills and delegated personas.
-- `AgentToolSet`: reusable external tool setup and verification contracts.
+- `AgentSkill` and `AgentSkillSet`: Markdown-only instructions and ordered collections.
+- `AgentTool` and `AgentToolSet`: executable acquisition contracts and ordered collections.
+- `AgentMCPServer` and `AgentMCPSet`: secret-free MCP connections and ordered collections.
 - `AgentSchedule`: interval and manual run creation across named templates.
 - `AgentRunControl`: cluster-wide pause and concurrency policy by scope key.
 - `AgentDataVolume` and `VolumeProfile`: explicit durable PVC-backed state.
-- `AgentAuthSession`: operator-driven durable Codex auth reauth/logout sessions.
+- `AgentAuthSession`: operator-driven durable auth reauth/logout/verify sessions
+  for Codex, Grok Build, and OpenClaw (OAuth operational path; OpenClaw api_key
+  profile import is supported without putting keys in manifests).
 - `AdverseSituation`: deduplicated event buffers with optional responders.
 - `AdverseSignal`: immutable, provider-neutral adverse evidence from any app.
 - `anvil-agents-api`: optional OIDC-protected summaries, live SSE logs, and the
@@ -148,9 +151,6 @@ make kind-e2e
 # Complete local publication from a clean checkout after docker login and
 # helm registry login:
 make release-local-all VERSION=vX.Y.Z REGISTRY_PREFIX=registry.example.com/team
-
-# Update the first-party Anvil Primaris deploy overlay from the generated lock:
-make release-pin-deploy VERSION=vX.Y.Z
 ```
 
 `make images` builds the controller plus all six built-in runner images into
@@ -167,11 +167,10 @@ and chart artifacts, run `make release-local`.
 `publish-release.sh` runs `make verify` and `make kind-e2e`, publishes all
 seven versioned images, verifies their immutable digests and source revision,
 writes a digest lock, and pushes an OCI chart whose seven default image
-references are pinned to that lock. `make release-pin-deploy` updates the
-first-party Anvil Primaris overlay from that lock so the controller and built-in
-runner defaults move together.
+references are pinned to that lock. Consumer deployment repositories use that
+lock to advance their controller and built-in runner references together.
 
-GitHub workflows use the same repository-owned build and test contracts and are
+GitHub workflows use the same repository-owned build and test scripts and are
 optional. The optional release workflow is manual-only for an existing `v*` tag.
 It verifies the tag and Kind upgrade/install tests, then invokes
 `publish-release.sh --skip-verification` so Actions and local publication
@@ -198,7 +197,7 @@ audience, and explicit namespace authorization bindings are configured. See
 
 - [Architecture and multi-harness semantics](docs/architecture.md)
 - [Distributed heavy workloads across machines](docs/distributed-workloads.md)
-- [Composable profiles, harnesses, skill sets, tool sets, and overrides](docs/composition.md)
+- [Canonical capability composition and compatibility overlays](docs/composition.md)
 - [Getting started](docs/getting-started.md)
 - [Harness contract and adapter matrix](docs/harnesses.md)
 - [Knowledge bases, tools, and external services](docs/integrating-knowledge-and-tools.md)
@@ -212,13 +211,12 @@ audience, and explicit namespace authorization bindings are configured. See
 - [Migration from Anvil Primaris](docs/migration-from-anvil-primaris.md)
 - [Third-party notices](THIRD_PARTY_NOTICES.md)
 
-Hazy Forge uses this same open-source runtime for its own agent system. The
-repository-local `.hazyforge/artifact-build.yaml` and `.hazyforge/tests.yaml`
-files are maintainer build and test contracts. The
-`.hazyforge/clusters/anvil-primaris/` tree is an optional Hazy Forge consumer
-deployment with environment-specific identity, credentials, routing, storage,
-placement, and image pins. None of those files is a chart default or runtime
-dependency; other consumers provide their own Helm values or GitOps layer.
+Hazy Forge uses this same open-source runtime for its own agent system. This
+repository owns the source, CRDs, reusable Helm chart, controller and runner
+images, portable examples, public security evidence, and release artifacts.
+Environment-specific identity, credentials, routing, storage, placement,
+application policy, and image pins live in consumer deployment repositories,
+including the private Anvil Primaris repository.
 
 ## Project Status
 

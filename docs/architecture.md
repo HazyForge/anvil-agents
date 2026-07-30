@@ -9,8 +9,8 @@ state back onto the `AgentRun`.
 
 1. A user or `AgentSchedule` creates an `AgentRun`.
 2. The controller resolves its namespace-local `AgentRunProfile`,
-   `AgentHarnessProfile`, ordered `AgentSkillSet` and `AgentToolSet` refs, and
-   local overrides.
+   `AgentHarnessProfile`, ordered atomic skill, tool, and MCP selections (or
+   their corresponding sets), and local overrides.
 3. It validates backend, Secret, storage, and optional ExternalSecret refs.
 4. It writes `prompt.md`, `source.json`, skill files, and tool setup scripts,
    then records composition and payload digests.
@@ -69,13 +69,15 @@ explicit API, Git repository, message bus, database, or `AgentDataVolume`.
 An `AgentRunProfile` owns why and where a role operates. An
 `AgentHarnessProfile` owns how one provider runtime executes, including its
 image, workload identity, credentials, storage, placement, and limits. An
-`AgentSkillSet` owns reusable backend-neutral instruction packs and optional
-delegated personas. `AgentToolSet` owns setup and verification contracts for
-external tools whose lifecycle is independent from those instructions.
+`AgentSkill` owns one Markdown-only instruction package, an `AgentTool` owns
+one executable acquisition contract, and an `AgentMCPServer` owns one
+secret-free protocol connection. Their corresponding sets own only ordered
+same-kind references. Deprecated embedded definitions and personas remain
+compatibility inputs.
 
 The split allows the same knowledge or review policy and external client to run
-through Codex, OpenCode, Pi, or a custom harness without copying them. Skill
-and tool sets cannot select a Secret, ServiceAccount, image, or volume, so
+through Codex, OpenCode, Pi, or a custom harness without copying them. Atomic
+capabilities and sets cannot select a Secret, ServiceAccount, image, or volume, so
 choosing one never silently grants runtime identity. Tool setup scripts still
 execute code, so their authors remain a code-execution authority. See [Agent
 Composition](composition.md) for the exact merge and override rules.

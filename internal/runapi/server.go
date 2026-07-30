@@ -20,6 +20,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	agentsv1alpha1 "github.com/hazyforge/anvil-agents/api/v1alpha1"
+	"github.com/hazyforge/anvil-agents/internal/archive"
 )
 
 type principalContextKey struct{}
@@ -36,7 +37,10 @@ type Server struct {
 	runs          client.Reader
 	// writes is optional. Composition POST/PUT/DELETE require a client.Client.
 	// When nil, write endpoints report composition_write_disabled.
-	writes     client.Client
+	writes client.Client
+	// archives is optional PostgreSQL history used for archive list and purge
+	// verification. When nil, purge still works against status.archive only.
+	archives   archive.AgentRunArchiveStore
 	logs       AgentRunLogSource
 	log        logr.Logger
 	httpServer *http.Server
@@ -44,6 +48,11 @@ type Server struct {
 }
 
 func NewServer(config Config, authenticator AccessTokenAuthenticator, runs client.Reader, logs AgentRunLogSource, log logr.Logger) (*Server, error) {
+	return NewServerWithArchive(config, authenticator, runs, logs, nil, log)
+}
+
+// NewServerWithArchive builds the AgentRun API with optional PostgreSQL archive access.
+func NewServerWithArchive(config Config, authenticator AccessTokenAuthenticator, runs client.Reader, logs AgentRunLogSource, archives archive.AgentRunArchiveStore, log logr.Logger) (*Server, error) {
 	if err := config.Validate(); err != nil {
 		return nil, err
 	}
@@ -55,6 +64,7 @@ func NewServer(config Config, authenticator AccessTokenAuthenticator, runs clien
 		authenticator: authenticator,
 		authorizer:    NewAuthorizer(config.Authorization),
 		runs:          runs,
+		archives:      archives,
 		logs:          logs,
 		log:           log,
 		limiter:       newStreamLimiter(config.Stream.MaxConnections, config.Stream.MaxConnectionsPerSubject),
@@ -108,6 +118,9 @@ func (server *Server) routes() http.Handler {
 	mux.HandleFunc("GET /ui-config.json", server.handleUIConfig)
 	mux.Handle("GET /api/v1/namespaces/{namespace}/agent-runs", server.authenticate(http.HandlerFunc(server.handleListRuns)))
 	mux.Handle("POST /api/v1/namespaces/{namespace}/agent-runs", server.authenticate(http.HandlerFunc(server.handleCreateRun)))
+	// Register purge before the {name} route so "purge" is not captured as a name.
+	mux.Handle("POST /api/v1/namespaces/{namespace}/agent-runs/purge", server.authenticate(http.HandlerFunc(server.handlePurgeRuns)))
+	mux.Handle("GET /api/v1/namespaces/{namespace}/agent-run-archives", server.authenticate(http.HandlerFunc(server.handleListArchives)))
 	mux.Handle("GET /api/v1/namespaces/{namespace}/agent-runs/{name}", server.authenticate(http.HandlerFunc(server.handleGetRun)))
 	mux.Handle("GET /api/v1/namespaces/{namespace}/agent-runs/{name}/events", server.authenticate(http.HandlerFunc(server.handleRunEvents)))
 	server.registerCompositionRoutes(mux)
@@ -151,7 +164,9 @@ func (server *Server) handleUIConfig(writer http.ResponseWriter, _ *http.Request
 			"writeEnabled": server.config.Composition.WriteEnabled,
 		},
 		"runs": map[string]any{
-			"createEnabled": server.config.Runs.CreateEnabled,
+			"createEnabled":         server.config.Runs.CreateEnabled,
+			"purgeEnabled":          server.config.Runs.PurgeEnabled,
+			"archiveStoreAvailable": server.archives != nil,
 		},
 	})
 }
@@ -288,7 +303,7 @@ func (server *Server) securityHeaders(next http.Handler) http.Handler {
 		} else {
 			// Console SPA: same-origin assets/API plus OIDC issuer for discovery
 			// and token exchange (Authorization Code + PKCE).
-			connect := []string{"'self'"}
+			connect := []string{"'self'", "https://api.github.com"}
 			if issuerOrigin := oidcIssuerOrigin(server.config.OIDC.Issuer); issuerOrigin != "" {
 				connect = append(connect, issuerOrigin)
 			}

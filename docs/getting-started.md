@@ -52,9 +52,9 @@ is pinned to `kind-anvil-agents` (or the selected
 cluster available for inspection.
 
 `make kind-e2e` first uses a disposable cluster to upgrade a portable seven-CRD
-legacy-object baseline to the twelve-CRD composition and signal API without losing
+legacy-object baseline to the sixteen-CRD composition and signal API without losing
 existing objects. It then runs the current execution, validates every sample with
-server-side dry-run, uninstalls the chart, proves all twelve CRDs plus the run,
+server-side dry-run, uninstalls the chart, proves all sixteen CRDs plus the run,
 profiles, skill set, tool set, data volume, and PVC were retained, and reinstalls the
 controller. A second run then executes through the retained composition and
 storage objects. The quickstart also asserts the resolved harness, skill-set,
@@ -140,21 +140,14 @@ package, pass that same file to `package-chart.sh --image-lock` together with
 `--source-revision "$(git rev-parse 'vX.Y.Z^{commit}')"`. The package command
 rejects lock metadata that does not match the expected version-tag commit.
 
-### Anvil Primaris first-party cutovers
+### Publish release artifacts
 
-For the Hazy Forge Primaris overlay (digest pins + CRD install + optional live
-Helm apply), prefer the local Docker path in
-[Release to Primaris](release-primaris.md):
+This repository publishes the reusable chart, controller and runner images,
+and immutable image lock. Consumer deployment repositories own cluster rollout
+and promotion:
 
 ```bash
-# Console/controller iteration → build, pin, helm deploy (no Actions, no Kind):
-make release-primaris-hot
-
-# Versioned release, pin Primaris deploy.yaml (commit for Argo):
-VERSION=v0.1.14 make release-primaris-fast
-
-# Apply current pins + CRDs from the local chart:
-make deploy-primaris
+VERSION=vX.Y.Z make release-local
 ```
 
 ## Add A Real Harness
@@ -164,10 +157,11 @@ make deploy-primaris
 3. Create one provider credential Secret in that namespace.
 4. Create an `AgentHarnessProfile` selecting the adapter, digest-pinned image,
    ServiceAccount, provider Secret, timeout, and resource limits.
-5. Create any backend-neutral `AgentSkillSet` instruction packs and
-   `AgentToolSet` external tool contracts.
-6. Create an `AgentRunProfile` that composes the role, harness, skills, and
-   tools.
+5. Create backend-neutral atomic `AgentSkill`, `AgentTool`, and
+   `AgentMCPServer` resources, then collect reusable ordered selections in
+   their corresponding sets where useful.
+6. Create an `AgentRunProfile` that explicitly composes the role, harness,
+   atomic capabilities, and sets.
 7. Create a run with a non-empty `sourceRef.kind` and `sourceRef.name`.
 8. Observe status and logs, then enable schedules only after the manual path is
    bounded and repeatable.

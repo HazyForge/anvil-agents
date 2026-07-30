@@ -12,7 +12,7 @@ against two deployments that use different election IDs.
 
 ## Handoff
 
-1. Back up the twelve agent CRDs and all agent custom resources.
+1. Back up the sixteen agent CRDs and all agent custom resources.
 2. Record the embedded controller replica count and confirm there are no
    unexpected terminating runs.
 3. Stage the standalone release with `crds.install=true` and zero replicas
@@ -20,7 +20,8 @@ against two deployments that use different election IDs.
    superset and the chart's Helm and Argo retention annotations without
    starting a second reconciler.
 4. Verify the seven existing CRD UIDs did not change, the three composition
-   CRDs, `AdverseSignal`, and `AgentAuthSession` CRDs exist, and all twelve CRDs carry
+   CRDs, `AdverseSignal`, `AgentAuthSession`, and atomic capability CRDs exist,
+   and all sixteen CRDs carry
    `helm.sh/resource-policy: keep` and
    `argocd.argoproj.io/sync-options: Prune=false`.
 5. Deploy the Anvil Primaris version where the embedded agent registrations and
@@ -39,10 +40,11 @@ Migrate incrementally rather than rewriting every run at cutover:
 1. Create an `AgentHarnessProfile` in each consuming namespace with the
    profile's backend, image, ServiceAccount, credential refs, data volumes,
    placement, and resource settings.
-2. Create one or more `AgentSkillSet` objects for reusable skills and delegated
-   personas. Create `AgentToolSet` objects for independently owned tools. Keep
-   role intent and standing policy in the run profile.
-3. Add `harnessProfileRef`, `skillSets.refs`, and `toolSets.refs` to the
+2. Create one `AgentSkill` per Markdown package and one `AgentTool` per
+   executable contract. Add ordered refs to `AgentSkillSet` and `AgentToolSet`;
+   create secret-free `AgentMCPServer` and `AgentMCPSet` resources as needed.
+   Keep role intent and standing policy in the run profile.
+3. Add `harnessProfileRef` and canonical `capabilities` selections to the
    existing run profile.
 4. Remove migrated inline runtime and capability fields after a canary run
    reports the expected `status.resolvedComposition` refs and digests.
@@ -52,8 +54,8 @@ Migrate incrementally rather than rewriting every run at cutover:
 Profile-inline runtime fields overlay the profile-selected harness for
 compatibility. They are skipped during a run-local harness swap to prevent old
 provider credentials from leaking into the replacement. Legacy inline skills,
-tools, and subagents remain a final overlay even with `skillSets.mode: Replace`
-or `toolSets.mode: Replace`; remove them when a clean replacement is required.
+tools, and subagents remain a final overlay even with a canonical run-level
+`Replace`; remove them when a clean replacement is required.
 
 ## Client and stream migration
 
@@ -90,14 +92,10 @@ full provider-neutral configuration and access-token contract.
 
 Keep the initial safe stage in the consumer deployment: `replicaCount: 0`,
 `crds.install: true`, and immutable references for the controller plus six
-runner images before scaling the controller. This repository retains Hazy
-Forge's optional consumer values and manifests under
-`.hazyforge/clusters/anvil-primaris/`. The Anvil Primaris repository owns the
-supporting remote ApplicationSet discovery under
-`manifests/bases/argocd-remote-apps` and its cluster instance configuration.
-Neither layer is a portable runtime prerequisite. Other consumers should keep identity,
-credentials, routes, storage, placement, image pins, and application policy in
-their own deployment layer.
+runner images before scaling the controller. The Anvil Primaris repository owns
+its values, manifests, application discovery, identity, credentials, routes,
+storage, placement, image pins, and application policy. Other consumers should
+keep the same cluster-specific concerns in their own deployment layer.
 
 ## Storage compatibility
 

@@ -47,12 +47,12 @@ kubectl patch agentdatavolume -n <namespace> <volume> \
   --patch '{"status":{"claimUID":"<verified-pvc-uid>"}}'
 ```
 
-Back up all twelve custom-resource kinds and relevant PVCs before an upgrade.
+Back up all sixteen custom-resource kinds and relevant PVCs before an upgrade.
 Run `helm template` and review CRD changes first. Only one controller may
 reconcile the branded API group during a migration or rollback.
 
 `make kind-upgrade-e2e` proves a portable seven-CRD, legacy-object baseline can
-be upgraded to the current twelve-CRD chart while retaining profiles and runs. It
+be upgraded to the current sixteen-CRD chart while retaining profiles and runs. It
 uses and removes a dedicated disposable Kind cluster. Set
 `ANVIL_AGENTS_UPGRADE_FROM_REF` to a reachable historical chart ref when
 testing an exact released baseline; the default does not depend on an
@@ -66,7 +66,7 @@ The controller exposes `/healthz` and `/readyz` on port 8081 and metrics on
 ```bash
 kubectl get agentruns,agentschedules,agentdatavolumes -A
 kubectl describe agentrun -n <namespace> <name>
-kubectl get agentharnessprofiles,agentskillsets,agenttoolsets -n <namespace>
+kubectl get agentharnessprofiles,agentskills,agentskillsets,agenttools,agenttoolsets,agentmcpservers,agentmcpsets -n <namespace>
 kubectl get jobs,pods -n <namespace> \
   -l control.anvil.hazyforge.io/agent-run=<name>
 ```
@@ -183,8 +183,6 @@ The Make release targets are deliberately split:
   matching release assets.
 - `make release-local-all VERSION=vX.Y.Z` runs `release-tag-push`,
   `release-local`, and `release-github` in sequence.
-- `make release-pin-deploy VERSION=vX.Y.Z` rewrites the first-party Anvil
-  Primaris deployment values from `dist/images-vX.Y.Z.lock.tsv`.
 
 `hack/package-chart.sh` still supports a convenient version-tagged development
 package. Pass `--image-lock dist/images-vX.Y.Z.lock.tsv` when assembling an

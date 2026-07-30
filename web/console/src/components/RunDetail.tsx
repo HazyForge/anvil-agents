@@ -210,14 +210,23 @@ export function RunDetail({ run, token, onRunUpdate }: Props) {
               </dd>
               <dt>Tool sets</dt>
               <dd className="mono">
-                {(composition.toolSetRefs ?? []).length > 0
-                  ? (composition.toolSetRefs ?? []).map((ref, index) => (
-                      <span key={`${ref.name}-${index}`}>
-                        {index > 0 ? ", " : null}
-                        {compositionRefLink(run.namespace, "tool-sets", ref)}
-                      </span>
-                    ))
-                  : "—"}
+                {compositionRefList(run.namespace, "tool-sets", composition.toolSetRefs)}
+              </dd>
+              <dt>Atomic skills</dt>
+              <dd className="mono">
+                {compositionRefList(run.namespace, "skills", composition.skillRefs)}
+              </dd>
+              <dt>Atomic tools</dt>
+              <dd className="mono">
+                {compositionRefList(run.namespace, "tools", composition.toolRefs)}
+              </dd>
+              <dt>MCP sets</dt>
+              <dd className="mono">
+                {compositionRefList(run.namespace, "mcp-sets", composition.mcpSetRefs)}
+              </dd>
+              <dt>MCP servers</dt>
+              <dd className="mono">
+                {compositionRefList(run.namespace, "mcp-servers", composition.mcpServerRefs)}
               </dd>
               <dt>Scope</dt>
               <dd>
@@ -270,4 +279,20 @@ function compositionRefLink(
       {label}
     </Link>
   );
+}
+
+function compositionRefList(
+  runNamespace: string,
+  kindRoute: string,
+  refs?: ResolvedObjectRef[],
+): React.ReactNode {
+  if (!refs?.length) {
+    return "—";
+  }
+  return refs.map((ref, index) => (
+    <span key={`${ref.namespace ?? runNamespace}-${ref.name}-${index}`}>
+      {index > 0 ? ", " : null}
+      {compositionRefLink(runNamespace, kindRoute, ref)}
+    </span>
+  ));
 }

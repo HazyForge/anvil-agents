@@ -2,6 +2,7 @@
 {{- $compositionRead := dig "composition" "readEnabled" false .Values.api.config }}
 {{- $compositionWrite := dig "composition" "writeEnabled" false .Values.api.config }}
 {{- $runsCreate := dig "runs" "createEnabled" false .Values.api.config }}
+{{- $runsPurge := dig "runs" "purgeEnabled" false .Values.api.config }}
 {{- if and $compositionWrite (not $compositionRead) }}
 {{- fail "api.config.composition.writeEnabled requires api.config.composition.readEnabled" }}
 {{- end }}
@@ -21,17 +22,22 @@ rules:
 {{- if $runsCreate }}
       - create
 {{- end }}
+{{- if $runsPurge }}
+      - delete
+{{- end }}
 {{- if $compositionRead }}
   - apiGroups: ["control.anvil.hazyforge.io"]
     resources:
       - agentrunprofiles
       - agentharnessprofiles
+      - agentskills
+      - agenttools
+      - agentmcpservers
+      - agentmcpsets
       - agentskillsets
       - agenttoolsets
       - volumeprofiles
       - agentdatavolumes
-      # Append-only auth maintenance CRs: read for console cards; mutate via anvil-agentctl only.
-      - agentauthsessions
     verbs:
       - get
       - list
@@ -40,6 +46,10 @@ rules:
     resources:
       - agentrunprofiles
       - agentharnessprofiles
+      - agentskills
+      - agenttools
+      - agentmcpservers
+      - agentmcpsets
       - agentskillsets
       - agenttoolsets
       - volumeprofiles

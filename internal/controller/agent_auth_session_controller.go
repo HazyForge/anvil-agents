@@ -2,8 +2,10 @@ package controller
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"path"
+	"strconv"
 	"strings"
 	"time"
 
@@ -44,22 +46,31 @@ const (
 	agentAuthGrokSeedFileName      = ".anvil-grok-auth-seed-id"
 	agentAuthGrokLogoutFileName    = ".anvil-grok-auth-logged-out"
 	// Relative to GROK_BUILD_HOME / mountPath: HOME/.grok/auth.json with HOME=mount.
-	agentAuthGrokAuthRelPath       = ".grok/auth.json"
-	agentAuthDefaultTimeoutSeconds = int32(300)
-	agentAuthContainerName         = "auth"
+	agentAuthGrokAuthRelPath = ".grok/auth.json"
+	// OpenClaw stages a version=1 auth profile store (not openclaw.json or a DB).
+	agentAuthOpenClawAuthEnv        = "OPENCLAW_AUTH_PROFILES_JSON"
+	agentAuthOpenClawSeedEnv        = "OPENCLAW_AUTH_SEED_ID"
+	agentAuthOpenClawSeedSecretKey  = "OPENCLAW_AUTH_SEED_ID"
+	agentAuthOpenClawSeedFileName   = ".anvil-openclaw-auth-seed-id"
+	agentAuthOpenClawLogoutFileName = ".anvil-openclaw-auth-logged-out"
+	agentAuthOpenClawAuthRelPath    = "state" // ownership root; agentDir resolved at runtime
+	agentAuthDefaultTimeoutSeconds  = int32(300)
+	agentAuthContainerName          = "auth"
+	agentAuthCodexUID               = int64(10001)
+	agentAuthOpenClawUID            = int64(1000)
 )
 
 // agentAuthProviderLayout describes durable-home paths and secret keys per provider.
 type agentAuthProviderLayout struct {
-	Provider           controlv1alpha1.AgentAuthSessionProvider
-	AuthEnvKey         string
-	SeedEnvKey         string
-	SeedSecretKey      string
+	Provider            controlv1alpha1.AgentAuthSessionProvider
+	AuthEnvKey          string
+	SeedEnvKey          string
+	SeedSecretKey       string
 	DefaultBootstrapKey string
-	AuthRelPath        string
-	SeedFileName       string
-	LogoutFileName     string
-	ComponentLabel     string
+	AuthRelPath         string
+	SeedFileName        string
+	LogoutFileName      string
+	ComponentLabel      string
 }
 
 func agentAuthLayout(provider controlv1alpha1.AgentAuthSessionProvider) (agentAuthProviderLayout, error) {
@@ -87,6 +98,18 @@ func agentAuthLayout(provider controlv1alpha1.AgentAuthSessionProvider) (agentAu
 			SeedFileName:        agentAuthGrokSeedFileName,
 			LogoutFileName:      agentAuthGrokLogoutFileName,
 			ComponentLabel:      "grok-auth-seed",
+		}, nil
+	case controlv1alpha1.AgentAuthSessionProviderOpenClaw:
+		return agentAuthProviderLayout{
+			Provider:            controlv1alpha1.AgentAuthSessionProviderOpenClaw,
+			AuthEnvKey:          agentAuthOpenClawAuthEnv,
+			SeedEnvKey:          agentAuthOpenClawSeedEnv,
+			SeedSecretKey:       agentAuthOpenClawSeedSecretKey,
+			DefaultBootstrapKey: agentAuthOpenClawAuthEnv,
+			AuthRelPath:         agentAuthOpenClawAuthRelPath,
+			SeedFileName:        agentAuthOpenClawSeedFileName,
+			LogoutFileName:      agentAuthOpenClawLogoutFileName,
+			ComponentLabel:      "openclaw-auth-seed",
 		}, nil
 	default:
 		return agentAuthProviderLayout{}, fmt.Errorf("unsupported provider %q", provider)
@@ -297,19 +320,82 @@ func validateAgentAuthSessionSpec(obj *controlv1alpha1.AgentAuthSession) error {
 		return err
 	}
 	switch obj.Spec.Action {
-	case controlv1alpha1.AgentAuthSessionActionReauth, controlv1alpha1.AgentAuthSessionActionLogout:
+	case controlv1alpha1.AgentAuthSessionActionReauth, controlv1alpha1.AgentAuthSessionActionLogout, controlv1alpha1.AgentAuthSessionActionVerify:
 	default:
 		return fmt.Errorf("unsupported action %q", obj.Spec.Action)
 	}
 	if strings.TrimSpace(obj.Spec.DataVolumeRef.Name) == "" {
 		return fmt.Errorf("spec.dataVolumeRef.name is required")
 	}
-	if obj.Spec.Action == controlv1alpha1.AgentAuthSessionActionReauth {
+	agentID := strings.TrimSpace(obj.Spec.AgentID)
+	authMode := strings.TrimSpace(string(obj.Spec.AuthMode))
+	modelProvider := strings.TrimSpace(obj.Spec.ModelProvider)
+	if obj.Spec.Provider == controlv1alpha1.AgentAuthSessionProviderOpenClaw {
+		if agentID == "" {
+			return fmt.Errorf("spec.agentID is required for provider openClaw")
+		}
+		if err := validateOpenClawAgentID(agentID); err != nil {
+			return err
+		}
+		if authMode == "" {
+			return fmt.Errorf("spec.authMode is required for provider openClaw")
+		}
+		if authMode != string(controlv1alpha1.AgentRunProviderAuthModeOAuth) && authMode != string(controlv1alpha1.AgentRunProviderAuthModeAPIKey) {
+			return fmt.Errorf("spec.authMode must be oauth or apiKey")
+		}
+		if modelProvider == "" {
+			return fmt.Errorf("spec.modelProvider is required for provider openClaw")
+		}
+		if err := validateOpenClawAgentID(modelProvider); err != nil {
+			return fmt.Errorf("spec.modelProvider must be a DNS label")
+		}
+	} else if agentID != "" {
+		return fmt.Errorf("spec.agentID is forbidden unless provider is openClaw")
+	} else if modelProvider != "" {
+		return fmt.Errorf("spec.modelProvider is forbidden unless provider is openClaw")
+	}
+	if authMode != "" && authMode != string(controlv1alpha1.AgentRunProviderAuthModeOAuth) && authMode != string(controlv1alpha1.AgentRunProviderAuthModeAPIKey) {
+		return fmt.Errorf("spec.authMode must be oauth or apiKey")
+	}
+	switch obj.Spec.Action {
+	case controlv1alpha1.AgentAuthSessionActionReauth:
 		if obj.Spec.StagingSecretRef == nil || strings.TrimSpace(obj.Spec.StagingSecretRef.Name) == "" {
 			return fmt.Errorf("spec.stagingSecretRef.name is required for reauth")
 		}
 		if strings.TrimSpace(obj.Spec.SeedID) == "" {
 			return fmt.Errorf("spec.seedID is required for reauth")
+		}
+	case controlv1alpha1.AgentAuthSessionActionLogout, controlv1alpha1.AgentAuthSessionActionVerify:
+		if obj.Spec.StagingSecretRef != nil && strings.TrimSpace(obj.Spec.StagingSecretRef.Name) != "" {
+			return fmt.Errorf("spec.stagingSecretRef is forbidden for %s", obj.Spec.Action)
+		}
+		if strings.TrimSpace(obj.Spec.SeedID) != "" {
+			return fmt.Errorf("spec.seedID is forbidden for %s", obj.Spec.Action)
+		}
+		if obj.Spec.BootstrapSecretRef != nil {
+			return fmt.Errorf("spec.bootstrapSecretRef is forbidden for %s", obj.Spec.Action)
+		}
+		if strings.TrimSpace(obj.Spec.BootstrapSecretKey) != "" {
+			return fmt.Errorf("spec.bootstrapSecretKey is forbidden for %s", obj.Spec.Action)
+		}
+	}
+	return nil
+}
+
+func validateOpenClawAgentID(id string) error {
+	if id == "" || len(id) > 63 {
+		return fmt.Errorf("spec.agentID must be a DNS label (1-63 chars)")
+	}
+	for i, r := range id {
+		isAlphaNum := (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9')
+		if i == 0 || i == len(id)-1 {
+			if !isAlphaNum {
+				return fmt.Errorf("spec.agentID must be a DNS label")
+			}
+			continue
+		}
+		if !isAlphaNum && r != '-' {
+			return fmt.Errorf("spec.agentID must be a DNS label")
 		}
 	}
 	return nil
@@ -323,6 +409,9 @@ func (r *AgentAuthSessionReconciler) resolveAuthSessionVolume(ctx context.Contex
 			return nil, "", "", "", controlv1alpha1.AgentAuthSessionPhaseFailed, "DataVolumeNotFound", fmt.Sprintf("AgentDataVolume %s/%s was not found.", obj.Namespace, volumeName), nil
 		}
 		return nil, "", "", "", "", "", "", err
+	}
+	if reason, message := agentAuthVolumeBackendValidation(volume, obj.Spec.Provider); reason != "" {
+		return volume, "", "", "", controlv1alpha1.AgentAuthSessionPhaseFailed, reason, message, nil
 	}
 	if volume.Status.ObservedGeneration == 0 || volume.Status.ObservedGeneration != volume.Generation {
 		return volume, "", "", "", controlv1alpha1.AgentAuthSessionPhasePending, "DataVolumeStatusStale", fmt.Sprintf("Waiting for AgentDataVolume %s/%s status to observe generation %d.", volume.Namespace, volume.Name, volume.Generation), nil
@@ -359,6 +448,20 @@ func (r *AgentAuthSessionReconciler) resolveAuthSessionVolume(ctx context.Contex
 	return volume, claimName, claimUID, mountPath, "", "", "", nil
 }
 
+func agentAuthVolumeBackendValidation(volume *controlv1alpha1.AgentDataVolume, provider controlv1alpha1.AgentAuthSessionProvider) (string, string) {
+	if volume == nil {
+		return "DataVolumeNotFound", "AgentDataVolume is nil."
+	}
+	expectedBackend := controlv1alpha1.AgentRunHarnessBackendKind(provider)
+	if volume.Spec.Backend == "" {
+		return "DataVolumeBackendRequired", fmt.Sprintf("AgentDataVolume %s/%s must set spec.backend=%q explicitly for auth maintenance; VolumeProfile does not provide backend identity.", volume.Namespace, volume.Name, expectedBackend)
+	}
+	if volume.Spec.Backend != expectedBackend {
+		return "ProviderVolumeMismatch", fmt.Sprintf("AgentDataVolume %s/%s backend %q does not match auth provider %q.", volume.Namespace, volume.Name, volume.Spec.Backend, provider)
+	}
+	return "", ""
+}
+
 func (r *AgentAuthSessionReconciler) validateStagingSecret(ctx context.Context, obj *controlv1alpha1.AgentAuthSession) error {
 	layout, err := agentAuthLayout(obj.Spec.Provider)
 	if err != nil {
@@ -372,8 +475,14 @@ func (r *AgentAuthSessionReconciler) validateStagingSecret(ctx context.Context, 
 		}
 		return err
 	}
-	if len(secret.Data[layout.AuthEnvKey]) == 0 {
+	raw := secret.Data[layout.AuthEnvKey]
+	if len(raw) == 0 {
 		return fmt.Errorf("staging Secret %s/%s is missing non-empty key %s", obj.Namespace, name, layout.AuthEnvKey)
+	}
+	if obj.Spec.Provider == controlv1alpha1.AgentAuthSessionProviderOpenClaw {
+		if err := validateOpenClawAuthProfilesJSON(raw, obj.Spec.AuthMode, obj.Spec.ModelProvider); err != nil {
+			return fmt.Errorf("staging Secret %s/%s %s: %w", obj.Namespace, name, layout.AuthEnvKey, err)
+		}
 	}
 	return nil
 }
@@ -508,6 +617,8 @@ func (r *AgentAuthSessionReconciler) ensureAuthSessionJob(ctx context.Context, o
 	automount := false
 	runAsNonRoot := true
 	allowPrivilegeEscalation := false
+	uid, gid := agentAuthSessionIDs(obj.Spec.Provider)
+	fsGroupChange := corev1.FSGroupChangeOnRootMismatch
 	job := &batchv1.Job{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      jobName,
@@ -540,8 +651,11 @@ func (r *AgentAuthSessionReconciler) ensureAuthSessionJob(ctx context.Context, o
 					RestartPolicy:                corev1.RestartPolicyNever,
 					AutomountServiceAccountToken: &automount,
 					SecurityContext: &corev1.PodSecurityContext{
-						RunAsNonRoot: &runAsNonRoot,
-						FSGroup:      int64Ptr(10001),
+						RunAsNonRoot:        &runAsNonRoot,
+						RunAsUser:           &uid,
+						RunAsGroup:          &gid,
+						FSGroup:             &uid,
+						FSGroupChangePolicy: &fsGroupChange,
 					},
 					NodeSelector: agentDataVolumeResolvedNodeSelector(volume),
 					Containers: []corev1.Container{{
@@ -550,14 +664,16 @@ func (r *AgentAuthSessionReconciler) ensureAuthSessionJob(ctx context.Context, o
 						ImagePullPolicy: corev1.PullIfNotPresent,
 						Command:         []string{"/bin/bash", "-lc", script},
 						Env:             agentAuthSessionEnv(obj),
-						EnvFrom:         agentAuthSessionEnvFrom(obj),
 						VolumeMounts: []corev1.VolumeMount{{
 							Name:      "agent-home",
 							MountPath: mountPath,
+							SubPath:   agentDataVolumeResolvedSubPath(volume),
 						}},
 						SecurityContext: &corev1.SecurityContext{
 							AllowPrivilegeEscalation: &allowPrivilegeEscalation,
 							RunAsNonRoot:             &runAsNonRoot,
+							RunAsUser:                &uid,
+							RunAsGroup:               &gid,
 							Capabilities:             &corev1.Capabilities{Drop: []corev1.Capability{"ALL"}},
 						},
 						Resources: corev1.ResourceRequirements{},
@@ -594,12 +710,24 @@ func (r *AgentAuthSessionReconciler) authSessionImage(provider controlv1alpha1.A
 			return strings.TrimSpace(r.Options.GrokBuildRunnerImage)
 		}
 		return agentRunDefaultGrokBuildImage
+	case controlv1alpha1.AgentAuthSessionProviderOpenClaw:
+		if r.Options != nil && strings.TrimSpace(r.Options.OpenClawRunnerImage) != "" {
+			return strings.TrimSpace(r.Options.OpenClawRunnerImage)
+		}
+		return agentRunDefaultOpenClawImage
 	default:
 		if r.Options != nil && strings.TrimSpace(r.Options.CodexRunnerImage) != "" {
 			return strings.TrimSpace(r.Options.CodexRunnerImage)
 		}
 		return agentRunDefaultCodexImage
 	}
+}
+
+func agentAuthSessionIDs(provider controlv1alpha1.AgentAuthSessionProvider) (uid, gid int64) {
+	if provider == controlv1alpha1.AgentAuthSessionProviderOpenClaw {
+		return agentAuthOpenClawUID, agentAuthOpenClawUID
+	}
+	return agentAuthCodexUID, agentAuthCodexUID
 }
 
 func agentAuthSessionEnv(obj *controlv1alpha1.AgentAuthSession) []corev1.EnvVar {
@@ -617,22 +745,32 @@ func agentAuthSessionEnv(obj *controlv1alpha1.AgentAuthSession) []corev1.EnvVar 
 	if seed := strings.TrimSpace(obj.Spec.SeedID); seed != "" {
 		env = append(env, corev1.EnvVar{Name: layout.SeedEnvKey, Value: seed})
 	}
+	if mode := strings.TrimSpace(string(obj.Spec.AuthMode)); mode != "" {
+		env = append(env, corev1.EnvVar{Name: "ANVIL_AUTH_MODE", Value: mode})
+	}
+	if agentID := strings.TrimSpace(obj.Spec.AgentID); agentID != "" {
+		env = append(env, corev1.EnvVar{Name: "ANVIL_OPENCLAW_AGENT_ID", Value: agentID})
+	}
+	if modelProvider := strings.TrimSpace(obj.Spec.ModelProvider); modelProvider != "" {
+		env = append(env, corev1.EnvVar{Name: "ANVIL_OPENCLAW_MODEL_PROVIDER", Value: modelProvider})
+	}
+	if obj.Spec.Action == controlv1alpha1.AgentAuthSessionActionReauth && obj.Spec.StagingSecretRef != nil {
+		env = append(env, corev1.EnvVar{
+			Name: layout.AuthEnvKey,
+			ValueFrom: &corev1.EnvVarSource{SecretKeyRef: &corev1.SecretKeySelector{
+				LocalObjectReference: corev1.LocalObjectReference{Name: strings.TrimSpace(obj.Spec.StagingSecretRef.Name)},
+				Key:                  layout.AuthEnvKey,
+				Optional:             boolPtr(false),
+			}},
+		})
+	}
 	return env
 }
 
-func agentAuthSessionEnvFrom(obj *controlv1alpha1.AgentAuthSession) []corev1.EnvFromSource {
-	if obj.Spec.Action != controlv1alpha1.AgentAuthSessionActionReauth || obj.Spec.StagingSecretRef == nil {
-		return nil
-	}
-	return []corev1.EnvFromSource{{
-		SecretRef: &corev1.SecretEnvSource{
-			LocalObjectReference: corev1.LocalObjectReference{Name: strings.TrimSpace(obj.Spec.StagingSecretRef.Name)},
-			Optional:             boolPtr(false),
-		},
-	}}
-}
-
 func agentAuthSessionScript(action controlv1alpha1.AgentAuthSessionAction, mountPath string, layout agentAuthProviderLayout) string {
+	if layout.Provider == controlv1alpha1.AgentAuthSessionProviderOpenClaw {
+		return agentAuthOpenClawSessionScript(action, mountPath, layout)
+	}
 	authPath := path.Join(mountPath, layout.AuthRelPath)
 	authDir := path.Dir(authPath)
 	seedPath := path.Join(mountPath, layout.SeedFileName)
@@ -652,6 +790,23 @@ printf 'logged-out\n' > "$logout"
 sync
 echo "ANVIL_AUTH_SESSION_COMPLETE action=logout provider=%s mount=$mount"
 `, mountPath, authPath, authDir, seedPath, logoutPath, layout.Provider)
+	case controlv1alpha1.AgentAuthSessionActionVerify:
+		return fmt.Sprintf(`set -euo pipefail
+mount=%q
+auth=%q
+if [[ ! -f "$auth" ]]; then
+  echo "ANVIL_AUTH_SESSION_FAILED reason=auth-missing" >&2
+  exit 1
+fi
+# Honest presence check only; never print credential bytes.
+if ! python3 -c 'import json,sys; json.load(open(sys.argv[1]))' "$auth" 2>/dev/null; then
+  if ! jq -e . "$auth" >/dev/null 2>&1; then
+    echo "ANVIL_AUTH_SESSION_FAILED reason=auth-invalid-json" >&2
+    exit 1
+  fi
+fi
+echo "ANVIL_AUTH_SESSION_COMPLETE action=verify provider=%s mount=$mount"
+`, mountPath, authPath, layout.Provider)
 	default:
 		// Embed concrete env names so the script does not need bash namerefs and
 		// never prints credential values.
@@ -681,6 +836,386 @@ echo "ANVIL_AUTH_SESSION_COMPLETE action=reauth provider=%s mount=$mount seed_wr
 			layout.AuthEnvKey, layout.AuthEnvKey,
 			layout.SeedEnvKey, layout.SeedEnvKey,
 			layout.AuthEnvKey, layout.SeedEnvKey, layout.Provider)
+	}
+}
+
+// agentAuthOpenClawSessionScript maintains OpenClaw per-agent auth via the
+// exported plugin-sdk (saveAuthProfileStore). It never replaces SQLite DBs,
+// never prints credentials, and resolves agentDir by strictly parsing the
+// registered agent list in the volume-owned openclaw.json without invoking
+// mutable OpenClaw config or plugins.
+func agentAuthOpenClawSessionScript(action controlv1alpha1.AgentAuthSessionAction, mountPath string, layout agentAuthProviderLayout) string {
+	seedPath := path.Join(mountPath, layout.SeedFileName)
+	logoutPath := path.Join(mountPath, layout.LogoutFileName)
+	// Node maintenance program embedded as a single-quoted heredoc. Credential
+	// values are written only through the SDK to the selected agentDir.
+	nodeProgram := `import fs from 'node:fs';
+import path from 'node:path';
+const mount = process.env.ANVIL_AUTH_MOUNT;
+const action = process.env.ANVIL_AUTH_ACTION;
+const agentId = process.env.ANVIL_OPENCLAW_AGENT_ID;
+const modelProvider = process.env.ANVIL_OPENCLAW_MODEL_PROVIDER;
+const authMode = process.env.ANVIL_AUTH_MODE || '';
+const seedEnv = process.env.OPENCLAW_AUTH_SEED_ID || '';
+const profilesRaw = process.env.OPENCLAW_AUTH_PROFILES_JSON || '';
+const seedPath = process.env.ANVIL_AUTH_SEED_PATH;
+const logoutPath = process.env.ANVIL_AUTH_LOGOUT_PATH;
+if (!mount || !agentId || !modelProvider) {
+  console.error('ANVIL_AUTH_SESSION_FAILED reason=missing-mount-agent-or-model-provider');
+  process.exit(1);
+}
+const stateDir = path.join(mount, 'state');
+fs.mkdirSync(stateDir, { recursive: true });
+process.env.OPENCLAW_STATE_DIR = stateDir;
+function fail(reason) {
+  console.error('ANVIL_AUTH_SESSION_FAILED reason=' + reason);
+  process.exit(1);
+}
+function resolveAgent() {
+  const realMount = fs.realpathSync(mount);
+  const configPath = path.join(stateDir, 'openclaw.json');
+  let stat;
+  try {
+    stat = fs.lstatSync(configPath);
+  } catch {
+    fail('agent-config-missing');
+  }
+  if (!stat.isFile() || stat.isSymbolicLink()) fail('agent-config-unsafe');
+  const realConfig = fs.realpathSync(configPath);
+  if (!realConfig.startsWith(realMount + path.sep)) fail('agent-config-outside-volume');
+  let parsed;
+  try {
+    parsed = JSON.parse(fs.readFileSync(realConfig, 'utf8'));
+  } catch {
+    fail('agent-config-invalid');
+  }
+  const agents = parsed?.agents?.list;
+  if (!Array.isArray(agents)) fail('agent-config-invalid');
+  const hits = agents.filter((a) => a && a.id === agentId);
+  if (hits.length !== 1) fail(hits.length === 0 ? 'agent-not-registered' : 'agent-duplicate');
+  const configuredDir = hits[0].agentDir;
+  if (typeof configuredDir !== 'string' || configuredDir.length === 0) fail('agent-dir-missing');
+  const candidate = path.resolve(configuredDir);
+  let dirStat;
+  try {
+    dirStat = fs.lstatSync(candidate);
+  } catch {
+    fail('agent-dir-missing');
+  }
+  if (!dirStat.isDirectory() || dirStat.isSymbolicLink()) fail('agent-dir-unsafe');
+  const realAgent = fs.realpathSync(candidate);
+  if (!realAgent.startsWith(realMount + path.sep)) fail('agent-dir-outside-volume');
+  return realAgent;
+}
+async function loadSdk() {
+  const candidates = [
+    '/usr/local/lib/node_modules/openclaw/dist/plugin-sdk/agent-runtime.js',
+    '/usr/lib/node_modules/openclaw/dist/plugin-sdk/agent-runtime.js',
+  ];
+  for (const c of candidates) {
+    try {
+      if (fs.existsSync(c)) return await import(c);
+    } catch {}
+  }
+  try {
+    return await import('openclaw/dist/plugin-sdk/agent-runtime.js');
+  } catch (err) {
+    console.error('ANVIL_AUTH_SESSION_FAILED reason=sdk-missing');
+    process.exit(1);
+  }
+}
+function writeAtomic(filePath, body) {
+  const dir = path.dirname(filePath);
+  fs.mkdirSync(dir, { recursive: true });
+  const tmp = path.join(dir, '.anvil-tmp-' + process.pid + '-' + Date.now());
+  fs.writeFileSync(tmp, body, { mode: 0o600 });
+  fs.renameSync(tmp, filePath);
+}
+function parseStore(raw) {
+  const store = JSON.parse(raw);
+  if (!store || store.version !== 1 || !store.profiles || typeof store.profiles !== 'object') {
+    throw new Error('invalid profile store');
+  }
+  const ids = Object.keys(store.profiles);
+  if (ids.length === 0) throw new Error('empty profiles');
+  return { store, ids };
+}
+function validKeyRef(value) {
+  return Boolean(value && typeof value === 'object' && !Array.isArray(value)
+    && value.source === 'env'
+    && typeof value.provider === 'string' && value.provider.length > 0
+    && typeof value.id === 'string' && value.id.length > 0);
+}
+async function main() {
+  const agentDir = resolveAgent();
+  const sdk = await loadSdk();
+  if (action === 'verify') {
+    // Load OpenClaw's effective native store without logging it. The later
+    // AgentRun canary is the live-provider proof; this action proves that the
+    // selected agent has a currently usable credential of the declared mode.
+    if (typeof sdk.loadAuthProfileStoreWithoutExternalProfiles !== 'function') {
+      console.error('ANVIL_AUTH_SESSION_FAILED reason=sdk-load-unavailable');
+      process.exit(1);
+    }
+    const existing = await sdk.loadAuthProfileStoreWithoutExternalProfiles(agentDir);
+    const profiles = Object.values(existing?.profiles || {});
+    const usable = profiles.some((profile) => {
+      if (!profile || typeof profile !== 'object') return false;
+      if (String(profile.provider || '') !== modelProvider) return false;
+      const type = String(profile.type || '').toLowerCase();
+      if (authMode === 'oauth') {
+        // A refresh-capable native profile is a truthful durable-auth receipt;
+        // the later AgentRun canary proves remote refresh/provider behavior.
+        // OpenClaw releases have persisted expires in both seconds and ms, so
+        // do not reject a structurally valid refresh credential by unit guess.
+        return type === 'oauth' && Boolean(profile.refresh);
+      }
+      if (authMode === 'apiKey') {
+        return type === 'api_key'
+          && ((typeof profile.key === 'string' && profile.key.length > 0) || validKeyRef(profile.keyRef));
+      }
+      return false;
+    });
+    if (!usable) {
+      console.error('ANVIL_AUTH_SESSION_FAILED reason=no-usable-profile');
+      process.exit(1);
+    }
+    console.log('ANVIL_AUTH_SESSION_COMPLETE action=verify provider=openClaw mount=' + mount + ' agent=' + agentId);
+    return;
+  }
+  if (action === 'logout') {
+    const empty = { version: 1, profiles: {} };
+    if (typeof sdk.saveAuthProfileStore !== 'function') {
+      console.error('ANVIL_AUTH_SESSION_FAILED reason=sdk-save-unavailable');
+      process.exit(1);
+    }
+    await sdk.saveAuthProfileStore(empty, agentDir);
+    if (typeof sdk.loadAuthProfileStoreWithoutExternalProfiles === 'function') {
+      const remaining = await sdk.loadAuthProfileStoreWithoutExternalProfiles(agentDir);
+      if (Object.keys(remaining?.profiles || {}).length > 0) {
+        console.error('ANVIL_AUTH_SESSION_FAILED reason=inherited-auth-remains');
+        process.exit(1);
+      }
+    }
+    try { fs.unlinkSync(seedPath); } catch {}
+    writeAtomic(logoutPath, 'logged-out\n');
+    console.log('ANVIL_AUTH_SESSION_COMPLETE action=logout provider=openClaw mount=' + mount + ' agent=' + agentId);
+    return;
+  }
+  // reauth
+  if (!profilesRaw || !seedEnv) {
+    console.error('ANVIL_AUTH_SESSION_FAILED reason=missing-staging');
+    process.exit(1);
+  }
+  const { store, ids } = parseStore(profilesRaw);
+  // Mode agreement is enforced by the controller; re-check types without logging secrets.
+  for (const id of ids) {
+    const p = store.profiles[id] || {};
+    if (String(p.provider || '') !== modelProvider) {
+      console.error('ANVIL_AUTH_SESSION_FAILED reason=model-provider-mismatch');
+      process.exit(1);
+    }
+    const t = String(p.type || p.credentialType || '').toLowerCase();
+    if (authMode === 'oauth' && t !== 'oauth') {
+      console.error('ANVIL_AUTH_SESSION_FAILED reason=mode-mismatch');
+      process.exit(1);
+    }
+    if (authMode === 'apiKey' && t !== 'api_key' && t !== 'apikey') {
+      console.error('ANVIL_AUTH_SESSION_FAILED reason=mode-mismatch');
+      process.exit(1);
+    }
+  }
+  if (typeof sdk.saveAuthProfileStore !== 'function') {
+    console.error('ANVIL_AUTH_SESSION_FAILED reason=sdk-save-unavailable');
+    process.exit(1);
+  }
+  await sdk.saveAuthProfileStore(store, agentDir);
+  writeAtomic(seedPath, seedEnv + '\n');
+  try { fs.unlinkSync(logoutPath); } catch {}
+  console.log('ANVIL_AUTH_SESSION_COMPLETE action=reauth provider=openClaw mount=' + mount + ' seed_written=true agent=' + agentId);
+}
+main().catch((err) => {
+  console.error('ANVIL_AUTH_SESSION_FAILED reason=runtime');
+  process.exit(1);
+});`
+	switch action {
+	case controlv1alpha1.AgentAuthSessionActionLogout:
+		return fmt.Sprintf(`set -euo pipefail
+export ANVIL_AUTH_MOUNT=%q
+export ANVIL_AUTH_ACTION=logout
+export ANVIL_AUTH_SEED_PATH=%q
+export ANVIL_AUTH_LOGOUT_PATH=%q
+: "${ANVIL_OPENCLAW_AGENT_ID:?ANVIL_OPENCLAW_AGENT_ID is required}"
+: "${ANVIL_OPENCLAW_MODEL_PROVIDER:?ANVIL_OPENCLAW_MODEL_PROVIDER is required}"
+mkdir -p "$ANVIL_AUTH_MOUNT/state" "$ANVIL_AUTH_MOUNT/workspace"
+export OPENCLAW_STATE_DIR="$ANVIL_AUTH_MOUNT/state"
+node --input-type=module <<'ANVIL_OPENCLAW_AUTH_NODE'
+%s
+ANVIL_OPENCLAW_AUTH_NODE
+`, mountPath, seedPath, logoutPath, nodeProgram)
+	case controlv1alpha1.AgentAuthSessionActionVerify:
+		return fmt.Sprintf(`set -euo pipefail
+export ANVIL_AUTH_MOUNT=%q
+export ANVIL_AUTH_ACTION=verify
+export ANVIL_AUTH_SEED_PATH=%q
+export ANVIL_AUTH_LOGOUT_PATH=%q
+: "${ANVIL_OPENCLAW_AGENT_ID:?ANVIL_OPENCLAW_AGENT_ID is required}"
+: "${ANVIL_OPENCLAW_MODEL_PROVIDER:?ANVIL_OPENCLAW_MODEL_PROVIDER is required}"
+mkdir -p "$ANVIL_AUTH_MOUNT/state" "$ANVIL_AUTH_MOUNT/workspace"
+export OPENCLAW_STATE_DIR="$ANVIL_AUTH_MOUNT/state"
+node --input-type=module <<'ANVIL_OPENCLAW_AUTH_NODE'
+%s
+ANVIL_OPENCLAW_AUTH_NODE
+`, mountPath, seedPath, logoutPath, nodeProgram)
+	default:
+		return fmt.Sprintf(`set -euo pipefail
+export ANVIL_AUTH_MOUNT=%q
+export ANVIL_AUTH_ACTION=reauth
+export ANVIL_AUTH_SEED_PATH=%q
+export ANVIL_AUTH_LOGOUT_PATH=%q
+: "${ANVIL_OPENCLAW_AGENT_ID:?ANVIL_OPENCLAW_AGENT_ID is required}"
+: "${ANVIL_OPENCLAW_MODEL_PROVIDER:?ANVIL_OPENCLAW_MODEL_PROVIDER is required}"
+: "${OPENCLAW_AUTH_PROFILES_JSON:?OPENCLAW_AUTH_PROFILES_JSON is required}"
+: "${OPENCLAW_AUTH_SEED_ID:?OPENCLAW_AUTH_SEED_ID is required}"
+mkdir -p "$ANVIL_AUTH_MOUNT/state" "$ANVIL_AUTH_MOUNT/workspace"
+export OPENCLAW_STATE_DIR="$ANVIL_AUTH_MOUNT/state"
+# Never print credential env values.
+node --input-type=module <<'ANVIL_OPENCLAW_AUTH_NODE'
+%s
+ANVIL_OPENCLAW_AUTH_NODE
+`, mountPath, seedPath, logoutPath, nodeProgram)
+	}
+}
+
+// validateOpenClawAuthProfilesJSON accepts a version=1 OpenClaw profile store.
+// Credential type must be uniform and agree with authMode. Credentials are never logged.
+func validateOpenClawAuthProfilesJSON(raw []byte, authMode controlv1alpha1.AgentRunProviderAuthMode, modelProvider string) error {
+	var store struct {
+		Version  int                    `json:"version"`
+		Profiles map[string]interface{} `json:"profiles"`
+	}
+	if err := json.Unmarshal(raw, &store); err != nil {
+		return fmt.Errorf("invalid JSON")
+	}
+	if store.Version != 1 {
+		return fmt.Errorf("version must be 1")
+	}
+	if len(store.Profiles) == 0 {
+		return fmt.Errorf("profiles must be non-empty")
+	}
+	mode := strings.TrimSpace(string(authMode))
+	expectedProvider := strings.TrimSpace(modelProvider)
+	if expectedProvider == "" {
+		return fmt.Errorf("modelProvider is required")
+	}
+	var seenType string
+	for id, value := range store.Profiles {
+		entry, ok := value.(map[string]interface{})
+		if !ok {
+			return fmt.Errorf("profile %q is not an object", id)
+		}
+		credType := strings.ToLower(strings.TrimSpace(asString(entry["type"])))
+		if credType == "" {
+			credType = strings.ToLower(strings.TrimSpace(asString(entry["credentialType"])))
+		}
+		provider := strings.TrimSpace(asString(entry["provider"]))
+		if provider == "" {
+			return fmt.Errorf("profile %q missing provider", id)
+		}
+		if provider != expectedProvider {
+			return fmt.Errorf("profile %q provider %q does not match modelProvider %q", id, provider, expectedProvider)
+		}
+		switch credType {
+		case "oauth":
+			if strings.TrimSpace(asString(entry["access"])) == "" {
+				return fmt.Errorf("oauth profile %q missing access", id)
+			}
+			if strings.TrimSpace(asString(entry["refresh"])) == "" {
+				return fmt.Errorf("oauth profile %q missing refresh", id)
+			}
+			if !openClawExpiresValid(entry["expires"]) {
+				return fmt.Errorf("oauth profile %q has invalid expires", id)
+			}
+		case "api_key", "apikey":
+			credType = "api_key"
+			if strings.TrimSpace(asString(entry["key"])) == "" {
+				if !validOpenClawAPIKeyRef(entry["keyRef"]) {
+					return fmt.Errorf("api_key profile %q missing key", id)
+				}
+			}
+		default:
+			return fmt.Errorf("profile %q has unsupported credential type %q", id, credType)
+		}
+		if seenType == "" {
+			seenType = credType
+		} else if seenType != credType {
+			return fmt.Errorf("mixed credential types are not allowed")
+		}
+	}
+	switch mode {
+	case string(controlv1alpha1.AgentRunProviderAuthModeOAuth):
+		if seenType != "oauth" {
+			return fmt.Errorf("authMode oauth requires oauth profiles")
+		}
+	case string(controlv1alpha1.AgentRunProviderAuthModeAPIKey):
+		if seenType != "api_key" {
+			return fmt.Errorf("authMode apiKey requires api_key profiles")
+		}
+	default:
+		return fmt.Errorf("authMode is required for openClaw staging validation")
+	}
+	return nil
+}
+
+func validOpenClawAPIKeyRef(value interface{}) bool {
+	ref, ok := value.(map[string]interface{})
+	if !ok {
+		return false
+	}
+	return strings.TrimSpace(asString(ref["source"])) == "env" &&
+		strings.TrimSpace(asString(ref["provider"])) != "" &&
+		strings.TrimSpace(asString(ref["id"])) != ""
+}
+
+func asString(v interface{}) string {
+	switch t := v.(type) {
+	case string:
+		return t
+	case float64:
+		return strconv.FormatInt(int64(t), 10)
+	case json.Number:
+		return t.String()
+	default:
+		return ""
+	}
+}
+
+func openClawExpiresValid(v interface{}) bool {
+	switch t := v.(type) {
+	case float64:
+		return t > 0
+	case json.Number:
+		n, err := t.Float64()
+		return err == nil && n > 0
+	case string:
+		s := strings.TrimSpace(t)
+		if s == "" {
+			return false
+		}
+		if n, err := strconv.ParseFloat(s, 64); err == nil {
+			return n > 0
+		}
+		if _, err := time.Parse(time.RFC3339, s); err == nil {
+			return true
+		}
+		if _, err := time.Parse(time.RFC3339Nano, s); err == nil {
+			return true
+		}
+		return false
+	case nil:
+		return false
+	default:
+		return false
 	}
 }
 
@@ -719,7 +1254,7 @@ func (r *AgentAuthSessionReconciler) applyBootstrapSecret(ctx context.Context, o
 			},
 			Type: corev1.SecretTypeOpaque,
 			Data: map[string][]byte{
-				key:                 append([]byte(nil), authBytes...),
+				key:                  append([]byte(nil), authBytes...),
 				layout.SeedSecretKey: []byte(seedID),
 			},
 		}

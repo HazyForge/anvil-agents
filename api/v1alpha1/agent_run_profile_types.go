@@ -38,6 +38,10 @@ type AgentRunProfileSpec struct {
 	// skills that teach agents when and how to use them.
 	// +optional
 	ToolSets *AgentToolCompositionSpec `json:"toolSets,omitempty"`
+	// Capabilities is the canonical ordered selection of atomic resources and
+	// sets. Legacy skillSets/toolSets resolve first; this layer resolves next.
+	// +optional
+	Capabilities *AgentCapabilitiesSpec `json:"capabilities,omitempty"`
 	// Notifications supplies default operator notification routing.
 	// +optional
 	Notifications *AgentRunNotificationSpec `json:"notifications,omitempty"`

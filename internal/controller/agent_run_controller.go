@@ -35,9 +35,9 @@ import (
 )
 
 const (
-	agentRunPollInterval                            = 10 * time.Second
-	agentRunExternalSecretRefreshPollInterval       = 2 * time.Second
-	agentRunExternalSecretRefreshTimeout            = 2 * time.Minute
+	agentRunPollInterval                      = 10 * time.Second
+	agentRunExternalSecretRefreshPollInterval = 2 * time.Second
+	agentRunExternalSecretRefreshTimeout      = 2 * time.Minute
 	// agentRunExternalSecretHealthyMaxAge is how recent status.refreshTime may
 	// be for a Ready ExternalSecret to satisfy preflight when force-sync does
 	// not advance refreshTime (common when the provider value is unchanged).
@@ -45,30 +45,36 @@ const (
 	// agentRunExternalSecretHealthyAcceptAfter is a short grace after the
 	// force-sync request so ESO can attempt a provider reconcile before the
 	// controller accepts an already-healthy stable secret.
-	agentRunExternalSecretHealthyAcceptAfter = 10 * time.Second
-	agentRunReady                            = "Ready"
-	agentRunDefaultCodexImage                       = "anvil-agent-run-codex:dev"
-	agentRunDefaultOpenCodeImage                    = "anvil-agent-run-opencode:dev"
-	agentRunDefaultHermesAgentImage                 = "anvil-agent-run-hermes:dev"
-	agentRunDefaultOpenClawImage                    = "anvil-agent-run-openclaw:dev"
-	agentRunDefaultGrokBuildImage                   = "anvil-agent-run-grok-build:dev"
-	agentRunDefaultPiAgentImage                     = "anvil-agent-run-pi:dev"
-	agentRunDefaultGitHubAPIBaseURL                 = "https://api.github.com"
-	agentRunRemoteSkillMaxBytes                     = 256 * 1024
-	agentRunPayloadConfigMapMaxBytes                = 900 * 1024
-	agentRunPodLogTailLines                   int64 = 10_000
-	agentRunPodLogMaxBytes                    int64 = 4 * 1024 * 1024
+	agentRunExternalSecretHealthyAcceptAfter       = 10 * time.Second
+	agentRunReady                                  = "Ready"
+	agentRunDefaultCodexImage                      = "anvil-agent-run-codex:dev"
+	agentRunDefaultOpenCodeImage                   = "anvil-agent-run-opencode:dev"
+	agentRunDefaultHermesAgentImage                = "anvil-agent-run-hermes:dev"
+	agentRunDefaultOpenClawImage                   = "anvil-agent-run-openclaw:dev"
+	agentRunDefaultGrokBuildImage                  = "anvil-agent-run-grok-build:dev"
+	agentRunDefaultPiAgentImage                    = "anvil-agent-run-pi:dev"
+	agentRunDefaultGitHubAPIBaseURL                = "https://api.github.com"
+	agentRunRemoteSkillMaxBytes                    = 256 * 1024
+	agentRunPayloadConfigMapMaxBytes               = 900 * 1024
+	agentRunPodLogTailLines                  int64 = 10_000
+	agentRunPodLogMaxBytes                   int64 = 4 * 1024 * 1024
 
 	agentRunContainerName              = "agent"
 	agentRunPayloadVolume              = "agent-run-payload"
+	agentRunCapabilityRuntimeVolume    = "agent-capability-runtime"
+	agentRunToolCacheVolume            = "agent-tool-cache"
 	agentRunDataVolumePrefix           = "agent-data-"
 	agentRunSpiffeWorkloadAPIVolume    = "spiffe-workload-api"
 	agentRunSpiffeWorkloadAPIMountPath = "/spiffe-workload-api"
 	agentRunSpiffeWorkloadAPISocket    = "/spiffe-workload-api/spire-agent.sock"
 	agentRunSpiffeCSIDriver            = "csi.spiffe.io"
 	agentRunPayloadMountPath           = "/var/run/anvil-agent-run"
+	agentRunCapabilityRuntimeMountPath = "/var/run/anvil-agent-capabilities"
+	agentRunToolCacheMountPath         = "/var/cache/anvil-agent-tools"
 	agentRunPromptFile                 = "prompt.md"
 	agentRunContextFile                = "source.json"
+	agentRunToolManifestFile           = "tools.json"
+	agentRunMCPManifestFile            = "mcp.json"
 	agentRunSkillFilePrefix            = "skill-"
 	agentRunToolFilePrefix             = "tool-"
 	agentRunStatusFile                 = "/tmp/anvil-agent-run-status/status.jsonl"
@@ -96,7 +102,7 @@ var agentRunImmutableGitRefPattern = regexp.MustCompile(`^([0-9a-fA-F]{40}|[0-9a
 // +kubebuilder:rbac:groups="control.anvil.hazyforge.io",resources=agentruns/status,verbs=get;patch;update
 // +kubebuilder:rbac:groups="control.anvil.hazyforge.io",resources=agentruns/finalizers,verbs=update
 // +kubebuilder:rbac:groups="control.anvil.hazyforge.io",resources=agentrunprofiles,verbs=get;list;watch
-// +kubebuilder:rbac:groups="control.anvil.hazyforge.io",resources=agentharnessprofiles;agentskillsets;agenttoolsets,verbs=get;list;watch
+// +kubebuilder:rbac:groups="control.anvil.hazyforge.io",resources=agentharnessprofiles;agentskills;agentskillsets;agenttools;agenttoolsets;agentmcpservers;agentmcpsets,verbs=get;list;watch
 // +kubebuilder:rbac:groups="control.anvil.hazyforge.io",resources=adversesituations,verbs=get;list;watch
 // +kubebuilder:rbac:groups="control.anvil.hazyforge.io",resources=agentdatavolumes,verbs=get;list;watch
 // +kubebuilder:rbac:groups="batch",resources=jobs,verbs=create;delete;get;list;patch;update;watch
@@ -671,6 +677,7 @@ func agentRunConfigMapData(obj *controlv1alpha1.AgentRun, prompt, contextBody st
 		}
 		data[agentRunToolSetupFileName(index, tool)] = agentRunToolSetupFileContent(tool)
 	}
+	appendAgentRunCapabilityManifests(data, obj)
 	return data
 }
 
@@ -692,10 +699,55 @@ func (r *AgentRunReconciler) agentRunConfigMapData(ctx context.Context, obj *con
 		}
 		data[agentRunToolSetupFileName(index, tool)] = agentRunToolSetupFileContent(tool)
 	}
+	appendAgentRunCapabilityManifests(data, obj)
 	if size := agentRunConfigMapDataSize(data); size > agentRunPayloadConfigMapMaxBytes {
 		return nil, fmt.Errorf("AgentRun payload is %d bytes; maximum supported ConfigMap payload is %d bytes", size, agentRunPayloadConfigMapMaxBytes)
 	}
 	return data, nil
+}
+
+func appendAgentRunCapabilityManifests(data map[string]string, obj *controlv1alpha1.AgentRun) {
+	if obj == nil {
+		return
+	}
+	if len(obj.Spec.Harness.Tools) > 0 {
+		tools := make([]agentRunToolManifestEntry, 0, len(obj.Spec.Harness.Tools))
+		for index, tool := range obj.Spec.Harness.Tools {
+			entry := agentRunToolManifestEntry{
+				Name:          strings.TrimSpace(tool.Name),
+				Description:   strings.TrimSpace(tool.Description),
+				Executable:    tool.Executable,
+				Source:        tool.Source,
+				SpecDigest:    strings.TrimSpace(tool.SpecDigest),
+				VerifyCommand: append([]string(nil), tool.VerifyCommand...),
+			}
+			if strings.TrimSpace(tool.SetupScript) != "" {
+				entry.SetupFile = agentRunPayloadMountPath + "/" + agentRunToolSetupFileName(index, tool)
+			}
+			tools = append(tools, entry)
+		}
+		if raw, err := json.Marshal(tools); err == nil {
+			data[agentRunToolManifestFile] = string(raw)
+		}
+	}
+	if len(obj.Spec.Harness.MCPServers) > 0 {
+		if raw, err := json.Marshal(obj.Spec.Harness.MCPServers); err == nil {
+			data[agentRunMCPManifestFile] = string(raw)
+		}
+	}
+}
+
+// agentRunToolManifestEntry intentionally keeps executable setup content out of
+// tools.json. Setup scripts are mounted as separate immutable payload files and
+// referenced by path so runner decoding can reject unexpected fields safely.
+type agentRunToolManifestEntry struct {
+	Name          string                               `json:"name"`
+	Description   string                               `json:"description,omitempty"`
+	Executable    *controlv1alpha1.AgentToolExecutable `json:"executable,omitempty"`
+	Source        *controlv1alpha1.AgentToolSource     `json:"source,omitempty"`
+	SpecDigest    string                               `json:"specDigest,omitempty"`
+	SetupFile     string                               `json:"setupFile,omitempty"`
+	VerifyCommand []string                             `json:"verifyCommand,omitempty"`
 }
 
 func agentRunConfigMapDataSize(data map[string]string) int {
@@ -1280,6 +1332,10 @@ func (r *AgentRunReconciler) agentRunJob(obj *controlv1alpha1.AgentRun, jobName,
 		MountPath: agentRunPayloadMountPath,
 		ReadOnly:  true,
 	}}
+	volumeMounts = append(volumeMounts, corev1.VolumeMount{
+		Name:      agentRunCapabilityRuntimeVolume,
+		MountPath: agentRunCapabilityRuntimeMountPath,
+	})
 	volumes := []corev1.Volume{{
 		Name: agentRunPayloadVolume,
 		VolumeSource: corev1.VolumeSource{
@@ -1288,6 +1344,11 @@ func (r *AgentRunReconciler) agentRunJob(obj *controlv1alpha1.AgentRun, jobName,
 			},
 		},
 	}}
+	volumes = append(volumes, corev1.Volume{
+		Name:         agentRunCapabilityRuntimeVolume,
+		VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}},
+	})
+	hasPersistentToolCache := false
 	for index, item := range dataVolumes {
 		volumeName := agentRunDataVolumeName(index, item)
 		volumeMounts = append(volumeMounts, corev1.VolumeMount{
@@ -1305,6 +1366,13 @@ func (r *AgentRunReconciler) agentRunJob(obj *controlv1alpha1.AgentRun, jobName,
 				},
 			},
 		})
+		if item.ToolCache {
+			hasPersistentToolCache = true
+		}
+	}
+	if !hasPersistentToolCache {
+		volumeMounts = append(volumeMounts, corev1.VolumeMount{Name: agentRunToolCacheVolume, MountPath: agentRunToolCacheMountPath})
+		volumes = append(volumes, corev1.Volume{Name: agentRunToolCacheVolume, VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}})
 	}
 	if obj.Spec.Harness.Execution.SpiffeWorkloadAPI.Enabled {
 		readOnly := true
@@ -1488,6 +1556,7 @@ func (r *AgentRunReconciler) agentRunEnv(obj *controlv1alpha1.AgentRun, dataVolu
 		{Name: "ANVIL_AGENT_RUN_SOURCE_NAME", Value: strings.TrimSpace(obj.Spec.SourceRef.Name)},
 		{Name: "ANVIL_AGENT_RUN_PROMPT_FILE", Value: agentRunPayloadMountPath + "/" + agentRunPromptFile},
 		{Name: "ANVIL_AGENT_RUN_CONTEXT_FILE", Value: agentRunPayloadMountPath + "/" + agentRunContextFile},
+		{Name: "ANVIL_AGENT_CAPABILITIES_ROOT", Value: agentRunCapabilityRuntimeMountPath},
 		{Name: "ANVIL_AGENT_RUN_STATUS_FILE", Value: agentRunStatusFile},
 		{Name: "ANVIL_AGENT_RUN_STATUS_LOG_PREFIX", Value: agentRunStatusLinePrefix},
 		{Name: "ANVIL_AGENT_RUN_STATUS_TOOL", Value: "anvil-agent-status"},
@@ -1555,6 +1624,20 @@ func (r *AgentRunReconciler) agentRunEnv(obj *controlv1alpha1.AgentRun, dataVolu
 	}
 	if toolsJSON := agentRunToolsJSONEnv(obj); toolsJSON != "" {
 		env = append(env, corev1.EnvVar{Name: "ANVIL_AGENT_RUN_TOOLS_JSON", Value: toolsJSON})
+	}
+	if len(obj.Spec.Harness.Tools) > 0 {
+		env = append(env,
+			corev1.EnvVar{Name: "ANVIL_AGENT_RUN_TOOL_MANIFEST_FILE", Value: agentRunPayloadMountPath + "/" + agentRunToolManifestFile},
+			corev1.EnvVar{Name: "ANVIL_AGENT_TOOL_CACHE_ROOT", Value: agentRunToolCacheMountPath},
+			corev1.EnvVar{Name: "ANVIL_AGENT_TOOL_INSTALL_ROOT", Value: agentRunCapabilityRuntimeMountPath + "/install"},
+			corev1.EnvVar{Name: "ANVIL_AGENT_TOOL_BIN_DIR", Value: agentRunCapabilityRuntimeMountPath + "/bin"},
+		)
+	}
+	if len(obj.Spec.Harness.MCPServers) > 0 {
+		env = append(env,
+			corev1.EnvVar{Name: "ANVIL_AGENT_RUN_MCP_MANIFEST_FILE", Value: agentRunPayloadMountPath + "/" + agentRunMCPManifestFile},
+			corev1.EnvVar{Name: "ANVIL_AGENT_MCP_RUNTIME_DIR", Value: agentRunCapabilityRuntimeMountPath + "/mcp"},
+		)
 	}
 	if len(dataVolumes) > 0 {
 		for _, item := range dataVolumes {
@@ -2070,10 +2153,22 @@ type resolvedAgentRunDataVolume struct {
 	ReadOnly     bool
 	ExtraEnv     []corev1.EnvVar
 	NodeSelector map[string]string
+	ToolCache    bool
 }
 
 func (r *AgentRunReconciler) resolveAgentRunDataVolumes(ctx context.Context, obj *controlv1alpha1.AgentRun) ([]resolvedAgentRunDataVolume, controlv1alpha1.AgentRunPhase, string, string, error) {
-	refs := obj.Spec.Harness.Execution.DataVolumeRefs
+	refs := append([]controlv1alpha1.AgentRunDataVolumeRef(nil), obj.Spec.Harness.Execution.DataVolumeRefs...)
+	toolCacheIndex := -1
+	if obj.Spec.Harness.Execution.ToolCache != nil {
+		cacheRef := *obj.Spec.Harness.Execution.ToolCache.DeepCopy()
+		if cacheRef.ReadOnly {
+			return nil, controlv1alpha1.AgentRunPhaseFailed, "ReadOnlyToolCache", "spec.harness.execution.toolCache must be writable.", nil
+		}
+		cacheRef.MountPath = agentRunToolCacheMountPath
+		cacheRef.ReadOnly = false
+		toolCacheIndex = len(refs)
+		refs = append(refs, cacheRef)
+	}
 	if len(refs) == 0 {
 		return nil, "", "", "", nil
 	}
@@ -2086,11 +2181,13 @@ func (r *AgentRunReconciler) resolveAgentRunDataVolumes(ctx context.Context, obj
 		return nil, "", "", "", fmt.Errorf("resolve AgentRun application for data volumes: %w", err)
 	}
 	out := make([]resolvedAgentRunDataVolume, 0, len(refs))
+	seenRefs := map[string]struct{}{}
+	seenMounts := map[string]string{}
 	nodeSelector := map[string]string{}
 	for key, value := range obj.Spec.Harness.Execution.NodeSelector {
 		nodeSelector[key] = value
 	}
-	for _, ref := range refs {
+	for refIndex, ref := range refs {
 		name := strings.TrimSpace(ref.Name)
 		if name == "" {
 			return nil, controlv1alpha1.AgentRunPhaseFailed, "InvalidDataVolumeRef", "spec.harness.execution.dataVolumeRefs entries must set name.", nil
@@ -2099,6 +2196,11 @@ func (r *AgentRunReconciler) resolveAgentRunDataVolumes(ctx context.Context, obj
 		if namespace != obj.Namespace {
 			return nil, controlv1alpha1.AgentRunPhaseFailed, "CrossNamespaceDataVolumeRef", "AgentRun dataVolumeRefs must reference AgentDataVolume objects in the AgentRun namespace.", nil
 		}
+		refKey := namespace + "/" + name
+		if _, exists := seenRefs[refKey]; exists {
+			return nil, controlv1alpha1.AgentRunPhaseFailed, "DuplicateDataVolumeRef", fmt.Sprintf("AgentDataVolume %s is selected more than once, including as toolCache.", refKey), nil
+		}
+		seenRefs[refKey] = struct{}{}
 		volume := &controlv1alpha1.AgentDataVolume{}
 		if err := reader.Get(ctx, client.ObjectKey{Namespace: namespace, Name: name}, volume); err != nil {
 			if apierrors.IsNotFound(err) {
@@ -2171,18 +2273,51 @@ func (r *AgentRunReconciler) resolveAgentRunDataVolumes(ctx context.Context, obj
 			}
 			nodeSelector[key] = value
 		}
+		mountPath := firstNonEmpty(strings.TrimSpace(ref.MountPath), agentDataVolumeResolvedMountPath(volume))
+		if mountPathOverlapsReservedCapabilityPath(mountPath, refIndex == toolCacheIndex) {
+			return nil, controlv1alpha1.AgentRunPhaseFailed, "ReservedCapabilityMountPath", fmt.Sprintf("AgentDataVolume %s/%s mountPath %q overlaps a reserved capability runtime path.", namespace, name, mountPath), nil
+		}
+		for existing, existingName := range seenMounts {
+			if pathsOverlap(existing, mountPath) {
+				return nil, controlv1alpha1.AgentRunPhaseFailed, "OverlappingDataVolumeMountPath", fmt.Sprintf("AgentDataVolume %s/%s mountPath %q overlaps %s at %q.", namespace, name, mountPath, existingName, existing), nil
+			}
+		}
+		seenMounts[mountPath] = refKey
+		isToolCache := refIndex == toolCacheIndex
+		extraEnv := agentDataVolumeResolvedExtraEnv(volume)
+		if isToolCache {
+			extraEnv = nil
+		}
 		out = append(out, resolvedAgentRunDataVolume{
 			Name:         name,
 			Namespace:    namespace,
 			ClaimName:    claimName,
-			MountPath:    firstNonEmpty(strings.TrimSpace(ref.MountPath), agentDataVolumeResolvedMountPath(volume)),
+			MountPath:    mountPath,
 			SubPath:      firstNonEmpty(strings.TrimSpace(ref.SubPath), agentDataVolumeResolvedSubPath(volume)),
 			ReadOnly:     ref.ReadOnly,
-			ExtraEnv:     agentDataVolumeResolvedExtraEnv(volume),
+			ExtraEnv:     extraEnv,
 			NodeSelector: cloneStringMap(volumeNodeSelector),
+			ToolCache:    isToolCache,
 		})
 	}
 	return out, "", "", "", nil
+}
+
+func mountPathOverlapsReservedCapabilityPath(path string, isToolCache bool) bool {
+	path = strings.TrimSpace(path)
+	if pathsOverlap(path, agentRunCapabilityRuntimeMountPath) {
+		return true
+	}
+	return !isToolCache && pathsOverlap(path, agentRunToolCacheMountPath)
+}
+
+func pathsOverlap(left, right string) bool {
+	left = strings.TrimSuffix(strings.TrimSpace(left), "/")
+	right = strings.TrimSuffix(strings.TrimSpace(right), "/")
+	if left == "" || right == "" {
+		return false
+	}
+	return left == right || strings.HasPrefix(left, right+"/") || strings.HasPrefix(right, left+"/")
 }
 
 func agentRunDataVolumeWaitingForConsumer(ctx context.Context, reader client.Reader, volume *controlv1alpha1.AgentDataVolume) (bool, error) {
@@ -2323,6 +2458,7 @@ func agentRunApplyProfile(obj *controlv1alpha1.AgentRun, profile *controlv1alpha
 	}
 	out.Spec.SkillSets = agentRunMergeSkillComposition(profile.Spec.SkillSets, obj.Spec.SkillSets)
 	out.Spec.ToolSets = agentRunMergeToolComposition(profile.Spec.ToolSets, obj.Spec.ToolSets)
+	out.Spec.Capabilities = agentRunMergeCapabilities(profile.Spec.Capabilities, obj.Spec.Capabilities)
 	out.Spec.Notifications = agentRunMergeNotifications(profile.Spec.Notifications, obj.Spec.Notifications)
 	return out
 }
@@ -2476,6 +2612,7 @@ func agentRunMergeHarness(profile, run controlv1alpha1.AgentRunHarnessSpec) cont
 	out.SkillInjections = append(out.SkillInjections, run.SkillInjections...)
 	out.Subagents = append(out.Subagents, run.Subagents...)
 	out.Tools = append(out.Tools, run.Tools...)
+	out.MCPServers = append(out.MCPServers, run.MCPServers...)
 	out.SystemPrompt = mergePromptText(profile.SystemPrompt, run.SystemPrompt)
 	return out
 }
@@ -2729,6 +2866,9 @@ func agentRunMergeExecution(profile, run controlv1alpha1.AgentRunHarnessExecutio
 	out.ExternalSecretRefreshRefs = mergeAgentRunExternalSecretRefreshRefs(out.ExternalSecretRefreshRefs, run.ExternalSecretRefreshRefs)
 	out.ExtraEnv = mergeEnvVars(out.ExtraEnv, run.ExtraEnv)
 	out.DataVolumeRefs = mergeAgentRunDataVolumeRefs(out.DataVolumeRefs, run.DataVolumeRefs)
+	if run.ToolCache != nil {
+		out.ToolCache = run.ToolCache.DeepCopy()
+	}
 	if run.SpiffeWorkloadAPI.Enabled || strings.TrimSpace(run.SpiffeWorkloadAPI.SPIFFEID) != "" {
 		out.SpiffeWorkloadAPI = run.SpiffeWorkloadAPI
 	}

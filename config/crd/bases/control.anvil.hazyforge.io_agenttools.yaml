@@ -1,0 +1,272 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.19.0
+  name: agenttools.control.anvil.hazyforge.io
+spec:
+  group: control.anvil.hazyforge.io
+  names:
+    kind: AgentTool
+    listKind: AgentToolList
+    plural: agenttools
+    shortNames:
+    - agtool
+    singular: agenttool
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.executable.name
+      name: Executable
+      type: string
+    - jsonPath: .spec.description
+      name: Description
+      type: string
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: AgentToolSpec defines one executable acquisition contract.
+            properties:
+              description:
+                description: Description explains what the executable does.
+                type: string
+              executable:
+                description: |-
+                  AgentToolExecutable identifies the command published into the per-run bin
+                  directory and its relative path inside the content-addressed install root.
+                properties:
+                  name:
+                    description: Name is the command name exposed on PATH.
+                    maxLength: 253
+                    pattern: ^[A-Za-z0-9][A-Za-z0-9._-]*$
+                    type: string
+                  path:
+                    description: Path is a safe relative executable path.
+                    maxLength: 253
+                    minLength: 1
+                    pattern: ^(?:[A-Za-z0-9_-][A-Za-z0-9._-]*|\.[A-Za-z0-9_-][A-Za-z0-9._-]*|\.\.[A-Za-z0-9._-]+)(?:/(?:[A-Za-z0-9_-][A-Za-z0-9._-]*|\.[A-Za-z0-9_-][A-Za-z0-9._-]*|\.\.[A-Za-z0-9._-]+))*$
+                    type: string
+                required:
+                - name
+                - path
+                type: object
+              setupScript:
+                description: |-
+                  SetupScript is the unrestricted compatibility escape hatch. It runs with
+                  the same authority as the consuming AgentRun and is composition-write
+                  code-execution authority.
+                maxLength: 1048576
+                type: string
+              source:
+                description: Source is the preferred structured acquisition contract.
+                properties:
+                  httpArtifact:
+                    properties:
+                      artifacts:
+                        description: Artifacts must contain at most one entry for
+                          each platform.
+                        items:
+                          description: AgentToolHTTPArtifact is one integrity-pinned
+                            HTTP artifact variant.
+                          properties:
+                            executablePath:
+                              description: |-
+                                ExecutablePath is the safe relative file path inside an archive. It is
+                                empty only for format=binary.
+                              maxLength: 253
+                              pattern: ^(?:[A-Za-z0-9_-][A-Za-z0-9._-]*|\.[A-Za-z0-9_-][A-Za-z0-9._-]*|\.\.[A-Za-z0-9._-]+)(?:/(?:[A-Za-z0-9_-][A-Za-z0-9._-]*|\.[A-Za-z0-9_-][A-Za-z0-9._-]*|\.\.[A-Za-z0-9._-]+))*$
+                              type: string
+                            format:
+                              description: Format controls safe extraction.
+                              enum:
+                              - binary
+                              - tar.gz
+                              - zip
+                              type: string
+                            platform:
+                              description: AgentToolPlatform selects one runner operating
+                                system and architecture.
+                              properties:
+                                arch:
+                                  description: Arch is the Go-style CPU architecture
+                                    name.
+                                  enum:
+                                  - amd64
+                                  - arm64
+                                  maxLength: 16
+                                  type: string
+                                os:
+                                  description: OS is the Go-style operating system
+                                    name.
+                                  enum:
+                                  - linux
+                                  - darwin
+                                  maxLength: 16
+                                  type: string
+                              required:
+                              - arch
+                              - os
+                              type: object
+                            sha256:
+                              description: SHA256 is the expected lowercase artifact
+                                digest.
+                              pattern: ^[a-f0-9]{64}$
+                              type: string
+                            url:
+                              description: URL must use HTTPS.
+                              maxLength: 4096
+                              pattern: ^https://[^[:space:]]+$
+                              type: string
+                          required:
+                          - format
+                          - platform
+                          - sha256
+                          - url
+                          type: object
+                          x-kubernetes-validations:
+                          - message: executablePath must be empty for binary artifacts
+                              and set for archives
+                            rule: (self.format == 'binary' && !has(self.executablePath))
+                              || (self.format != 'binary' && has(self.executablePath))
+                        maxItems: 4
+                        minItems: 1
+                        type: array
+                    required:
+                    - artifacts
+                    type: object
+                  inlineScript:
+                    description: |-
+                      AgentToolInlineScript is a complete executable script installed as the
+                      declared executable. It is distinct from setupScript, which is an
+                      unrestricted environment-mutating compatibility escape hatch.
+                    properties:
+                      interpreter:
+                        description: |-
+                          Interpreter is an argv-form interpreter prefix, for example
+                          ["/usr/bin/env", "bash"].
+                        items:
+                          maxLength: 4096
+                          minLength: 1
+                          type: string
+                        maxItems: 8
+                        minItems: 1
+                        type: array
+                      script:
+                        description: Script is the executable script body.
+                        maxLength: 1048576
+                        minLength: 1
+                        type: string
+                    required:
+                    - interpreter
+                    - script
+                    type: object
+                  ociArtifact:
+                    properties:
+                      artifacts:
+                        description: Artifacts must contain at most one entry for
+                          each platform.
+                        items:
+                          description: AgentToolOCIArtifact is one digest-pinned OCI
+                            artifact variant.
+                          properties:
+                            executablePath:
+                              description: ExecutablePath is the safe relative executable
+                                path in the artifact.
+                              maxLength: 253
+                              minLength: 1
+                              pattern: ^(?:[A-Za-z0-9_-][A-Za-z0-9._-]*|\.[A-Za-z0-9_-][A-Za-z0-9._-]*|\.\.[A-Za-z0-9._-]+)(?:/(?:[A-Za-z0-9_-][A-Za-z0-9._-]*|\.[A-Za-z0-9_-][A-Za-z0-9._-]*|\.\.[A-Za-z0-9._-]+))*$
+                              type: string
+                            platform:
+                              description: AgentToolPlatform selects one runner operating
+                                system and architecture.
+                              properties:
+                                arch:
+                                  description: Arch is the Go-style CPU architecture
+                                    name.
+                                  enum:
+                                  - amd64
+                                  - arm64
+                                  maxLength: 16
+                                  type: string
+                                os:
+                                  description: OS is the Go-style operating system
+                                    name.
+                                  enum:
+                                  - linux
+                                  - darwin
+                                  maxLength: 16
+                                  type: string
+                              required:
+                              - arch
+                              - os
+                              type: object
+                            reference:
+                              description: Reference must include a sha256 digest.
+                              maxLength: 4096
+                              pattern: ^[^[:space:]@]+@sha256:[a-f0-9]{64}$
+                              type: string
+                          required:
+                          - executablePath
+                          - platform
+                          - reference
+                          type: object
+                        maxItems: 4
+                        minItems: 1
+                        type: array
+                    required:
+                    - artifacts
+                    type: object
+                type: object
+                x-kubernetes-validations:
+                - message: exactly one tool source must be set
+                  rule: '(has(self.httpArtifact) ? 1 : 0) + (has(self.ociArtifact)
+                    ? 1 : 0) + (has(self.inlineScript) ? 1 : 0) == 1'
+              verifyCommand:
+                description: VerifyCommand is an argv-form post-install check.
+                items:
+                  maxLength: 4096
+                  minLength: 1
+                  type: string
+                maxItems: 32
+                minItems: 1
+                type: array
+            required:
+            - executable
+            - verifyCommand
+            type: object
+            x-kubernetes-validations:
+            - message: exactly one of source or setupScript must be set
+              rule: has(self.source) != (has(self.setupScript) && self.setupScript.size()
+                > 0)
+            - message: archive executablePath must equal executable.path
+              rule: '!has(self.source) || !has(self.source.httpArtifact) || self.source.httpArtifact.artifacts.all(a,
+                a.format == ''binary'' || a.executablePath == self.executable.path)'
+            - message: OCI executablePath must equal executable.path
+              rule: '!has(self.source) || !has(self.source.ociArtifact) || self.source.ociArtifact.artifacts.all(a,
+                a.executablePath == self.executable.path)'
+        required:
+        - spec
+        type: object
+    served: true
+    storage: true
+    subresources: {}

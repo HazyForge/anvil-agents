@@ -2160,6 +2160,37 @@ spec:
                           type: string
                       type: object
                     type: array
+                  toolCache:
+                    description: |-
+                      ToolCache selects a dedicated writable AgentDataVolume for structured
+                      tool acquisition. Empty uses a per-run emptyDir. The cache is mounted at a
+                      reserved path and never reused as a model authentication home.
+                    properties:
+                      mountPath:
+                        description: MountPath overrides the AgentDataVolume default
+                          mount path for this run.
+                        type: string
+                      name:
+                        description: Name references an AgentDataVolume in the AgentRun
+                          namespace.
+                        minLength: 1
+                        type: string
+                      namespace:
+                        description: |-
+                          Namespace must be empty or the AgentRun namespace. Cross-namespace
+                          volume mounts are intentionally not supported.
+                        type: string
+                      readOnly:
+                        description: ReadOnly mounts the durable data volume read-only
+                          for this run.
+                        type: boolean
+                      subPath:
+                        description: SubPath optionally mounts a subdirectory of the
+                          AgentDataVolume PVC.
+                        type: string
+                    required:
+                    - name
+                    type: object
                   ttlSecondsAfterFinished:
                     description: |-
                       TTLSecondsAfterFinished controls Job cleanup. Empty keeps the Job until

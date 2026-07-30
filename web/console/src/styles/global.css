@@ -1261,19 +1261,6 @@ table.data-table tr.click-row:hover td {
   border-color: var(--amber-dim);
 }
 
-.auth-session-card-active {
-  border-color: var(--amber-dim);
-  box-shadow: inset 0 0 0 1px rgba(240, 180, 41, 0.35);
-}
-
-.related-auth-sessions {
-  display: flex;
-  flex-direction: column;
-  gap: 0.45rem;
-  padding: 0.65rem 0 0.25rem;
-  border-top: 1px dashed var(--border);
-}
-
 .agent-card {
   border: 1px solid var(--border);
   background: linear-gradient(180deg, var(--bg-panel-2) 0%, var(--bg-panel) 100%);
@@ -2039,3 +2026,9 @@ table.data-table tr.click-row:hover td {
   color: var(--text-mute);
   min-height: 1.25rem;
 }
+
+.library-section { margin-top: 1.5rem; }
+.library-section > .page-sub { margin: 0.35rem 0 0.8rem; }
+.ordered-ref-list { display: grid; gap: 0.4rem; margin: 0 0 0.65rem; padding: 0; list-style: none; }
+.ordered-ref-list > li { display: flex; align-items: center; gap: 0.5rem; min-height: 2.25rem; padding: 0.35rem 0.5rem; border: 1px solid var(--border); border-radius: 0.5rem; background: var(--bg-panel); }
+.ordered-ref-actions { display: flex; gap: 0.25rem; margin-left: auto; }

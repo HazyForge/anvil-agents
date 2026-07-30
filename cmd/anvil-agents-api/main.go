@@ -1,8 +1,11 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"os"
+	"strings"
+	"time"
 
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes"
@@ -12,6 +15,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
 	agentsv1alpha1 "github.com/hazyforge/anvil-agents/api/v1alpha1"
+	"github.com/hazyforge/anvil-agents/internal/archive"
 	"github.com/hazyforge/anvil-agents/internal/runapi"
 )
 
@@ -61,7 +65,20 @@ func main() {
 		log.Error(err, "configure OIDC authentication")
 		os.Exit(1)
 	}
-	server, err := runapi.NewServer(config, authenticator, runClient, runapi.KubernetesLogSource{Client: clientset}, log)
+	var archiveStore archive.AgentRunArchiveStore
+	if databaseURL := strings.TrimSpace(os.Getenv("ANVIL_AGENTS_ARCHIVE_DATABASE_URL")); databaseURL != "" {
+		openCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		store, err := archive.OpenPostgresAgentRunArchiveStore(openCtx, databaseURL)
+		cancel()
+		if err != nil {
+			log.Error(err, "open AgentRun archive database; archive list/purge verify disabled")
+		} else {
+			archiveStore = store
+			defer store.Close()
+			log.Info("AgentRun PostgreSQL archive store enabled for API")
+		}
+	}
+	server, err := runapi.NewServerWithArchive(config, authenticator, runClient, runapi.KubernetesLogSource{Client: clientset}, archiveStore, log)
 	if err != nil {
 		log.Error(err, "configure AgentRun API")
 		os.Exit(1)

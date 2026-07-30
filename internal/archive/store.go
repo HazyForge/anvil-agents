@@ -65,7 +65,28 @@ CREATE INDEX IF NOT EXISTS anvilhub_agent_run_archives_phase_idx
 
 type AgentRunArchiveStore interface {
 	ArchiveAgentRun(ctx context.Context, record AgentRunArchiveRecord) (AgentRunArchiveResult, error)
+	// ListAgentRunArchives returns newest archived rows for a namespace.
+	ListAgentRunArchives(ctx context.Context, namespace string, limit int) ([]AgentRunArchiveListItem, error)
+	// HasAgentRunArchive reports whether a durable archive row exists.
+	HasAgentRunArchive(ctx context.Context, namespace, name, uid string) (bool, error)
 	Close()
+}
+
+// AgentRunArchiveListItem is a compact historical row for console/API listings.
+type AgentRunArchiveListItem struct {
+	Namespace     string    `json:"namespace"`
+	Name          string    `json:"name"`
+	UID           string    `json:"uid"`
+	Phase         string    `json:"phase"`
+	Backend       string    `json:"backend,omitempty"`
+	ScheduleName  string    `json:"scheduleName,omitempty"`
+	SourceKind    string    `json:"sourceKind,omitempty"`
+	SourceName    string    `json:"sourceName,omitempty"`
+	Error         string    `json:"error,omitempty"`
+	CompletedAt   time.Time `json:"completedAt,omitempty"`
+	ArchivedAt    time.Time `json:"archivedAt"`
+	Digest        string    `json:"digest"`
+	PullRequestURL string   `json:"pullRequestURL,omitempty"`
 }
 
 type AgentRunArchiveRecord struct {
@@ -242,6 +263,83 @@ ON CONFLICT (namespace, name, run_uid) DO UPDATE SET
 		ArchivedAt: record.ArchivedAt,
 		Digest:     record.Digest,
 	}, nil
+}
+
+func (s *PostgresAgentRunArchiveStore) ListAgentRunArchives(ctx context.Context, namespace string, limit int) ([]AgentRunArchiveListItem, error) {
+	namespace = strings.TrimSpace(namespace)
+	if namespace == "" {
+		return nil, fmt.Errorf("namespace is required")
+	}
+	if limit < 1 {
+		limit = 50
+	}
+	if limit > 500 {
+		limit = 500
+	}
+	rows, err := s.pool.Query(ctx, `
+SELECT namespace, name, run_uid, phase, backend, schedule_name, source_kind, source_name,
+       error, completed_at, archived_at, digest, pull_request_url
+FROM anvilhub_agent_run_archives
+WHERE namespace = $1
+ORDER BY COALESCE(completed_at, archived_at) DESC
+LIMIT $2`, namespace, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list AgentRun archives for %s: %w", namespace, err)
+	}
+	defer rows.Close()
+	out := make([]AgentRunArchiveListItem, 0, limit)
+	for rows.Next() {
+		var item AgentRunArchiveListItem
+		var completed pgtype.Timestamptz
+		var archived pgtype.Timestamptz
+		if err := rows.Scan(
+			&item.Namespace,
+			&item.Name,
+			&item.UID,
+			&item.Phase,
+			&item.Backend,
+			&item.ScheduleName,
+			&item.SourceKind,
+			&item.SourceName,
+			&item.Error,
+			&completed,
+			&archived,
+			&item.Digest,
+			&item.PullRequestURL,
+		); err != nil {
+			return nil, fmt.Errorf("scan AgentRun archive row: %w", err)
+		}
+		if completed.Valid {
+			item.CompletedAt = completed.Time.UTC()
+		}
+		if archived.Valid {
+			item.ArchivedAt = archived.Time.UTC()
+		}
+		out = append(out, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate AgentRun archives: %w", err)
+	}
+	return out, nil
+}
+
+func (s *PostgresAgentRunArchiveStore) HasAgentRunArchive(ctx context.Context, namespace, name, uid string) (bool, error) {
+	namespace = strings.TrimSpace(namespace)
+	name = strings.TrimSpace(name)
+	uid = strings.TrimSpace(uid)
+	if namespace == "" || name == "" || uid == "" {
+		return false, fmt.Errorf("namespace, name, and uid are required")
+	}
+	var exists bool
+	err := s.pool.QueryRow(ctx, `
+SELECT EXISTS(
+  SELECT 1 FROM anvilhub_agent_run_archives
+  WHERE namespace = $1 AND name = $2 AND run_uid = $3
+)`, namespace, name, uid).Scan(&exists)
+	if err != nil {
+		return false, fmt.Errorf("check AgentRun archive %s/%s: %w", namespace, name, err)
+	}
+	return exists, nil
 }
 
 func NewAgentRunArchiveRecord(run *controlv1alpha1.AgentRun, archivedAt time.Time) (AgentRunArchiveRecord, error) {

@@ -15,6 +15,8 @@ export type UIConfig = {
   };
   runs: {
     createEnabled: boolean;
+    purgeEnabled: boolean;
+    archiveStoreAvailable: boolean;
   };
 };
 
@@ -60,6 +62,10 @@ export async function loadUIConfig(force = false): Promise<UIConfig> {
       },
       runs: {
         createEnabled: Boolean(runs?.createEnabled),
+        purgeEnabled: Boolean((runs as { purgeEnabled?: boolean } | undefined)?.purgeEnabled),
+        archiveStoreAvailable: Boolean(
+          (runs as { archiveStoreAvailable?: boolean } | undefined)?.archiveStoreAvailable,
+        ),
       },
     };
     return cached;

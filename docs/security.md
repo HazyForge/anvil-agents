@@ -9,14 +9,17 @@ multi-tenant sandbox.
 An `AgentRun`, `AgentRunProfile`, or `AgentHarnessProfile` author can select an
 image, custom command, ServiceAccount, same-namespace Secrets, pull
 credentials, security context, node placement, and tolerations. An
-`AgentToolSet` author, or an author using the legacy `AgentSkillSet.spec.tools`
-field, can supply setup scripts that execute in consuming Jobs.
+`AgentTool` or `AgentToolSet` author, or an author using the legacy
+`AgentSkillSet.spec.tools` field, can supply setup scripts that execute in
+consuming Jobs. `AgentMCPServer` authors select executable argv or an egress
+endpoint, header names, and required environment names, but never Secret refs
+or credential values.
 Granting write access to any of these resources is therefore equivalent to
 granting substantial code-execution authority in that namespace. An admission
 controller should enforce allowed registries, ServiceAccounts, Secret and PVC
 refs, security contexts, resources, and placement rules.
 
-Skill and tool sets cannot directly select images, identities, Secrets,
+Atomic capabilities and their sets cannot directly select images, identities, Secrets,
 storage, or placement. Remote skill sources must identify a full immutable Git
 commit, and private-source tokens are selected by exact API host only from the
 trusted harness execution envelope. Keep those boundaries in admission policy too. A
@@ -42,12 +45,22 @@ is backfilled by the controller; new executions record both immediately.
 Structured CLI views escape terminal control characters; the explicit
 `run logs` stream remains raw.
 
-Codex auth maintenance uses append-only `AgentAuthSession` objects. The CLI
-creates a short-lived staging Secret and session; the controller creates one
-fixed maintenance Job with `automountServiceAccountToken: false`, no caller-
-selected image/command/mount, and credential env that is never logged. Bootstrap
-Secret updates refuse ExternalSecret-managed targets. Untrusted AgentRuns may
-call `self report` only and never create auth sessions or mutate Secrets.
+Provider auth maintenance uses append-only `AgentAuthSession` objects (Codex,
+Grok Build, and OpenClaw). The CLI creates a short-lived staging Secret and
+session for `reauth` only; `verify` and `logout` never stage credentials. The
+controller creates one fixed maintenance Job with
+`automountServiceAccountToken: false`, no caller-selected image/command/mount,
+and credential env that is never logged. Reauth projects only the provider's
+exact staging key, never the entire Secret. OpenClaw sessions bind the selected
+agent, model provider, and auth mode; a strict, symlink-safe parser resolves the
+registered agent directory without launching the OpenClaw CLI or volume-owned
+plugins while credentials are present. OpenClaw Jobs use the OpenClaw runner
+image with UID/GID/fsGroup `1000` and `fsGroupChangePolicy=OnRootMismatch`;
+Codex/Grok Jobs retain `10001`. OpenClaw reauth writes only the selected
+agent's canonical auth profile store via the OpenClaw SDK and never replaces
+SQLite databases or prints secrets. Bootstrap Secret updates refuse
+ExternalSecret-managed targets. Untrusted AgentRuns may call `self report` only
+and never create auth sessions or mutate Secrets.
 
 Creating an `AdverseSignal` is incident-trigger authority for enabled
 `AdverseSituation` responders in that namespace. A write-only reporter role
@@ -113,11 +126,13 @@ Permissions:
 | --- | --- |
 | `anvil-agents:runs:read` | List/get sanitized AgentRun views |
 | `anvil-agents:runs:stream` | Live log/status streams (with read) |
+| `anvil-agents:runs:purge` | Purge terminal live AgentRun CRs already archived to PostgreSQL |
 | `anvil-agents:composition:read` | List/get composition CRs (when `composition.readEnabled`) |
 | `anvil-agents:composition:write` | Create/update/delete **console-managed** composition CRs (when `composition.writeEnabled`) |
 
-Composition kinds: `AgentRunProfile`, `AgentHarnessProfile`, `AgentSkillSet`,
-`AgentToolSet`, `VolumeProfile`, `AgentDataVolume`.
+Composition kinds: `AgentRunProfile`, `AgentHarnessProfile`, `AgentSkill`,
+`AgentSkillSet`, `AgentTool`, `AgentToolSet`, `AgentMCPServer`, `AgentMCPSet`,
+`VolumeProfile`, and `AgentDataVolume`.
 
 **GitOps is source of truth.** Even with composition write enabled, the API
 refuses to update or delete objects that:

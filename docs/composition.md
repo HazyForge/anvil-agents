@@ -1,18 +1,24 @@
 # Agent Composition
 
-Anvil Agents uses four namespaced resources for reusable configuration:
+Anvil Agents separates five authorities. Singular skills, tools, and MCP
+servers are first-class namespaced resources; ordered sets collect only one
+atomic kind; profiles select capabilities; harnesses grant runtime authority.
 
 | Resource | Owns | Must not own |
 | --- | --- | --- |
-| `AgentRunProfile` | role, scope, policy, standing prompt, intent, notifications, and composition choices | shared capability definitions |
-| `AgentHarnessProfile` | one backend adapter, image, Kubernetes execution identity, credentials, storage, placement, and limits | task instructions or skills |
-| `AgentSkillSet` | backend-neutral skills and optional delegated personas | images, ServiceAccounts, Secrets, storage, or placement |
-| `AgentToolSet` | reusable setup and verification contracts for external tools | the external service, credentials, ServiceAccounts, networking, storage, or placement |
+| `AgentSkill` | one Markdown-only `SKILL.md` package plus optional Markdown references | scripts, binaries, credentials, identity, or placement |
+| `AgentTool` | one executable acquisition and argv-form verification contract | instructions, Secrets, identity, volumes, or placement |
+| `AgentMCPServer` | one secret-free stdio or Streamable HTTP connection contract | tokens, Secret refs, identity, tools, or placement |
+| `AgentSkillSet`, `AgentToolSet`, `AgentMCPSet` | ordered refs to one corresponding atomic resource kind | cross-type bundles or runtime grants |
+| `AgentRunProfile` | role, scope, policy, standing prompt, intent, notifications, and explicit capability selections | capability definitions or runtime credentials |
+| `AgentHarnessProfile` | one backend adapter, image, Kubernetes execution identity, credentials, storage, optional tool cache, placement, and limits | task instructions or capability selection |
 
-`AgentToolSet` exists because external tools commonly have an independent
-owner and lifecycle from the instructions that use them. It never installs the
-external service. Prompt sets and personas remain part of role or skill
-composition until they demonstrate the same independent lifecycle.
+Skills contain Markdown only. A skill package script or non-Markdown asset must
+be authored separately as an `AgentTool` and selected explicitly. Tool/skill
+pairing is not persisted and selecting one never auto-selects the other.
+`setupScript` remains an unrestricted migration escape hatch and therefore
+composition-write code-execution authority; structured digest-pinned
+acquisition is preferred.
 
 All references must resolve in the `AgentRun` namespace. This keeps Kubernetes
 RBAC and Secret ownership understandable. A platform can distribute identical
@@ -29,13 +35,17 @@ metadata:
 spec:
   harnessProfileRef:
     name: codex-standard
-  skillSets:
-    refs:
-      - name: repository-review
-      - name: organization-knowledge
-  toolSets:
-    refs:
-      - name: organization-knowledge-http
+  capabilities:
+    skills:
+      selections:
+        - skillSetRef: {name: repository-review}
+        - skillRef: {name: organization-knowledge}
+    tools:
+      selections:
+        - toolSetRef: {name: organization-knowledge-http}
+    mcpServers:
+      selections:
+        - mcpSetRef: {name: organization-context}
   harness:
     intent: observe
     systemPrompt: Review current evidence and make no mutations.
@@ -46,32 +56,33 @@ editing either set. Changing a skill-set ref changes instructions without
 changing the provider runtime. Changing a tool-set ref changes the executable
 integration without copying either the role or its knowledge-use policy.
 
-## Skill Resolution
+## Canonical Resolution And Compatibility
 
-The controller resolves skills in this order:
+The controller freezes this precedence:
 
-1. Profile skill-set refs, in declaration order.
-2. Profile skill overrides.
-3. Run skill-set refs, in declaration order, when the run mode is `Append` or
-   empty.
-4. Run skill overrides.
-5. Legacy inline `harness.skillInjections`, `tools`, and `subagents` as a final
-   v1alpha1 compatibility overlay.
+1. Deprecated profile/run `skillSets` and `toolSets` resolve with their current
+   v1alpha1 behavior.
+2. Canonical profile `capabilities` resolve in declared atomic-or-set order.
+3. Canonical run `capabilities` resolve next.
+4. Legacy inline `harness.skillInjections`, `tools`, `subagents`, and MCP
+   servers remain the final compatibility overlay.
 
-Tool-set resolution happens after selected skill sets and before that inline
-overlay:
+Each canonical kind has independent `Append` and `Replace` semantics. A
+canonical run-level `Replace` clears inherited deprecated and canonical
+selections for that kind, but never silently removes the final inline overlay.
+Sets expand atomics in place, so `[atomic, set, atomic]` retains exact order.
+Selecting the same atomic directly and through a set fails as a duplicate.
 
-1. Profile tool-set refs in declaration order, unless the run mode is
-   `Replace`.
-2. Run tool-set refs in declaration order.
-3. Legacy inline `harness.tools` as the final compatibility overlay.
+Set `skillRefs`, `toolRefs`, and `serverRefs` are canonical. Existing embedded
+`skills`, `tools`, personas, and inline harness fields remain deprecated inputs
+so existing objects execute unchanged during migration.
 
-`toolSets.mode: Replace` replaces inherited tool-set refs only. It does not
+Legacy `toolSets.mode: Replace` replaces inherited tool-set refs only. It does not
 discard tools still embedded in a legacy `AgentSkillSet`, and it does not
 remove inline profile tools. Move those tools into `AgentToolSet` before
 relying on an atomic tool integration swap.
 
-`mode: Replace` on a run discards the profile's skill-set refs and overrides
+Legacy `skillSets.mode: Replace` on a run discards the profile's skill-set refs and overrides
 before resolving the run layer. It does not discard legacy inline profile
 capabilities; remove those while migrating if a completely clean swap is
 required.
@@ -82,7 +93,8 @@ tool sets and identical subagent personas are deduplicated by name. Conflicting
 definitions of the same tool or persona fail the run instead of choosing one
 silently. Duplicate refs and duplicate override names in one layer also fail.
 
-Remote GitHub skill sources require a full 40- or 64-character commit object
+Canonical GitHub skill packages require a safe relative path ending in
+`SKILL.md`, Markdown-only reference paths, and a full 40- or 64-character commit object
 ID. Branches, tags, and repository defaults are deliberately rejected so the
 resolved payload cannot change without a spec change. An `AgentSkillSet`
 cannot select its own token. For private repositories, map the exact GitHub API
@@ -90,6 +102,12 @@ host to a same-namespace token Secret in the selected
 `AgentHarnessProfile.spec.execution.skillSourceCredentials`. This lets the same
 skill set remain portable across public, private, and mirrored deployments
 without transferring credential authority to capability-pack authors.
+
+The console can inspect a public github.com tree at the pinned commit, populate
+Markdown reference paths, and report ignored scripts/assets. This browser
+preview is unauthenticated and restricted by CSP to `https://api.github.com`;
+private and GitHub Enterprise packages are authored by reference and fetched
+only by the controller through the harness-owned credential mapping.
 
 ## Skill Overrides
 
@@ -149,7 +167,8 @@ profile-inline backend/execution overlays.
 
 At Job materialization, `status.resolvedComposition` records each selected
 object's name, namespace, UID, generation, resource version, and spec digest.
-This includes separate `skillSetRefs` and `toolSetRefs` evidence.
+This includes separate `skillRefs`, `skillSetRefs`, `toolRefs`, `toolSetRefs`,
+`mcpServerRefs`, and `mcpSetRefs` evidence.
 `effectiveDigest` covers the complete resolved `AgentRun` spec.
 `payloadDigest` covers the exact mounted ConfigMap data, including resolved
 remote skill bytes. The read-only OIDC API exposes this sanitized evidence with
@@ -162,3 +181,11 @@ the latest objects when they become launchable. Once the Job exists, the
 controller follows that single execution and recovers the accepted resolution
 snapshot from a Job annotation if the status patch was interrupted. Create a
 new `AgentRun` to execute changed composition.
+
+## Deferred Catalog Work
+
+This capability model preserves names, immutable source refs, digests, and
+provenance so a catalog can be layered on later. Marketplace, popularity
+search, cross-type bundles, auto-pairing, external registry APIs, and a
+separate validation-receipt CRD are explicitly out of scope. The first real
+consuming `AgentRun` is the fail-closed dynamic canary.

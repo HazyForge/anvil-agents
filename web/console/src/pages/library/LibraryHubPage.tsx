@@ -17,6 +17,11 @@ export function LibraryHubPage({ namespace, writeEnabled }: Props) {
   }
 
   const kinds = COMPOSITION_KINDS.filter((kind) => kind.route !== "profiles");
+  const sections = [
+    { id: "atomic", title: "Atomic capabilities", description: "Select skills, executable tools, and MCP servers independently." },
+    { id: "collection", title: "Collections", description: "Reusable ordered sets of one atomic capability kind." },
+    { id: "runtime", title: "Runtime", description: "Harness identity, storage, placement, and auth maintenance." },
+  ] as const;
 
   return (
     <div className="library-hub">
@@ -45,20 +50,26 @@ export function LibraryHubPage({ namespace, writeEnabled }: Props) {
         be created or edited here.
       </div>
 
-      <div className="library-grid">
-        {kinds.map((kind) => (
-          <Link
-            key={kind.segment}
-            className={`library-card${kind.danger ? " library-card-danger" : ""}`}
-            to={`/ns/${encodeURIComponent(namespace)}/${kind.route}`}
-          >
-            <div className="library-card-title">{kind.title}</div>
-            <div className="library-card-kind mono">{kind.kind}</div>
-            <div className="library-card-body">{kind.description}</div>
-            {kind.danger ? <div className="library-card-warn">Elevated authority</div> : null}
-          </Link>
-        ))}
-      </div>
+      {sections.map((section) => (
+        <section key={section.id} className="library-section">
+          <h2 className="panel-title">{section.title}</h2>
+          <p className="page-sub">{section.description}</p>
+          <div className="library-grid">
+            {kinds.filter((kind) => kind.category === section.id).map((kind) => (
+              <Link
+                key={kind.segment}
+                className={`library-card${kind.danger ? " library-card-danger" : ""}`}
+                to={`/ns/${encodeURIComponent(namespace)}/${kind.route}`}
+              >
+                <div className="library-card-title">{kind.title}</div>
+                <div className="library-card-kind mono">{kind.kind}</div>
+                <div className="library-card-body">{kind.description}</div>
+                {kind.danger ? <div className="library-card-warn">Elevated authority</div> : null}
+              </Link>
+            ))}
+          </div>
+        </section>
+      ))}
     </div>
   );
 }

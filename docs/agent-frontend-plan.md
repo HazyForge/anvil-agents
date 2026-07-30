@@ -200,7 +200,8 @@ Useful fixture classes:
 - Succeeded manager/child with `pullRequestURL`
 - Schedule-sourced vs ManualRequest-sourced runs
 
-Static loops documented in `HazyForge/hazy-trade` under `.hazyforge/agents/`:
+Static loops are deployment-owned and may use a consumer repository's
+`.hazyforge/agents/` integration convention:
 
 - Manager schedule/profile: `hazy-trade-agent-manager-1h` / `hazy-trade-agent-manager`
 - Production auditor schedule/profile: `hazy-trade-production-auditor`

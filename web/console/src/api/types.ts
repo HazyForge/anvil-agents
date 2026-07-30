@@ -64,6 +64,10 @@ export interface ResolvedComposition {
   harnessProfileRef?: ResolvedObjectRef;
   skillSetRefs?: ResolvedObjectRef[];
   toolSetRefs?: ResolvedObjectRef[];
+  skillRefs?: ResolvedObjectRef[];
+  toolRefs?: ResolvedObjectRef[];
+  mcpSetRefs?: ResolvedObjectRef[];
+  mcpServerRefs?: ResolvedObjectRef[];
   scope?: {
     application?: string;
     applicationTarget?: string;
@@ -102,6 +106,53 @@ export interface AgentRunView {
 
 export interface AgentRunListResponse {
   items: AgentRunView[];
+}
+
+export interface AgentRunPurgeRequest {
+  keepLatest?: number;
+  keepPerSchedule?: number;
+  olderThan?: string;
+  scheduleName?: string;
+  dryRun?: boolean;
+}
+
+export interface AgentRunPurgeSkip {
+  name: string;
+  reason: string;
+}
+
+export interface AgentRunPurgeResponse {
+  deleted: string[];
+  skipped?: AgentRunPurgeSkip[];
+  kept: number;
+  dryRun: boolean;
+  archiveStoreAvailable: boolean;
+}
+
+export interface AgentRunArchiveItem {
+  namespace: string;
+  name: string;
+  uid: string;
+  phase: string;
+  backend?: string;
+  scheduleName?: string;
+  sourceKind?: string;
+  sourceName?: string;
+  error?: string;
+  completedAt?: string;
+  archivedAt: string;
+  digest: string;
+  pullRequestURL?: string;
+}
+
+export interface AgentRunArchiveListResponse {
+  items: AgentRunArchiveItem[];
+}
+
+export interface UIConfigRuns {
+  createEnabled?: boolean;
+  purgeEnabled?: boolean;
+  archiveStoreAvailable?: boolean;
 }
 
 export interface APIErrorBody {

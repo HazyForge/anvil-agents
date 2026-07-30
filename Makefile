@@ -6,10 +6,8 @@ RELEASE_PLATFORM ?= linux/amd64
 RELEASE_OUTPUT ?= dist
 RELEASE_CHART_REGISTRY ?=
 RELEASE_REPO ?= HazyForge/anvil-agents
-RELEASE_DEPLOY_VALUES ?= .hazyforge/clusters/anvil-primaris/namespace/anvil-agents-system/deploy.yaml
-RELEASE_IMAGE_LOCK ?= $(RELEASE_OUTPUT)/images-$(VERSION).lock.tsv
 
-.PHONY: generate manifests test verify verify-runner-contract security security-govulncheck security-gosec security-trivy security-all build console-build console-typecheck console-embed console-embed-restore docker-build images image-checks helm-lint archive-postgres-integration chart-package release-tag release-tag-push release-local release-publish release-github release-local-all release-pin-deploy release-primaris release-primaris-fast release-primaris-hot deploy-primaris judge-prerequisites judge-kind-e2e kind-upgrade-e2e kind-e2e
+.PHONY: generate manifests test test-openclaw-auth-image verify verify-runner-contract security security-govulncheck security-gosec security-trivy security-all build console-build console-typecheck console-test console-embed console-embed-restore docker-build images image-checks helm-lint archive-postgres-integration chart-package release-tag release-tag-push release-local release-publish release-github release-local-all judge-prerequisites judge-kind-e2e kind-upgrade-e2e kind-e2e
 
 generate:
 	$(CONTROLLER_GEN) object paths=./api/...
@@ -28,8 +26,14 @@ manifests: generate
 test:
 	go test ./...
 
+# Executes the exact embedded OpenClaw auth runtime against the reviewed,
+# digest-pinned OpenClaw image and its native plugin SDK. This is opt-in because
+# it requires Docker and registry access.
+test-openclaw-auth-image:
+	ANVIL_RUN_OPENCLAW_IMAGE_TEST=true go test ./internal/controller -run '^TestAgentAuthOpenClawPinnedImageLifecycle$$' -count=1 -v
+
 # Local mirrors of the public GitHub Actions security program
-# (.github/workflows/security.yml). Not part of Primaris lifecycle.
+# (.github/workflows/security.yml). Not part of consumer deployment lifecycle.
 # Prefer the go.mod toolchain (go1.26.5+) so stdlib CVE scans match CI.
 security-govulncheck:
 	@command -v govulncheck >/dev/null || go install golang.org/x/vuln/cmd/govulncheck@latest
@@ -72,6 +76,9 @@ console-build:
 console-typecheck:
 	cd web/console && npm ci && npm run typecheck
 
+console-test:
+	cd web/console && npm ci && npm test
+
 # Copy built SPA assets into the go:embed tree used by anvil-agents-api.
 # Docker multi-stage builds do this automatically; use this for local binaries.
 # WARNING: replaces committed stub files under internal/runapi/consolefs/dist.
@@ -99,6 +106,7 @@ image-checks:
 	./hack/build-images.sh --check
 
 helm-lint:
+	bash ./hack/test-crd-install-surfaces.sh
 	./hack/test-api-chart.sh
 	./hack/test-archive-chart.sh
 
@@ -142,40 +150,6 @@ release-local-all:
 	$(MAKE) release-local
 	$(MAKE) release-github
 
-release-pin-deploy:
-	./hack/pin-deploy-values-from-lock.sh \
-		--image-lock "$(RELEASE_IMAGE_LOCK)" \
-		--values "$(RELEASE_DEPLOY_VALUES)"
-
-# Local Docker → Anvil Primaris (no GitHub Actions). See docs/release-primaris.md.
-# full: VERSION=vX.Y.Z make release-primaris
-# fast: VERSION=vX.Y.Z make release-primaris-fast
-# hot:  make release-primaris-hot   (controller only; allow dirty; deploys)
-# apply: make deploy-primaris
-release-primaris:
-	./hack/release-primaris.sh --mode full --version "$${VERSION:?set VERSION, for example v0.1.14}" \
-		--prefix "$(REGISTRY_PREFIX)" \
-		$(if $(filter true,$(RELEASE_SKIP_VERIFICATION)),--skip-verification,) \
-		$(if $(filter true,$(RELEASE_DEPLOY)),--deploy,) \
-		$(if $(filter true,$(RELEASE_GITHUB)),--github,)
-
-release-primaris-fast:
-	./hack/release-primaris.sh --mode fast --version "$${VERSION:?set VERSION, for example v0.1.14}" \
-		--prefix "$(REGISTRY_PREFIX)" \
-		$(if $(filter true,$(RELEASE_DEPLOY)),--deploy,) \
-		$(if $(filter true,$(RELEASE_GITHUB)),--github,)
-
-release-primaris-hot:
-	./hack/release-primaris.sh --mode hot --prefix "$(REGISTRY_PREFIX)" \
-		--component "$(or $(COMPONENT),controller)" \
-		--allow-dirty \
-		$(if $(filter false,$(RELEASE_DEPLOY)),--no-deploy,)
-
-deploy-primaris:
-	./hack/deploy-primaris.sh --manifests \
-		--values "$(RELEASE_DEPLOY_VALUES)" \
-		$(if $(KUBE_CONTEXT),--context $(KUBE_CONTEXT),)
-
 judge-prerequisites:
 	./hack/install-judge-prerequisites.sh
 
@@ -197,12 +171,9 @@ verify-runner-contract:
 	@bash -n hack/publish-release_test.sh
 	@bash -n hack/ensure-release-tag.sh
 	@bash -n hack/create-github-release.sh
-	@bash -n hack/pin-deploy-values-from-lock.sh
 	@bash -n hack/local-release_test.sh
-	@bash -n hack/deploy-primaris.sh
-	@bash -n hack/release-primaris.sh
-	@bash -n hack/release-primaris_test.sh
 	@bash -n hack/test-api-chart.sh
+	@bash -n hack/test-crd-install-surfaces.sh
 	@bash -n hack/test-archive-chart.sh
 	@bash -n hack/test-archive-postgres.sh
 	@bash -n hack/package-chart.sh
@@ -222,9 +193,6 @@ verify-runner-contract:
 	@hack/publish-release.sh --help >/dev/null
 	@hack/ensure-release-tag.sh --help >/dev/null
 	@hack/create-github-release.sh --help >/dev/null
-	@hack/pin-deploy-values-from-lock.sh --help >/dev/null
-	@hack/deploy-primaris.sh --help >/dev/null
-	@hack/release-primaris.sh --help >/dev/null
 	@hack/package-chart.sh --help >/dev/null
 	@hack/package-chart_test.sh
 	@hack/install-judge-prerequisites.sh --help >/dev/null
@@ -261,10 +229,11 @@ verify-runner-contract:
 	@hack/publish-images_test.sh
 	@hack/publish-release_test.sh
 	@hack/local-release_test.sh
-	@hack/release-primaris_test.sh
+	@bash hack/test-crd-install-surfaces.sh
 	@hack/test-kind-upgrade-cleanup.sh
 	@hack/test-runner-repository-checkout.sh
 	@hack/test-opencode-runner.sh
+	@hack/test-runner-capabilities.sh
 	@hack/stream-agent-run.sh --help >/dev/null
 	@if ANVIL_AGENTS_ACCESS_TOKEN=dummy hack/stream-agent-run.sh \
 		--endpoint https://agents.example.com@127.0.0.1 \
@@ -274,15 +243,14 @@ verify-runner-contract:
 	fi
 	@for script in docker/agent-run-*/entrypoint.sh; do \
 		bash -n "$$script"; \
-		rg -q 'ANVIL_AGENT_RUN_TOOL_SETUP_FILES' "$$script"; \
-		rg -q 'ANVIL_AGENT_RUN_TOOLS_JSON' "$$script"; \
 		rg -q 'repository-checkout.sh' "$$script"; \
 		rg -q 'anvil_clone_repository_url' "$$script"; \
-		rg -q '^run_tool_setup$$' "$$script"; \
 	done
 	@for dockerfile in docker/agent-run-*/Dockerfile; do \
 		rg -q 'agent-run-common/repository-checkout.sh' "$$dockerfile"; \
+		rg -q 'agent-run-common/capabilities.sh' "$$dockerfile"; \
+		rg -q '/out/anvil-agent-capabilities' "$$dockerfile"; \
 	done
 
-verify: manifests test build helm-lint verify-runner-contract console-typecheck
+verify: manifests test build helm-lint verify-runner-contract console-typecheck console-test
 	@test -z "$$(rg -l 'github.com/hazyforge/anvil-primaris|github.com/hazyforge/anvil-primaris/lib/go/anvilhub' --glob '*.go' .)"

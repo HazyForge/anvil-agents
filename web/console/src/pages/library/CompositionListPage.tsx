@@ -97,7 +97,7 @@ export function CompositionListPage({ token, namespace: activeNamespace, writeEn
           </p>
         </div>
         <div className="chip-row">
-          {writeEnabled && !kind.appendOnly ? (
+          {writeEnabled ? (
             <button
               type="button"
               className="btn btn-primary"
@@ -117,17 +117,7 @@ export function CompositionListPage({ token, namespace: activeNamespace, writeEn
           <>
             {" "}
             Harness profiles are the <em>runtime machine</em> (backend, SA, secrets, volumes) —
-            role/skills stay on <Link to="/profiles">run profiles</Link>. Attached data volumes
-            surface related <Link to={`/ns/${encodeURIComponent(namespace)}/auth-sessions`}>auth
-            session</Link> cards.
-          </>
-        ) : null}
-        {kind.appendOnly ? (
-          <>
-            {" "}
-            These are append-only. Create reauth/logout with{" "}
-            <span className="mono">anvil-agentctl auth</span> — the controller applies them and
-            blocks AgentRuns on the target volume until the session finishes.
+            role/skills stay on <Link to="/profiles">run profiles</Link>.
           </>
         ) : null}
       </div>

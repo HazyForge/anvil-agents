@@ -1,4 +1,5 @@
 {{- if .Values.api.enabled }}
+{{- $archiveMode := include "anvil-agents.archiveMode" . }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -21,6 +22,9 @@ spec:
         checksum/config: {{ include (print $.Template.BasePath "/api-configmap.yaml") . | sha256sum }}
         {{ with .Values.api.oidcCA.restartToken }}
         control.anvil.hazyforge.io/oidc-ca-restart: {{ . | quote }}
+        {{ end }}
+        {{ with .Values.archive.restartToken }}
+        control.anvil.hazyforge.io/archive-restart: {{ . | quote }}
         {{ end }}
     spec:
       serviceAccountName: {{ include "anvil-agents.apiServiceAccountName" . }}
@@ -53,6 +57,14 @@ spec:
 {{ toYaml .Values.api.securityContext | indent 12 }}
           resources:
 {{ toYaml .Values.api.resources | indent 12 }}
+          {{- if ne $archiveMode "disabled" }}
+          env:
+            - name: ANVIL_AGENTS_ARCHIVE_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "anvil-agents.archiveSecretName" . | quote }}
+                  key: {{ include "anvil-agents.archiveSecretKey" . | quote }}
+          {{- end }}
           volumeMounts:
             - name: config
               mountPath: /etc/anvil-agents-api

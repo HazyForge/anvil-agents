@@ -5,7 +5,8 @@ system is an external capability with four separate concerns:
 
 1. **Connection**: a URL, local CLI, mounted data, or custom runner image.
 2. **Identity**: a read-only token or workload identity in a Kubernetes Secret.
-3. **Tooling**: an `AgentToolSet` with a small command and stable I/O contract.
+3. **Tooling**: an atomic `AgentTool`, optionally collected in an ordered
+   `AgentToolSet`, with a small command and stable I/O contract.
 4. **Policy**: prompt or injected skill text explaining when and how to use it.
 
 Keeping these layers separate lets the same loop use a Markdown vault, an HTTP
@@ -40,8 +41,8 @@ memory; each run still decides what to query and records its own outcome.
 
 ## Git-Backed Knowledge
 
-For a small instruction pack, an `AgentSkillSet` skill can use
-`sourceRefs.github` to fetch one file from GitHub at run materialization. Pin
+For a small instruction pack, an `AgentSkill` can embed one `SKILL.md` and
+Markdown references or select the same Markdown-only package from GitHub. Pin
 `ref` to a commit SHA for repeatability. A private repository token is read
 from a same-namespace Secret. This is file injection, not search, and v0.1
 supports only the GitHub Contents API for remote skill files.
@@ -53,11 +54,17 @@ a shared RWO PVC and assume the controller provides synchronization.
 
 ## MCP And Other Protocols
 
-`AgentToolSet` can install a reviewed MCP launcher or client command, but it
-does not model MCP server discovery or provider-native session semantics. A
-harness that already supports MCP can configure those details in its image,
-home volume, or setup script. Preserve provider-native behavior rather than
-hiding incompatible protocols behind one loose field.
+`AgentMCPServer` models one secret-free `stdio` or Streamable HTTP server.
+`stdio.command` is argv-form; its executable must come from an independently
+selected `AgentTool` or the harness image. Streamable HTTP requires HTTPS and
+maps header names to environment-variable names. Header values and tokens are
+forbidden in the MCP CR and come only from the harness credential envelope.
+
+The shared runner performs `initialize` and `tools/list` before model startup,
+validates any allowlist, and translates the normalized manifest into the
+selected harness's native configuration. Unsupported backend/transport
+combinations fail before model tokens are spent. The first consuming
+`AgentRun` is the dynamic canary; there is no validation CRD.
 
 ## Tool-Use Evidence
 
@@ -84,7 +91,7 @@ only bounded output.
 - Pin tool versions and verify checksums or signatures.
 - Never curl an unversioned installer in a production profile.
 - Keep setup scripts reviewable and idempotent.
-- Treat write access to `AgentToolSet` and the legacy
+- Treat write access to `AgentTool`, `AgentToolSet`, and the legacy
   `AgentSkillSet.spec.tools` field as code-execution authority because setup
   scripts execute in every consuming Job.
 - Bound output size and avoid logging tokens or sensitive note contents.

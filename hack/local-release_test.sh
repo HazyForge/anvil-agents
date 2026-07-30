@@ -26,35 +26,6 @@ pi	ghcr.io/hazyforge/anvil-agent-run-pi@sha256:777777777777777777777777777777777
 EOF
 : > "${tmp_dir}/dist/anvil-agents-9.8.7.tgz"
 
-cat > "${tmp_dir}/deploy.yaml" <<'EOF'
-helmChartPath: charts/anvil-agents
-image:
-  reference: ghcr.io/hazyforge/anvil-agents@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
-  pullPolicy: IfNotPresent
-runnerImages:
-  codex: ghcr.io/hazyforge/anvil-agent-run-codex@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
-  openCode: ghcr.io/hazyforge/anvil-agent-run-opencode@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
-  hermesAgent: ghcr.io/hazyforge/anvil-agent-run-hermes@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
-  openClaw: ghcr.io/hazyforge/anvil-agent-run-openclaw@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
-  grokBuild: ghcr.io/hazyforge/anvil-agent-run-grok-build@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
-  piAgent: ghcr.io/hazyforge/anvil-agent-run-pi@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
-crds:
-  install: true
-EOF
-
-"${source_root}/hack/pin-deploy-values-from-lock.sh" \
-	--image-lock "${tmp_dir}/dist/images-v9.8.7.lock.tsv" \
-	--values "${tmp_dir}/deploy.yaml" >/dev/null
-for digest in 1111111111111111111111111111111111111111111111111111111111111111 \
-	2222222222222222222222222222222222222222222222222222222222222222 \
-	3333333333333333333333333333333333333333333333333333333333333333 \
-	4444444444444444444444444444444444444444444444444444444444444444 \
-	5555555555555555555555555555555555555555555555555555555555555555 \
-	6666666666666666666666666666666666666666666666666666666666666666 \
-	7777777777777777777777777777777777777777777777777777777777777777; do
-	rg -q "${digest}" "${tmp_dir}/deploy.yaml" || fail "deploy values missing digest ${digest}"
-done
-
 tag_repo="${tmp_dir}/tag-repo"
 mkdir -p "${tag_repo}/hack"
 cp "${source_root}/hack/ensure-release-tag.sh" "${tag_repo}/hack/ensure-release-tag.sh"

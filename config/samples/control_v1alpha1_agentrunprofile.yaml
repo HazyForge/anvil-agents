@@ -11,9 +11,19 @@ spec:
       - agents
   harnessProfileRef:
     name: codex-standard
-  skillSets:
-    refs:
-      - name: repository-review
+  capabilities:
+    skills:
+      selections:
+        - skillSetRef:
+            name: repository-review
+    tools:
+      selections:
+        - toolSetRef:
+            name: repository-tools
+    mcpServers:
+      selections:
+        - mcpSetRef:
+            name: organization-context
   harness:
     intent: observe
     systemPrompt: Inspect current evidence and make no mutations.

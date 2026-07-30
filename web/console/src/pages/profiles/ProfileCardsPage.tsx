@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { APIError } from "../../api/client";
+import { APIError, createAgentRun } from "../../api/client";
 import { listComposition } from "../../api/composition";
 import type { CompositionDocument } from "../../api/types.composition";
 import { CompositionResourceCard } from "../../components/CompositionResourceCard";
@@ -11,14 +11,37 @@ interface Props {
   token: string;
   namespace: string;
   writeEnabled: boolean;
+  createRunEnabled?: boolean;
 }
 
-export function ProfileCardsPage({ token, namespace, writeEnabled }: Props) {
+function defaultPromptForProfile(name: string, description: string): string {
+  if (name.endsWith("-agent-manager") || name.includes("agent-manager")) {
+    return [
+      "Run one bounded repository-agent management round and finish within about 20 minutes.",
+      "Inventory recent AgentRuns/schedules/storage first, skim open PRs/issues, and only dig into observability if something new is broken.",
+      "Prefer Succeeded with no-op-deduplicated-blocker or no-op-clean-manager-pass when no actionable work remains.",
+      "Do not perform money-touching actions.",
+    ].join(" ");
+  }
+  if (description.trim()) {
+    return `Run one pass for profile ${name}. ${description.trim()}`;
+  }
+  return `Run one manual AgentRun for profile ${name}. Gather live evidence, act only within this profile's authority, and finish with a clear decision.`;
+}
+
+export function ProfileCardsPage({
+  token,
+  namespace,
+  writeEnabled,
+  createRunEnabled = false,
+}: Props) {
   const navigate = useNavigate();
   const [items, setItems] = useState<CompositionDocument[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState("");
+  const [runningName, setRunningName] = useState<string | null>(null);
 
   useEffect(() => {
     if (!namespace) {
@@ -60,6 +83,52 @@ export function ProfileCardsPage({ token, namespace, writeEnabled }: Props) {
     });
   }, [items, query]);
 
+  const onRunNow = async (doc: CompositionDocument) => {
+    if (!createRunEnabled || !namespace) {
+      return;
+    }
+    const name = doc.metadata.name;
+    const description = String(doc.spec?.description ?? "");
+    const prompt = window.prompt(
+      [
+        `Review the prompt for a new append-only AgentRun.`,
+        `Namespace: ${namespace}`,
+        `Profile: ${name}`,
+        `Purpose: manual`,
+        `Source: ConsoleCard/profile-${name}`,
+        "",
+        `Choose Cancel to leave without creating a run.`,
+      ].join("\n"),
+      defaultPromptForProfile(name, description),
+    );
+    if (prompt === null) {
+      return;
+    }
+    if (!prompt.trim()) {
+      setError("Run prompt cannot be empty");
+      return;
+    }
+    setRunningName(name);
+    setError(null);
+    setNotice(null);
+    try {
+      const run = await createAgentRun(token, namespace, {
+        generateName: `console-${name.replace(/[^a-z0-9-]/gi, "").slice(0, 40)}-`.toLowerCase(),
+        profileName: name,
+        prompt: prompt.trim(),
+        purpose: "manual",
+        sourceKind: "ConsoleCard",
+        sourceName: `profile-${name}`,
+      });
+      setNotice(`Started ${run.name}`);
+      navigate(`/ns/${encodeURIComponent(namespace)}/runs/${encodeURIComponent(run.name)}`);
+    } catch (err) {
+      setError(err instanceof APIError ? `${err.code}: ${err.message}` : String(err));
+    } finally {
+      setRunningName(null);
+    }
+  };
+
   if (!namespace) {
     return (
       <div className="panel">
@@ -89,13 +158,18 @@ export function ProfileCardsPage({ token, namespace, writeEnabled }: Props) {
           ) : (
             <span className="chip chip-mute">create disabled</span>
           )}
+          {!createRunEnabled ? (
+            <span className="chip chip-mute" title="api.config.runs.createEnabled is false">
+              run-now disabled
+            </span>
+          ) : null}
         </div>
       </div>
 
       <div className="banner banner-info">
         <strong>{CRD_AS_CARD_MANTRA}</strong> {CRD_AS_CARD_HELP} Assign avatars via{" "}
         <span className="mono">ui.anvil.hazyforge.io/icon</span>. GitOps-owned profiles stay
-        read-only.
+        read-only for edits, but you can still <strong>Run now</strong> when create is enabled.
       </div>
 
       <div className="filters-bar">
@@ -111,6 +185,7 @@ export function ProfileCardsPage({ token, namespace, writeEnabled }: Props) {
       </div>
 
       {error ? <div className="banner banner-error">{error}</div> : null}
+      {notice ? <div className="banner banner-ok">{notice}</div> : null}
       {loading ? <div className="empty">Loading profiles…</div> : null}
 
       {!loading && !error && filtered.length === 0 ? (
@@ -130,6 +205,15 @@ export function ProfileCardsPage({ token, namespace, writeEnabled }: Props) {
               size="lg"
               primaryLabel="Open"
               secondaryLabel={doc.management.writable && writeEnabled ? "Edit" : "View"}
+              actionLabel={
+                createRunEnabled
+                  ? runningName === doc.metadata.name
+                    ? "Starting…"
+                    : "Run now"
+                  : undefined
+              }
+              actionDisabled={runningName !== null}
+              onAction={createRunEnabled ? () => void onRunNow(doc) : undefined}
               onOpen={() =>
                 navigate(
                   `/ns/${encodeURIComponent(namespace)}/profiles/${encodeURIComponent(doc.metadata.name)}`,

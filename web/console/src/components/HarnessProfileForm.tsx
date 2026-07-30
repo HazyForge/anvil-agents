@@ -4,7 +4,6 @@ import {
   type HarnessForm,
   type HarnessBackendKind,
 } from "../pages/library/harnessForm";
-import { RelatedAuthSessionCards } from "./RelatedAuthSessionCards";
 import { StringChipList } from "./StringChipList";
 
 interface Props {
@@ -12,9 +11,6 @@ interface Props {
   disabled?: boolean;
   isCreate: boolean;
   dataVolumeNames: string[];
-  /** When set, show AgentAuthSession cards for the selected durable homes. */
-  token?: string;
-  namespace?: string;
   onChange: <K extends keyof HarnessForm>(key: K, value: HarnessForm[K]) => void;
 }
 
@@ -23,8 +19,6 @@ export function HarnessProfileForm({
   disabled,
   isCreate,
   dataVolumeNames,
-  token,
-  namespace,
   onChange,
 }: Props) {
   const kindMeta = useMemo(
@@ -315,7 +309,7 @@ export function HarnessProfileForm({
 
       <StringChipList
         label="Data volumes (durable homes)"
-        help="AgentDataVolume names for sessions, OAuth homes, caches. Auth sessions that target these volumes appear as cards below."
+        help="AgentDataVolume names for sessions and OAuth homes. Tool acquisition caching is selected separately below."
         value={form.dataVolumeNames}
         disabled={disabled}
         suggestions={dataVolumeNames}
@@ -323,14 +317,14 @@ export function HarnessProfileForm({
         onChange={(next) => onChange("dataVolumeNames", next)}
       />
 
-      {token && namespace ? (
-        <RelatedAuthSessionCards
-          token={token}
-          namespace={namespace}
-          dataVolumeNames={form.dataVolumeNames}
-          title="Auth sessions for selected data volumes"
-        />
-      ) : null}
+      <label className="field">
+        <span className="label">Structured tool cache (optional)</span>
+        <select className="select" value={form.toolCacheVolumeName} disabled={disabled} onChange={(event) => onChange("toolCacheVolumeName", event.target.value)}>
+          <option value="">Per-run ephemeral emptyDir</option>
+          {dataVolumeNames.map((name) => <option key={name} value={name}>{name}</option>)}
+        </select>
+        <p className="field-help">Dedicated AgentDataVolume for content-addressed structured tool artifacts. Never reuse a model authentication home.</p>
+      </label>
 
       <StringChipList
         label="Image pull secrets"

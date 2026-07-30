@@ -431,6 +431,190 @@ func TestAgentRunCompositionComposesToolSetsAndAppliesInlineOverlay(t *testing.T
 	}
 }
 
+func TestAgentRunCompositionCanonicalReplaceAndInlinePrecedence(t *testing.T) {
+	t.Parallel()
+
+	legacySkills := &controlv1alpha1.AgentSkillSet{
+		ObjectMeta: metav1.ObjectMeta{Name: "legacy-skills", Namespace: "agents", UID: "legacy-skills-uid", Generation: 2},
+		Spec:       controlv1alpha1.AgentSkillSetSpec{Skills: []controlv1alpha1.AgentRunSkillInjectionSpec{{Name: "legacy", Content: "legacy"}}},
+	}
+	profileSkill := &controlv1alpha1.AgentSkill{
+		ObjectMeta: metav1.ObjectMeta{Name: "profile-skill", Namespace: "agents", UID: "profile-skill-uid", Generation: 3, ResourceVersion: "11"},
+		Spec:       controlv1alpha1.AgentSkillSpec{Inline: &controlv1alpha1.AgentSkillInlineSource{SkillMD: "profile"}},
+	}
+	runSkill := &controlv1alpha1.AgentSkill{
+		ObjectMeta: metav1.ObjectMeta{Name: "run-skill", Namespace: "agents", UID: "run-skill-uid", Generation: 4, ResourceVersion: "12"},
+		Spec:       controlv1alpha1.AgentSkillSpec{Inline: &controlv1alpha1.AgentSkillInlineSource{SkillMD: "run", References: []controlv1alpha1.AgentSkillMarkdownReference{{Path: "references/checks.md", Content: "checks"}}}},
+	}
+	profileTool := canonicalInlineTool("profile-tool", "profile-tool-uid")
+	runTool := canonicalInlineTool("run-tool", "run-tool-uid")
+	profileMCP := canonicalMCPServer("profile-mcp", "profile-mcp-uid")
+	runMCP := canonicalMCPServer("run-mcp", "run-mcp-uid")
+	profileMCPSet := &controlv1alpha1.AgentMCPSet{
+		ObjectMeta: metav1.ObjectMeta{Name: "profile-mcps", Namespace: "agents", UID: "profile-mcps-uid", Generation: 2},
+		Spec:       controlv1alpha1.AgentMCPSetSpec{ServerRefs: []controlv1alpha1.NamespacedObjectReference{{Name: profileMCP.Name}}},
+	}
+	profile := &controlv1alpha1.AgentRunProfile{
+		ObjectMeta: metav1.ObjectMeta{Name: "canonical", Namespace: "agents"},
+		Spec: controlv1alpha1.AgentRunProfileSpec{
+			SkillSets: &controlv1alpha1.AgentSkillCompositionSpec{Refs: []controlv1alpha1.NamespacedObjectReference{{Name: legacySkills.Name}}},
+			Capabilities: &controlv1alpha1.AgentCapabilitiesSpec{
+				Skills:     &controlv1alpha1.AgentSkillCapabilityComposition{Selections: []controlv1alpha1.AgentSkillSelection{{SkillRef: &controlv1alpha1.NamespacedObjectReference{Name: profileSkill.Name}}}},
+				Tools:      &controlv1alpha1.AgentToolCapabilityComposition{Selections: []controlv1alpha1.AgentToolSelection{{ToolRef: &controlv1alpha1.NamespacedObjectReference{Name: profileTool.Name}}}},
+				MCPServers: &controlv1alpha1.AgentMCPCapabilityComposition{Selections: []controlv1alpha1.AgentMCPSelection{{MCPSetRef: &controlv1alpha1.NamespacedObjectReference{Name: profileMCPSet.Name}}}},
+			},
+		},
+	}
+	run := &controlv1alpha1.AgentRun{
+		ObjectMeta: metav1.ObjectMeta{Name: "replace", Namespace: "agents"},
+		Spec: controlv1alpha1.AgentRunSpec{
+			ProfileRef: &controlv1alpha1.NamespacedObjectReference{Name: profile.Name},
+			Capabilities: &controlv1alpha1.AgentCapabilitiesSpec{
+				Skills:     &controlv1alpha1.AgentSkillCapabilityComposition{Mode: controlv1alpha1.AgentCapabilityCompositionReplace, Selections: []controlv1alpha1.AgentSkillSelection{{SkillRef: &controlv1alpha1.NamespacedObjectReference{Name: runSkill.Name}}}},
+				Tools:      &controlv1alpha1.AgentToolCapabilityComposition{Mode: controlv1alpha1.AgentCapabilityCompositionReplace, Selections: []controlv1alpha1.AgentToolSelection{{ToolRef: &controlv1alpha1.NamespacedObjectReference{Name: runTool.Name}}}},
+				MCPServers: &controlv1alpha1.AgentMCPCapabilityComposition{Mode: controlv1alpha1.AgentCapabilityCompositionReplace, Selections: []controlv1alpha1.AgentMCPSelection{{ServerRef: &controlv1alpha1.NamespacedObjectReference{Name: runMCP.Name}}}},
+			},
+			Harness: controlv1alpha1.AgentRunHarnessSpec{
+				SkillInjections: []controlv1alpha1.AgentRunSkillInjectionSpec{{Name: "run-skill", Content: "inline wins"}},
+				Tools:           []controlv1alpha1.AgentRunToolSpec{{Name: "inline-tool", VerifyCommand: []string{"inline-tool", "--help"}}},
+				MCPServers:      []controlv1alpha1.AgentRunMCPServerSpec{{Name: "inline-mcp", Transport: *profileMCP.Spec.Transport.DeepCopy()}},
+			},
+		},
+	}
+
+	effective, resolution, phase, reason, message, err := testCompositionReconciler(t, legacySkills, profileSkill, runSkill, profileTool, runTool, profileMCP, runMCP, profileMCPSet, profile).
+		resolveAgentRunComposition(context.Background(), run)
+	if err != nil || phase != "" {
+		t.Fatalf("resolve canonical composition: phase=%q reason=%q message=%q err=%v", phase, reason, message, err)
+	}
+	if got := effective.Spec.Harness.SkillInjections; len(got) != 1 || got[0].Name != runSkill.Name || got[0].Content != "inline wins" {
+		t.Fatalf("canonical replacement and inline skill overlay = %#v", got)
+	}
+	if got := effective.Spec.Harness.Tools; len(got) != 2 || got[0].Name != runTool.Name || got[1].Name != "inline-tool" || got[0].SpecDigest == "" {
+		t.Fatalf("canonical replacement and inline tools = %#v", got)
+	}
+	if got := effective.Spec.Harness.MCPServers; len(got) != 2 || got[0].Name != runMCP.Name || got[1].Name != "inline-mcp" {
+		t.Fatalf("canonical replacement and inline MCP servers = %#v", got)
+	}
+	if resolution == nil || len(resolution.SkillSetRefs) != 0 || len(resolution.SkillRefs) != 1 || len(resolution.ToolRefs) != 1 || len(resolution.MCPServerRefs) != 1 || len(resolution.MCPSetRefs) != 0 {
+		t.Fatalf("canonical resolution evidence = %#v", resolution)
+	}
+	if got := resolution.SkillRefs[0]; got.UID != "run-skill-uid" || got.Generation != 4 || got.ResourceVersion != "12" || got.Digest == "" {
+		t.Fatalf("atomic skill provenance = %#v", got)
+	}
+}
+
+func TestAgentRunCompositionRejectsDirectAndSetDuplicateAtomicRef(t *testing.T) {
+	t.Parallel()
+	skill := &controlv1alpha1.AgentSkill{ObjectMeta: metav1.ObjectMeta{Name: "review", Namespace: "agents"}, Spec: controlv1alpha1.AgentSkillSpec{Inline: &controlv1alpha1.AgentSkillInlineSource{SkillMD: "review"}}}
+	set := &controlv1alpha1.AgentSkillSet{ObjectMeta: metav1.ObjectMeta{Name: "review-set", Namespace: "agents"}, Spec: controlv1alpha1.AgentSkillSetSpec{SkillRefs: []controlv1alpha1.NamespacedObjectReference{{Name: skill.Name}}}}
+	run := testCompositionRun(&controlv1alpha1.AgentRunSpec{Capabilities: &controlv1alpha1.AgentCapabilitiesSpec{Skills: &controlv1alpha1.AgentSkillCapabilityComposition{Selections: []controlv1alpha1.AgentSkillSelection{
+		{SkillRef: &controlv1alpha1.NamespacedObjectReference{Name: skill.Name}},
+		{SkillSetRef: &controlv1alpha1.NamespacedObjectReference{Name: set.Name}},
+	}}}})
+	_, _, phase, reason, _, err := testCompositionReconciler(t, skill, set).resolveAgentRunComposition(context.Background(), run)
+	if err != nil || phase != controlv1alpha1.AgentRunPhaseFailed || reason != "DuplicateSkillRef" {
+		t.Fatalf("duplicate atomic ref block phase=%q reason=%q err=%v", phase, reason, err)
+	}
+}
+
+func TestLegacySetSelectionsExpandCanonicalAtomicRefs(t *testing.T) {
+	t.Parallel()
+	skill := &controlv1alpha1.AgentSkill{ObjectMeta: metav1.ObjectMeta{Name: "review", Namespace: "agents", UID: "skill-uid"}, Spec: controlv1alpha1.AgentSkillSpec{Inline: &controlv1alpha1.AgentSkillInlineSource{SkillMD: "review"}}}
+	tool := canonicalInlineTool("query", "tool-uid")
+	skillSet := &controlv1alpha1.AgentSkillSet{ObjectMeta: metav1.ObjectMeta{Name: "reviews", Namespace: "agents", UID: "skill-set-uid"}, Spec: controlv1alpha1.AgentSkillSetSpec{SkillRefs: []controlv1alpha1.NamespacedObjectReference{{Name: skill.Name}}}}
+	toolSet := &controlv1alpha1.AgentToolSet{ObjectMeta: metav1.ObjectMeta{Name: "queries", Namespace: "agents", UID: "tool-set-uid"}, Spec: controlv1alpha1.AgentToolSetSpec{ToolRefs: []controlv1alpha1.NamespacedObjectReference{{Name: tool.Name}}}}
+	profile := &controlv1alpha1.AgentRunProfile{
+		ObjectMeta: metav1.ObjectMeta{Name: "legacy-selectors", Namespace: "agents"},
+		Spec: controlv1alpha1.AgentRunProfileSpec{
+			SkillSets: &controlv1alpha1.AgentSkillCompositionSpec{Refs: []controlv1alpha1.NamespacedObjectReference{{Name: skillSet.Name}}},
+			ToolSets:  &controlv1alpha1.AgentToolCompositionSpec{Refs: []controlv1alpha1.NamespacedObjectReference{{Name: toolSet.Name}}},
+		},
+	}
+	run := testCompositionRun(&controlv1alpha1.AgentRunSpec{ProfileRef: &controlv1alpha1.NamespacedObjectReference{Name: profile.Name}})
+	effective, resolution, phase, reason, message, err := testCompositionReconciler(t, skill, tool, skillSet, toolSet, profile).resolveAgentRunComposition(context.Background(), run)
+	if err != nil || phase != "" {
+		t.Fatalf("resolve composition: phase=%q reason=%q message=%q err=%v", phase, reason, message, err)
+	}
+	if len(effective.Spec.Harness.SkillInjections) != 1 || effective.Spec.Harness.SkillInjections[0].Name != skill.Name || len(effective.Spec.Harness.Tools) != 1 || effective.Spec.Harness.Tools[0].Name != tool.Name {
+		t.Fatalf("legacy selectors did not expand canonical refs: skills=%#v tools=%#v", effective.Spec.Harness.SkillInjections, effective.Spec.Harness.Tools)
+	}
+	if resolution == nil || len(resolution.SkillRefs) != 1 || len(resolution.ToolRefs) != 1 {
+		t.Fatalf("atomic provenance missing: %#v", resolution)
+	}
+}
+
+func TestInlineMCPOverlayReplacesCanonicalServerByName(t *testing.T) {
+	t.Parallel()
+	server := canonicalMCPServer("context", "mcp-uid")
+	overlay := controlv1alpha1.AgentRunMCPServerSpec{Name: server.Name, Transport: controlv1alpha1.AgentMCPTransport{StreamableHTTP: &controlv1alpha1.AgentMCPStreamableHTTPTransport{Endpoint: "https://mcp.example.test/v1"}}}
+	run := testCompositionRun(&controlv1alpha1.AgentRunSpec{
+		Capabilities: &controlv1alpha1.AgentCapabilitiesSpec{MCPServers: &controlv1alpha1.AgentMCPCapabilityComposition{Selections: []controlv1alpha1.AgentMCPSelection{{ServerRef: &controlv1alpha1.NamespacedObjectReference{Name: server.Name}}}}},
+		Harness:      controlv1alpha1.AgentRunHarnessSpec{MCPServers: []controlv1alpha1.AgentRunMCPServerSpec{overlay}},
+	})
+	effective, _, phase, reason, message, err := testCompositionReconciler(t, server).resolveAgentRunComposition(context.Background(), run)
+	if err != nil || phase != "" {
+		t.Fatalf("resolve composition: phase=%q reason=%q message=%q err=%v", phase, reason, message, err)
+	}
+	if got := effective.Spec.Harness.MCPServers; len(got) != 1 || got[0].Transport.StreamableHTTP == nil {
+		t.Fatalf("inline MCP overlay did not replace canonical server: %#v", got)
+	}
+}
+
+func TestCanonicalSkillReplaceRetainsLegacySetProvenanceForRemainingTool(t *testing.T) {
+	t.Parallel()
+	legacy := &controlv1alpha1.AgentSkillSet{
+		ObjectMeta: metav1.ObjectMeta{Name: "legacy", Namespace: "agents", UID: "legacy-uid", Generation: 3},
+		Spec: controlv1alpha1.AgentSkillSetSpec{
+			Skills: []controlv1alpha1.AgentRunSkillInjectionSpec{{Name: "old-skill", Content: "old"}},
+			Tools:  []controlv1alpha1.AgentRunToolSpec{{Name: "remaining-tool", VerifyCommand: []string{"remaining-tool", "--help"}}},
+		},
+	}
+	canonical := &controlv1alpha1.AgentSkill{
+		ObjectMeta: metav1.ObjectMeta{Name: "new-skill", Namespace: "agents"},
+		Spec:       controlv1alpha1.AgentSkillSpec{Inline: &controlv1alpha1.AgentSkillInlineSource{SkillMD: "new"}},
+	}
+	profile := &controlv1alpha1.AgentRunProfile{
+		ObjectMeta: metav1.ObjectMeta{Name: "profile", Namespace: "agents"},
+		Spec:       controlv1alpha1.AgentRunProfileSpec{SkillSets: &controlv1alpha1.AgentSkillCompositionSpec{Refs: []controlv1alpha1.NamespacedObjectReference{{Name: legacy.Name}}}},
+	}
+	run := testCompositionRun(&controlv1alpha1.AgentRunSpec{
+		ProfileRef: &controlv1alpha1.NamespacedObjectReference{Name: profile.Name},
+		Capabilities: &controlv1alpha1.AgentCapabilitiesSpec{Skills: &controlv1alpha1.AgentSkillCapabilityComposition{
+			Mode:       controlv1alpha1.AgentCapabilityCompositionReplace,
+			Selections: []controlv1alpha1.AgentSkillSelection{{SkillRef: &controlv1alpha1.NamespacedObjectReference{Name: canonical.Name}}},
+		}},
+	})
+	effective, resolution, phase, reason, message, err := testCompositionReconciler(t, legacy, canonical, profile).resolveAgentRunComposition(context.Background(), run)
+	if err != nil || phase != "" {
+		t.Fatalf("resolve composition: phase=%q reason=%q message=%q err=%v", phase, reason, message, err)
+	}
+	if len(effective.Spec.Harness.Tools) != 1 || effective.Spec.Harness.Tools[0].Name != "remaining-tool" {
+		t.Fatalf("legacy tool was not retained: %#v", effective.Spec.Harness.Tools)
+	}
+	if resolution == nil || len(resolution.SkillSetRefs) != 1 || resolution.SkillSetRefs[0].Name != legacy.Name {
+		t.Fatalf("remaining legacy tool lost its set provenance: %#v", resolution)
+	}
+}
+
+func canonicalInlineTool(name, uid string) *controlv1alpha1.AgentTool {
+	return &controlv1alpha1.AgentTool{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "agents", UID: typesUID(uid), Generation: 2},
+		Spec: controlv1alpha1.AgentToolSpec{
+			Executable:    controlv1alpha1.AgentToolExecutable{Name: name, Path: name},
+			Source:        &controlv1alpha1.AgentToolSource{InlineScript: &controlv1alpha1.AgentToolInlineScript{Interpreter: []string{"/usr/bin/env", "bash"}, Script: "#!/usr/bin/env bash\nexit 0"}},
+			VerifyCommand: []string{name, "--help"},
+		},
+	}
+}
+
+func canonicalMCPServer(name, uid string) *controlv1alpha1.AgentMCPServer {
+	return &controlv1alpha1.AgentMCPServer{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "agents", UID: typesUID(uid), Generation: 2},
+		Spec:       controlv1alpha1.AgentMCPServerSpec{Transport: controlv1alpha1.AgentMCPTransport{Stdio: &controlv1alpha1.AgentMCPStdioTransport{Command: []string{"mcp-server", "--stdio"}}}},
+	}
+}
+
 func TestAgentRunCompositionReplaceDoesNotResolveBrokenProfileToolComposition(t *testing.T) {
 	t.Parallel()
 
