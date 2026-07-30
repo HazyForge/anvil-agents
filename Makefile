@@ -9,7 +9,7 @@ RELEASE_REPO ?= HazyForge/anvil-agents
 RELEASE_DEPLOY_VALUES ?= .hazyforge/clusters/anvil-primaris/namespace/anvil-agents-system/deploy.yaml
 RELEASE_IMAGE_LOCK ?= $(RELEASE_OUTPUT)/images-$(VERSION).lock.tsv
 
-.PHONY: generate manifests test verify verify-runner-contract security security-govulncheck security-gosec security-trivy security-all build console-build console-typecheck console-embed console-embed-restore docker-build images image-checks helm-lint archive-postgres-integration chart-package release-tag release-tag-push release-local release-publish release-github release-local-all release-pin-deploy release-primaris release-primaris-fast release-primaris-hot deploy-primaris judge-prerequisites judge-kind-e2e kind-upgrade-e2e kind-e2e
+.PHONY: generate manifests test verify verify-runner-contract security security-govulncheck security-gosec security-trivy security-all build console-build console-typecheck console-test console-embed console-embed-restore docker-build images image-checks helm-lint archive-postgres-integration chart-package release-tag release-tag-push release-local release-publish release-github release-local-all release-pin-deploy release-primaris release-primaris-fast release-primaris-hot deploy-primaris judge-prerequisites judge-kind-e2e kind-upgrade-e2e kind-e2e
 
 generate:
 	$(CONTROLLER_GEN) object paths=./api/...
@@ -71,6 +71,9 @@ console-build:
 
 console-typecheck:
 	cd web/console && npm ci && npm run typecheck
+
+console-test:
+	cd web/console && npm ci && npm test
 
 # Copy built SPA assets into the go:embed tree used by anvil-agents-api.
 # Docker multi-stage builds do this automatically; use this for local binaries.
@@ -284,5 +287,5 @@ verify-runner-contract:
 		rg -q '/out/anvil-agent-capabilities' "$$dockerfile"; \
 	done
 
-verify: manifests test build helm-lint verify-runner-contract console-typecheck
+verify: manifests test build helm-lint verify-runner-contract console-typecheck console-test
 	@test -z "$$(rg -l 'github.com/hazyforge/anvil-primaris|github.com/hazyforge/anvil-primaris/lib/go/anvilhub' --glob '*.go' .)"

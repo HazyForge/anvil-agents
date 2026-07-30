@@ -18,6 +18,8 @@ import { IconPicker } from "../../components/IconPicker";
 import { RelatedAuthSessionCards } from "../../components/RelatedAuthSessionCards";
 import { SkillSetForm } from "../../components/SkillSetForm";
 import { ToolSetForm } from "../../components/ToolSetForm";
+import { MCPSetForm } from "../../components/MCPSetForm";
+import { MCPServerForm, SkillForm, ToolForm } from "../../components/AtomicCapabilityForms";
 import { VolumeProfileForm } from "../../components/VolumeProfileForm";
 import {
   getIconUrl,
@@ -59,6 +61,14 @@ import {
   validateVolumeProfileForm,
   type VolumeProfileForm as VolumeProfileFormModel,
 } from "./volumeProfileForm";
+import {
+  buildMCPServerSpec, buildMCPSetSpec, buildSkillSpec, buildToolSpec,
+  emptyMCPServerForm, emptyMCPSetForm, emptySkillForm, emptyToolForm,
+  formFromMCPServerSpec, formFromMCPSetSpec, formFromSkillSpec, formFromToolSpec,
+  validateMCPServerForm, validateMCPSetForm, validateSkillForm, validateToolForm,
+  type MCPServerForm as MCPServerFormModel, type MCPSetForm as MCPSetFormModel,
+  type SkillForm as SkillFormModel, type ToolForm as ToolFormModel,
+} from "./capabilityForms";
 
 interface Props {
   token: string;
@@ -67,6 +77,10 @@ interface Props {
 }
 
 type GuidedKind =
+  | "AgentSkill"
+  | "AgentTool"
+  | "AgentMCPServer"
+  | "AgentMCPSet"
   | "AgentHarnessProfile"
   | "AgentDataVolume"
   | "VolumeProfile"
@@ -77,6 +91,10 @@ function guidedKindFrom(
   kindName: string | undefined,
   kindRoute: string,
 ): GuidedKind | null {
+  if (kindName === "AgentSkill" || kindRoute === "skills") return "AgentSkill";
+  if (kindName === "AgentTool" || kindRoute === "tools") return "AgentTool";
+  if (kindName === "AgentMCPServer" || kindRoute === "mcp-servers") return "AgentMCPServer";
+  if (kindName === "AgentMCPSet" || kindRoute === "mcp-sets") return "AgentMCPSet";
   if (kindName === "AgentHarnessProfile" || kindRoute === "harness-profiles") {
     return "AgentHarnessProfile";
   }
@@ -96,6 +114,10 @@ function guidedKindFrom(
 }
 
 const CREATE_TITLES: Record<GuidedKind, string> = {
+  AgentSkill: "New skill",
+  AgentTool: "New tool",
+  AgentMCPServer: "New MCP server",
+  AgentMCPSet: "New MCP set",
   AgentHarnessProfile: "New harness profile",
   AgentDataVolume: "New data volume",
   VolumeProfile: "New volume profile",
@@ -111,6 +133,10 @@ export function CompositionEditorPage({ token, namespace: activeNamespace, write
   const isCreate = nameParam === "new" || !nameParam;
   const guided = guidedKindFrom(kind?.kind, kindRoute);
   const isHarness = guided === "AgentHarnessProfile";
+  const isSkill = guided === "AgentSkill";
+  const isTool = guided === "AgentTool";
+  const isMCPServer = guided === "AgentMCPServer";
+  const isMCPSet = guided === "AgentMCPSet";
   const isDataVolume = guided === "AgentDataVolume";
   const isVolumeProfile = guided === "VolumeProfile";
   const isSkillSet = guided === "AgentSkillSet";
@@ -128,6 +154,10 @@ export function CompositionEditorPage({ token, namespace: activeNamespace, write
     useState<VolumeProfileFormModel>(emptyVolumeProfileForm);
   const [skillSetForm, setSkillSetForm] = useState<SkillSetFormModel>(emptySkillSetForm);
   const [toolSetForm, setToolSetForm] = useState<ToolSetFormModel>(emptyToolSetForm);
+  const [skillForm, setSkillForm] = useState<SkillFormModel>(emptySkillForm);
+  const [toolForm, setToolForm] = useState<ToolFormModel>(emptyToolForm);
+  const [mcpServerForm, setMCPServerForm] = useState<MCPServerFormModel>(emptyMCPServerForm);
+  const [mcpSetForm, setMCPSetForm] = useState<MCPSetFormModel>(emptyMCPSetForm);
   const [showAdvancedJson, setShowAdvancedJson] = useState(false);
   const [icon, setIcon] = useState("");
   const [screenshot, setScreenshot] = useState("");
@@ -138,12 +168,15 @@ export function CompositionEditorPage({ token, namespace: activeNamespace, write
   const [deleteConfirm, setDeleteConfirm] = useState("");
   const [dataVolumeNames, setDataVolumeNames] = useState<string[]>([]);
   const [volumeProfileNames, setVolumeProfileNames] = useState<string[]>([]);
+  const [skillNames, setSkillNames] = useState<string[]>([]);
+  const [toolNames, setToolNames] = useState<string[]>([]);
+  const [mcpServerNames, setMCPServerNames] = useState<string[]>([]);
 
   useEffect(() => {
     if (!kind || !namespace || !token) {
       return;
     }
-    if (!isHarness && !isDataVolume) {
+    if (!isHarness && !isDataVolume && !isSkillSet && !isToolSet && !isMCPSet) {
       return;
     }
     const controller = new AbortController();
@@ -157,8 +190,11 @@ export function CompositionEditorPage({ token, namespace: activeNamespace, write
         .then((docs) => setVolumeProfileNames(docs.map((item) => item.metadata.name)))
         .catch(() => setVolumeProfileNames([]));
     }
+    if (isSkillSet) void listComposition(token, namespace, "agent-skills", 200, controller.signal).then((docs) => setSkillNames(docs.map((item) => item.metadata.name))).catch(() => setSkillNames([]));
+    if (isToolSet) void listComposition(token, namespace, "agent-tools", 200, controller.signal).then((docs) => setToolNames(docs.map((item) => item.metadata.name))).catch(() => setToolNames([]));
+    if (isMCPSet) void listComposition(token, namespace, "agent-mcp-servers", 200, controller.signal).then((docs) => setMCPServerNames(docs.map((item) => item.metadata.name))).catch(() => setMCPServerNames([]));
     return () => controller.abort();
-  }, [token, namespace, kind, isHarness, isDataVolume]);
+  }, [token, namespace, kind, isHarness, isDataVolume, isSkillSet, isToolSet, isMCPSet]);
 
   useEffect(() => {
     if (!kind || !namespace || isCreate) {
@@ -170,8 +206,13 @@ export function CompositionEditorPage({ token, namespace: activeNamespace, write
         setVolumeProfileForm(emptyVolumeProfileForm());
         setSkillSetForm(emptySkillSetForm());
         setToolSetForm(emptyToolSetForm());
+        setSkillForm(emptySkillForm()); setToolForm(emptyToolForm()); setMCPServerForm(emptyMCPServerForm()); setMCPSetForm(emptyMCPSetForm());
         // Seed advanced JSON from empty guided builders so toggle stays consistent.
-        if (kind.kind === "AgentHarnessProfile") {
+        if (kind.kind === "AgentSkill") setSpecText(JSON.stringify(buildSkillSpec(emptySkillForm()), null, 2));
+        else if (kind.kind === "AgentTool") setSpecText(JSON.stringify(buildToolSpec(emptyToolForm()), null, 2));
+        else if (kind.kind === "AgentMCPServer") setSpecText(JSON.stringify(buildMCPServerSpec(emptyMCPServerForm()), null, 2));
+        else if (kind.kind === "AgentMCPSet") setSpecText(JSON.stringify(buildMCPSetSpec(emptyMCPSetForm()), null, 2));
+        else if (kind.kind === "AgentHarnessProfile") {
           setSpecText(JSON.stringify(buildHarnessSpec(emptyHarnessForm()), null, 2));
         } else if (kind.kind === "AgentDataVolume") {
           setSpecText(JSON.stringify(buildDataVolumeSpec(emptyDataVolumeForm()), null, 2));
@@ -200,7 +241,11 @@ export function CompositionEditorPage({ token, namespace: activeNamespace, write
         const spec = loaded.spec ?? {};
         setSpecText(JSON.stringify(spec, null, 2));
         setShowAdvancedJson(false);
-        if (kind.kind === "AgentHarnessProfile") {
+        if (kind.kind === "AgentSkill") setSkillForm(formFromSkillSpec(spec, loaded.metadata.name));
+        else if (kind.kind === "AgentTool") setToolForm(formFromToolSpec(spec, loaded.metadata.name));
+        else if (kind.kind === "AgentMCPServer") setMCPServerForm(formFromMCPServerSpec(spec, loaded.metadata.name));
+        else if (kind.kind === "AgentMCPSet") setMCPSetForm(formFromMCPSetSpec(spec, loaded.metadata.name));
+        else if (kind.kind === "AgentHarnessProfile") {
           setHarnessForm(formFromHarnessSpec(spec, loaded.metadata.name));
         } else if (kind.kind === "AgentDataVolume") {
           setDataVolumeForm(formFromDataVolumeSpec(spec, loaded.metadata.name));
@@ -241,6 +286,10 @@ export function CompositionEditorPage({ token, namespace: activeNamespace, write
     }
     try {
       switch (guided) {
+        case "AgentSkill": return JSON.stringify(buildSkillSpec(skillForm), null, 2);
+        case "AgentTool": return JSON.stringify(buildToolSpec(toolForm), null, 2);
+        case "AgentMCPServer": return JSON.stringify(buildMCPServerSpec(mcpServerForm), null, 2);
+        case "AgentMCPSet": return JSON.stringify(buildMCPSetSpec(mcpSetForm), null, 2);
         case "AgentHarnessProfile":
           return JSON.stringify(buildHarnessSpec(harnessForm), null, 2);
         case "AgentDataVolume":
@@ -265,6 +314,7 @@ export function CompositionEditorPage({ token, namespace: activeNamespace, write
     volumeProfileForm,
     skillSetForm,
     toolSetForm,
+    skillForm, toolForm, mcpServerForm, mcpSetForm,
   ]);
 
   if (!kind) {
@@ -306,8 +356,16 @@ export function CompositionEditorPage({ token, namespace: activeNamespace, write
   ) {
     setToolSetForm((prev) => ({ ...prev, [key]: value }));
   }
+  function updateSkill<K extends keyof SkillFormModel>(key: K, value: SkillFormModel[K]) { setSkillForm((prev) => ({ ...prev, [key]: value })); }
+  function updateTool<K extends keyof ToolFormModel>(key: K, value: ToolFormModel[K]) { setToolForm((prev) => ({ ...prev, [key]: value })); }
+  function updateMCPServer<K extends keyof MCPServerFormModel>(key: K, value: MCPServerFormModel[K]) { setMCPServerForm((prev) => ({ ...prev, [key]: value })); }
+  function updateMCPSet<K extends keyof MCPSetFormModel>(key: K, value: MCPSetFormModel[K]) { setMCPSetForm((prev) => ({ ...prev, [key]: value })); }
 
   function createNameFromForms(): string {
+    if (isSkill) return skillForm.name.trim();
+    if (isTool) return toolForm.name.trim();
+    if (isMCPServer) return mcpServerForm.name.trim();
+    if (isMCPSet) return mcpSetForm.name.trim();
     if (isHarness) {
       return harnessForm.name.trim();
     }
@@ -329,6 +387,10 @@ export function CompositionEditorPage({ token, namespace: activeNamespace, write
   function resolveSpec(): { ok: true; spec: Record<string, unknown> } | { ok: false; error: string } {
     if (isGuided && !showAdvancedJson) {
       switch (guided) {
+        case "AgentSkill": { const validation = validateSkillForm(skillForm, isCreate); return validation ? { ok: false, error: validation } : { ok: true, spec: buildSkillSpec(skillForm) }; }
+        case "AgentTool": { const validation = validateToolForm(toolForm, isCreate); return validation ? { ok: false, error: validation } : { ok: true, spec: buildToolSpec(toolForm) }; }
+        case "AgentMCPServer": { const validation = validateMCPServerForm(mcpServerForm, isCreate); return validation ? { ok: false, error: validation } : { ok: true, spec: buildMCPServerSpec(mcpServerForm) }; }
+        case "AgentMCPSet": { const validation = validateMCPSetForm(mcpSetForm, isCreate); return validation ? { ok: false, error: validation } : { ok: true, spec: buildMCPSetSpec(mcpSetForm) }; }
         case "AgentHarnessProfile": {
           const validation = validateHarnessForm(harnessForm, isCreate);
           if (validation) {
@@ -379,7 +441,11 @@ export function CompositionEditorPage({ token, namespace: activeNamespace, write
   }
 
   function applySpecToForms(spec: Record<string, unknown>, resourceName: string) {
-    if (isHarness) {
+    if (isSkill) setSkillForm(formFromSkillSpec(spec, resourceName));
+    else if (isTool) setToolForm(formFromToolSpec(spec, resourceName));
+    else if (isMCPServer) setMCPServerForm(formFromMCPServerSpec(spec, resourceName));
+    else if (isMCPSet) setMCPSetForm(formFromMCPSetSpec(spec, resourceName));
+    else if (isHarness) {
       setHarnessForm(formFromHarnessSpec(spec, resourceName));
     } else if (isDataVolume) {
       setDataVolumeForm(formFromDataVolumeSpec(spec, resourceName));
@@ -521,6 +587,10 @@ export function CompositionEditorPage({ token, namespace: activeNamespace, write
           </h1>
           <p className="page-sub">
             Namespace <span className="mono">{namespace}</span>
+            {isSkill ? " · Markdown-only instruction package" : null}
+            {isTool ? " · executable acquisition contract" : null}
+            {isMCPServer ? " · secret-free MCP connection" : null}
+            {isMCPSet ? " · ordered MCP collection" : null}
             {isHarness ? " · runtime machine for AgentRuns" : null}
             {isDataVolume ? " · durable PVC home" : null}
             {isVolumeProfile ? " · reusable storage shape" : null}
@@ -533,9 +603,9 @@ export function CompositionEditorPage({ token, namespace: activeNamespace, write
 
       {kind.danger ? (
         <div className="banner banner-warn">
-          Editing {kind.plural} grants substantial code-execution authority in this namespace
-          (images, setup scripts, ServiceAccount and Secret refs). Prefer GitOps for shared
-          production objects.
+          {isTool || isToolSet
+            ? "Editing tools grants code-execution authority through executable acquisition or setup scripts. Tools cannot select identity, Secrets, storage, or placement."
+            : "Editing this runtime envelope grants substantial authority through images, ServiceAccounts, Secret refs, and placement."} Prefer GitOps for shared production objects.
         </div>
       ) : null}
 
@@ -620,6 +690,10 @@ export function CompositionEditorPage({ token, namespace: activeNamespace, write
               <>
                 {!showAdvancedJson ? (
                   <>
+                    {isSkill ? <SkillForm form={skillForm} disabled={!writable} isCreate={isCreate} onChange={updateSkill} /> : null}
+                    {isTool ? <ToolForm form={toolForm} disabled={!writable} isCreate={isCreate} onChange={updateTool} /> : null}
+                    {isMCPServer ? <MCPServerForm form={mcpServerForm} disabled={!writable} isCreate={isCreate} onChange={updateMCPServer} /> : null}
+                    {isMCPSet ? <MCPSetForm form={mcpSetForm} disabled={!writable} isCreate={isCreate} serverNames={mcpServerNames} onChange={updateMCPSet} /> : null}
                     {isHarness ? (
                       <HarnessProfileForm
                         form={harnessForm}
@@ -654,6 +728,7 @@ export function CompositionEditorPage({ token, namespace: activeNamespace, write
                         form={skillSetForm}
                         disabled={!writable}
                         isCreate={isCreate}
+                        skillNames={skillNames}
                         onChange={updateSkillSet}
                       />
                     ) : null}
@@ -662,6 +737,7 @@ export function CompositionEditorPage({ token, namespace: activeNamespace, write
                         form={toolSetForm}
                         disabled={!writable}
                         isCreate={isCreate}
+                        toolNames={toolNames}
                         onChange={updateToolSet}
                       />
                     ) : null}
@@ -696,7 +772,11 @@ export function CompositionEditorPage({ token, namespace: activeNamespace, write
                           disabled={!writable}
                           onChange={(event) => {
                             const value = event.target.value;
-                            if (isHarness) {
+                            if (isSkill) updateSkill("name", value);
+                            else if (isTool) updateTool("name", value);
+                            else if (isMCPServer) updateMCPServer("name", value);
+                            else if (isMCPSet) updateMCPSet("name", value);
+                            else if (isHarness) {
                               updateHarness("name", value);
                             } else if (isDataVolume) {
                               updateDataVolume("name", value);

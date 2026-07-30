@@ -92,6 +92,7 @@ export interface HarnessForm {
   serviceAccountName: string;
   envSecretNames: string[];
   dataVolumeNames: string[];
+  toolCacheVolumeName: string;
   imagePullSecretNames: string[];
   workdir: string;
   timeoutSeconds: string;
@@ -118,6 +119,7 @@ export function emptyHarnessForm(): HarnessForm {
     serviceAccountName: "",
     envSecretNames: [],
     dataVolumeNames: [],
+    toolCacheVolumeName: "",
     imagePullSecretNames: [],
     workdir: "/workspace",
     timeoutSeconds: "1800",
@@ -211,6 +213,7 @@ export function formFromHarnessSpec(spec: Record<string, unknown>, name = ""): H
   form.serviceAccountName = String(execution.serviceAccountName ?? "");
   form.envSecretNames = refNames(execution.envSecretRefs);
   form.dataVolumeNames = refNames(execution.dataVolumeRefs);
+  form.toolCacheVolumeName = String(asRecord(execution.toolCache).name ?? "");
   form.imagePullSecretNames = refNames(execution.imagePullSecrets);
   form.workdir = String(execution.workdir ?? "/workspace");
   form.timeoutSeconds =
@@ -335,6 +338,9 @@ export function buildHarnessSpec(form: HarnessForm): Record<string, unknown> {
   }
   if (form.dataVolumeNames.length) {
     execution.dataVolumeRefs = form.dataVolumeNames.map((name) => ({ name }));
+  }
+  if (form.toolCacheVolumeName.trim()) {
+    execution.toolCache = { name: form.toolCacheVolumeName.trim() };
   }
   if (form.imagePullSecretNames.length) {
     execution.imagePullSecrets = form.imagePullSecretNames.map((name) => ({ name }));

@@ -60,6 +60,30 @@ type compositionKind struct {
 }
 
 var compositionKinds = map[string]compositionKind{
+	"agent-skills": {
+		PathSegment: "agent-skills",
+		Kind:        "AgentSkill",
+		NewObject:   func() client.Object { return &agentsv1alpha1.AgentSkill{} },
+		NewList:     func() client.ObjectList { return &agentsv1alpha1.AgentSkillList{} },
+	},
+	"agent-tools": {
+		PathSegment: "agent-tools",
+		Kind:        "AgentTool",
+		NewObject:   func() client.Object { return &agentsv1alpha1.AgentTool{} },
+		NewList:     func() client.ObjectList { return &agentsv1alpha1.AgentToolList{} },
+	},
+	"agent-mcp-servers": {
+		PathSegment: "agent-mcp-servers",
+		Kind:        "AgentMCPServer",
+		NewObject:   func() client.Object { return &agentsv1alpha1.AgentMCPServer{} },
+		NewList:     func() client.ObjectList { return &agentsv1alpha1.AgentMCPServerList{} },
+	},
+	"agent-mcp-sets": {
+		PathSegment: "agent-mcp-sets",
+		Kind:        "AgentMCPSet",
+		NewObject:   func() client.Object { return &agentsv1alpha1.AgentMCPSet{} },
+		NewList:     func() client.ObjectList { return &agentsv1alpha1.AgentMCPSetList{} },
+	},
 	"agent-run-profiles": {
 		PathSegment: "agent-run-profiles",
 		Kind:        "AgentRunProfile",
@@ -572,6 +596,30 @@ func decodeSpecIntoObject(kind compositionKind, obj client.Object, spec json.Raw
 
 func objectListItems(list client.ObjectList) []client.Object {
 	switch typed := list.(type) {
+	case *agentsv1alpha1.AgentSkillList:
+		out := make([]client.Object, len(typed.Items))
+		for i := range typed.Items {
+			out[i] = &typed.Items[i]
+		}
+		return out
+	case *agentsv1alpha1.AgentToolList:
+		out := make([]client.Object, len(typed.Items))
+		for i := range typed.Items {
+			out[i] = &typed.Items[i]
+		}
+		return out
+	case *agentsv1alpha1.AgentMCPServerList:
+		out := make([]client.Object, len(typed.Items))
+		for i := range typed.Items {
+			out[i] = &typed.Items[i]
+		}
+		return out
+	case *agentsv1alpha1.AgentMCPSetList:
+		out := make([]client.Object, len(typed.Items))
+		for i := range typed.Items {
+			out[i] = &typed.Items[i]
+		}
+		return out
 	case *agentsv1alpha1.AgentRunProfileList:
 		out := make([]client.Object, len(typed.Items))
 		for i := range typed.Items {

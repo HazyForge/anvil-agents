@@ -2039,3 +2039,9 @@ table.data-table tr.click-row:hover td {
   color: var(--text-mute);
   min-height: 1.25rem;
 }
+
+.library-section { margin-top: 1.5rem; }
+.library-section > .page-sub { margin: 0.35rem 0 0.8rem; }
+.ordered-ref-list { display: grid; gap: 0.4rem; margin: 0 0 0.65rem; padding: 0; list-style: none; }
+.ordered-ref-list > li { display: flex; align-items: center; gap: 0.5rem; min-height: 2.25rem; padding: 0.35rem 0.5rem; border: 1px solid var(--border); border-radius: 0.5rem; background: var(--bg-panel); }
+.ordered-ref-actions { display: flex; gap: 0.25rem; margin-left: auto; }

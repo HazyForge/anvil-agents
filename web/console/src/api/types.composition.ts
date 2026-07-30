@@ -1,6 +1,10 @@
 export type CompositionPathSegment =
   | "agent-run-profiles"
   | "agent-harness-profiles"
+  | "agent-skills"
+  | "agent-tools"
+  | "agent-mcp-servers"
+  | "agent-mcp-sets"
   | "agent-skill-sets"
   | "agent-tool-sets"
   | "volume-profiles"
@@ -10,6 +14,10 @@ export type CompositionPathSegment =
 export type CompositionKindName =
   | "AgentRunProfile"
   | "AgentHarnessProfile"
+  | "AgentSkill"
+  | "AgentTool"
+  | "AgentMCPServer"
+  | "AgentMCPSet"
   | "AgentSkillSet"
   | "AgentToolSet"
   | "VolumeProfile"
@@ -60,6 +68,7 @@ export interface CompositionKindInfo {
   plural: string;
   route: string;
   description: string;
+  category?: "atomic" | "collection" | "runtime";
   danger?: boolean;
   /** Append-only CRs: browse as cards; create via operator CLI, not console write. */
   appendOnly?: boolean;
@@ -82,7 +91,45 @@ export const COMPOSITION_KINDS: CompositionKindInfo[] = [
     route: "harness-profiles",
     description:
       "Runtime machine for AgentRuns: pick backend (Codex/OpenCode/Grok/…), identity, secrets, volumes, resources",
+    category: "runtime",
     danger: true,
+  },
+  {
+    segment: "agent-skills",
+    kind: "AgentSkill",
+    title: "Skills",
+    plural: "skills",
+    route: "skills",
+    description: "One Markdown-only instruction package",
+    category: "atomic",
+  },
+  {
+    segment: "agent-tools",
+    kind: "AgentTool",
+    title: "Tools",
+    plural: "tools",
+    route: "tools",
+    description: "One runtime-acquired executable or script",
+    category: "atomic",
+    danger: true,
+  },
+  {
+    segment: "agent-mcp-servers",
+    kind: "AgentMCPServer",
+    title: "MCP servers",
+    plural: "MCP servers",
+    route: "mcp-servers",
+    description: "One secret-free stdio or Streamable HTTP MCP connection",
+    category: "atomic",
+  },
+  {
+    segment: "agent-mcp-sets",
+    kind: "AgentMCPSet",
+    title: "MCP sets",
+    plural: "MCP sets",
+    route: "mcp-sets",
+    description: "Ordered collections of MCP servers",
+    category: "collection",
   },
   {
     segment: "agent-skill-sets",
@@ -91,6 +138,7 @@ export const COMPOSITION_KINDS: CompositionKindInfo[] = [
     plural: "skill sets",
     route: "skill-sets",
     description: "Backend-neutral instruction packs and personas",
+    category: "collection",
   },
   {
     segment: "agent-tool-sets",
@@ -99,6 +147,7 @@ export const COMPOSITION_KINDS: CompositionKindInfo[] = [
     plural: "tool sets",
     route: "tool-sets",
     description: "Setup scripts and verify contracts (code-execution authority)",
+    category: "collection",
     danger: true,
   },
   {
@@ -108,6 +157,7 @@ export const COMPOSITION_KINDS: CompositionKindInfo[] = [
     plural: "volume profiles",
     route: "volume-profiles",
     description: "Reusable durable storage shapes",
+    category: "runtime",
   },
   {
     segment: "agent-data-volumes",
@@ -116,6 +166,7 @@ export const COMPOSITION_KINDS: CompositionKindInfo[] = [
     plural: "data volumes",
     route: "data-volumes",
     description: "Concrete agent homes and PVC ownership — durable auth targets",
+    category: "runtime",
   },
   {
     segment: "agent-auth-sessions",
@@ -125,6 +176,7 @@ export const COMPOSITION_KINDS: CompositionKindInfo[] = [
     route: "auth-sessions",
     description:
       "Append-only reauth/logout maintenance on data volumes (blocks AgentRuns while active)",
+    category: "runtime",
     danger: true,
     appendOnly: true,
   },
