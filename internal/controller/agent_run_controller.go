@@ -35,9 +35,9 @@ import (
 )
 
 const (
-	agentRunPollInterval                            = 10 * time.Second
-	agentRunExternalSecretRefreshPollInterval       = 2 * time.Second
-	agentRunExternalSecretRefreshTimeout            = 2 * time.Minute
+	agentRunPollInterval                      = 10 * time.Second
+	agentRunExternalSecretRefreshPollInterval = 2 * time.Second
+	agentRunExternalSecretRefreshTimeout      = 2 * time.Minute
 	// agentRunExternalSecretHealthyMaxAge is how recent status.refreshTime may
 	// be for a Ready ExternalSecret to satisfy preflight when force-sync does
 	// not advance refreshTime (common when the provider value is unchanged).
@@ -45,19 +45,19 @@ const (
 	// agentRunExternalSecretHealthyAcceptAfter is a short grace after the
 	// force-sync request so ESO can attempt a provider reconcile before the
 	// controller accepts an already-healthy stable secret.
-	agentRunExternalSecretHealthyAcceptAfter = 10 * time.Second
-	agentRunReady                            = "Ready"
-	agentRunDefaultCodexImage                       = "anvil-agent-run-codex:dev"
-	agentRunDefaultOpenCodeImage                    = "anvil-agent-run-opencode:dev"
-	agentRunDefaultHermesAgentImage                 = "anvil-agent-run-hermes:dev"
-	agentRunDefaultOpenClawImage                    = "anvil-agent-run-openclaw:dev"
-	agentRunDefaultGrokBuildImage                   = "anvil-agent-run-grok-build:dev"
-	agentRunDefaultPiAgentImage                     = "anvil-agent-run-pi:dev"
-	agentRunDefaultGitHubAPIBaseURL                 = "https://api.github.com"
-	agentRunRemoteSkillMaxBytes                     = 256 * 1024
-	agentRunPayloadConfigMapMaxBytes                = 900 * 1024
-	agentRunPodLogTailLines                   int64 = 10_000
-	agentRunPodLogMaxBytes                    int64 = 4 * 1024 * 1024
+	agentRunExternalSecretHealthyAcceptAfter       = 10 * time.Second
+	agentRunReady                                  = "Ready"
+	agentRunDefaultCodexImage                      = "anvil-agent-run-codex:dev"
+	agentRunDefaultOpenCodeImage                   = "anvil-agent-run-opencode:dev"
+	agentRunDefaultHermesAgentImage                = "anvil-agent-run-hermes:dev"
+	agentRunDefaultOpenClawImage                   = "anvil-agent-run-openclaw:dev"
+	agentRunDefaultGrokBuildImage                  = "anvil-agent-run-grok-build:dev"
+	agentRunDefaultPiAgentImage                    = "anvil-agent-run-pi:dev"
+	agentRunDefaultGitHubAPIBaseURL                = "https://api.github.com"
+	agentRunRemoteSkillMaxBytes                    = 256 * 1024
+	agentRunPayloadConfigMapMaxBytes               = 900 * 1024
+	agentRunPodLogTailLines                  int64 = 10_000
+	agentRunPodLogMaxBytes                   int64 = 4 * 1024 * 1024
 
 	agentRunContainerName              = "agent"
 	agentRunPayloadVolume              = "agent-run-payload"
@@ -96,7 +96,7 @@ var agentRunImmutableGitRefPattern = regexp.MustCompile(`^([0-9a-fA-F]{40}|[0-9a
 // +kubebuilder:rbac:groups="control.anvil.hazyforge.io",resources=agentruns/status,verbs=get;patch;update
 // +kubebuilder:rbac:groups="control.anvil.hazyforge.io",resources=agentruns/finalizers,verbs=update
 // +kubebuilder:rbac:groups="control.anvil.hazyforge.io",resources=agentrunprofiles,verbs=get;list;watch
-// +kubebuilder:rbac:groups="control.anvil.hazyforge.io",resources=agentharnessprofiles;agentskillsets;agenttoolsets,verbs=get;list;watch
+// +kubebuilder:rbac:groups="control.anvil.hazyforge.io",resources=agentharnessprofiles;agentskills;agentskillsets;agenttools;agenttoolsets;agentmcpservers;agentmcpsets,verbs=get;list;watch
 // +kubebuilder:rbac:groups="control.anvil.hazyforge.io",resources=adversesituations,verbs=get;list;watch
 // +kubebuilder:rbac:groups="control.anvil.hazyforge.io",resources=agentdatavolumes,verbs=get;list;watch
 // +kubebuilder:rbac:groups="batch",resources=jobs,verbs=create;delete;get;list;patch;update;watch
@@ -2323,6 +2323,7 @@ func agentRunApplyProfile(obj *controlv1alpha1.AgentRun, profile *controlv1alpha
 	}
 	out.Spec.SkillSets = agentRunMergeSkillComposition(profile.Spec.SkillSets, obj.Spec.SkillSets)
 	out.Spec.ToolSets = agentRunMergeToolComposition(profile.Spec.ToolSets, obj.Spec.ToolSets)
+	out.Spec.Capabilities = agentRunMergeCapabilities(profile.Spec.Capabilities, obj.Spec.Capabilities)
 	out.Spec.Notifications = agentRunMergeNotifications(profile.Spec.Notifications, obj.Spec.Notifications)
 	return out
 }
@@ -2476,6 +2477,7 @@ func agentRunMergeHarness(profile, run controlv1alpha1.AgentRunHarnessSpec) cont
 	out.SkillInjections = append(out.SkillInjections, run.SkillInjections...)
 	out.Subagents = append(out.Subagents, run.Subagents...)
 	out.Tools = append(out.Tools, run.Tools...)
+	out.MCPServers = append(out.MCPServers, run.MCPServers...)
 	out.SystemPrompt = mergePromptText(profile.SystemPrompt, run.SystemPrompt)
 	return out
 }
@@ -2729,6 +2731,9 @@ func agentRunMergeExecution(profile, run controlv1alpha1.AgentRunHarnessExecutio
 	out.ExternalSecretRefreshRefs = mergeAgentRunExternalSecretRefreshRefs(out.ExternalSecretRefreshRefs, run.ExternalSecretRefreshRefs)
 	out.ExtraEnv = mergeEnvVars(out.ExtraEnv, run.ExtraEnv)
 	out.DataVolumeRefs = mergeAgentRunDataVolumeRefs(out.DataVolumeRefs, run.DataVolumeRefs)
+	if run.ToolCache != nil {
+		out.ToolCache = run.ToolCache.DeepCopy()
+	}
 	if run.SpiffeWorkloadAPI.Enabled || strings.TrimSpace(run.SpiffeWorkloadAPI.SPIFFEID) != "" {
 		out.SpiffeWorkloadAPI = run.SpiffeWorkloadAPI
 	}

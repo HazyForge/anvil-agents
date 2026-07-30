@@ -609,6 +609,16 @@ type AgentRunToolSpec struct {
 	// Description explains what this tool is for during the run.
 	// +optional
 	Description string `json:"description,omitempty"`
+	// Executable is populated for canonical AgentTool resources.
+	// +optional
+	Executable *AgentToolExecutable `json:"executable,omitempty"`
+	// Source is the structured acquisition plan for a canonical AgentTool.
+	// +optional
+	Source *AgentToolSource `json:"source,omitempty"`
+	// SpecDigest is the canonical AgentTool spec digest used for
+	// content-addressed cache paths. The resolver owns this field.
+	// +optional
+	SpecDigest string `json:"specDigest,omitempty"`
 	// SetupScript is an optional shell script run by compatible backend
 	// adapters after repository checkout and before the agent runtime starts.
 	// The script runs in the agent workdir as the agent container user. Keep it
@@ -620,6 +630,20 @@ type AgentRunToolSpec struct {
 	// the tool is available, for example ["kbctl", "--version"].
 	// +optional
 	VerifyCommand []string `json:"verifyCommand,omitempty"`
+}
+
+// AgentRunMCPServerSpec is the normalized, secret-free MCP manifest consumed
+// by runner adapters.
+type AgentRunMCPServerSpec struct {
+	Name string `json:"name"`
+	// +optional
+	Description string            `json:"description,omitempty"`
+	Transport   AgentMCPTransport `json:"transport"`
+	// +optional
+	ToolAllowlist []string `json:"toolAllowlist,omitempty"`
+	// SpecDigest records the selected AgentMCPServer spec digest.
+	// +optional
+	SpecDigest string `json:"specDigest,omitempty"`
 }
 
 type AgentRunDataVolumeRef struct {
@@ -694,6 +718,11 @@ type AgentRunHarnessExecutionSpec struct {
 	// The Job remains ephemeral; only these volumes survive.
 	// +optional
 	DataVolumeRefs []AgentRunDataVolumeRef `json:"dataVolumeRefs,omitempty"`
+	// ToolCache selects a dedicated writable AgentDataVolume for structured
+	// tool acquisition. Empty uses a per-run emptyDir. The cache is mounted at a
+	// reserved path and never reused as a model authentication home.
+	// +optional
+	ToolCache *AgentRunDataVolumeRef `json:"toolCache,omitempty"`
 	// SpiffeWorkloadAPI opts this run into the SPIFFE CSI Workload API mount.
 	// Authorization remains separately controlled by the SVID's configured
 	// permissions and workload scope.
@@ -756,6 +785,11 @@ type AgentRunHarnessSpec struct {
 	// weaken immutable image safety prompts.
 	// +optional
 	SkillInjections []AgentRunSkillInjectionSpec `json:"skillInjections,omitempty"`
+	// MCPServers is the normalized resolved MCP manifest. Canonical callers
+	// select MCP resources through spec.capabilities; direct entries are an
+	// inline compatibility overlay and therefore resolve last.
+	// +optional
+	MCPServers []AgentRunMCPServerSpec `json:"mcpServers,omitempty"`
 	// Subagents describes optional delegated workstreams or personas for
 	// backends that can spawn workers. Backends without worker support should
 	// treat each entry as a separately labeled pass in the same run.
@@ -830,7 +864,12 @@ type AgentRunSpec struct {
 	// to profile refs unless mode is Replace.
 	// +optional
 	ToolSets *AgentToolCompositionSpec `json:"toolSets,omitempty"`
-	Scope    AgentRunScopeSpec         `json:"scope,omitempty"`
+	// Capabilities is the canonical ordered capability selection. A run-level
+	// Replace clears inherited legacy and canonical selections for that kind;
+	// inline harness compatibility entries remain the final overlay.
+	// +optional
+	Capabilities *AgentCapabilitiesSpec `json:"capabilities,omitempty"`
+	Scope        AgentRunScopeSpec      `json:"scope,omitempty"`
 	// Docs tells the harness which docs/runtime surfaces must be kept aligned.
 	// +optional
 	Docs *AgentRunDocsSpec `json:"docs,omitempty"`
@@ -916,12 +955,12 @@ type AgentRunResolvedObjectReferenceStatus struct {
 // AgentRunResolvedScopeStatus records the opaque workload names inherited by
 // the effective run without copying a mutable profile or any runtime fields.
 type AgentRunResolvedScopeStatus struct {
-	Application         string   `json:"application,omitempty"`
-	ApplicationTarget   string   `json:"applicationTarget,omitempty"`
-	Repository          string   `json:"repository,omitempty"`
-	RepositoryRef       string   `json:"repositoryRef,omitempty"`
-	DestinationBranch   string   `json:"destinationBranch,omitempty"`
-	AllowedBranches     []string `json:"allowedBranches,omitempty"`
+	Application       string   `json:"application,omitempty"`
+	ApplicationTarget string   `json:"applicationTarget,omitempty"`
+	Repository        string   `json:"repository,omitempty"`
+	RepositoryRef     string   `json:"repositoryRef,omitempty"`
+	DestinationBranch string   `json:"destinationBranch,omitempty"`
+	AllowedBranches   []string `json:"allowedBranches,omitempty"`
 }
 
 // AgentRunResolvedCompositionStatus records the reusable inputs accepted for a
@@ -934,16 +973,20 @@ type AgentRunResolvedCompositionStatus struct {
 	HarnessProfileRef *AgentRunResolvedObjectReferenceStatus  `json:"harnessProfileRef,omitempty"`
 	SkillSetRefs      []AgentRunResolvedObjectReferenceStatus `json:"skillSetRefs,omitempty"`
 	ToolSetRefs       []AgentRunResolvedObjectReferenceStatus `json:"toolSetRefs,omitempty"`
+	SkillRefs         []AgentRunResolvedObjectReferenceStatus `json:"skillRefs,omitempty"`
+	ToolRefs          []AgentRunResolvedObjectReferenceStatus `json:"toolRefs,omitempty"`
+	MCPSetRefs        []AgentRunResolvedObjectReferenceStatus `json:"mcpSetRefs,omitempty"`
+	MCPServerRefs     []AgentRunResolvedObjectReferenceStatus `json:"mcpServerRefs,omitempty"`
 	Scope             *AgentRunResolvedScopeStatus            `json:"scope,omitempty"`
 	EffectiveDigest   string                                  `json:"effectiveDigest,omitempty"`
 	PayloadDigest     string                                  `json:"payloadDigest,omitempty"`
 }
 
 type AgentRunStatus struct {
-	ObservedGeneration      int64                                 `json:"observedGeneration,omitempty"`
-	Conditions              []metav1.Condition                    `json:"conditions,omitempty"`
-	Phase                   AgentRunPhase                         `json:"phase,omitempty"`
-	Backend                 string                                `json:"backend,omitempty"`
+	ObservedGeneration int64              `json:"observedGeneration,omitempty"`
+	Conditions         []metav1.Condition `json:"conditions,omitempty"`
+	Phase              AgentRunPhase      `json:"phase,omitempty"`
+	Backend            string             `json:"backend,omitempty"`
 	// Model is the resolved backend model id/profile (for example gpt-5.5 or
 	// grok-4.5) from the effective harness after composition. Empty when the
 	// backend uses its runner default or does not select a model.

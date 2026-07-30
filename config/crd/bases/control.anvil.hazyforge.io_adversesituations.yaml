@@ -2271,6 +2271,37 @@ spec:
                                       type: string
                                   type: object
                                 type: array
+                              toolCache:
+                                description: |-
+                                  ToolCache selects a dedicated writable AgentDataVolume for structured
+                                  tool acquisition. Empty uses a per-run emptyDir. The cache is mounted at a
+                                  reserved path and never reused as a model authentication home.
+                                properties:
+                                  mountPath:
+                                    description: MountPath overrides the AgentDataVolume
+                                      default mount path for this run.
+                                    type: string
+                                  name:
+                                    description: Name references an AgentDataVolume
+                                      in the AgentRun namespace.
+                                    minLength: 1
+                                    type: string
+                                  namespace:
+                                    description: |-
+                                      Namespace must be empty or the AgentRun namespace. Cross-namespace
+                                      volume mounts are intentionally not supported.
+                                    type: string
+                                  readOnly:
+                                    description: ReadOnly mounts the durable data
+                                      volume read-only for this run.
+                                    type: boolean
+                                  subPath:
+                                    description: SubPath optionally mounts a subdirectory
+                                      of the AgentDataVolume PVC.
+                                    type: string
+                                required:
+                                - name
+                                type: object
                               ttlSecondsAfterFinished:
                                 description: |-
                                   TTLSecondsAfterFinished controls Job cleanup. Empty keeps the Job until
@@ -2293,6 +2324,120 @@ spec:
                             - proposeChange
                             - cleanup
                             type: string
+                          mcpServers:
+                            description: |-
+                              MCPServers is the normalized resolved MCP manifest. Canonical callers
+                              select MCP resources through spec.capabilities; direct entries are an
+                              inline compatibility overlay and therefore resolve last.
+                            items:
+                              description: |-
+                                AgentRunMCPServerSpec is the normalized, secret-free MCP manifest consumed
+                                by runner adapters.
+                              properties:
+                                description:
+                                  type: string
+                                name:
+                                  type: string
+                                specDigest:
+                                  description: SpecDigest records the selected AgentMCPServer
+                                    spec digest.
+                                  type: string
+                                toolAllowlist:
+                                  items:
+                                    type: string
+                                  type: array
+                                transport:
+                                  description: AgentMCPTransport is an exclusive MCP
+                                    transport union.
+                                  properties:
+                                    stdio:
+                                      description: |-
+                                        AgentMCPStdioTransport launches an MCP server as a child process. The first
+                                        argv entry must be supplied by a selected AgentTool or the harness image.
+                                      properties:
+                                        command:
+                                          description: Command is the complete argv
+                                            vector; shell evaluation is never used.
+                                          items:
+                                            maxLength: 1024
+                                            minLength: 1
+                                            type: string
+                                          maxItems: 64
+                                          minItems: 1
+                                          type: array
+                                        requiredEnv:
+                                          description: RequiredEnv lists environment-variable
+                                            names that must exist at preflight.
+                                          items:
+                                            maxLength: 253
+                                            pattern: ^[A-Z_][A-Z0-9_]*$
+                                            type: string
+                                          maxItems: 64
+                                          type: array
+                                          x-kubernetes-list-type: set
+                                      required:
+                                      - command
+                                      type: object
+                                    streamableHTTP:
+                                      description: AgentMCPStreamableHTTPTransport
+                                        connects to a Streamable HTTP MCP endpoint.
+                                      properties:
+                                        endpoint:
+                                          description: Endpoint must use HTTPS and
+                                            cannot contain embedded credentials.
+                                          maxLength: 4096
+                                          pattern: ^https://[^@/?#]+(?::[0-9]+)?(?:/[^?#]*)?$
+                                          type: string
+                                        headers:
+                                          description: |-
+                                            Headers map header names to environment variables; values never appear in
+                                            the CR or immutable payload.
+                                          items:
+                                            description: |-
+                                              AgentMCPHTTPHeader maps a non-secret HTTP header name to an environment
+                                              variable populated by the harness identity/credential envelope.
+                                            properties:
+                                              envVar:
+                                                maxLength: 253
+                                                pattern: ^[A-Z_][A-Z0-9_]*$
+                                                type: string
+                                              name:
+                                                maxLength: 253
+                                                pattern: ^[A-Za-z0-9][A-Za-z0-9-]*$
+                                                type: string
+                                            required:
+                                            - envVar
+                                            - name
+                                            type: object
+                                          maxItems: 32
+                                          type: array
+                                          x-kubernetes-list-map-keys:
+                                          - name
+                                          x-kubernetes-list-type: map
+                                        requiredEnv:
+                                          description: |-
+                                            RequiredEnv lists additional environment-variable names required by the
+                                            server integration.
+                                          items:
+                                            maxLength: 253
+                                            pattern: ^[A-Z_][A-Z0-9_]*$
+                                            type: string
+                                          maxItems: 64
+                                          type: array
+                                          x-kubernetes-list-type: set
+                                      required:
+                                      - endpoint
+                                      type: object
+                                  type: object
+                                  x-kubernetes-validations:
+                                  - message: exactly one of stdio or streamableHTTP
+                                      must be set
+                                    rule: has(self.stdio) != has(self.streamableHTTP)
+                              required:
+                              - name
+                              - transport
+                              type: object
+                            type: array
                           skillInjections:
                             description: |-
                               SkillInjections are backend-neutral instruction packs selected for this
@@ -2423,6 +2568,27 @@ spec:
                                   description: Description explains what this tool
                                     is for during the run.
                                   type: string
+                                executable:
+                                  description: Executable is populated for canonical
+                                    AgentTool resources.
+                                  properties:
+                                    name:
+                                      description: Name is the command name exposed
+                                        on PATH.
+                                      maxLength: 253
+                                      pattern: ^[A-Za-z0-9][A-Za-z0-9._-]*$
+                                      type: string
+                                    path:
+                                      description: Path is a safe relative executable
+                                        path.
+                                      maxLength: 253
+                                      minLength: 1
+                                      pattern: ^(?:[A-Za-z0-9_-][A-Za-z0-9._-]*|\.[A-Za-z0-9_-][A-Za-z0-9._-]*|\.\.[A-Za-z0-9._-]+)(?:/(?:[A-Za-z0-9_-][A-Za-z0-9._-]*|\.[A-Za-z0-9_-][A-Za-z0-9._-]*|\.\.[A-Za-z0-9._-]+))*$
+                                      type: string
+                                  required:
+                                  - name
+                                  - path
+                                  type: object
                                 name:
                                   description: Name is a stable tool identifier such
                                     as kbctl.
@@ -2435,6 +2601,183 @@ spec:
                                     The script runs in the agent workdir as the agent container user. Keep it
                                     idempotent, install into writable agent data volumes or the workdir, and
                                     pass credentials through envSecretRefs instead of inline script text.
+                                  type: string
+                                source:
+                                  description: Source is the structured acquisition
+                                    plan for a canonical AgentTool.
+                                  properties:
+                                    httpArtifact:
+                                      properties:
+                                        artifacts:
+                                          description: Artifacts must contain at most
+                                            one entry for each platform.
+                                          items:
+                                            description: AgentToolHTTPArtifact is
+                                              one integrity-pinned HTTP artifact variant.
+                                            properties:
+                                              executablePath:
+                                                description: |-
+                                                  ExecutablePath is the safe relative file path inside an archive. It is
+                                                  empty only for format=binary.
+                                                maxLength: 253
+                                                pattern: ^(?:[A-Za-z0-9_-][A-Za-z0-9._-]*|\.[A-Za-z0-9_-][A-Za-z0-9._-]*|\.\.[A-Za-z0-9._-]+)(?:/(?:[A-Za-z0-9_-][A-Za-z0-9._-]*|\.[A-Za-z0-9_-][A-Za-z0-9._-]*|\.\.[A-Za-z0-9._-]+))*$
+                                                type: string
+                                              format:
+                                                description: Format controls safe
+                                                  extraction.
+                                                enum:
+                                                - binary
+                                                - tar.gz
+                                                - zip
+                                                type: string
+                                              platform:
+                                                description: AgentToolPlatform selects
+                                                  one runner operating system and
+                                                  architecture.
+                                                properties:
+                                                  arch:
+                                                    description: Arch is the Go-style
+                                                      CPU architecture name.
+                                                    enum:
+                                                    - amd64
+                                                    - arm64
+                                                    maxLength: 16
+                                                    type: string
+                                                  os:
+                                                    description: OS is the Go-style
+                                                      operating system name.
+                                                    enum:
+                                                    - linux
+                                                    - darwin
+                                                    maxLength: 16
+                                                    type: string
+                                                required:
+                                                - arch
+                                                - os
+                                                type: object
+                                              sha256:
+                                                description: SHA256 is the expected
+                                                  lowercase artifact digest.
+                                                pattern: ^[a-f0-9]{64}$
+                                                type: string
+                                              url:
+                                                description: URL must use HTTPS.
+                                                maxLength: 4096
+                                                pattern: ^https://[^[:space:]]+$
+                                                type: string
+                                            required:
+                                            - format
+                                            - platform
+                                            - sha256
+                                            - url
+                                            type: object
+                                            x-kubernetes-validations:
+                                            - message: executablePath must be empty
+                                                for binary artifacts and set for archives
+                                              rule: (self.format == 'binary' && !has(self.executablePath))
+                                                || (self.format != 'binary' && has(self.executablePath))
+                                          maxItems: 4
+                                          minItems: 1
+                                          type: array
+                                      required:
+                                      - artifacts
+                                      type: object
+                                    inlineScript:
+                                      description: |-
+                                        AgentToolInlineScript is a complete executable script installed as the
+                                        declared executable. It is distinct from setupScript, which is an
+                                        unrestricted environment-mutating compatibility escape hatch.
+                                      properties:
+                                        interpreter:
+                                          description: |-
+                                            Interpreter is an argv-form interpreter prefix, for example
+                                            ["/usr/bin/env", "bash"].
+                                          items:
+                                            maxLength: 4096
+                                            minLength: 1
+                                            type: string
+                                          maxItems: 8
+                                          minItems: 1
+                                          type: array
+                                        script:
+                                          description: Script is the executable script
+                                            body.
+                                          maxLength: 1048576
+                                          minLength: 1
+                                          type: string
+                                      required:
+                                      - interpreter
+                                      - script
+                                      type: object
+                                    ociArtifact:
+                                      properties:
+                                        artifacts:
+                                          description: Artifacts must contain at most
+                                            one entry for each platform.
+                                          items:
+                                            description: AgentToolOCIArtifact is one
+                                              digest-pinned OCI artifact variant.
+                                            properties:
+                                              executablePath:
+                                                description: ExecutablePath is the
+                                                  safe relative executable path in
+                                                  the artifact.
+                                                maxLength: 253
+                                                minLength: 1
+                                                pattern: ^(?:[A-Za-z0-9_-][A-Za-z0-9._-]*|\.[A-Za-z0-9_-][A-Za-z0-9._-]*|\.\.[A-Za-z0-9._-]+)(?:/(?:[A-Za-z0-9_-][A-Za-z0-9._-]*|\.[A-Za-z0-9_-][A-Za-z0-9._-]*|\.\.[A-Za-z0-9._-]+))*$
+                                                type: string
+                                              platform:
+                                                description: AgentToolPlatform selects
+                                                  one runner operating system and
+                                                  architecture.
+                                                properties:
+                                                  arch:
+                                                    description: Arch is the Go-style
+                                                      CPU architecture name.
+                                                    enum:
+                                                    - amd64
+                                                    - arm64
+                                                    maxLength: 16
+                                                    type: string
+                                                  os:
+                                                    description: OS is the Go-style
+                                                      operating system name.
+                                                    enum:
+                                                    - linux
+                                                    - darwin
+                                                    maxLength: 16
+                                                    type: string
+                                                required:
+                                                - arch
+                                                - os
+                                                type: object
+                                              reference:
+                                                description: Reference must include
+                                                  a sha256 digest.
+                                                maxLength: 4096
+                                                pattern: ^[^[:space:]@]+@sha256:[a-f0-9]{64}$
+                                                type: string
+                                            required:
+                                            - executablePath
+                                            - platform
+                                            - reference
+                                            type: object
+                                          maxItems: 4
+                                          minItems: 1
+                                          type: array
+                                      required:
+                                      - artifacts
+                                      type: object
+                                  type: object
+                                  x-kubernetes-validations:
+                                  - message: exactly one tool source must be set
+                                    rule: '(has(self.httpArtifact) ? 1 : 0) + (has(self.ociArtifact)
+                                      ? 1 : 0) + (has(self.inlineScript) ? 1 : 0)
+                                      == 1'
+                                specDigest:
+                                  description: |-
+                                    SpecDigest is the canonical AgentTool spec digest used for
+                                    content-addressed cache paths. The resolver owns this field.
                                   type: string
                                 verifyCommand:
                                   description: |-
