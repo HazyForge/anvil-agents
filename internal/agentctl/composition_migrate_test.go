@@ -261,3 +261,52 @@ spec:
 		t.Fatalf("invalid entries should remain compatibility inputs:\n%s", body)
 	}
 }
+
+func TestCompositionMigrateLeavesDuplicateAtomicNamesEmbedded(t *testing.T) {
+	t.Parallel()
+	input := `apiVersion: control.anvil.hazyforge.io/v1alpha1
+kind: AgentSkillSet
+metadata: {name: review, namespace: agents}
+spec:
+  skills:
+    - {name: same, content: one}
+    - {name: same, content: two}
+---
+apiVersion: control.anvil.hazyforge.io/v1alpha1
+kind: AgentToolSet
+metadata: {name: tools, namespace: agents}
+spec:
+  tools:
+    - {name: same, setupScript: one, verifyCommand: [same]}
+    - {name: same, setupScript: two, verifyCommand: [same]}
+`
+	var out bytes.Buffer
+	app := App{In: strings.NewReader(input), Out: &out, Err: &bytes.Buffer{}}
+	if err := app.Run(context.Background(), []string{"composition", "migrate", "-f", "-"}); err != nil {
+		t.Fatal(err)
+	}
+	body := out.String()
+	if strings.Contains(body, "kind: AgentSkill\n") || strings.Contains(body, "kind: AgentTool\n") || strings.Contains(body, "-canonical") {
+		t.Fatalf("sets with duplicate atomic names must remain entirely unchanged:\n%s", body)
+	}
+}
+
+func TestCompositionMigratePassesThroughForeignVersionBeforeTypedDecode(t *testing.T) {
+	t.Parallel()
+	input := `apiVersion: control.anvil.hazyforge.io/v2
+kind: AgentSkillSet
+metadata: {name: future, namespace: agents}
+spec:
+  skills: not-the-v1alpha1-shape
+  futureField: keep
+`
+	var out bytes.Buffer
+	app := App{In: strings.NewReader(input), Out: &out, Err: &bytes.Buffer{}}
+	if err := app.Run(context.Background(), []string{"composition", "migrate", "-f", "-"}); err != nil {
+		t.Fatalf("foreign-version object should pass through: %v", err)
+	}
+	body := out.String()
+	if !strings.Contains(body, "apiVersion: control.anvil.hazyforge.io/v2") || !strings.Contains(body, "skills: not-the-v1alpha1-shape") || !strings.Contains(body, "futureField: keep") {
+		t.Fatalf("foreign-version object was not preserved:\n%s", body)
+	}
+}

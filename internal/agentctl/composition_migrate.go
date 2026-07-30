@@ -148,6 +148,9 @@ func migrateCompositionObjects(objects []*unstructured.Unstructured) ([]runtime.
 	}
 	for _, object := range objects {
 		inventory.existing[compositionGeneratedKey(object.GetKind(), object.GetNamespace(), object.GetName())] = struct{}{}
+		if object.GetAPIVersion() != agentsv1alpha1.GroupVersion.String() {
+			continue
+		}
 		key := compositionObjectKey(object.GetNamespace(), object.GetName())
 		switch object.GetKind() {
 		case "AgentSkillSet":
@@ -208,11 +211,16 @@ func (inventory *migrationInventory) migrateSkillSet(original *unstructured.Unst
 		return []runtime.Object{original.DeepCopy()}, nil
 	}
 	atomics := make([]*agentsv1alpha1.AgentSkill, 0, len(set.Spec.Skills))
+	localNames := make(map[string]struct{}, len(set.Spec.Skills))
 	for _, skill := range set.Spec.Skills {
 		atomic, ok := migratableLegacySkill(set.ObjectMeta, skill)
 		if !ok || referenceNameExists(set.Spec.SkillRefs, atomic.Name) || !inventory.canReserveGenerated(atomic) {
 			return []runtime.Object{original.DeepCopy()}, nil
 		}
+		if _, duplicate := localNames[atomic.Name]; duplicate {
+			return []runtime.Object{original.DeepCopy()}, nil
+		}
+		localNames[atomic.Name] = struct{}{}
 		atomics = append(atomics, atomic)
 	}
 	canonical := set.DeepCopy()
@@ -270,11 +278,16 @@ func (inventory *migrationInventory) migrateToolSet(original *unstructured.Unstr
 		return []runtime.Object{original.DeepCopy()}, nil
 	}
 	atomics := make([]*agentsv1alpha1.AgentTool, 0, len(set.Spec.Tools))
+	localNames := make(map[string]struct{}, len(set.Spec.Tools))
 	for _, tool := range set.Spec.Tools {
 		atomic, ok := migratableLegacyTool(set.ObjectMeta, tool)
 		if !ok || referenceNameExists(set.Spec.ToolRefs, atomic.Name) || !inventory.canReserveGenerated(atomic) {
 			return []runtime.Object{original.DeepCopy()}, nil
 		}
+		if _, duplicate := localNames[atomic.Name]; duplicate {
+			return []runtime.Object{original.DeepCopy()}, nil
+		}
+		localNames[atomic.Name] = struct{}{}
 		atomics = append(atomics, atomic)
 	}
 	canonical := set.DeepCopy()
