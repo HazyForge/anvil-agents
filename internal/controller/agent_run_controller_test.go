@@ -726,7 +726,6 @@ func TestAgentRunSkillInjectionsBecomeMountedFilesAndEnv(t *testing.T) {
 			t.Fatalf("skill file missing %q:\n%s", want, skill)
 		}
 	}
-
 	job := agentRunJob(run, "platform-health-harness", "platform-health-context", nil)
 	env := map[string]string{}
 	for _, item := range job.Spec.Template.Spec.Containers[0].Env {
@@ -1339,6 +1338,9 @@ func TestAgentRunToolsBecomeSetupFilesAndEnv(t *testing.T) {
 			t.Fatalf("setup file missing %q:\n%s", want, setup)
 		}
 	}
+	if manifest := data[agentRunToolManifestFile]; !strings.Contains(manifest, `"name":"hazytradectl"`) || !strings.Contains(manifest, `"setupFile"`) || strings.Contains(manifest, `"setupScript"`) {
+		t.Fatalf("tool manifest = %q, want immutable file-backed tool plan", manifest)
+	}
 
 	job := agentRunJob(run, "hazy-trade-health-harness", "hazy-trade-health-context", nil)
 	env := map[string]string{}
@@ -1354,6 +1356,59 @@ func TestAgentRunToolsBecomeSetupFilesAndEnv(t *testing.T) {
 	}
 	if strings.Contains(env["ANVIL_AGENT_RUN_TOOLS_JSON"], "SetupScript") || strings.Contains(env["ANVIL_AGENT_RUN_TOOLS_JSON"], "setupScript") {
 		t.Fatalf("ANVIL_AGENT_RUN_TOOLS_JSON should not inline setup scripts: %s", env["ANVIL_AGENT_RUN_TOOLS_JSON"])
+	}
+	if got := env["ANVIL_AGENT_RUN_TOOL_MANIFEST_FILE"]; got != agentRunPayloadMountPath+"/"+agentRunToolManifestFile {
+		t.Fatalf("ANVIL_AGENT_RUN_TOOL_MANIFEST_FILE = %q", got)
+	}
+	if env["ANVIL_AGENT_CAPABILITIES_ROOT"] != agentRunCapabilityRuntimeMountPath || env["ANVIL_AGENT_TOOL_CACHE_ROOT"] != agentRunToolCacheMountPath || env["ANVIL_AGENT_TOOL_BIN_DIR"] != agentRunCapabilityRuntimeMountPath+"/bin" {
+		t.Fatalf("capability tool paths = %#v", env)
+	}
+}
+
+func TestAgentRunMCPServersBecomeImmutableManifestAndEnv(t *testing.T) {
+	t.Parallel()
+	run := &controlv1alpha1.AgentRun{Spec: controlv1alpha1.AgentRunSpec{Harness: controlv1alpha1.AgentRunHarnessSpec{MCPServers: []controlv1alpha1.AgentRunMCPServerSpec{{
+		Name: "runbooks",
+		Transport: controlv1alpha1.AgentMCPTransport{StreamableHTTP: &controlv1alpha1.AgentMCPStreamableHTTPTransport{
+			Endpoint: "https://mcp.example.test/v1",
+			Headers:  []controlv1alpha1.AgentMCPHTTPHeader{{Name: "Authorization", EnvVar: "RUNBOOKS_TOKEN"}},
+		}},
+		ToolAllowlist: []string{"search"},
+	}}}}}
+	data := agentRunConfigMapData(run, "prompt", "{}")
+	manifest := data[agentRunMCPManifestFile]
+	if !strings.Contains(manifest, `"name":"runbooks"`) || !strings.Contains(manifest, `"envVar":"RUNBOOKS_TOKEN"`) || strings.Contains(manifest, "token-value") {
+		t.Fatalf("MCP manifest = %q", manifest)
+	}
+	job := agentRunJob(run, "mcp-harness", "mcp-context", nil)
+	if got := agentRunJobEnvValue(job, "ANVIL_AGENT_RUN_MCP_MANIFEST_FILE"); got != agentRunPayloadMountPath+"/"+agentRunMCPManifestFile {
+		t.Fatalf("MCP manifest env = %q", got)
+	}
+}
+
+func TestAgentRunJobUsesPersistentToolCacheWithoutAuthenticationEnv(t *testing.T) {
+	t.Parallel()
+	run := &controlv1alpha1.AgentRun{Spec: controlv1alpha1.AgentRunSpec{Harness: controlv1alpha1.AgentRunHarnessSpec{Tools: []controlv1alpha1.AgentRunToolSpec{{Name: "query"}}}}}
+	cache := resolvedAgentRunDataVolume{
+		Name:      "shared-tools",
+		Namespace: "agents",
+		ClaimName: "agent-data-shared-tools",
+		MountPath: agentRunToolCacheMountPath,
+		ToolCache: true,
+	}
+	job := agentRunJob(run, "cache-harness", "cache-context", []resolvedAgentRunDataVolume{cache})
+	pod := job.Spec.Template.Spec
+	cacheVolumes := 0
+	for _, volume := range pod.Volumes {
+		if volume.PersistentVolumeClaim != nil && volume.PersistentVolumeClaim.ClaimName == cache.ClaimName {
+			cacheVolumes++
+		}
+		if volume.Name == agentRunToolCacheVolume {
+			t.Fatalf("ephemeral cache rendered with persistent cache: %#v", pod.Volumes)
+		}
+	}
+	if cacheVolumes != 1 {
+		t.Fatalf("persistent cache volumes = %d, want 1", cacheVolumes)
 	}
 }
 
@@ -1392,6 +1447,7 @@ func TestAgentRunJobInjectsStatusToolEnv(t *testing.T) {
 	}
 
 	expected := map[string]string{
+		"ANVIL_AGENT_CAPABILITIES_ROOT":           agentRunCapabilityRuntimeMountPath,
 		"ANVIL_AGENT_RUN_STATUS_FILE":             agentRunStatusFile,
 		"ANVIL_AGENT_RUN_STATUS_LOG_PREFIX":       agentRunStatusLinePrefix,
 		"ANVIL_AGENT_RUN_STATUS_TOOL":             "anvil-agent-status",
@@ -2374,15 +2430,15 @@ func TestAgentRunJobMountsDataVolumesAndEnv(t *testing.T) {
 	if got, want := podSpec.NodeSelector["kubernetes.io/arch"], "amd64"; got != want {
 		t.Fatalf("arch node selector = %q, want %q", got, want)
 	}
-	if len(podSpec.Volumes) != 2 {
-		t.Fatalf("volumes = %d, want payload plus data volume", len(podSpec.Volumes))
+	if len(podSpec.Volumes) != 4 {
+		t.Fatalf("volumes = %d, want payload, capability runtime, data volume, and ephemeral tool cache", len(podSpec.Volumes))
 	}
-	dataVolume := podSpec.Volumes[1]
+	dataVolume := podSpec.Volumes[2]
 	if dataVolume.PersistentVolumeClaim == nil || dataVolume.PersistentVolumeClaim.ClaimName != "agent-data-anvil-codex-home" {
 		t.Fatalf("data volume PVC = %#v, want agent-data-anvil-codex-home", dataVolume.PersistentVolumeClaim)
 	}
 	mounts := podSpec.Containers[0].VolumeMounts
-	if len(mounts) != 2 || mounts[1].MountPath != "/codex-home" {
+	if len(mounts) != 4 || mounts[2].MountPath != "/codex-home" || mounts[3].MountPath != agentRunToolCacheMountPath {
 		t.Fatalf("volume mounts = %#v, want data volume at /codex-home", mounts)
 	}
 	env := map[string]string{}
@@ -2677,10 +2733,10 @@ func TestAgentRunJobMountsSPIFFEWorkloadAPI(t *testing.T) {
 
 	job := agentRunJob(run, "hazy-trade-tests-harness", "hazy-trade-tests-context", nil)
 	pod := job.Spec.Template.Spec
-	if got, want := len(pod.Volumes), 2; got != want {
+	if got, want := len(pod.Volumes), 4; got != want {
 		t.Fatalf("volumes = %d, want %d", got, want)
 	}
-	spiffeVolume := pod.Volumes[1]
+	spiffeVolume := pod.Volumes[3]
 	if spiffeVolume.Name != agentRunSpiffeWorkloadAPIVolume || spiffeVolume.CSI == nil {
 		t.Fatalf("SPIFFE volume = %#v, want CSI volume", spiffeVolume)
 	}
@@ -2811,8 +2867,9 @@ func TestAgentRunJobMergesRestrictedSecurityDefaults(t *testing.T) {
 						FSGroup:    &fsGroup,
 					},
 					SecurityContext: &corev1.SecurityContext{
-						RunAsUser:  &runAsUser,
-						RunAsGroup: &runAsGroup,
+						RunAsUser:              &runAsUser,
+						RunAsGroup:             &runAsGroup,
+						ReadOnlyRootFilesystem: boolPtr(true),
 					},
 				},
 			},
@@ -2837,8 +2894,23 @@ func TestAgentRunJobMergesRestrictedSecurityDefaults(t *testing.T) {
 	if containerSecurityContext.AllowPrivilegeEscalation == nil || *containerSecurityContext.AllowPrivilegeEscalation {
 		t.Fatalf("container allowPrivilegeEscalation = %#v, want false", containerSecurityContext.AllowPrivilegeEscalation)
 	}
+	if containerSecurityContext.ReadOnlyRootFilesystem == nil || !*containerSecurityContext.ReadOnlyRootFilesystem {
+		t.Fatalf("container readOnlyRootFilesystem = %#v, want true", containerSecurityContext.ReadOnlyRootFilesystem)
+	}
 	if containerSecurityContext.Capabilities == nil || !agentRunDropsCapability(containerSecurityContext.Capabilities.Drop, "ALL") {
 		t.Fatalf("container dropped capabilities = %#v, want ALL", containerSecurityContext.Capabilities)
+	}
+	if got := agentRunJobEnvValue(job, "ANVIL_AGENT_CAPABILITIES_ROOT"); got != agentRunCapabilityRuntimeMountPath {
+		t.Fatalf("ANVIL_AGENT_CAPABILITIES_ROOT = %q, want writable runtime mount %q", got, agentRunCapabilityRuntimeMountPath)
+	}
+	foundCapabilityMount := false
+	for _, mount := range job.Spec.Template.Spec.Containers[0].VolumeMounts {
+		if mount.Name == agentRunCapabilityRuntimeVolume && mount.MountPath == agentRunCapabilityRuntimeMountPath && !mount.ReadOnly {
+			foundCapabilityMount = true
+		}
+	}
+	if !foundCapabilityMount {
+		t.Fatal("read-only-root AgentRun does not mount a writable capability runtime")
 	}
 }
 

@@ -265,6 +265,7 @@ verify-runner-contract:
 	@hack/test-kind-upgrade-cleanup.sh
 	@hack/test-runner-repository-checkout.sh
 	@hack/test-opencode-runner.sh
+	@hack/test-runner-capabilities.sh
 	@hack/stream-agent-run.sh --help >/dev/null
 	@if ANVIL_AGENTS_ACCESS_TOKEN=dummy hack/stream-agent-run.sh \
 		--endpoint https://agents.example.com@127.0.0.1 \
@@ -274,14 +275,13 @@ verify-runner-contract:
 	fi
 	@for script in docker/agent-run-*/entrypoint.sh; do \
 		bash -n "$$script"; \
-		rg -q 'ANVIL_AGENT_RUN_TOOL_SETUP_FILES' "$$script"; \
-		rg -q 'ANVIL_AGENT_RUN_TOOLS_JSON' "$$script"; \
 		rg -q 'repository-checkout.sh' "$$script"; \
 		rg -q 'anvil_clone_repository_url' "$$script"; \
-		rg -q '^run_tool_setup$$' "$$script"; \
 	done
 	@for dockerfile in docker/agent-run-*/Dockerfile; do \
 		rg -q 'agent-run-common/repository-checkout.sh' "$$dockerfile"; \
+		rg -q 'agent-run-common/capabilities.sh' "$$dockerfile"; \
+		rg -q '/out/anvil-agent-capabilities' "$$dockerfile"; \
 	done
 
 verify: manifests test build helm-lint verify-runner-contract console-typecheck
