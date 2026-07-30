@@ -269,6 +269,8 @@ func preflightMCPStdio(ctx context.Context, server MCPServer) ([]string, error) 
 	if err := requiredEnvironment(transport.RequiredEnv); err != nil {
 		return nil, err
 	}
+	// #nosec G204 -- stdio command is explicit argv from an authorized
+	// AgentMCPServer CRD and is intentionally launched without a shell.
 	command := exec.CommandContext(ctx, transport.Command[0], transport.Command[1:]...)
 	// MCP launchers such as npx commonly fork the real server. Put the whole
 	// preflight subtree in its own process group so cleanup cannot leave an

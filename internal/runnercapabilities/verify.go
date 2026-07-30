@@ -57,6 +57,9 @@ func VerifyTools(ctx context.Context, manifest ToolManifest, options VerifyOptio
 		if err != nil {
 			return fmt.Errorf("verify tool %q: command is unavailable", tool.Name)
 		}
+		// #nosec G204 -- verifyCommand is explicit argv from an authorized
+		// AgentTool CRD; it is resolved against the acquired tool bin and never
+		// passed through a shell.
 		command := exec.CommandContext(ctx, resolved, tool.VerifyCommand[1:]...)
 		command.Args[0] = tool.VerifyCommand[0]
 		command.Dir = options.Dir

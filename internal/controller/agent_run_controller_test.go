@@ -1360,7 +1360,7 @@ func TestAgentRunToolsBecomeSetupFilesAndEnv(t *testing.T) {
 	if got := env["ANVIL_AGENT_RUN_TOOL_MANIFEST_FILE"]; got != agentRunPayloadMountPath+"/"+agentRunToolManifestFile {
 		t.Fatalf("ANVIL_AGENT_RUN_TOOL_MANIFEST_FILE = %q", got)
 	}
-	if env["ANVIL_AGENT_TOOL_CACHE_ROOT"] != agentRunToolCacheMountPath || env["ANVIL_AGENT_TOOL_BIN_DIR"] != agentRunCapabilityRuntimeMountPath+"/bin" {
+	if env["ANVIL_AGENT_CAPABILITIES_ROOT"] != agentRunCapabilityRuntimeMountPath || env["ANVIL_AGENT_TOOL_CACHE_ROOT"] != agentRunToolCacheMountPath || env["ANVIL_AGENT_TOOL_BIN_DIR"] != agentRunCapabilityRuntimeMountPath+"/bin" {
 		t.Fatalf("capability tool paths = %#v", env)
 	}
 }
@@ -1447,6 +1447,7 @@ func TestAgentRunJobInjectsStatusToolEnv(t *testing.T) {
 	}
 
 	expected := map[string]string{
+		"ANVIL_AGENT_CAPABILITIES_ROOT":           agentRunCapabilityRuntimeMountPath,
 		"ANVIL_AGENT_RUN_STATUS_FILE":             agentRunStatusFile,
 		"ANVIL_AGENT_RUN_STATUS_LOG_PREFIX":       agentRunStatusLinePrefix,
 		"ANVIL_AGENT_RUN_STATUS_TOOL":             "anvil-agent-status",
@@ -2866,8 +2867,9 @@ func TestAgentRunJobMergesRestrictedSecurityDefaults(t *testing.T) {
 						FSGroup:    &fsGroup,
 					},
 					SecurityContext: &corev1.SecurityContext{
-						RunAsUser:  &runAsUser,
-						RunAsGroup: &runAsGroup,
+						RunAsUser:              &runAsUser,
+						RunAsGroup:             &runAsGroup,
+						ReadOnlyRootFilesystem: boolPtr(true),
 					},
 				},
 			},
@@ -2892,8 +2894,23 @@ func TestAgentRunJobMergesRestrictedSecurityDefaults(t *testing.T) {
 	if containerSecurityContext.AllowPrivilegeEscalation == nil || *containerSecurityContext.AllowPrivilegeEscalation {
 		t.Fatalf("container allowPrivilegeEscalation = %#v, want false", containerSecurityContext.AllowPrivilegeEscalation)
 	}
+	if containerSecurityContext.ReadOnlyRootFilesystem == nil || !*containerSecurityContext.ReadOnlyRootFilesystem {
+		t.Fatalf("container readOnlyRootFilesystem = %#v, want true", containerSecurityContext.ReadOnlyRootFilesystem)
+	}
 	if containerSecurityContext.Capabilities == nil || !agentRunDropsCapability(containerSecurityContext.Capabilities.Drop, "ALL") {
 		t.Fatalf("container dropped capabilities = %#v, want ALL", containerSecurityContext.Capabilities)
+	}
+	if got := agentRunJobEnvValue(job, "ANVIL_AGENT_CAPABILITIES_ROOT"); got != agentRunCapabilityRuntimeMountPath {
+		t.Fatalf("ANVIL_AGENT_CAPABILITIES_ROOT = %q, want writable runtime mount %q", got, agentRunCapabilityRuntimeMountPath)
+	}
+	foundCapabilityMount := false
+	for _, mount := range job.Spec.Template.Spec.Containers[0].VolumeMounts {
+		if mount.Name == agentRunCapabilityRuntimeVolume && mount.MountPath == agentRunCapabilityRuntimeMountPath && !mount.ReadOnly {
+			foundCapabilityMount = true
+		}
+	}
+	if !foundCapabilityMount {
+		t.Fatal("read-only-root AgentRun does not mount a writable capability runtime")
 	}
 }
 

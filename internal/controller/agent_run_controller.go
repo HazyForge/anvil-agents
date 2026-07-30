@@ -1556,6 +1556,7 @@ func (r *AgentRunReconciler) agentRunEnv(obj *controlv1alpha1.AgentRun, dataVolu
 		{Name: "ANVIL_AGENT_RUN_SOURCE_NAME", Value: strings.TrimSpace(obj.Spec.SourceRef.Name)},
 		{Name: "ANVIL_AGENT_RUN_PROMPT_FILE", Value: agentRunPayloadMountPath + "/" + agentRunPromptFile},
 		{Name: "ANVIL_AGENT_RUN_CONTEXT_FILE", Value: agentRunPayloadMountPath + "/" + agentRunContextFile},
+		{Name: "ANVIL_AGENT_CAPABILITIES_ROOT", Value: agentRunCapabilityRuntimeMountPath},
 		{Name: "ANVIL_AGENT_RUN_STATUS_FILE", Value: agentRunStatusFile},
 		{Name: "ANVIL_AGENT_RUN_STATUS_LOG_PREFIX", Value: agentRunStatusLinePrefix},
 		{Name: "ANVIL_AGENT_RUN_STATUS_TOOL", Value: "anvil-agent-status"},

@@ -134,6 +134,8 @@ func acquireOCIArtifact(ctx context.Context, artifact *controlv1alpha1.AgentTool
 		return "", "", err
 	}
 	executable := filepath.Join(staging, filepath.FromSlash(artifact.ExecutablePath))
+	// #nosec G302 -- this is the selected tool executable, not sensitive data;
+	// execution by the container user requires executable mode bits.
 	if err := os.Chmod(executable, 0o755); err != nil {
 		return "", "", fmt.Errorf("mark OCI executable: %w", err)
 	}

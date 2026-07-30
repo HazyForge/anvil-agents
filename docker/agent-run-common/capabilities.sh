@@ -98,6 +98,16 @@ anvil_link_native_projection_home() {
 	done < <(find "${source_home}" -mindepth 1 -maxdepth 1 -print0)
 }
 
+anvil_link_native_projection_entry() {
+	local source_home="$1"
+	local destination_home="$2"
+	local entry_name="$3"
+	if [[ -e "${destination_home}/${entry_name}" || -L "${destination_home}/${entry_name}" ]]; then
+		return 0
+	fi
+	ln -s -- "${source_home}/${entry_name}" "${destination_home}/${entry_name}"
+}
+
 anvil_prepare_native_mcp_projection() {
 	local backend="$1"
 	anvil_initialize_capability_paths
@@ -120,9 +130,14 @@ anvil_prepare_native_mcp_projection() {
 			;;
 		grokBuild)
 			local shared_grok_home="${GROK_HOME:-${HOME}/.grok}"
+			local shared_grok_auth_path="${GROK_AUTH_PATH:-${shared_grok_home}/auth.json}"
 			anvil_link_native_projection_home "${shared_grok_home}" "${native_root}" config.toml
 			anvil_copy_native_projection_file "${shared_grok_home}/config.toml" "${native_root}/config.toml"
 			export ANVIL_AGENT_SHARED_GROK_HOME="${shared_grok_home}"
+			# Grok supports an auth path independently of GROK_HOME. Keep the
+			# credential and its sibling auth.json.lock in the durable home so
+			# refresh uses one atomic-rename target and one cross-process lock.
+			export GROK_AUTH_PATH="${shared_grok_auth_path}"
 			export GROK_HOME="${native_root}"
 			;;
 		hermesAgent)
@@ -131,13 +146,60 @@ anvil_prepare_native_mcp_projection() {
 			# other profile state beside config.yaml. Preserve that durable home
 			# through links while keeping only the mutable native config run-local.
 			mkdir -p \
+				"${shared_hermes_home}/auth" \
+				"${shared_hermes_home}/backups" \
+				"${shared_hermes_home}/cache" \
 				"${shared_hermes_home}/cron" \
 				"${shared_hermes_home}/home" \
+				"${shared_hermes_home}/kanban" \
 				"${shared_hermes_home}/logs" \
 				"${shared_hermes_home}/memories" \
+				"${shared_hermes_home}/pairing" \
+				"${shared_hermes_home}/platforms" \
+				"${shared_hermes_home}/plugins" \
 				"${shared_hermes_home}/sessions" \
-				"${shared_hermes_home}/skills"
+				"${shared_hermes_home}/skills" \
+				"${shared_hermes_home}/spawn-trees" \
+				"${shared_hermes_home}/state-snapshots" \
+				"${shared_hermes_home}/workspace"
 			anvil_link_native_projection_home "${shared_hermes_home}" "${native_root}" config.yaml
+			# The pinned Hermes release creates several top-level state files
+			# lazily. Create dangling links for those names before Hermes starts,
+			# otherwise a fresh volume would place them in this run-local home and
+			# lose them at Pod teardown. SQLite sidecars and auth.lock must also
+			# resolve to the durable home so concurrent runs coordinate correctly.
+			local hermes_state_name hermes_db_name
+			for hermes_state_name in \
+				.env \
+				.anthropic_oauth.json \
+				AGENTS.md \
+				BOOTSTRAP.md \
+				IDENTITY.md \
+				MEMORY.md \
+				SOUL.md \
+				TOOLS.md \
+				USER.md \
+				auth.json \
+				auth.lock \
+				channel_aliases.json \
+				channel_directory.json \
+				feishu_comment_pairing.json \
+				gateway_state.json \
+				processes.json \
+				webhook_subscriptions.json; do
+				anvil_link_native_projection_entry "${shared_hermes_home}" "${native_root}" "${hermes_state_name}"
+			done
+			for hermes_db_name in \
+				kanban.db \
+				memory_store.db \
+				projects.db \
+				response_store.db \
+				state.db \
+				verification_evidence.db; do
+				anvil_link_native_projection_entry "${shared_hermes_home}" "${native_root}" "${hermes_db_name}"
+				anvil_link_native_projection_entry "${shared_hermes_home}" "${native_root}" "${hermes_db_name}-shm"
+				anvil_link_native_projection_entry "${shared_hermes_home}" "${native_root}" "${hermes_db_name}-wal"
+			done
 			anvil_copy_native_projection_file "${shared_hermes_home}/config.yaml" "${native_root}/config.yaml"
 			export ANVIL_AGENT_SHARED_HERMES_HOME="${shared_hermes_home}"
 			export HERMES_HOME="${native_root}"
@@ -150,7 +212,17 @@ anvil_prepare_native_mcp_projection() {
 			export OPENCLAW_CONFIG_PATH="${native_root}/openclaw.json"
 			;;
 		openCode)
+			# Ignore ambient alternate config channels from Secret env and runner
+			# images. The normalized manifest below is the only MCP authority.
+			unset OPENCODE_CONFIG_CONTENT OPENCODE_CONFIG_DIR
 			export OPENCODE_CONFIG="${native_root}/opencode.json"
+			# OpenCode layers global and project configuration around
+			# OPENCODE_CONFIG. Isolate the global config directory and disable
+			# project config so an unselected MCP server cannot bypass preflight.
+			export XDG_CONFIG_HOME="${native_root}/xdg-config"
+			export OPENCODE_DISABLE_PROJECT_CONFIG=1
+			mkdir -p "${XDG_CONFIG_HOME}/opencode"
+			chmod 0700 "${XDG_CONFIG_HOME}" "${XDG_CONFIG_HOME}/opencode"
 			;;
 		piAgent)
 			# ConfigureNativeMCP rejects Pi until the image carries an audited

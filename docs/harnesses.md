@@ -33,6 +33,13 @@ Every built-in runner receives:
 - `ANVIL_AGENT_RUN_CONTEXT_FILE`: structured run and source context.
 - `ANVIL_AGENT_RUN_TOOL_SETUP_FILES`: newline-separated executable setup files.
 - `ANVIL_AGENT_RUN_TOOLS_JSON`: names, descriptions, setup paths, and checks.
+- `ANVIL_AGENT_RUN_TOOL_MANIFEST_FILE`: immutable structured acquisition plan.
+- `ANVIL_AGENT_RUN_MCP_MANIFEST_FILE`: immutable secret-free MCP plan.
+- `ANVIL_AGENT_CAPABILITIES_ROOT`: writable per-run capability-runtime
+  `emptyDir`, including native MCP configuration projections.
+- `ANVIL_AGENT_TOOL_CACHE_ROOT`: dedicated persistent or ephemeral cache.
+- `ANVIL_AGENT_TOOL_INSTALL_ROOT` and `ANVIL_AGENT_TOOL_BIN_DIR`: per-run
+  ephemeral install and command publication paths.
 - `ANVIL_AGENT_RUN_STATUS_LOG_PREFIX`: prefix for JSON status log records.
 - provider and backend-specific environment variables.
 
@@ -59,10 +66,16 @@ their setup-script authority and is never reused by structured acquisition.
 Native MCP configuration is also projected per run. Codex, Grok Build, and
 Hermes receive an ephemeral config home whose non-config entries link back to
 the selected durable home, preserving authentication and profile state without
-sharing the mutable MCP config file. OpenClaw keeps its durable state directory
-and uses a per-run `OPENCLAW_CONFIG_PATH`; OpenCode uses a per-run
-`OPENCODE_CONFIG`. This prevents concurrent AgentRuns that share a durable home
-from overwriting one another's runtime-managed MCP declarations.
+sharing the mutable MCP config file. Grok's supported `GROK_AUTH_PATH` remains
+anchored in the durable home so OAuth refreshes share one atomic target and
+lock. The Hermes adapter also projects the pinned release's lazily-created
+identity, authentication, and SQLite state (including WAL sidecars) back to the
+durable home. OpenClaw keeps its durable state directory and uses a per-run
+`OPENCLAW_CONFIG_PATH`. OpenCode uses a per-run `OPENCODE_CONFIG` and XDG config
+directory and disables project config loading; its XDG data directory remains
+durable for authentication. This prevents concurrent AgentRuns that share a
+durable home from overwriting one another's runtime-managed MCP declarations or
+bypassing the normalized manifest with ambient OpenCode MCP configuration.
 
 Run profiles created before the composition API may still contain inline
 backend and execution settings. When a run selects a different

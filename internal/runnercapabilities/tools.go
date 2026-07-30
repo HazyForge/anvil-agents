@@ -244,6 +244,8 @@ func populateTool(ctx context.Context, tool Tool, staging, finalCachePath, downl
 	default:
 		return "", "", fmt.Errorf("unsupported artifact format %q", artifact.Format)
 	}
+	// #nosec G302 -- this is the selected tool executable, not sensitive data;
+	// execution by the container user requires executable mode bits.
 	if err := os.Chmod(filepath.Join(staging, filepath.FromSlash(executableRelative)), 0o755); err != nil {
 		return "", "", fmt.Errorf("mark executable: %w", err)
 	}

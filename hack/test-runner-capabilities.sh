@@ -55,8 +55,13 @@ run_native_projection_worker() (
 		ANVIL_AGENT_SHARED_GROK_HOME \
 		ANVIL_AGENT_SHARED_HERMES_HOME \
 		ANVIL_AGENT_SHARED_OPENCLAW_CONFIG_PATH \
+		GROK_AUTH_PATH \
 		OPENCODE_CONFIG \
+		OPENCODE_CONFIG_CONTENT \
+		OPENCODE_CONFIG_DIR \
+		OPENCODE_DISABLE_PROJECT_CONFIG \
 		OPENCLAW_CONFIG_PATH
+	unset XDG_CONFIG_HOME
 	export ANVIL_AGENT_CAPABILITIES_ROOT="${run_root}"
 	export ANVIL_AGENT_TOOL_CACHE_ROOT="${run_root}/cache"
 	export ANVIL_AGENT_TOOL_INSTALL_ROOT="${run_root}/install"
@@ -76,6 +81,8 @@ run_native_projection_worker() (
 			;;
 		openCode)
 			export XDG_DATA_HOME="${projection_shared}/opencode-data"
+			export OPENCODE_CONFIG_CONTENT='{"mcp":{"ambient":{"type":"local","command":["false"]}}}'
+			export OPENCODE_CONFIG_DIR="${projection_shared}/ambient-opencode-config"
 			;;
 	esac
 
@@ -101,9 +108,12 @@ run_native_projection_worker() (
 		grokBuild)
 			[[ -L "${GROK_HOME}/auth.json" ]]
 			[[ "$(cat "${GROK_HOME}/auth.json")" == '{"tokens":"grok-auth"}' ]]
+			[[ "${GROK_AUTH_PATH}" == "${projection_shared}/grok/auth.json" ]]
 			;;
 		hermesAgent)
 			[[ -L "${HERMES_HOME}/auth.json" && -L "${HERMES_HOME}/.env" ]]
+			[[ -L "${HERMES_HOME}/auth.lock" && -L "${HERMES_HOME}/state.db" ]]
+			[[ "$(readlink "${HERMES_HOME}/auth.lock")" == "${projection_shared}/hermes/auth.lock" ]]
 			[[ -L "${HERMES_HOME}/memories" && -L "${HERMES_HOME}/sessions" ]]
 			[[ "$(cat "${HERMES_HOME}/memories/MEMORY.md")" == durable-memory ]]
 			;;
@@ -113,6 +123,9 @@ run_native_projection_worker() (
 			;;
 		openCode)
 			[[ "$(cat "${XDG_DATA_HOME}/opencode/auth.json")" == '{"provider":"opencode-auth"}' ]]
+			[[ -z "${OPENCODE_CONFIG_CONTENT:-}" && -z "${OPENCODE_CONFIG_DIR:-}" ]]
+			[[ "${XDG_CONFIG_HOME}" == "${run_root}/native/openCode/xdg-config" ]]
+			[[ "${OPENCODE_DISABLE_PROJECT_CONFIG}" == 1 ]]
 			;;
 	esac
 	printf '%s\n' "${native_config}" > "${result_file}"
@@ -152,6 +165,45 @@ shared_digest_after="$(find "${projection_shared}" -type f -print0 | sort -z | x
 	echo "native MCP projection mutated a shared backend home" >&2
 	exit 1
 }
+
+# Hermes creates its state lazily. A fresh durable home must receive new
+# top-level identity, credential-lock, and SQLite files rather than losing them
+# with the per-run config projection.
+(
+	fresh_shared="${test_root}/fresh-hermes"
+	fresh_run="${test_root}/fresh-hermes-run"
+	mkdir -p "${fresh_shared}"
+	export HERMES_HOME="${fresh_shared}"
+	export ANVIL_AGENT_CAPABILITIES_ROOT="${fresh_run}"
+	unset ANVIL_AGENT_NATIVE_MCP_PROJECTION_ID
+	anvil_prepare_native_mcp_projection hermesAgent
+	[[ -L "${HERMES_HOME}/state.db" && -L "${HERMES_HOME}/state.db-wal" ]]
+	[[ -L "${HERMES_HOME}/auth.lock" && -L "${HERMES_HOME}/SOUL.md" ]]
+	printf '%s\n' durable-state > "${HERMES_HOME}/state.db"
+	printf '%s\n' lock-state > "${HERMES_HOME}/auth.lock"
+	printf '%s\n' '# durable identity' > "${HERMES_HOME}/SOUL.md"
+	[[ "$(cat "${fresh_shared}/state.db")" == durable-state ]]
+	[[ "$(cat "${fresh_shared}/auth.lock")" == lock-state ]]
+	[[ "$(cat "${fresh_shared}/SOUL.md")" == '# durable identity' ]]
+)
+
+# Grok's supported auth-path override keeps both atomic replacement and its
+# sibling auth.json.lock in the durable home while config.toml stays per-run.
+(
+	shared_grok="${test_root}/fresh-grok"
+	run_grok="${test_root}/fresh-grok-run"
+	mkdir -p "${shared_grok}"
+	export GROK_HOME="${shared_grok}"
+	export GROK_AUTH_PATH="${shared_grok}/custom-auth.json"
+	export ANVIL_AGENT_CAPABILITIES_ROOT="${run_grok}"
+	unset ANVIL_AGENT_NATIVE_MCP_PROJECTION_ID
+	anvil_prepare_native_mcp_projection grokBuild
+	[[ "${GROK_AUTH_PATH}" == "${shared_grok}/custom-auth.json" ]]
+	printf '%s\n' refreshed > "${GROK_AUTH_PATH}"
+	printf '%s\n' locked > "$(dirname "${GROK_AUTH_PATH}")/auth.json.lock"
+	[[ "$(cat "${shared_grok}/custom-auth.json")" == refreshed ]]
+	[[ "$(cat "${shared_grok}/auth.json.lock")" == locked ]]
+)
 
 capability_invocations="${test_root}/invocations"
 fake_capabilities() {
