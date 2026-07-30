@@ -108,6 +108,8 @@ type AgentToolExecutable struct {
 // AgentToolSpec defines one executable acquisition contract.
 // +kubebuilder:validation:XValidation:rule="has(self.source) != (has(self.setupScript) && self.setupScript != '')",message="exactly one of source or setupScript must be set"
 // +kubebuilder:validation:XValidation:rule="self.verifyCommand.all(a, a != '')",message="verifyCommand arguments must not be empty"
+// +kubebuilder:validation:XValidation:rule="!has(self.source) || !has(self.source.httpArtifact) || self.source.httpArtifact.artifacts.all(a, a.format == 'binary' || a.executablePath == self.executable.path)",message="archive executablePath must equal executable.path"
+// +kubebuilder:validation:XValidation:rule="!has(self.source) || !has(self.source.ociArtifact) || self.source.ociArtifact.artifacts.all(a, a.executablePath == self.executable.path)",message="OCI executablePath must equal executable.path"
 type AgentToolSpec struct {
 	// Description explains what the executable does.
 	// +optional

@@ -22269,6 +22269,12 @@ spec:
                 != '')
             - message: verifyCommand arguments must not be empty
               rule: self.verifyCommand.all(a, a != '')
+            - message: archive executablePath must equal executable.path
+              rule: '!has(self.source) || !has(self.source.httpArtifact) || self.source.httpArtifact.artifacts.all(a,
+                a.format == ''binary'' || a.executablePath == self.executable.path)'
+            - message: OCI executablePath must equal executable.path
+              rule: '!has(self.source) || !has(self.source.ociArtifact) || self.source.ociArtifact.artifacts.all(a,
+                a.executablePath == self.executable.path)'
         required:
         - spec
         type: object
