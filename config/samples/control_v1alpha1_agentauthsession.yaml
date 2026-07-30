@@ -1,3 +1,4 @@
+# Codex OAuth reauth (existing path). Credential bytes live only in the staging Secret.
 apiVersion: control.anvil.hazyforge.io/v1alpha1
 kind: AgentAuthSession
 metadata:
@@ -15,3 +16,45 @@ spec:
   bootstrapSecretKey: CODEX_AUTH_JSON
   seedID: seed-example-replace-me
   timeoutSeconds: 300
+---
+# OpenClaw OAuth reauth (current operational path).
+# Staging Secret key OPENCLAW_AUTH_PROFILES_JSON must hold a version=1 profile store
+# with oauth credentials. Never put API keys or tokens in this manifest.
+# Grok Build ~/.grok/auth.json is incompatible with OpenClaw profile stores.
+apiVersion: control.anvil.hazyforge.io/v1alpha1
+kind: AgentAuthSession
+metadata:
+  name: openclaw-reauth-example
+  namespace: agents
+spec:
+  provider: openClaw
+  action: reauth
+  authMode: oauth
+  modelProvider: xai
+  agentID: anvil
+  dataVolumeRef:
+    name: openclaw-home
+  stagingSecretRef:
+    name: openclaw-auth-staging-example
+  seedID: seed-openclaw-example-replace-me
+  timeoutSeconds: 300
+---
+# OpenClaw verify: wait for volume idle and check provider-native auth without mutation.
+# No staging Secret or seedID. agentID must match harness openClaw.agentId.
+apiVersion: control.anvil.hazyforge.io/v1alpha1
+kind: AgentAuthSession
+metadata:
+  name: openclaw-verify-example
+  namespace: agents
+spec:
+  provider: openClaw
+  action: verify
+  authMode: oauth
+  modelProvider: xai
+  agentID: anvil
+  dataVolumeRef:
+    name: openclaw-home
+  timeoutSeconds: 300
+# Note: authMode=apiKey is structurally supported for importing a valid OpenClaw
+# api_key profile store later. This repository does not provision API keys into
+# samples or manifests.

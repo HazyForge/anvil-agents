@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -67,6 +68,109 @@ func TestResolveAuthProviderAliases(t *testing.T) {
 		if err != nil || profile.Provider != agentsv1alpha1.AgentAuthSessionProviderGrokBuild {
 			t.Fatalf("%s => %#v err=%v", name, profile, err)
 		}
+	}
+	for _, name := range []string{"openclaw", "claw"} {
+		profile, err := resolveAuthProvider(name)
+		if err != nil || profile.Provider != agentsv1alpha1.AgentAuthSessionProviderOpenClaw || !profile.RequiresAgentID {
+			t.Fatalf("%s => %#v err=%v", name, profile, err)
+		}
+	}
+}
+
+func TestSummarizeOpenClawAuthBytes(t *testing.T) {
+	t.Parallel()
+	body := []byte(`{"version":1,"profiles":{"openai:default":{"type":"oauth","provider":"openai","access":"a","refresh":"r","expires":4102444800}}}`)
+	summary := summarizeOpenClawAuthBytes(body)
+	if !summary.ValidJSON || !summary.HasAccessToken || !summary.HasRefreshToken || summary.AuthMode != "oauth" {
+		t.Fatalf("summary = %#v", summary)
+	}
+	if strings.Contains(string(body), "access") && strings.Contains(fmt.Sprintf("%#v", summary), `"a"`) {
+		// Ensure summary struct itself does not embed credential material in string fields beyond booleans.
+	}
+	apiKey := []byte(`{"version":1,"profiles":{"xai:default":{"type":"api_key","provider":"xai","key":"secret-key"}}}`)
+	apiSummary := summarizeOpenClawAuthBytes(apiKey)
+	if !apiSummary.ValidJSON || !apiSummary.HasAPIKey || apiSummary.AuthMode != "apiKey" {
+		t.Fatalf("api summary = %#v", apiSummary)
+	}
+	if err := validateOpenClawAuthFileForMode(body, agentsv1alpha1.AgentRunProviderAuthModeAPIKey, "openai"); err == nil {
+		t.Fatal("expected mode mismatch")
+	}
+}
+
+func TestAuthOpenClawReauthCreatesSession(t *testing.T) {
+	dir := t.TempDir()
+	authPath := filepath.Join(dir, "profiles.json")
+	body := []byte(`{"version":1,"profiles":{"openai:default":{"type":"oauth","provider":"openai","access":"a","refresh":"r","expires":4102444800}}}`)
+	if err := os.WriteFile(authPath, body, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	backend := &fakeBackend{
+		dataVolume: &agentsv1alpha1.AgentDataVolume{
+			ObjectMeta: metav1.ObjectMeta{Name: "openclaw-home", Namespace: "agents"},
+			Status:     agentsv1alpha1.AgentDataVolumeStatus{Phase: agentsv1alpha1.AgentDataVolumePhaseReady, ClaimUID: "claim"},
+		},
+	}
+	var output strings.Builder
+	if err := testApp(backend, &output).Run(context.Background(), []string{
+		"auth", "claw", "reauth",
+		"-n", "agents",
+		"--data-volume", "openclaw-home",
+		"--agent-id", "anvil",
+		"--model-provider", "openai",
+		"--auth-file", authPath,
+	}); err != nil {
+		t.Fatalf("reauth error: %v", err)
+	}
+	if backend.authSession == nil || backend.authSession.Spec.Provider != agentsv1alpha1.AgentAuthSessionProviderOpenClaw {
+		t.Fatalf("session = %#v", backend.authSession)
+	}
+	if backend.authSession.Spec.AgentID != "anvil" {
+		t.Fatalf("agentID = %q", backend.authSession.Spec.AgentID)
+	}
+	if backend.authSession.Spec.AuthMode != agentsv1alpha1.AgentRunProviderAuthModeOAuth {
+		t.Fatalf("authMode = %q", backend.authSession.Spec.AuthMode)
+	}
+	if backend.authSession.Spec.ModelProvider != "openai" {
+		t.Fatalf("modelProvider = %q", backend.authSession.Spec.ModelProvider)
+	}
+	if len(backend.createdSecret.Data[openClawAuthProfilesKey]) == 0 {
+		t.Fatal("expected OPENCLAW_AUTH_PROFILES_JSON staging key")
+	}
+	// Staging must not appear in CLI summary output.
+	if strings.Contains(output.String(), "refresh") || strings.Contains(output.String(), `"a"`) {
+		t.Fatalf("output leaked credential material: %s", output.String())
+	}
+}
+
+func TestAuthOpenClawVerifyRequiresAgentID(t *testing.T) {
+	backend := &fakeBackend{
+		dataVolume: &agentsv1alpha1.AgentDataVolume{
+			ObjectMeta: metav1.ObjectMeta{Name: "openclaw-home", Namespace: "agents"},
+			Status:     agentsv1alpha1.AgentDataVolumeStatus{Phase: agentsv1alpha1.AgentDataVolumePhaseReady},
+		},
+	}
+	err := testApp(backend, &strings.Builder{}).Run(context.Background(), []string{
+		"auth", "openclaw", "verify",
+		"-n", "agents",
+		"--data-volume", "openclaw-home",
+	})
+	if err == nil || !strings.Contains(err.Error(), "agent-id") {
+		t.Fatalf("expected agent-id error, got %v", err)
+	}
+	if err := testApp(backend, &strings.Builder{}).Run(context.Background(), []string{
+		"auth", "openclaw", "verify",
+		"-n", "agents",
+		"--data-volume", "openclaw-home",
+		"--agent-id", "anvil",
+		"--model-provider", "xai",
+	}); err != nil {
+		t.Fatalf("verify error: %v", err)
+	}
+	if backend.authSession == nil || backend.authSession.Spec.Action != agentsv1alpha1.AgentAuthSessionActionVerify {
+		t.Fatalf("session = %#v", backend.authSession)
+	}
+	if backend.authSession.Spec.StagingSecretRef != nil || backend.authSession.Spec.SeedID != "" {
+		t.Fatalf("verify must not stage credentials: %#v", backend.authSession.Spec)
 	}
 }
 
