@@ -60,11 +60,13 @@ export function compositionCardSummary(doc: CompositionDocument): string {
     }
     case "AgentSkillSet": {
       const skills = Array.isArray(spec.skills) ? spec.skills.length : 0;
-      return skills ? `${skills} skill${skills === 1 ? "" : "s"}` : "skill set";
+      const base = skills ? `${skills} skill${skills === 1 ? "" : "s"}` : "skill set";
+      return compositionIsGlobal(doc) ? `global · ${base}` : base;
     }
     case "AgentToolSet": {
       const tools = Array.isArray(spec.tools) ? spec.tools.length : 0;
-      return tools ? `${tools} tool${tools === 1 ? "" : "s"}` : "tool set";
+      const base = tools ? `${tools} tool${tools === 1 ? "" : "s"}` : "tool set";
+      return compositionIsGlobal(doc) ? `global · ${base}` : base;
     }
     case "VolumeProfile": {
       const volumes = Array.isArray(spec.volumes) ? spec.volumes.length : 0;
@@ -95,6 +97,14 @@ export function compositionCardSummary(doc: CompositionDocument): string {
     default:
       return String(spec.description ?? "").trim() || kind;
   }
+}
+
+/** True when AgentSkillSet/AgentToolSet.spec.global attaches to every namespace run. */
+export function compositionIsGlobal(doc: CompositionDocument): boolean {
+  if (doc.kind !== "AgentSkillSet" && doc.kind !== "AgentToolSet") {
+    return false;
+  }
+  return Boolean(doc.spec?.global);
 }
 
 /** True when status.phase is a non-terminal AgentAuthSession phase. */

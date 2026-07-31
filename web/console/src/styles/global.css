@@ -1132,6 +1132,51 @@ table.runs .intent-cell {
   color: var(--text-mute);
 }
 
+/* Namespace-global skill/tool packs (spec.global) */
+.chip-global {
+  border-color: rgba(110, 180, 255, 0.45);
+  color: #8ec8ff;
+  background: rgba(56, 120, 200, 0.12);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: lowercase;
+}
+
+.agent-card-global {
+  box-shadow: inset 0 0 0 1px rgba(110, 180, 255, 0.22);
+}
+
+.checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.field-checkbox .field-help {
+  margin-top: 0.35rem;
+}
+
+.compose-pick-global-note {
+  color: #8ec8ff;
+  font-size: 0.72rem;
+}
+
+.composition-ref-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin-right: 0.5rem;
+  margin-bottom: 0.25rem;
+}
+
+.composition-ref-link-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+}
+
 .filters-bar {
   display: flex;
   gap: 0.75rem;

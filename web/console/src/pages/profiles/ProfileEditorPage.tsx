@@ -44,6 +44,7 @@ function skillSetMeta(doc: CompositionDocument): string | undefined {
   const skills = arrayLen(doc.spec ?? {}, "skills");
   const tools = arrayLen(doc.spec ?? {}, "tools");
   const bits = [
+    doc.spec?.global ? "global" : null,
     skills ? `${skills} skill${skills === 1 ? "" : "s"}` : null,
     tools ? `${tools} embedded tool${tools === 1 ? "" : "s"}` : null,
   ].filter(Boolean);
@@ -52,7 +53,11 @@ function skillSetMeta(doc: CompositionDocument): string | undefined {
 
 function toolSetMeta(doc: CompositionDocument): string | undefined {
   const tools = arrayLen(doc.spec ?? {}, "tools");
-  return tools ? `${tools} tool${tools === 1 ? "" : "s"}` : undefined;
+  const bits = [
+    doc.spec?.global ? "global" : null,
+    tools ? `${tools} tool${tools === 1 ? "" : "s"}` : null,
+  ].filter(Boolean);
+  return bits.length ? bits.join(" · ") : undefined;
 }
 
 interface ProfileForm {

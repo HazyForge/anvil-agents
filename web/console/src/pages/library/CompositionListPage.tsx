@@ -5,7 +5,7 @@ import { listComposition } from "../../api/composition";
 import { compositionKindByRoute } from "../../api/types.composition";
 import { CompositionResourceCard } from "../../components/CompositionResourceCard";
 import { CRD_AS_CARD_HELP, CRD_AS_CARD_MANTRA } from "../../design/mantra";
-import { compositionCardSummary } from "../../utils/compositionSummary";
+import { compositionCardSummary, compositionIsGlobal } from "../../utils/compositionSummary";
 import type { CompositionDocument } from "../../api/types.composition";
 
 interface Props {
@@ -48,21 +48,36 @@ export function CompositionListPage({ token, namespace: activeNamespace, writeEn
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) {
-      return items;
-    }
-    return items.filter((item) => {
-      const description = String(item.spec?.description ?? "").toLowerCase();
-      const summary = compositionCardSummary(item).toLowerCase();
-      return (
-        item.metadata.name.toLowerCase().includes(q) ||
-        description.includes(q) ||
-        summary.includes(q) ||
-        item.management.managedBy?.toLowerCase().includes(q) ||
-        item.management.reason.toLowerCase().includes(q)
-      );
+    const matches = !q
+      ? items
+      : items.filter((item) => {
+          const description = String(item.spec?.description ?? "").toLowerCase();
+          const summary = compositionCardSummary(item).toLowerCase();
+          const globalHit = compositionIsGlobal(item) && "global".includes(q);
+          return (
+            item.metadata.name.toLowerCase().includes(q) ||
+            description.includes(q) ||
+            summary.includes(q) ||
+            globalHit ||
+            item.management.managedBy?.toLowerCase().includes(q) ||
+            item.management.reason.toLowerCase().includes(q)
+          );
+        });
+    // Namespace defaults first so global skill/tool packs are obvious.
+    return [...matches].sort((a, b) => {
+      const ag = compositionIsGlobal(a) ? 0 : 1;
+      const bg = compositionIsGlobal(b) ? 0 : 1;
+      if (ag !== bg) {
+        return ag - bg;
+      }
+      return a.metadata.name.localeCompare(b.metadata.name);
     });
   }, [items, query]);
+
+  const globalCount = useMemo(
+    () => items.filter((item) => compositionIsGlobal(item)).length,
+    [items],
+  );
 
   if (!kind) {
     return (
@@ -94,6 +109,14 @@ export function CompositionListPage({ token, namespace: activeNamespace, writeEn
             Namespace <span className="mono">{namespace}</span>
             {" · "}
             {kind.kind} CRDs as cards
+            {globalCount > 0 ? (
+              <>
+                {" · "}
+                <span className="chip chip-global" title="spec.global packs auto-attach to every run">
+                  {globalCount} global
+                </span>
+              </>
+            ) : null}
           </p>
         </div>
         <div className="chip-row">
@@ -113,6 +136,15 @@ export function CompositionListPage({ token, namespace: activeNamespace, writeEn
 
       <div className="banner banner-info">
         <strong>{CRD_AS_CARD_MANTRA}</strong> {CRD_AS_CARD_HELP}
+        {kind.route === "skill-sets" || kind.route === "tool-sets" ? (
+          <>
+            {" "}
+            Cards tagged <span className="chip chip-global">global</span> are namespace defaults (
+            <span className="mono">spec.global</span>) and attach to every AgentRun unless a profile
+            or run sets <span className="mono">excludeGlobal</span>. Search{" "}
+            <span className="mono">global</span> to filter them.
+          </>
+        ) : null}
         {kind.route === "harness-profiles" ? (
           <>
             {" "}

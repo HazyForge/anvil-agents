@@ -916,6 +916,11 @@ type AgentRunResolvedObjectReferenceStatus struct {
 	Generation      int64  `json:"generation,omitempty"`
 	ResourceVersion string `json:"resourceVersion,omitempty"`
 	Digest          string `json:"digest,omitempty"`
+	// Global is true when this skill/tool set was attached because
+	// AgentSkillSet/AgentToolSet.spec.global is set (namespace default),
+	// rather than only via an explicit profile/run ref.
+	// +optional
+	Global bool `json:"global,omitempty"`
 }
 
 // AgentRunResolvedScopeStatus records the opaque workload names inherited by

@@ -198,22 +198,22 @@ export function RunDetail({ run, token, onRunUpdate }: Props) {
                 {compositionRefLink(run.namespace, "harness-profiles", composition.harnessProfileRef)}
               </dd>
               <dt>Skill sets</dt>
-              <dd className="mono">
+              <dd>
                 {(composition.skillSetRefs ?? []).length > 0
                   ? (composition.skillSetRefs ?? []).map((ref, index) => (
-                      <span key={`${ref.name}-${index}`}>
-                        {index > 0 ? ", " : null}
+                      <span key={`${ref.name}-${index}`} className="composition-ref-item">
+                        {index > 0 ? " " : null}
                         {compositionRefLink(run.namespace, "skill-sets", ref)}
                       </span>
                     ))
                   : "—"}
               </dd>
               <dt>Tool sets</dt>
-              <dd className="mono">
+              <dd>
                 {(composition.toolSetRefs ?? []).length > 0
                   ? (composition.toolSetRefs ?? []).map((ref, index) => (
-                      <span key={`${ref.name}-${index}`}>
-                        {index > 0 ? ", " : null}
+                      <span key={`${ref.name}-${index}`} className="composition-ref-item">
+                        {index > 0 ? " " : null}
                         {compositionRefLink(run.namespace, "tool-sets", ref)}
                       </span>
                     ))
@@ -266,8 +266,15 @@ function compositionRefLink(
   const digest = ref.digest ? `@${ref.digest.slice(0, 12)}` : "";
   const label = `${ref.namespace ? `${ref.namespace}/` : ""}${ref.name}${digest}`;
   return (
-    <Link to={`/ns/${encodeURIComponent(ns)}/${kindRoute}/${encodeURIComponent(ref.name)}`}>
-      {label}
-    </Link>
+    <span className="composition-ref-link-wrap mono">
+      <Link to={`/ns/${encodeURIComponent(ns)}/${kindRoute}/${encodeURIComponent(ref.name)}`}>
+        {label}
+      </Link>
+      {ref.global ? (
+        <span className="chip chip-global" title="Attached as namespace-global skill/tool set">
+          global
+        </span>
+      ) : null}
+    </span>
   );
 }

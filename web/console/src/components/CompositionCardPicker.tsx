@@ -8,6 +8,8 @@ export interface CompositionOption {
   managedBy?: string;
   danger?: boolean;
   icon?: string;
+  /** Namespace-global skill/tool set (spec.global). */
+  global?: boolean;
 }
 
 interface BaseProps {
@@ -34,6 +36,8 @@ interface SingleProps extends BaseProps {
 type Props = MultiProps | SingleProps;
 
 function optionFromDoc(doc: CompositionDocument, meta?: string): CompositionOption {
+  const isGlobal =
+    (doc.kind === "AgentSkillSet" || doc.kind === "AgentToolSet") && Boolean(doc.spec?.global);
   return {
     name: doc.metadata.name,
     description: String(doc.spec?.description ?? "").trim() || undefined,
@@ -41,6 +45,7 @@ function optionFromDoc(doc: CompositionDocument, meta?: string): CompositionOpti
     managedBy: doc.management.managedBy,
     danger: doc.management.reason === "gitops_protected" ? false : undefined,
     icon: getIconUrl(doc.metadata.annotations) || undefined,
+    global: isGlobal || undefined,
   };
 }
 
@@ -121,33 +126,41 @@ export function CompositionCardPicker(props: Props) {
         <div className="composition-selected-bar">
           <span className="label">Selected order</span>
           <ol className="composition-selected-order">
-            {selected.map((name, index) => (
-              <li key={name} className="composition-selected-chip">
-                <span className="mono">
-                  {index + 1}. {name}
-                </span>
-                <span className="ordered-ref-actions">
-                  <button
-                    type="button"
-                    className="btn btn-ghost"
-                    disabled={disabled || index === 0}
-                    onClick={() => moveSelected(name, -1)}
-                    title="Move earlier"
-                  >
-                    ↑
-                  </button>
-                  <button
-                    type="button"
-                    className="btn btn-ghost"
-                    disabled={disabled || index === selected.length - 1}
-                    onClick={() => moveSelected(name, 1)}
-                    title="Move later"
-                  >
-                    ↓
-                  </button>
-                </span>
-              </li>
-            ))}
+            {selected.map((name, index) => {
+              const opt = options.find((item) => item.name === name);
+              return (
+                <li key={name} className="composition-selected-chip">
+                  <span className="mono">
+                    {index + 1}. {name}
+                  </span>
+                  {opt?.global ? (
+                    <span className="chip chip-global" title="Also auto-attached as namespace global">
+                      global
+                    </span>
+                  ) : null}
+                  <span className="ordered-ref-actions">
+                    <button
+                      type="button"
+                      className="btn btn-ghost"
+                      disabled={disabled || index === 0}
+                      onClick={() => moveSelected(name, -1)}
+                      title="Move earlier"
+                    >
+                      ↑
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-ghost"
+                      disabled={disabled || index === selected.length - 1}
+                      onClick={() => moveSelected(name, 1)}
+                      title="Move later"
+                    >
+                      ↓
+                    </button>
+                  </span>
+                </li>
+              );
+            })}
           </ol>
         </div>
       ) : null}
@@ -185,6 +198,14 @@ export function CompositionCardPicker(props: Props) {
                   )}
                   {iconSrc ? <img src={iconSrc} alt="" className="compose-pick-icon" /> : null}
                   <span className="compose-pick-name mono">{opt.name}</span>
+                  {opt.global ? (
+                    <span
+                      className="chip chip-global"
+                      title="Auto-attached to every AgentRun in this namespace"
+                    >
+                      global
+                    </span>
+                  ) : null}
                 </div>
                 {opt.description ? (
                   <p className="compose-pick-desc">{opt.description}</p>
@@ -193,6 +214,9 @@ export function CompositionCardPicker(props: Props) {
                 )}
                 <div className="compose-pick-meta">
                   {opt.meta ? <span>{opt.meta}</span> : null}
+                  {opt.global ? (
+                    <span className="compose-pick-global-note">namespace default</span>
+                  ) : null}
                   {opt.managedBy ? (
                     <span className="chip chip-mute" style={{ marginLeft: "auto" }}>
                       {opt.managedBy}

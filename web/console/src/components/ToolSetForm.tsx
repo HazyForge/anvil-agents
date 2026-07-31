@@ -38,7 +38,8 @@ export function ToolSetForm({ form, disabled, isCreate, onChange }: Props) {
         </p>
         <ul className="explain-list">
           <li>
-            <strong>Compose on run profiles</strong> as ordered tool-set refs.
+            <strong>Compose on run profiles</strong> as ordered tool-set refs, or mark{" "}
+            <strong>global</strong> so every AgentRun in the namespace installs the tools.
           </li>
           <li>
             <strong>Verify command</strong> is argv (space-separated in this form), e.g.{" "}
@@ -67,6 +68,27 @@ export function ToolSetForm({ form, disabled, isCreate, onChange }: Props) {
           onChange={(event) => onChange("description", event.target.value)}
           placeholder="What integration this tool set exposes"
         />
+      </label>
+
+      <label className="field field-checkbox">
+        <span className="checkbox-row">
+          <input
+            type="checkbox"
+            checked={form.global}
+            disabled={disabled}
+            onChange={(event) => onChange("global", event.target.checked)}
+          />
+          <span className="label" style={{ margin: 0 }}>
+            Global for this namespace
+          </span>
+          {form.global ? <span className="chip chip-global">global</span> : null}
+        </span>
+        <p className="field-help">
+          When enabled, every AgentRun in this namespace gets these tools installed automatically
+          (before profile/run refs). Use for shared clients such as{" "}
+          <span className="mono">knowledge-search</span>. Opt out per profile/run with{" "}
+          <span className="mono">toolSets.excludeGlobal</span>.
+        </p>
       </label>
 
       <h3 className="form-section-title">Tools</h3>

@@ -7,6 +7,8 @@ export interface SkillEntryForm {
 export interface SkillSetForm {
   name: string;
   description: string;
+  /** Namespace-global: auto-attach to every AgentRun unless excludeGlobal. */
+  global: boolean;
   skills: SkillEntryForm[];
 }
 
@@ -18,6 +20,7 @@ export function emptySkillSetForm(): SkillSetForm {
   return {
     name: "",
     description: "",
+    global: false,
     skills: [emptySkillEntry()],
   };
 }
@@ -39,6 +42,7 @@ export function formFromSkillSetSpec(spec: Record<string, unknown>, name = ""): 
   return {
     name,
     description: String(spec.description ?? ""),
+    global: Boolean(spec.global),
     skills: skills.length ? skills : [emptySkillEntry()],
   };
 }
@@ -59,6 +63,9 @@ export function buildSkillSetSpec(form: SkillSetForm): Record<string, unknown> {
   const spec: Record<string, unknown> = {};
   if (form.description.trim()) {
     spec.description = form.description.trim();
+  }
+  if (form.global) {
+    spec.global = true;
   }
   if (skills.length) {
     spec.skills = skills;

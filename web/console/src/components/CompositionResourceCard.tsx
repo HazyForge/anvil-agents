@@ -3,6 +3,7 @@ import type { CompositionDocument } from "../api/types.composition";
 import {
   authSessionIsActive,
   compositionCardSummary,
+  compositionIsGlobal,
 } from "../utils/compositionSummary";
 import { formatTime } from "../utils/format";
 import { getIconUrl, getScreenshotUrl, resolveIconSrc } from "../utils/icons";
@@ -53,12 +54,13 @@ export function CompositionResourceCard({
   const href = `/ns/${encodeURIComponent(namespace)}/${kindRoute}/${encodeURIComponent(doc.metadata.name)}`;
   const sizeClass = size === "lg" ? "agent-card-lg" : "agent-card-library";
   const activeAuth = doc.kind === "AgentAuthSession" && authSessionIsActive(doc);
+  const isGlobal = compositionIsGlobal(doc);
   const phase =
     doc.kind === "AgentAuthSession" ? String(doc.status?.phase ?? "Pending") : "";
 
   return (
     <article
-      className={`agent-card ${sizeClass}${activeAuth ? " auth-session-card-active" : ""}`}
+      className={`agent-card ${sizeClass}${activeAuth ? " auth-session-card-active" : ""}${isGlobal ? " agent-card-global" : ""}`}
       role="button"
       tabIndex={0}
       onClick={onOpen}
@@ -79,6 +81,14 @@ export function CompositionResourceCard({
         <div className="agent-card-heading">
           <div className="chip-row" style={{ marginBottom: "0.15rem" }}>
             <span className="chip chip-mute">{doc.kind}</span>
+            {isGlobal ? (
+              <span
+                className="chip chip-global"
+                title="Auto-attached to every AgentRun in this namespace"
+              >
+                global
+              </span>
+            ) : null}
             {phase ? (
               <span className={`chip ${activeAuth ? "chip-warn" : "chip-mute"}`}>{phase}</span>
             ) : null}
