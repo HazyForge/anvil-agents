@@ -45,9 +45,9 @@ archive:
     name: anvilhub-inventory-database
     key: database-url
   terminalRetention: 72h
-# The read-only API uses the existing Anvil Primaris resource audience and an
-# explicit compatibility binding. Replace this administrative role with the
-# narrower anvil_agents_viewer role when that role is provisioned in ZITADEL.
+# The API uses the existing Anvil Primaris resource audience. Administrators
+# retain explicit operator permissions, while dashboard-only users receive the
+# narrower anvil_agents_viewer role and read-only observer permissions.
 api:
   enabled: true
   config:
@@ -68,6 +68,16 @@ api:
       roleObjectClaims:
         - urn:zitadel:iam:org:project:376124473528572432:roles
       bindings:
+        - name: anvil-agents-viewers
+          roles:
+            - anvil_agents_viewer
+          permissions:
+            - anvil-agents:runs:read
+            - anvil-agents:runs:stream
+            - anvil-agents:composition:read
+          namespaces:
+            - anvilhub
+            - hazy-trade
         - name: anvil-primaris-admin-compatibility
           roles:
             - anvil_primaris_admin

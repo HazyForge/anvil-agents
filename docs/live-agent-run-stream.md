@@ -120,12 +120,13 @@ empty to rely only on the token claim. A wildcard namespace is honored only
 when an explicit binding or authorized namespace claim contains `"*"`; no
 implicit administrator bypass exists.
 
-For ZITADEL migration, retain the existing issuer and temporarily map the
-existing `anvil_agent_read` and `anvil_primaris_admin` roles in separate,
-explicit bindings. Prefer issuing a narrower `anvil_agents_viewer` role and a
-distinct `anvil-agents` API audience, then remove the administrative
-compatibility binding after clients have migrated. Claim names are chart
-configuration rather than ZITADEL constants.
+For ZITADEL migration, retain the existing issuer and map the existing
+`anvil_agent_read` and `anvil_primaris_admin` roles only in separate, explicit
+bindings. Hazy Forge assigns the narrower `anvil_agents_viewer` role to
+dashboard observers while retaining a distinct administrative compatibility
+binding for operator permissions. Prefer a distinct `anvil-agents` API audience
+before removing the compatibility binding after clients have migrated. Claim
+names are chart configuration rather than ZITADEL constants.
 See `examples/live-api/zitadel-values.yaml` for the explicit ZITADEL object
 claim overlay. Keycloak, Auth0, Entra ID, and Dex deployments should map their
 tokens to configured top-level string/array role, group, scope, and namespace
