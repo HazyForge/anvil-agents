@@ -1,57 +1,78 @@
+---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: anvil-agents-manager-role
+  name: manager-role
 rules:
-  - apiGroups: ["control.anvil.hazyforge.io"]
-    resources: ["adversesituations", "agentauthsessions", "agentdatavolumes", "agentruncontrols", "agentruns", "agentschedules"]
-    verbs: ["create", "delete", "get", "list", "patch", "update", "watch"]
-  - apiGroups: ["control.anvil.hazyforge.io"]
-    resources: ["agentharnessprofiles", "agentrunprofiles", "agentskillsets", "agenttoolsets", "volumeprofiles"]
-    verbs: ["get", "list", "watch"]
-  - apiGroups: ["control.anvil.hazyforge.io"]
-    resources:
-      - adversesituations/status
-      - adversesignals/status
-      - agentauthsessions/status
-      - agentdatavolumes/status
-      - agentruncontrols/status
-      - agentruns/status
-      - agentschedules/status
-      - volumeprofiles/status
-    verbs: ["get", "patch", "update"]
-  - apiGroups: ["control.anvil.hazyforge.io"]
-    resources: ["adversesignals"]
-    verbs: ["get", "list", "patch", "watch"]
-  - apiGroups: ["control.anvil.hazyforge.io"]
-    resources: ["adversesignals/finalizers"]
-    verbs: ["update"]
-  - apiGroups: ["control.anvil.hazyforge.io"]
-    resources:
-      - adversesituations/finalizers
-      - agentauthsessions/finalizers
-      - agentdatavolumes/finalizers
-      - agentruns/finalizers
-      - agentschedules/finalizers
-    verbs: ["update"]
-  - apiGroups: ["batch"]
-    resources: ["jobs"]
-    verbs: ["create", "delete", "get", "list", "patch", "update", "watch"]
-  - apiGroups: [""]
-    resources: ["configmaps", "pods", "persistentvolumeclaims"]
-    verbs: ["create", "delete", "get", "list", "patch", "update", "watch"]
-  - apiGroups: [""]
-    resources: ["pods/log"]
-    verbs: ["get"]
-  - apiGroups: [""]
-    resources: ["secrets"]
-    verbs: ["create", "delete", "get", "list", "patch", "update", "watch"]
-  - apiGroups: [""]
-    resources: ["events"]
-    verbs: ["create", "patch"]
-  - apiGroups: ["storage.k8s.io"]
-    resources: ["storageclasses"]
-    verbs: ["get"]
-  - apiGroups: ["coordination.k8s.io"]
-    resources: ["leases"]
-    verbs: ["create", "delete", "get", "list", "patch", "update", "watch"]
+- apiGroups:
+  - ""
+  resources:
+  - persistentvolumeclaims
+  - persistentvolumes
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - ""
+  resources:
+  - services
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - watch
+- apiGroups:
+  - batch
+  resources:
+  - jobs
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - watch
+- apiGroups:
+  - control.anvil.hazyforge.io
+  resources:
+  - agentdatavolumecopies
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - control.anvil.hazyforge.io
+  resources:
+  - agentdatavolumecopies/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - control.anvil.hazyforge.io
+  resources:
+  - agentdatavolumecopies/status
+  verbs:
+  - get
+  - patch
+  - update
+- apiGroups:
+  - control.anvil.hazyforge.io
+  resources:
+  - agentdatavolumes
+  verbs:
+  - create
+  - get
+  - list
+  - watch
+- apiGroups:
+  - control.anvil.hazyforge.io
+  resources:
+  - agentruns
+  verbs:
+  - get
+  - list
+  - watch
