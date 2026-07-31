@@ -48,6 +48,7 @@ type fakeBackend struct {
 	authSession      *agentsv1alpha1.AgentAuthSession
 	authSessions     []agentsv1alpha1.AgentAuthSession
 	createAuthErr    error
+	volumeCopy       *agentsv1alpha1.AgentDataVolumeCopy
 }
 
 func (backend *fakeBackend) DefaultNamespace() string { return backend.defaultNamespace }
@@ -157,6 +158,22 @@ func (backend *fakeBackend) GetAuthSession(_ context.Context, _, _ string) (*age
 
 func (backend *fakeBackend) ListAuthSessions(_ context.Context, _ string) (*agentsv1alpha1.AgentAuthSessionList, error) {
 	return &agentsv1alpha1.AgentAuthSessionList{Items: append([]agentsv1alpha1.AgentAuthSession(nil), backend.authSessions...)}, nil
+}
+
+func (backend *fakeBackend) CreateDataVolumeCopy(_ context.Context, copyObj *agentsv1alpha1.AgentDataVolumeCopy) error {
+	if copyObj.Name == "" {
+		copyObj.Name = copyObj.GenerateName + "copy"
+	}
+	copyObj.Status.Phase = agentsv1alpha1.AgentDataVolumeCopyPhaseSucceeded
+	backend.volumeCopy = copyObj.DeepCopy()
+	return nil
+}
+
+func (backend *fakeBackend) GetDataVolumeCopy(_ context.Context, _, _ string) (*agentsv1alpha1.AgentDataVolumeCopy, error) {
+	if backend.volumeCopy == nil {
+		return nil, apierrors.NewNotFound(schema.GroupResource{Group: agentsv1alpha1.GroupVersion.Group, Resource: "agentdatavolumecopies"}, "missing")
+	}
+	return backend.volumeCopy.DeepCopy(), nil
 }
 
 func TestRunCreateClientDryRunDoesNotLoadKubernetes(t *testing.T) {

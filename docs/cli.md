@@ -38,6 +38,7 @@ The caller needs only the Kubernetes verbs used by each command:
 | `auth grok\|xai diagnose` | same as codex diagnose for xAI/Grok durable homes |
 | `auth grok\|xai reauth` | same as codex reauth; staging key is `GROK_AUTH_JSON` |
 | `auth grok\|xai logout` | same as codex logout for Grok durable homes |
+| `volume copy` | create an append-only `AgentDataVolumeCopy` (stream source claim to a new volume on a target node) |
 | `self report` | none (writes local status JSONL / pod log only) |
 
 ## Create An Append-Only Run

@@ -1,0 +1,14 @@
+apiVersion: control.anvil.hazyforge.io/v1alpha1
+kind: AgentDataVolumeCopy
+metadata:
+  generateName: volume-copy-
+  namespace: agents
+spec:
+  sourceRef:
+    name: example-codex-home
+  destination:
+    name: example-codex-home-acer
+    nodeSelector:
+      kubernetes.io/hostname: acer
+  method: Stream
+  timeoutSeconds: 1800

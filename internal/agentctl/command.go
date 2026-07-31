@@ -127,6 +127,8 @@ func (app App) Run(ctx context.Context, args []string) error {
 		}
 	case "auth":
 		return app.runAuth(ctx, options, remaining[1:])
+	case "volume":
+		return app.runVolume(ctx, options, remaining[1:])
 	case "self":
 		return app.runSelf(remaining[1:])
 	case "help":
@@ -141,9 +143,10 @@ func (app App) Run(ctx context.Context, args []string) error {
 func writeRootUsage(writer io.Writer) {
 	fmt.Fprintln(writer, "Usage: anvil-agentctl [--kubeconfig PATH] [--context NAME] COMMAND")
 	fmt.Fprintln(writer, "")
-	fmt.Fprintln(writer, "Commands: run, auth, self")
+	fmt.Fprintln(writer, "Commands: run, auth, volume, self")
 	writeRunUsage(writer)
 	writeAuthUsage(writer)
+	writeVolumeUsage(writer)
 	writeSelfUsage(writer)
 }
 

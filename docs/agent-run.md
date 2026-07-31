@@ -119,7 +119,11 @@ the authority boundary.
 ## Durable storage
 
 `AgentDataVolume` creates a PVC or accepts a compatible existing claim already
-controller-owned by the same `AgentDataVolume` identity. It exposes the
+controller-owned by the same `AgentDataVolume` identity. Topology-bound local
+storage can be migrated with append-only `AgentDataVolumeCopy` objects (see
+[volume-copy.md](volume-copy.md)): the controller creates a new destination
+volume and streams bytes across nodes; it never rewrites an existing claim.
+It exposes the
 resolved claim, mount, placement, and environment defaults in status. A
 `VolumeProfile` can provide reusable values. Cross-namespace mounts are
 rejected.

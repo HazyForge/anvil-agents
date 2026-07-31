@@ -25,6 +25,8 @@ func addKnownTypes(scheme *runtime.Scheme) error {
 		&AgentAuthSessionList{},
 		&AgentDataVolume{},
 		&AgentDataVolumeList{},
+		&AgentDataVolumeCopy{},
+		&AgentDataVolumeCopyList{},
 		&VolumeProfile{},
 		&VolumeProfileList{},
 		&AgentRunControl{},
