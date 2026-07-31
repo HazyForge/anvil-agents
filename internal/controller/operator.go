@@ -69,6 +69,7 @@ func Run(ctx context.Context, options *Options) error {
 		{"AgentDataVolume", (&AgentDataVolumeReconciler{Client: mgr.GetClient(), Scheme: mgr.GetScheme(), DefaultStorageClass: options.DefaultStorageClass}).SetupWithManager},
 		{"VolumeProfile", (&VolumeProfileReconciler{Client: mgr.GetClient(), Scheme: mgr.GetScheme()}).SetupWithManager},
 		{"AgentAuthSession", (&AgentAuthSessionReconciler{Client: mgr.GetClient(), Scheme: mgr.GetScheme(), CommonReconcilerOptions: common}).SetupWithManager},
+		{"AgentDataVolumeCopy", (&AgentDataVolumeCopyReconciler{Client: mgr.GetClient(), Scheme: mgr.GetScheme(), CommonReconcilerOptions: common}).SetupWithManager},
 		{"AgentRunControl", (&AgentRunControlReconciler{Client: mgr.GetClient(), Scheme: mgr.GetScheme()}).SetupWithManager},
 		{"AgentRun", (&AgentRunReconciler{Client: mgr.GetClient(), Scheme: mgr.GetScheme(), CommonReconcilerOptions: common, AgentRunArchive: archiveStore}).SetupWithManager},
 		{"AgentSchedule", (&AgentScheduleReconciler{Client: mgr.GetClient(), Scheme: mgr.GetScheme()}).SetupWithManager},

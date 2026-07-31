@@ -42,6 +42,8 @@ type Backend interface {
 	CreateAuthSession(context.Context, *agentsv1alpha1.AgentAuthSession) error
 	GetAuthSession(context.Context, string, string) (*agentsv1alpha1.AgentAuthSession, error)
 	ListAuthSessions(context.Context, string) (*agentsv1alpha1.AgentAuthSessionList, error)
+	CreateDataVolumeCopy(context.Context, *agentsv1alpha1.AgentDataVolumeCopy) error
+	GetDataVolumeCopy(context.Context, string, string) (*agentsv1alpha1.AgentDataVolumeCopy, error)
 }
 
 type KubernetesBackend struct {
@@ -212,4 +214,19 @@ func (backend *KubernetesBackend) ListAuthSessions(ctx context.Context, namespac
 		return nil, fmt.Errorf("list AgentAuthSessions: %w", err)
 	}
 	return list, nil
+}
+
+func (backend *KubernetesBackend) CreateDataVolumeCopy(ctx context.Context, copyObj *agentsv1alpha1.AgentDataVolumeCopy) error {
+	if err := backend.runs.Create(ctx, copyObj); err != nil {
+		return fmt.Errorf("create AgentDataVolumeCopy: %w", err)
+	}
+	return nil
+}
+
+func (backend *KubernetesBackend) GetDataVolumeCopy(ctx context.Context, namespace, name string) (*agentsv1alpha1.AgentDataVolumeCopy, error) {
+	copyObj := &agentsv1alpha1.AgentDataVolumeCopy{}
+	if err := backend.runs.Get(ctx, client.ObjectKey{Namespace: namespace, Name: name}, copyObj); err != nil {
+		return nil, fmt.Errorf("get AgentDataVolumeCopy %s/%s: %w", namespace, name, err)
+	}
+	return copyObj, nil
 }

@@ -2133,6 +2133,11 @@ func (r *AgentRunReconciler) resolveAgentRunDataVolumes(ctx context.Context, obj
 		} else if blocked {
 			return nil, controlv1alpha1.AgentRunPhasePending, "AuthSessionActive", fmt.Sprintf("Waiting for AgentAuthSession %s/%s to finish maintenance on AgentDataVolume %s.", namespace, sessionName, name), nil
 		}
+		if blocked, copyName, err := AgentDataVolumeCopyBlocksDataVolume(ctx, reader, namespace, name); err != nil {
+			return nil, "", "", "", fmt.Errorf("check AgentDataVolumeCopy reservation for %s/%s: %w", namespace, name, err)
+		} else if blocked {
+			return nil, controlv1alpha1.AgentRunPhasePending, "VolumeCopyActive", fmt.Sprintf("Waiting for AgentDataVolumeCopy %s/%s to finish on AgentDataVolume %s.", namespace, copyName, name), nil
+		}
 		claimName := agentDataVolumeClaimName(volume)
 		if volume.Status.ClaimRef != nil && strings.TrimSpace(volume.Status.ClaimRef.Name) != "" {
 			claimNamespace := firstNonEmpty(strings.TrimSpace(volume.Status.ClaimRef.Namespace), namespace)
