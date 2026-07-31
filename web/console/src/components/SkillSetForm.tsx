@@ -37,7 +37,8 @@ export function SkillSetForm({ form, disabled, isCreate, onChange }: Props) {
         </p>
         <ul className="explain-list">
           <li>
-            <strong>Compose on run profiles</strong> as ordered skill-set refs.
+            <strong>Compose on run profiles</strong> as ordered skill-set refs, or mark{" "}
+            <strong>global</strong> so every AgentRun in the namespace gets it.
           </li>
           <li>
             <strong>Content</strong> is Markdown injected into the harness prompt layers.
@@ -68,6 +69,26 @@ export function SkillSetForm({ form, disabled, isCreate, onChange }: Props) {
           onChange={(event) => onChange("description", event.target.value)}
           placeholder="When to select this capability pack"
         />
+      </label>
+
+      <label className="field field-checkbox">
+        <span className="checkbox-row">
+          <input
+            type="checkbox"
+            checked={form.global}
+            disabled={disabled}
+            onChange={(event) => onChange("global", event.target.checked)}
+          />
+          <span className="label" style={{ margin: 0 }}>
+            Global for this namespace
+          </span>
+          {form.global ? <span className="chip chip-global">global</span> : null}
+        </span>
+        <p className="field-help">
+          When enabled, every AgentRun in this namespace receives these skills automatically
+          (before profile/run refs). Use for shared guidance such as knowledge-base usage. Opt out
+          per profile/run with <span className="mono">skillSets.excludeGlobal</span>.
+        </p>
       </label>
 
       <h3 className="form-section-title">Skills</h3>

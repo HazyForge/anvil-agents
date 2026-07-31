@@ -56,6 +56,8 @@ export interface ResolvedObjectRef {
   generation?: number;
   resourceVersion?: string;
   digest?: string;
+  /** True when attached via AgentSkillSet/AgentToolSet.spec.global. */
+  global?: boolean;
 }
 
 export interface ResolvedComposition {

@@ -8,6 +8,8 @@ export interface ToolEntryForm {
 export interface ToolSetForm {
   name: string;
   description: string;
+  /** Namespace-global: auto-attach to every AgentRun unless excludeGlobal. */
+  global: boolean;
   tools: ToolEntryForm[];
 }
 
@@ -19,6 +21,7 @@ export function emptyToolSetForm(): ToolSetForm {
   return {
     name: "",
     description: "",
+    global: false,
     tools: [emptyToolEntry()],
   };
 }
@@ -44,6 +47,7 @@ export function formFromToolSetSpec(spec: Record<string, unknown>, name = ""): T
   return {
     name,
     description: String(spec.description ?? ""),
+    global: Boolean(spec.global),
     tools: tools.length ? tools : [emptyToolEntry()],
   };
 }
@@ -71,6 +75,9 @@ export function buildToolSetSpec(form: ToolSetForm): Record<string, unknown> {
   const spec: Record<string, unknown> = {};
   if (form.description.trim()) {
     spec.description = form.description.trim();
+  }
+  if (form.global) {
+    spec.global = true;
   }
   if (tools.length) {
     spec.tools = tools;

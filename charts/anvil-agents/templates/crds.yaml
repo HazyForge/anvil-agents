@@ -12714,6 +12714,12 @@ spec:
                       generation:
                         format: int64
                         type: integer
+                      global:
+                        description: |-
+                          Global is true when this skill/tool set was attached because
+                          AgentSkillSet/AgentToolSet.spec.global is set (namespace default),
+                          rather than only via an explicit profile/run ref.
+                        type: boolean
                       name:
                         type: string
                       namespace:
@@ -12738,6 +12744,12 @@ spec:
                       generation:
                         format: int64
                         type: integer
+                      global:
+                        description: |-
+                          Global is true when this skill/tool set was attached because
+                          AgentSkillSet/AgentToolSet.spec.global is set (namespace default),
+                          rather than only via an explicit profile/run ref.
+                        type: boolean
                       name:
                         type: string
                       namespace:
@@ -12784,6 +12796,12 @@ spec:
                         generation:
                           format: int64
                           type: integer
+                        global:
+                          description: |-
+                            Global is true when this skill/tool set was attached because
+                            AgentSkillSet/AgentToolSet.spec.global is set (namespace default),
+                            rather than only via an explicit profile/run ref.
+                          type: boolean
                         name:
                           type: string
                         namespace:
@@ -12808,6 +12826,12 @@ spec:
                         generation:
                           format: int64
                           type: integer
+                        global:
+                          description: |-
+                            Global is true when this skill/tool set was attached because
+                            AgentSkillSet/AgentToolSet.spec.global is set (namespace default),
+                            rather than only via an explicit profile/run ref.
+                          type: boolean
                         name:
                           type: string
                         namespace:

@@ -74,10 +74,14 @@ func (r *AgentRunReconciler) resolveAgentRunComposition(ctx context.Context, obj
 		status.HarnessProfileRef = resolvedObjectReferenceStatus(harnessProfile, digestJSON(harnessProfile.Spec))
 	}
 	for _, skillSet := range resolvedSkillSets {
-		status.SkillSetRefs = append(status.SkillSetRefs, *resolvedObjectReferenceStatus(skillSet, digestJSON(skillSet.Spec)))
+		ref := *resolvedObjectReferenceStatus(skillSet, digestJSON(skillSet.Spec))
+		ref.Global = skillSet.Spec.Global
+		status.SkillSetRefs = append(status.SkillSetRefs, ref)
 	}
 	for _, toolSet := range resolvedToolSets {
-		status.ToolSetRefs = append(status.ToolSetRefs, *resolvedObjectReferenceStatus(toolSet, digestJSON(toolSet.Spec)))
+		ref := *resolvedObjectReferenceStatus(toolSet, digestJSON(toolSet.Spec))
+		ref.Global = toolSet.Spec.Global
+		status.ToolSetRefs = append(status.ToolSetRefs, ref)
 	}
 	status.Scope = agentRunResolvedScopeStatus(effective.Spec.Scope)
 	status.EffectiveDigest = digestJSON(effective.Spec)
