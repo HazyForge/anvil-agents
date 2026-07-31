@@ -10,6 +10,13 @@ type AgentSkillSetSpec struct {
 	// Description explains when this capability pack should be selected.
 	// +optional
 	Description string `json:"description,omitempty"`
+	// Global attaches this skill set to every AgentRun in the same namespace
+	// unless the profile or run sets skillSets.excludeGlobal. Globals apply
+	// before explicit profile/run refs and are not duplicated when also listed
+	// explicitly. Use this for namespace shared instruction packs such as
+	// knowledge-base usage that every agent should receive by default.
+	// +optional
+	Global bool `json:"global,omitempty"`
 	// Skills are named instruction packs materialized for the selected harness.
 	// +kubebuilder:validation:MaxItems=64
 	// +optional
@@ -27,6 +34,7 @@ type AgentSkillSetSpec struct {
 
 // +kubebuilder:object:root=true
 // +kubebuilder:resource:path=agentskillsets,scope=Namespaced,shortName=agskills
+// +kubebuilder:printcolumn:name="Global",type="boolean",JSONPath=".spec.global"
 // +kubebuilder:printcolumn:name="Description",type="string",JSONPath=".spec.description"
 type AgentSkillSet struct {
 	metav1.TypeMeta   `json:",inline"`

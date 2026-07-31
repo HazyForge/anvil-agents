@@ -2601,6 +2601,12 @@ spec:
                   SkillSets composes ordered backend-neutral instruction packs and
                   profile-local named skill overrides.
                 properties:
+                  excludeGlobal:
+                    description: |-
+                      ExcludeGlobal skips namespace-global AgentSkillSets (spec.global=true)
+                      that would otherwise attach automatically. Profile and run layers may set
+                      this; either layer opting out disables globals for the run.
+                    type: boolean
                   mode:
                     description: |-
                       Mode controls how this layer combines refs with inherited profile refs.
@@ -2721,6 +2727,12 @@ spec:
                   ToolSets composes ordered external tool contracts independently of the
                   skills that teach agents when and how to use them.
                 properties:
+                  excludeGlobal:
+                    description: |-
+                      ExcludeGlobal skips namespace-global AgentToolSets (spec.global=true)
+                      that would otherwise attach automatically. Profile and run layers may set
+                      this; either layer opting out disables globals for the run.
+                    type: boolean
                   mode:
                     description: |-
                       Mode controls how this layer combines refs with inherited profile refs.

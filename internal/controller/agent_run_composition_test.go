@@ -601,3 +601,174 @@ func testCompositionReconciler(t *testing.T, objects ...client.Object) *AgentRun
 func typesUID(value string) types.UID {
 	return types.UID(value)
 }
+
+func TestAgentRunCompositionAttachesGlobalSkillAndToolSets(t *testing.T) {
+	t.Parallel()
+
+	profile := &controlv1alpha1.AgentRunProfile{
+		ObjectMeta: metav1.ObjectMeta{Name: "observer", Namespace: "agents", UID: "profile-uid", Generation: 1},
+		Spec: controlv1alpha1.AgentRunProfileSpec{
+			HarnessProfileRef: &controlv1alpha1.NamespacedObjectReference{Name: "codex-standard"},
+			// No skillSets/toolSets refs — globals alone must attach.
+			Harness: controlv1alpha1.AgentRunHarnessSpec{
+				Intent:       controlv1alpha1.AgentRunIntentObserve,
+				SystemPrompt: "Observe.",
+			},
+		},
+	}
+	codexHarness := testAgentHarnessProfile("codex-standard", controlv1alpha1.AgentRunHarnessBackendCodex, "codex-credentials")
+	globalSkill := &controlv1alpha1.AgentSkillSet{
+		ObjectMeta: metav1.ObjectMeta{Name: "namespace-knowledge-skill", Namespace: "agents", UID: "skill-uid", Generation: 1},
+		Spec: controlv1alpha1.AgentSkillSetSpec{
+			Global: true,
+			Description: "Shared knowledge usage",
+			Skills: []controlv1alpha1.AgentRunSkillInjectionSpec{{
+				Name:    "knowledge-base",
+				Content: "Run knowledge-search before planning.",
+			}},
+		},
+	}
+	globalTool := &controlv1alpha1.AgentToolSet{
+		ObjectMeta: metav1.ObjectMeta{Name: "namespace-knowledge-tool", Namespace: "agents", UID: "tool-uid", Generation: 1},
+		Spec: controlv1alpha1.AgentToolSetSpec{
+			Global: true,
+			Description: "Shared knowledge client",
+			Tools: []controlv1alpha1.AgentRunToolSpec{{
+				Name:          "knowledge-search",
+				VerifyCommand: []string{"knowledge-search", "--help"},
+			}},
+		},
+	}
+	// Non-global set must not attach automatically.
+	localOnly := &controlv1alpha1.AgentSkillSet{
+		ObjectMeta: metav1.ObjectMeta{Name: "local-only", Namespace: "agents", UID: "local-uid", Generation: 1},
+		Spec: controlv1alpha1.AgentSkillSetSpec{
+			Skills: []controlv1alpha1.AgentRunSkillInjectionSpec{{Name: "local", Content: "Not global."}},
+		},
+	}
+	run := &controlv1alpha1.AgentRun{
+		ObjectMeta: metav1.ObjectMeta{Name: "observe-1", Namespace: "agents"},
+		Spec: controlv1alpha1.AgentRunSpec{
+			ProfileRef: &controlv1alpha1.NamespacedObjectReference{Name: profile.Name},
+		},
+	}
+
+	reconciler := testCompositionReconciler(t, profile, codexHarness, globalSkill, globalTool, localOnly)
+	effective, resolution, phase, reason, message, err := reconciler.resolveAgentRunComposition(context.Background(), run)
+	if err != nil {
+		t.Fatalf("resolve composition: %v", err)
+	}
+	if phase != "" || reason != "" || message != "" {
+		t.Fatalf("unexpected block phase=%q reason=%q message=%q", phase, reason, message)
+	}
+	if got := effective.Spec.Harness.SkillInjections; len(got) != 1 || got[0].Name != "knowledge-base" {
+		t.Fatalf("skills = %#v, want knowledge-base only", got)
+	}
+	if got := effective.Spec.Harness.Tools; len(got) != 1 || got[0].Name != "knowledge-search" {
+		t.Fatalf("tools = %#v, want knowledge-search only", got)
+	}
+	if len(resolution.SkillSetRefs) != 1 || resolution.SkillSetRefs[0].Name != globalSkill.Name {
+		t.Fatalf("skillSetRefs = %#v", resolution.SkillSetRefs)
+	}
+	if len(resolution.ToolSetRefs) != 1 || resolution.ToolSetRefs[0].Name != globalTool.Name {
+		t.Fatalf("toolSetRefs = %#v", resolution.ToolSetRefs)
+	}
+}
+
+func TestAgentRunCompositionGlobalDedupesExplicitRef(t *testing.T) {
+	t.Parallel()
+
+	profile := &controlv1alpha1.AgentRunProfile{
+		ObjectMeta: metav1.ObjectMeta{Name: "observer", Namespace: "agents", UID: "profile-uid", Generation: 1},
+		Spec: controlv1alpha1.AgentRunProfileSpec{
+			HarnessProfileRef: &controlv1alpha1.NamespacedObjectReference{Name: "codex-standard"},
+			SkillSets: &controlv1alpha1.AgentSkillCompositionSpec{
+				Refs: []controlv1alpha1.NamespacedObjectReference{{Name: "namespace-knowledge-skill"}},
+			},
+			ToolSets: &controlv1alpha1.AgentToolCompositionSpec{
+				Refs: []controlv1alpha1.NamespacedObjectReference{{Name: "namespace-knowledge-tool"}},
+			},
+			Harness: controlv1alpha1.AgentRunHarnessSpec{Intent: controlv1alpha1.AgentRunIntentObserve, SystemPrompt: "Observe."},
+		},
+	}
+	codexHarness := testAgentHarnessProfile("codex-standard", controlv1alpha1.AgentRunHarnessBackendCodex, "codex-credentials")
+	globalSkill := &controlv1alpha1.AgentSkillSet{
+		ObjectMeta: metav1.ObjectMeta{Name: "namespace-knowledge-skill", Namespace: "agents", UID: "skill-uid", Generation: 1},
+		Spec: controlv1alpha1.AgentSkillSetSpec{
+			Global: true,
+			Skills: []controlv1alpha1.AgentRunSkillInjectionSpec{{Name: "knowledge-base", Content: "Search first."}},
+		},
+	}
+	globalTool := &controlv1alpha1.AgentToolSet{
+		ObjectMeta: metav1.ObjectMeta{Name: "namespace-knowledge-tool", Namespace: "agents", UID: "tool-uid", Generation: 1},
+		Spec: controlv1alpha1.AgentToolSetSpec{
+			Global: true,
+			Tools:  []controlv1alpha1.AgentRunToolSpec{{Name: "knowledge-search", VerifyCommand: []string{"knowledge-search", "--help"}}},
+		},
+	}
+	run := &controlv1alpha1.AgentRun{
+		ObjectMeta: metav1.ObjectMeta{Name: "observe-2", Namespace: "agents"},
+		Spec:       controlv1alpha1.AgentRunSpec{ProfileRef: &controlv1alpha1.NamespacedObjectReference{Name: profile.Name}},
+	}
+	reconciler := testCompositionReconciler(t, profile, codexHarness, globalSkill, globalTool)
+	effective, resolution, phase, reason, message, err := reconciler.resolveAgentRunComposition(context.Background(), run)
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if phase != "" || reason != "" || message != "" {
+		t.Fatalf("block phase=%q reason=%q message=%q", phase, reason, message)
+	}
+	if len(resolution.SkillSetRefs) != 1 || len(resolution.ToolSetRefs) != 1 {
+		t.Fatalf("expected single global refs, got skills=%#v tools=%#v", resolution.SkillSetRefs, resolution.ToolSetRefs)
+	}
+	if len(effective.Spec.Harness.SkillInjections) != 1 || len(effective.Spec.Harness.Tools) != 1 {
+		t.Fatalf("duplicated capabilities skills=%#v tools=%#v", effective.Spec.Harness.SkillInjections, effective.Spec.Harness.Tools)
+	}
+}
+
+func TestAgentRunCompositionExcludeGlobal(t *testing.T) {
+	t.Parallel()
+
+	profile := &controlv1alpha1.AgentRunProfile{
+		ObjectMeta: metav1.ObjectMeta{Name: "isolated", Namespace: "agents", UID: "profile-uid", Generation: 1},
+		Spec: controlv1alpha1.AgentRunProfileSpec{
+			HarnessProfileRef: &controlv1alpha1.NamespacedObjectReference{Name: "codex-standard"},
+			SkillSets:         &controlv1alpha1.AgentSkillCompositionSpec{ExcludeGlobal: true},
+			ToolSets:          &controlv1alpha1.AgentToolCompositionSpec{ExcludeGlobal: true},
+			Harness:           controlv1alpha1.AgentRunHarnessSpec{Intent: controlv1alpha1.AgentRunIntentObserve, SystemPrompt: "Isolated."},
+		},
+	}
+	codexHarness := testAgentHarnessProfile("codex-standard", controlv1alpha1.AgentRunHarnessBackendCodex, "codex-credentials")
+	globalSkill := &controlv1alpha1.AgentSkillSet{
+		ObjectMeta: metav1.ObjectMeta{Name: "namespace-knowledge-skill", Namespace: "agents", UID: "skill-uid", Generation: 1},
+		Spec: controlv1alpha1.AgentSkillSetSpec{
+			Global: true,
+			Skills: []controlv1alpha1.AgentRunSkillInjectionSpec{{Name: "knowledge-base", Content: "Search first."}},
+		},
+	}
+	globalTool := &controlv1alpha1.AgentToolSet{
+		ObjectMeta: metav1.ObjectMeta{Name: "namespace-knowledge-tool", Namespace: "agents", UID: "tool-uid", Generation: 1},
+		Spec: controlv1alpha1.AgentToolSetSpec{
+			Global: true,
+			Tools:  []controlv1alpha1.AgentRunToolSpec{{Name: "knowledge-search", VerifyCommand: []string{"knowledge-search", "--help"}}},
+		},
+	}
+	run := &controlv1alpha1.AgentRun{
+		ObjectMeta: metav1.ObjectMeta{Name: "isolated-1", Namespace: "agents"},
+		Spec:       controlv1alpha1.AgentRunSpec{ProfileRef: &controlv1alpha1.NamespacedObjectReference{Name: profile.Name}},
+	}
+	reconciler := testCompositionReconciler(t, profile, codexHarness, globalSkill, globalTool)
+	effective, resolution, phase, reason, message, err := reconciler.resolveAgentRunComposition(context.Background(), run)
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if phase != "" || reason != "" || message != "" {
+		t.Fatalf("block phase=%q reason=%q message=%q", phase, reason, message)
+	}
+	if len(effective.Spec.Harness.SkillInjections) != 0 || len(effective.Spec.Harness.Tools) != 0 {
+		t.Fatalf("globals should be excluded, skills=%#v tools=%#v", effective.Spec.Harness.SkillInjections, effective.Spec.Harness.Tools)
+	}
+	if len(resolution.SkillSetRefs) != 0 || len(resolution.ToolSetRefs) != 0 {
+		t.Fatalf("resolution refs should be empty, skills=%#v tools=%#v", resolution.SkillSetRefs, resolution.ToolSetRefs)
+	}
+}

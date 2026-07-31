@@ -2638,6 +2638,12 @@ spec:
                   SkillSets selects reusable backend-neutral instruction packs and named
                   overrides. Run-local refs append to profile refs unless mode is Replace.
                 properties:
+                  excludeGlobal:
+                    description: |-
+                      ExcludeGlobal skips namespace-global AgentSkillSets (spec.global=true)
+                      that would otherwise attach automatically. Profile and run layers may set
+                      this; either layer opting out disables globals for the run.
+                    type: boolean
                   mode:
                     description: |-
                       Mode controls how this layer combines refs with inherited profile refs.
@@ -2777,6 +2783,12 @@ spec:
                   ToolSets selects reusable external tool contracts. Run-local refs append
                   to profile refs unless mode is Replace.
                 properties:
+                  excludeGlobal:
+                    description: |-
+                      ExcludeGlobal skips namespace-global AgentToolSets (spec.global=true)
+                      that would otherwise attach automatically. Profile and run layers may set
+                      this; either layer opting out disables globals for the run.
+                    type: boolean
                   mode:
                     description: |-
                       Mode controls how this layer combines refs with inherited profile refs.

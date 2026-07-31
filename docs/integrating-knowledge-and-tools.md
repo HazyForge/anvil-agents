@@ -23,6 +23,52 @@ Pi `AgentHarnessProfile` objects inject the same read-only knowledge identity
 alongside their own provider credentials. The run profile composes the runtime,
 policy, and tool independently.
 
+### Namespace-global tool and skill sets
+
+Mark a set with `spec.global: true` so every AgentRun in the **same namespace**
+receives it automatically (before profile/run refs, name-sorted). This is how
+shared capabilities such as a knowledge-base client should land: the tool set
+installs the binary, the skill set teaches usage, and neither is hard-coded in
+the controller.
+
+```yaml
+apiVersion: control.anvil.hazyforge.io/v1alpha1
+kind: AgentToolSet
+metadata:
+  name: cluster-knowledge
+  namespace: my-app
+spec:
+  global: true
+  description: Read-only knowledge-search client for the namespace service.
+  tools:
+    - name: knowledge-search
+      setupScript: |
+        # install bin...
+      verifyCommand: ["knowledge-search", "--help"]
+---
+apiVersion: control.anvil.hazyforge.io/v1alpha1
+kind: AgentSkillSet
+metadata:
+  name: cluster-knowledge-usage
+  namespace: my-app
+spec:
+  global: true
+  description: When and how to query shared knowledge.
+  skills:
+    - name: knowledge-base
+      content: |
+        Run knowledge-search QUERY before selecting work.
+```
+
+Rules:
+
+- Globals stay namespaced (swap the service by editing GitOps in that namespace).
+- Explicit profile/run refs that restate a global are deduped (not an error).
+- Opt out with `skillSets.excludeGlobal: true` and/or `toolSets.excludeGlobal: true`
+  on the profile or run when a lane must not receive shared memory.
+- Connection env (for example `KNOWLEDGE_BASE_URL`) still comes from the harness
+  or the tool setup script; the controller does not embed a knowledge vendor.
+
 `examples/knowledge-service/runs.yaml` shows both useful local changes: one run
 augments the shared search policy without editing the set, and another swaps
 the harness to Pi while keeping the same role and knowledge skill.
