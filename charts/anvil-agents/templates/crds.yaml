@@ -2956,6 +2956,12 @@ spec:
                           SkillSets selects reusable instruction packs and responder-local skill
                           overrides for the created AgentRun.
                         properties:
+                          excludeGlobal:
+                            description: |-
+                              ExcludeGlobal skips namespace-global AgentSkillSets (spec.global=true)
+                              that would otherwise attach automatically. Profile and run layers may set
+                              this; either layer opting out disables globals for the run.
+                            type: boolean
                           mode:
                             description: |-
                               Mode controls how this layer combines refs with inherited profile refs.
@@ -3077,6 +3083,12 @@ spec:
                           ToolSets selects reusable external tool contracts for the created
                           AgentRun.
                         properties:
+                          excludeGlobal:
+                            description: |-
+                              ExcludeGlobal skips namespace-global AgentToolSets (spec.global=true)
+                              that would otherwise attach automatically. Profile and run layers may set
+                              this; either layer opting out disables globals for the run.
+                            type: boolean
                           mode:
                             description: |-
                               Mode controls how this layer combines refs with inherited profile refs.
@@ -9442,6 +9454,12 @@ spec:
                   SkillSets composes ordered backend-neutral instruction packs and
                   profile-local named skill overrides.
                 properties:
+                  excludeGlobal:
+                    description: |-
+                      ExcludeGlobal skips namespace-global AgentSkillSets (spec.global=true)
+                      that would otherwise attach automatically. Profile and run layers may set
+                      this; either layer opting out disables globals for the run.
+                    type: boolean
                   mode:
                     description: |-
                       Mode controls how this layer combines refs with inherited profile refs.
@@ -9562,6 +9580,12 @@ spec:
                   ToolSets composes ordered external tool contracts independently of the
                   skills that teach agents when and how to use them.
                 properties:
+                  excludeGlobal:
+                    description: |-
+                      ExcludeGlobal skips namespace-global AgentToolSets (spec.global=true)
+                      that would otherwise attach automatically. Profile and run layers may set
+                      this; either layer opting out disables globals for the run.
+                    type: boolean
                   mode:
                     description: |-
                       Mode controls how this layer combines refs with inherited profile refs.
@@ -12237,6 +12261,12 @@ spec:
                   SkillSets selects reusable backend-neutral instruction packs and named
                   overrides. Run-local refs append to profile refs unless mode is Replace.
                 properties:
+                  excludeGlobal:
+                    description: |-
+                      ExcludeGlobal skips namespace-global AgentSkillSets (spec.global=true)
+                      that would otherwise attach automatically. Profile and run layers may set
+                      this; either layer opting out disables globals for the run.
+                    type: boolean
                   mode:
                     description: |-
                       Mode controls how this layer combines refs with inherited profile refs.
@@ -12376,6 +12406,12 @@ spec:
                   ToolSets selects reusable external tool contracts. Run-local refs append
                   to profile refs unless mode is Replace.
                 properties:
+                  excludeGlobal:
+                    description: |-
+                      ExcludeGlobal skips namespace-global AgentToolSets (spec.global=true)
+                      that would otherwise attach automatically. Profile and run layers may set
+                      this; either layer opting out disables globals for the run.
+                    type: boolean
                   mode:
                     description: |-
                       Mode controls how this layer combines refs with inherited profile refs.
@@ -15534,6 +15570,12 @@ spec:
                       SkillSets selects reusable backend-neutral instruction packs and named
                       overrides. Run-local refs append to profile refs unless mode is Replace.
                     properties:
+                      excludeGlobal:
+                        description: |-
+                          ExcludeGlobal skips namespace-global AgentSkillSets (spec.global=true)
+                          that would otherwise attach automatically. Profile and run layers may set
+                          this; either layer opting out disables globals for the run.
+                        type: boolean
                       mode:
                         description: |-
                           Mode controls how this layer combines refs with inherited profile refs.
@@ -15673,6 +15715,12 @@ spec:
                       ToolSets selects reusable external tool contracts. Run-local refs append
                       to profile refs unless mode is Replace.
                     properties:
+                      excludeGlobal:
+                        description: |-
+                          ExcludeGlobal skips namespace-global AgentToolSets (spec.global=true)
+                          that would otherwise attach automatically. Profile and run layers may set
+                          this; either layer opting out disables globals for the run.
+                        type: boolean
                       mode:
                         description: |-
                           Mode controls how this layer combines refs with inherited profile refs.
@@ -18361,6 +18409,12 @@ spec:
                             SkillSets selects reusable backend-neutral instruction packs and named
                             overrides. Run-local refs append to profile refs unless mode is Replace.
                           properties:
+                            excludeGlobal:
+                              description: |-
+                                ExcludeGlobal skips namespace-global AgentSkillSets (spec.global=true)
+                                that would otherwise attach automatically. Profile and run layers may set
+                                this; either layer opting out disables globals for the run.
+                              type: boolean
                             mode:
                               description: |-
                                 Mode controls how this layer combines refs with inherited profile refs.
@@ -18501,6 +18555,12 @@ spec:
                             ToolSets selects reusable external tool contracts. Run-local refs append
                             to profile refs unless mode is Replace.
                           properties:
+                            excludeGlobal:
+                              description: |-
+                                ExcludeGlobal skips namespace-global AgentToolSets (spec.global=true)
+                                that would otherwise attach automatically. Profile and run layers may set
+                                this; either layer opting out disables globals for the run.
+                              type: boolean
                             mode:
                               description: |-
                                 Mode controls how this layer combines refs with inherited profile refs.
@@ -18702,6 +18762,9 @@ spec:
   scope: Namespaced
   versions:
   - additionalPrinterColumns:
+    - jsonPath: .spec.global
+      name: Global
+      type: boolean
     - jsonPath: .spec.description
       name: Description
       type: string
@@ -18737,6 +18800,14 @@ spec:
                 description: Description explains when this capability pack should
                   be selected.
                 type: string
+              global:
+                description: |-
+                  Global attaches this skill set to every AgentRun in the same namespace
+                  unless the profile or run sets skillSets.excludeGlobal. Globals apply
+                  before explicit profile/run refs and are not duplicated when also listed
+                  explicitly. Use this for namespace shared instruction packs such as
+                  knowledge-base usage that every agent should receive by default.
+                type: boolean
               skills:
                 description: Skills are named instruction packs materialized for the
                   selected harness.
@@ -18906,6 +18977,9 @@ spec:
   scope: Namespaced
   versions:
   - additionalPrinterColumns:
+    - jsonPath: .spec.global
+      name: Global
+      type: boolean
     - jsonPath: .spec.description
       name: Description
       type: string
@@ -18940,6 +19014,14 @@ spec:
               description:
                 description: Description explains what integration this tool set exposes.
                 type: string
+              global:
+                description: |-
+                  Global attaches this tool set to every AgentRun in the same namespace
+                  unless the profile or run sets toolSets.excludeGlobal. Globals apply
+                  before explicit profile/run refs and are not duplicated when also listed
+                  explicitly. Use this for namespace shared capabilities such as a
+                  knowledge-base client binary that every agent should install by default.
+                type: boolean
               tools:
                 description: |-
                   Tools are materialized into compatible agent harnesses in declaration

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"sort"
 	"strings"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -182,7 +183,11 @@ func agentRunMergeSkillComposition(profile, run *controlv1alpha1.AgentSkillCompo
 		return nil
 	}
 	if run != nil && run.Mode == controlv1alpha1.AgentSkillCompositionReplace {
-		return run.DeepCopy()
+		out := run.DeepCopy()
+		if profile != nil && profile.ExcludeGlobal {
+			out.ExcludeGlobal = true
+		}
+		return out
 	}
 	out := &controlv1alpha1.AgentSkillCompositionSpec{}
 	if profile != nil {
@@ -194,6 +199,9 @@ func agentRunMergeSkillComposition(profile, run *controlv1alpha1.AgentSkillCompo
 		if run.Mode != "" {
 			out.Mode = run.Mode
 		}
+		if run.ExcludeGlobal {
+			out.ExcludeGlobal = true
+		}
 	}
 	return out
 }
@@ -203,7 +211,11 @@ func agentRunMergeToolComposition(profile, run *controlv1alpha1.AgentToolComposi
 		return nil
 	}
 	if run != nil && run.Mode == controlv1alpha1.AgentToolCompositionReplace {
-		return run.DeepCopy()
+		out := run.DeepCopy()
+		if profile != nil && profile.ExcludeGlobal {
+			out.ExcludeGlobal = true
+		}
+		return out
 	}
 	out := &controlv1alpha1.AgentToolCompositionSpec{}
 	if profile != nil {
@@ -214,8 +226,31 @@ func agentRunMergeToolComposition(profile, run *controlv1alpha1.AgentToolComposi
 		if run.Mode != "" {
 			out.Mode = run.Mode
 		}
+		if run.ExcludeGlobal {
+			out.ExcludeGlobal = true
+		}
 	}
 	return out
+}
+
+func agentRunExcludeGlobalSkills(profile, run *controlv1alpha1.AgentSkillCompositionSpec) bool {
+	if profile != nil && profile.ExcludeGlobal {
+		return true
+	}
+	if run != nil && run.ExcludeGlobal {
+		return true
+	}
+	return false
+}
+
+func agentRunExcludeGlobalTools(profile, run *controlv1alpha1.AgentToolCompositionSpec) bool {
+	if profile != nil && profile.ExcludeGlobal {
+		return true
+	}
+	if run != nil && run.ExcludeGlobal {
+		return true
+	}
+	return false
 }
 
 func (r *AgentRunReconciler) resolveAgentSkillComposition(ctx context.Context, reader client.Reader, obj *controlv1alpha1.AgentRun, profile *controlv1alpha1.AgentRunProfile, effective *controlv1alpha1.AgentRun, capabilities *agentRunCapabilities) ([]*controlv1alpha1.AgentSkillSet, controlv1alpha1.AgentRunPhase, string, string, error) {
@@ -225,12 +260,28 @@ func (r *AgentRunReconciler) resolveAgentSkillComposition(ctx context.Context, r
 	}
 	runComposition := obj.Spec.SkillSets
 	effective.Spec.SkillSets = agentRunMergeSkillComposition(profileComposition, runComposition)
-	if profileComposition == nil && runComposition == nil {
-		return nil, "", "", "", nil
-	}
+	excludeGlobal := agentRunExcludeGlobalSkills(profileComposition, runComposition)
 
 	resolved := []*controlv1alpha1.AgentSkillSet{}
-	seenRefs := map[string]struct{}{}
+	// seenFromGlobal tracks whether the first attachment of a ref came from
+	// a namespace-global set so an explicit restate is a no-op instead of error.
+	seenFromGlobal := map[string]bool{}
+	applySkillSet := func(skillSet *controlv1alpha1.AgentSkillSet, fromGlobal bool) (controlv1alpha1.AgentRunPhase, string, string, error) {
+		key := skillSet.Namespace + "/" + skillSet.Name
+		if fromGlobalFlag, exists := seenFromGlobal[key]; exists {
+			if fromGlobalFlag && !fromGlobal {
+				// Explicit ref restates a global; skip without re-applying.
+				return "", "", "", nil
+			}
+			return controlv1alpha1.AgentRunPhaseFailed, "DuplicateSkillSetRef", fmt.Sprintf("AgentSkillSet %s is selected more than once.", key), nil
+		}
+		seenFromGlobal[key] = fromGlobal
+		if reason, message := capabilities.applySkillSet(skillSet); reason != "" {
+			return controlv1alpha1.AgentRunPhaseFailed, reason, message, nil
+		}
+		resolved = append(resolved, skillSet)
+		return "", "", "", nil
+	}
 	applyComposition := func(composition *controlv1alpha1.AgentSkillCompositionSpec) (controlv1alpha1.AgentRunPhase, string, string, error) {
 		if composition == nil {
 			return "", "", "", nil
@@ -245,10 +296,6 @@ func (r *AgentRunReconciler) resolveAgentSkillComposition(ctx context.Context, r
 				return controlv1alpha1.AgentRunPhaseFailed, "CrossNamespaceSkillSetRef", "AgentSkillSet refs must stay in the AgentRun namespace.", nil
 			}
 			key := namespace + "/" + name
-			if _, exists := seenRefs[key]; exists {
-				return controlv1alpha1.AgentRunPhaseFailed, "DuplicateSkillSetRef", fmt.Sprintf("AgentSkillSet %s is selected more than once.", key), nil
-			}
-			seenRefs[key] = struct{}{}
 			skillSet := &controlv1alpha1.AgentSkillSet{}
 			if err := reader.Get(ctx, client.ObjectKey{Namespace: namespace, Name: name}, skillSet); err != nil {
 				if apierrors.IsNotFound(err) {
@@ -256,15 +303,26 @@ func (r *AgentRunReconciler) resolveAgentSkillComposition(ctx context.Context, r
 				}
 				return "", "", "", err
 			}
-			if reason, message := capabilities.applySkillSet(skillSet); reason != "" {
-				return controlv1alpha1.AgentRunPhaseFailed, reason, message, nil
+			if phase, reason, message, err := applySkillSet(skillSet, false); err != nil || phase != "" {
+				return phase, reason, message, err
 			}
-			resolved = append(resolved, skillSet)
 		}
 		if reason, message := capabilities.applyOverrides(composition.Overrides); reason != "" {
 			return controlv1alpha1.AgentRunPhaseFailed, reason, message, nil
 		}
 		return "", "", "", nil
+	}
+
+	if !excludeGlobal {
+		globals, err := listGlobalAgentSkillSets(ctx, reader, obj.Namespace)
+		if err != nil {
+			return nil, "", "", "", err
+		}
+		for _, skillSet := range globals {
+			if phase, reason, message, err := applySkillSet(skillSet, true); err != nil || phase != "" {
+				return nil, phase, reason, message, err
+			}
+		}
 	}
 
 	if runComposition == nil || runComposition.Mode != controlv1alpha1.AgentSkillCompositionReplace {
@@ -286,12 +344,25 @@ func (r *AgentRunReconciler) resolveAgentToolComposition(ctx context.Context, re
 	}
 	runComposition := obj.Spec.ToolSets
 	effective.Spec.ToolSets = agentRunMergeToolComposition(profileComposition, runComposition)
-	if profileComposition == nil && runComposition == nil {
-		return nil, "", "", "", nil
-	}
+	excludeGlobal := agentRunExcludeGlobalTools(profileComposition, runComposition)
 
 	resolved := []*controlv1alpha1.AgentToolSet{}
-	seenRefs := map[string]struct{}{}
+	seenFromGlobal := map[string]bool{}
+	applyToolSet := func(toolSet *controlv1alpha1.AgentToolSet, fromGlobal bool) (controlv1alpha1.AgentRunPhase, string, string, error) {
+		key := toolSet.Namespace + "/" + toolSet.Name
+		if fromGlobalFlag, exists := seenFromGlobal[key]; exists {
+			if fromGlobalFlag && !fromGlobal {
+				return "", "", "", nil
+			}
+			return controlv1alpha1.AgentRunPhaseFailed, "DuplicateToolSetRef", fmt.Sprintf("AgentToolSet %s is selected more than once.", key), nil
+		}
+		seenFromGlobal[key] = fromGlobal
+		if reason, message := capabilities.applyToolSet(toolSet); reason != "" {
+			return controlv1alpha1.AgentRunPhaseFailed, reason, message, nil
+		}
+		resolved = append(resolved, toolSet)
+		return "", "", "", nil
+	}
 	applyComposition := func(composition *controlv1alpha1.AgentToolCompositionSpec) (controlv1alpha1.AgentRunPhase, string, string, error) {
 		if composition == nil {
 			return "", "", "", nil
@@ -306,10 +377,6 @@ func (r *AgentRunReconciler) resolveAgentToolComposition(ctx context.Context, re
 				return controlv1alpha1.AgentRunPhaseFailed, "CrossNamespaceToolSetRef", "AgentToolSet refs must stay in the AgentRun namespace.", nil
 			}
 			key := namespace + "/" + name
-			if _, exists := seenRefs[key]; exists {
-				return controlv1alpha1.AgentRunPhaseFailed, "DuplicateToolSetRef", fmt.Sprintf("AgentToolSet %s is selected more than once.", key), nil
-			}
-			seenRefs[key] = struct{}{}
 			toolSet := &controlv1alpha1.AgentToolSet{}
 			if err := reader.Get(ctx, client.ObjectKey{Namespace: namespace, Name: name}, toolSet); err != nil {
 				if apierrors.IsNotFound(err) {
@@ -317,12 +384,23 @@ func (r *AgentRunReconciler) resolveAgentToolComposition(ctx context.Context, re
 				}
 				return "", "", "", err
 			}
-			if reason, message := capabilities.applyToolSet(toolSet); reason != "" {
-				return controlv1alpha1.AgentRunPhaseFailed, reason, message, nil
+			if phase, reason, message, err := applyToolSet(toolSet, false); err != nil || phase != "" {
+				return phase, reason, message, err
 			}
-			resolved = append(resolved, toolSet)
 		}
 		return "", "", "", nil
+	}
+
+	if !excludeGlobal {
+		globals, err := listGlobalAgentToolSets(ctx, reader, obj.Namespace)
+		if err != nil {
+			return nil, "", "", "", err
+		}
+		for _, toolSet := range globals {
+			if phase, reason, message, err := applyToolSet(toolSet, true); err != nil || phase != "" {
+				return nil, phase, reason, message, err
+			}
+		}
 	}
 
 	if runComposition == nil || runComposition.Mode != controlv1alpha1.AgentToolCompositionReplace {
@@ -334,6 +412,42 @@ func (r *AgentRunReconciler) resolveAgentToolComposition(ctx context.Context, re
 		return nil, phase, reason, message, err
 	}
 	return resolved, "", "", "", nil
+}
+
+func listGlobalAgentSkillSets(ctx context.Context, reader client.Reader, namespace string) ([]*controlv1alpha1.AgentSkillSet, error) {
+	list := &controlv1alpha1.AgentSkillSetList{}
+	if err := reader.List(ctx, list, client.InNamespace(namespace)); err != nil {
+		return nil, err
+	}
+	var out []*controlv1alpha1.AgentSkillSet
+	for i := range list.Items {
+		item := &list.Items[i]
+		if item.Spec.Global {
+			out = append(out, item)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].Name < out[j].Name
+	})
+	return out, nil
+}
+
+func listGlobalAgentToolSets(ctx context.Context, reader client.Reader, namespace string) ([]*controlv1alpha1.AgentToolSet, error) {
+	list := &controlv1alpha1.AgentToolSetList{}
+	if err := reader.List(ctx, list, client.InNamespace(namespace)); err != nil {
+		return nil, err
+	}
+	var out []*controlv1alpha1.AgentToolSet
+	for i := range list.Items {
+		item := &list.Items[i]
+		if item.Spec.Global {
+			out = append(out, item)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].Name < out[j].Name
+	})
+	return out, nil
 }
 
 type agentRunCapabilities struct {

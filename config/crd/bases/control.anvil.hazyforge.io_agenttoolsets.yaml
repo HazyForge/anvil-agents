@@ -17,6 +17,9 @@ spec:
   scope: Namespaced
   versions:
   - additionalPrinterColumns:
+    - jsonPath: .spec.global
+      name: Global
+      type: boolean
     - jsonPath: .spec.description
       name: Description
       type: string
@@ -51,6 +54,14 @@ spec:
               description:
                 description: Description explains what integration this tool set exposes.
                 type: string
+              global:
+                description: |-
+                  Global attaches this tool set to every AgentRun in the same namespace
+                  unless the profile or run sets toolSets.excludeGlobal. Globals apply
+                  before explicit profile/run refs and are not duplicated when also listed
+                  explicitly. Use this for namespace shared capabilities such as a
+                  knowledge-base client binary that every agent should install by default.
+                type: boolean
               tools:
                 description: |-
                   Tools are materialized into compatible agent harnesses in declaration

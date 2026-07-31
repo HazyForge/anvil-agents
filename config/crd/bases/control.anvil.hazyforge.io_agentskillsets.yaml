@@ -17,6 +17,9 @@ spec:
   scope: Namespaced
   versions:
   - additionalPrinterColumns:
+    - jsonPath: .spec.global
+      name: Global
+      type: boolean
     - jsonPath: .spec.description
       name: Description
       type: string
@@ -52,6 +55,14 @@ spec:
                 description: Description explains when this capability pack should
                   be selected.
                 type: string
+              global:
+                description: |-
+                  Global attaches this skill set to every AgentRun in the same namespace
+                  unless the profile or run sets skillSets.excludeGlobal. Globals apply
+                  before explicit profile/run refs and are not duplicated when also listed
+                  explicitly. Use this for namespace shared instruction packs such as
+                  knowledge-base usage that every agent should receive by default.
+                type: boolean
               skills:
                 description: Skills are named instruction packs materialized for the
                   selected harness.

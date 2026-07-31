@@ -2687,6 +2687,12 @@ spec:
                           SkillSets selects reusable instruction packs and responder-local skill
                           overrides for the created AgentRun.
                         properties:
+                          excludeGlobal:
+                            description: |-
+                              ExcludeGlobal skips namespace-global AgentSkillSets (spec.global=true)
+                              that would otherwise attach automatically. Profile and run layers may set
+                              this; either layer opting out disables globals for the run.
+                            type: boolean
                           mode:
                             description: |-
                               Mode controls how this layer combines refs with inherited profile refs.
@@ -2808,6 +2814,12 @@ spec:
                           ToolSets selects reusable external tool contracts for the created
                           AgentRun.
                         properties:
+                          excludeGlobal:
+                            description: |-
+                              ExcludeGlobal skips namespace-global AgentToolSets (spec.global=true)
+                              that would otherwise attach automatically. Profile and run layers may set
+                              this; either layer opting out disables globals for the run.
+                            type: boolean
                           mode:
                             description: |-
                               Mode controls how this layer combines refs with inherited profile refs.

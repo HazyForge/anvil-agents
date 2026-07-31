@@ -544,6 +544,11 @@ type AgentSkillCompositionSpec struct {
 	// +kubebuilder:validation:MaxItems=64
 	// +optional
 	Overrides []AgentSkillOverrideSpec `json:"overrides,omitempty"`
+	// ExcludeGlobal skips namespace-global AgentSkillSets (spec.global=true)
+	// that would otherwise attach automatically. Profile and run layers may set
+	// this; either layer opting out disables globals for the run.
+	// +optional
+	ExcludeGlobal bool `json:"excludeGlobal,omitempty"`
 }
 
 type AgentRunSkillSourceRef struct {

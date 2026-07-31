@@ -30,6 +30,11 @@ type AgentToolCompositionSpec struct {
 	// +kubebuilder:validation:MaxItems=16
 	// +optional
 	Refs []NamespacedObjectReference `json:"refs,omitempty"`
+	// ExcludeGlobal skips namespace-global AgentToolSets (spec.global=true)
+	// that would otherwise attach automatically. Profile and run layers may set
+	// this; either layer opting out disables globals for the run.
+	// +optional
+	ExcludeGlobal bool `json:"excludeGlobal,omitempty"`
 }
 
 // AgentToolSetSpec is a reusable collection of setup and verification
@@ -40,6 +45,13 @@ type AgentToolSetSpec struct {
 	// Description explains what integration this tool set exposes.
 	// +optional
 	Description string `json:"description,omitempty"`
+	// Global attaches this tool set to every AgentRun in the same namespace
+	// unless the profile or run sets toolSets.excludeGlobal. Globals apply
+	// before explicit profile/run refs and are not duplicated when also listed
+	// explicitly. Use this for namespace shared capabilities such as a
+	// knowledge-base client binary that every agent should install by default.
+	// +optional
+	Global bool `json:"global,omitempty"`
 	// Tools are materialized into compatible agent harnesses in declaration
 	// order.
 	// +kubebuilder:validation:MaxItems=32
@@ -49,6 +61,7 @@ type AgentToolSetSpec struct {
 
 // +kubebuilder:object:root=true
 // +kubebuilder:resource:path=agenttoolsets,scope=Namespaced,shortName=agtools
+// +kubebuilder:printcolumn:name="Global",type="boolean",JSONPath=".spec.global"
 // +kubebuilder:printcolumn:name="Description",type="string",JSONPath=".spec.description"
 type AgentToolSet struct {
 	metav1.TypeMeta   `json:",inline"`
