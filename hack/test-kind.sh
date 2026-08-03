@@ -41,7 +41,11 @@ kubectl --context "${kube_context}" create namespace agents --dry-run=client --o
 kubectl --context "${kube_context}" create namespace anvilhub --dry-run=client --output=yaml | \
 	kubectl --context "${kube_context}" apply --filename=- >/dev/null
 while IFS= read -r manifest; do
-	kubectl --context "${kube_context}" apply --dry-run=server --filename "${manifest}" >/dev/null
+	if grep -Eq '^[[:space:]]+generateName:' "${manifest}"; then
+		kubectl --context "${kube_context}" create --dry-run=server --filename "${manifest}" >/dev/null
+	else
+		kubectl --context "${kube_context}" apply --dry-run=server --filename "${manifest}" >/dev/null
+	fi
 done < <(find "${root_dir}/config/samples" "${root_dir}/examples" \
 	-type f -name '*.yaml' \
 	! -path "${root_dir}/examples/judge-kind/*" \
