@@ -31,12 +31,14 @@ export function compositionCardSummary(doc: CompositionDocument): string {
           : "";
       const skills = refNames(asRecord(spec.skillSets).refs);
       const tools = refNames(asRecord(spec.toolSets).refs);
+      const council = String(asRecord(spec.councilRef).name ?? "");
       const intent = String(asRecord(spec.harness).intent ?? "");
       return (
         [
           harness ? `harness:${harness}` : null,
           skills.length ? `skills:${skills.length}` : null,
           tools.length ? `tools:${tools.length}` : null,
+          council ? `council:${council}` : null,
           intent ? `intent:${intent}` : null,
         ]
           .filter(Boolean)
@@ -67,6 +69,14 @@ export function compositionCardSummary(doc: CompositionDocument): string {
       const tools = Array.isArray(spec.tools) ? spec.tools.length : 0;
       const base = tools ? `${tools} tool${tools === 1 ? "" : "s"}` : "tool set";
       return compositionIsGlobal(doc) ? `global · ${base}` : base;
+    }
+    case "AgentCouncil": {
+      const members = Array.isArray(spec.members) ? spec.members.length : 0;
+      const hasPrompt = Boolean(String(spec.councilPrompt ?? "").trim());
+      return [
+        members ? `${members} member${members === 1 ? "" : "s"}` : null,
+        hasPrompt ? "prompt" : "inventory",
+      ].filter(Boolean).join(" · ") || "council";
     }
     case "VolumeProfile": {
       const volumes = Array.isArray(spec.volumes) ? spec.volumes.length : 0;

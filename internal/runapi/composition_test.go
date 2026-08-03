@@ -83,6 +83,36 @@ func TestCompositionListAndGet(t *testing.T) {
 	}
 }
 
+func TestCompositionListAndGetAgentCouncil(t *testing.T) {
+	council := &agentsv1alpha1.AgentCouncil{
+		ObjectMeta: metav1.ObjectMeta{Name: "release-council", Namespace: "agents", UID: types.UID("council-uid"), ResourceVersion: "3"},
+		Spec: agentsv1alpha1.AgentCouncilSpec{
+			Description: "Release workforce",
+			Members: []agentsv1alpha1.AgentCouncilMemberSpec{{
+				Role: "manager", ProfileRef: agentsv1alpha1.NamespacedObjectReference{Name: "release-manager"},
+			}},
+			CouncilPrompt: "Coordinate with explicit evidence.",
+		},
+	}
+	server := compositionTestServer(t, true, false, council)
+
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/namespaces/agents/agent-councils", nil)
+	request.Header.Set("Authorization", "Bearer valid")
+	response := httptest.NewRecorder()
+	server.routes().ServeHTTP(response, request)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"kind":"AgentCouncil"`) || !strings.Contains(response.Body.String(), "release-council") {
+		t.Fatalf("list status = %d %s", response.Code, response.Body.String())
+	}
+
+	request = httptest.NewRequest(http.MethodGet, "/api/v1/namespaces/agents/agent-councils/release-council", nil)
+	request.Header.Set("Authorization", "Bearer valid")
+	response = httptest.NewRecorder()
+	server.routes().ServeHTTP(response, request)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), "Coordinate with explicit evidence.") {
+		t.Fatalf("get status = %d %s", response.Code, response.Body.String())
+	}
+}
+
 func TestCompositionCreateStampsConsoleManaged(t *testing.T) {
 	server := compositionTestServer(t, true, true)
 
@@ -242,11 +272,11 @@ func TestCompositionAuthSessionAppendOnly(t *testing.T) {
 			Namespace: "agents",
 		},
 		Spec: agentsv1alpha1.AgentAuthSessionSpec{
-			Provider: agentsv1alpha1.AgentAuthSessionProviderGrokBuild,
-			Action:   agentsv1alpha1.AgentAuthSessionActionReauth,
-			DataVolumeRef: corev1.LocalObjectReference{Name: "home"},
+			Provider:         agentsv1alpha1.AgentAuthSessionProviderGrokBuild,
+			Action:           agentsv1alpha1.AgentAuthSessionActionReauth,
+			DataVolumeRef:    corev1.LocalObjectReference{Name: "home"},
 			StagingSecretRef: &corev1.LocalObjectReference{Name: "staging"},
-			SeedID: "seed-1",
+			SeedID:           "seed-1",
 		},
 		Status: agentsv1alpha1.AgentAuthSessionStatus{Phase: agentsv1alpha1.AgentAuthSessionPhaseRunning},
 	}

@@ -66,6 +66,8 @@ the certified submission contract.
 - `AgentHarnessProfile`: reusable backend and Kubernetes execution envelope.
 - `AgentSkillSet`: reusable skills and delegated personas.
 - `AgentToolSet`: reusable external tool setup and verification contracts.
+- `AgentCouncil`: durable workforce inventory and opt-in interaction guidance;
+  it does not merge member authority or create runs.
 - `AgentSchedule`: interval and manual run creation across named templates.
 - `AgentRunControl`: cluster-wide pause and concurrency policy by scope key.
 - `AgentDataVolume` and `VolumeProfile`: explicit durable PVC-backed state.
@@ -198,7 +200,7 @@ audience, and explicit namespace authorization bindings are configured. See
 
 - [Architecture and multi-harness semantics](docs/architecture.md)
 - [Distributed heavy workloads across machines](docs/distributed-workloads.md)
-- [Composable profiles, harnesses, skill sets, tool sets, and overrides](docs/composition.md)
+- [Composable profiles, harnesses, skill sets, tool sets, councils, and overrides](docs/composition.md)
 - [Getting started](docs/getting-started.md)
 - [Harness contract and adapter matrix](docs/harnesses.md)
 - [Knowledge bases, tools, and external services](docs/integrating-knowledge-and-tools.md)

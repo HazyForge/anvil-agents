@@ -22,7 +22,7 @@ documentation.
   create append-only AgentRuns (never update existing runs). Opt-in composition
   library endpoints may get/list (and, when `composition.writeEnabled=true`,
   create/update/delete) `AgentRunProfile`, `AgentHarnessProfile`,
-  `AgentSkillSet`, `AgentToolSet`, `VolumeProfile`, and `AgentDataVolume`
+  `AgentSkillSet`, `AgentToolSet`, `AgentCouncil`, `VolumeProfile`, and `AgentDataVolume`
   objects. Writes are denied for GitOps-owned objects and for any object that is
   not labeled `control.anvil.hazyforge.io/managed-by=anvil-agents-console` so
   Git remains source of truth for fleet config. The console presents

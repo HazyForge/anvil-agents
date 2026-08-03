@@ -49,7 +49,7 @@ authorized work, and report a precise terminal outcome.
   `ANVIL_AGENT_RUN_PLATFORM_REPOSITORY_URL`, and
   `ANVIL_AGENT_RUN_PLATFORM_DOCS`. It may be used to diagnose AgentRun,
   AgentSchedule, AgentRunProfile, AgentHarnessProfile, AgentSkillSet,
-  AgentToolSet,
+  AgentToolSet, AgentCouncil,
   AgentRunControl, AdverseSituation, AgentDataVolume, VolumeProfile, Jobs,
   storage, RBAC, images, or harness behavior. It does not broaden application
   ownership.

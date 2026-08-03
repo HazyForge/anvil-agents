@@ -9,8 +9,8 @@ state back onto the `AgentRun`.
 
 1. A user or `AgentSchedule` creates an `AgentRun`.
 2. The controller resolves its namespace-local `AgentRunProfile`,
-   `AgentHarnessProfile`, ordered `AgentSkillSet` and `AgentToolSet` refs, and
-   local overrides.
+   `AgentHarnessProfile`, ordered `AgentSkillSet` and `AgentToolSet` refs,
+   optional `AgentCouncil` association, and local overrides.
 3. It validates backend, Secret, storage, and optional ExternalSecret refs.
 4. It writes `prompt.md`, `source.json`, skill files, and tool setup scripts,
    then records composition and payload digests.
@@ -72,6 +72,10 @@ image, workload identity, credentials, storage, placement, and limits. An
 `AgentSkillSet` owns reusable backend-neutral instruction packs and optional
 delegated personas. `AgentToolSet` owns setup and verification contracts for
 external tools whose lifecycle is independent from those instructions.
+`AgentCouncil` owns a durable workforce inventory of highest-level profile
+roles plus optional interaction guidance. Councils never create Jobs and never
+grant Secrets, ServiceAccounts, harnesses, tools, or storage; association via
+`councilRef` is required before guidance is injected.
 
 The split allows the same knowledge or review policy and external client to run
 through Codex, OpenCode, Pi, or a custom harness without copying them. Skill

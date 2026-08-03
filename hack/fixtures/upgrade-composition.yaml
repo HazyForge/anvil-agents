@@ -29,3 +29,15 @@ spec:
   tools:
     - name: repository-status
       verifyCommand: ["git", "status", "--short"]
+---
+apiVersion: control.anvil.hazyforge.io/v1alpha1
+kind: AgentCouncil
+metadata:
+  name: repository-council
+  namespace: agents-upgrade
+spec:
+  members:
+    - role: reviewer
+      profileRef:
+        name: legacy-review
+  councilPrompt: Review the upgraded composition without expanding authority.

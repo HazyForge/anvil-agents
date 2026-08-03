@@ -93,6 +93,10 @@ Omit the origin and API responses return `origin_denied`.
 - `/profiles/new` — create a console-managed profile
 - `/ns/:namespace/profiles/:name` — view/edit (GitOps profiles are read-only)
 
+`AgentCouncil` objects are available under `/library/councils`; profile cards
+can opt into a same-namespace council without inheriting member credentials or
+execution authority.
+
 Requires `composition.readEnabled` + `anvil-agents:composition:read`. Create
 needs `composition.writeEnabled` + `anvil-agents:composition:write`.
 

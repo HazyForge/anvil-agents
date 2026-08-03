@@ -1,0 +1,22 @@
+apiVersion: control.anvil.hazyforge.io/v1alpha1
+kind: AgentCouncil
+metadata:
+  name: example-council
+  namespace: agents
+spec:
+  description: Example workforce inventory and opt-in interaction guidance.
+  members:
+    - role: coordinator
+      profileRef:
+        name: some-manager-profile
+      description: Plans bounded work without inheriting implementer authority.
+    - role: implementer
+      profileRef:
+        name: some-worker-profile
+      description: Executes work within its own profile and harness authority.
+  # Materialized only when a profile or run sets councilRef to this council.
+  # Membership alone does not inject the prompt or launch AgentRuns.
+  councilPrompt: |
+    Coordinate through durable issues, pull requests, and release evidence.
+    Each member keeps its own harness, ServiceAccount, credentials, and tools.
+    Council prose is guidance, never release or deployment proof.

@@ -835,7 +835,14 @@ type AgentRunSpec struct {
 	// to profile refs unless mode is Replace.
 	// +optional
 	ToolSets *AgentToolCompositionSpec `json:"toolSets,omitempty"`
-	Scope    AgentRunScopeSpec         `json:"scope,omitempty"`
+	// CouncilRef optionally associates this run with a same-namespace
+	// AgentCouncil. A non-nil run ref overrides a profile-level councilRef;
+	// omission inherits the profile association. There is no run-level clear
+	// signal in v1alpha1. A selected council's non-empty prompt is injected as a
+	// reserved skill only after its member profile references validate.
+	// +optional
+	CouncilRef *NamespacedObjectReference `json:"councilRef,omitempty"`
+	Scope      AgentRunScopeSpec          `json:"scope,omitempty"`
 	// Docs tells the harness which docs/runtime surfaces must be kept aligned.
 	// +optional
 	Docs *AgentRunDocsSpec `json:"docs,omitempty"`
@@ -926,12 +933,12 @@ type AgentRunResolvedObjectReferenceStatus struct {
 // AgentRunResolvedScopeStatus records the opaque workload names inherited by
 // the effective run without copying a mutable profile or any runtime fields.
 type AgentRunResolvedScopeStatus struct {
-	Application         string   `json:"application,omitempty"`
-	ApplicationTarget   string   `json:"applicationTarget,omitempty"`
-	Repository          string   `json:"repository,omitempty"`
-	RepositoryRef       string   `json:"repositoryRef,omitempty"`
-	DestinationBranch   string   `json:"destinationBranch,omitempty"`
-	AllowedBranches     []string `json:"allowedBranches,omitempty"`
+	Application       string   `json:"application,omitempty"`
+	ApplicationTarget string   `json:"applicationTarget,omitempty"`
+	Repository        string   `json:"repository,omitempty"`
+	RepositoryRef     string   `json:"repositoryRef,omitempty"`
+	DestinationBranch string   `json:"destinationBranch,omitempty"`
+	AllowedBranches   []string `json:"allowedBranches,omitempty"`
 }
 
 // AgentRunResolvedCompositionStatus records the reusable inputs accepted for a
@@ -939,21 +946,25 @@ type AgentRunResolvedScopeStatus struct {
 // AgentRun spec; PayloadDigest covers the final mounted payload including
 // remote skill bytes.
 type AgentRunResolvedCompositionStatus struct {
-	ResolvedAt        *metav1.Time                            `json:"resolvedAt,omitempty"`
-	ProfileRef        *AgentRunResolvedObjectReferenceStatus  `json:"profileRef,omitempty"`
-	HarnessProfileRef *AgentRunResolvedObjectReferenceStatus  `json:"harnessProfileRef,omitempty"`
-	SkillSetRefs      []AgentRunResolvedObjectReferenceStatus `json:"skillSetRefs,omitempty"`
-	ToolSetRefs       []AgentRunResolvedObjectReferenceStatus `json:"toolSetRefs,omitempty"`
-	Scope             *AgentRunResolvedScopeStatus            `json:"scope,omitempty"`
-	EffectiveDigest   string                                  `json:"effectiveDigest,omitempty"`
-	PayloadDigest     string                                  `json:"payloadDigest,omitempty"`
+	ResolvedAt        *metav1.Time                           `json:"resolvedAt,omitempty"`
+	ProfileRef        *AgentRunResolvedObjectReferenceStatus `json:"profileRef,omitempty"`
+	HarnessProfileRef *AgentRunResolvedObjectReferenceStatus `json:"harnessProfileRef,omitempty"`
+	// CouncilRef records the exact AgentCouncil object version and spec digest
+	// accepted for this run without copying its prompt or member profiles.
+	// +optional
+	CouncilRef      *AgentRunResolvedObjectReferenceStatus  `json:"councilRef,omitempty"`
+	SkillSetRefs    []AgentRunResolvedObjectReferenceStatus `json:"skillSetRefs,omitempty"`
+	ToolSetRefs     []AgentRunResolvedObjectReferenceStatus `json:"toolSetRefs,omitempty"`
+	Scope           *AgentRunResolvedScopeStatus            `json:"scope,omitempty"`
+	EffectiveDigest string                                  `json:"effectiveDigest,omitempty"`
+	PayloadDigest   string                                  `json:"payloadDigest,omitempty"`
 }
 
 type AgentRunStatus struct {
-	ObservedGeneration      int64                                 `json:"observedGeneration,omitempty"`
-	Conditions              []metav1.Condition                    `json:"conditions,omitempty"`
-	Phase                   AgentRunPhase                         `json:"phase,omitempty"`
-	Backend                 string                                `json:"backend,omitempty"`
+	ObservedGeneration int64              `json:"observedGeneration,omitempty"`
+	Conditions         []metav1.Condition `json:"conditions,omitempty"`
+	Phase              AgentRunPhase      `json:"phase,omitempty"`
+	Backend            string             `json:"backend,omitempty"`
 	// Model is the resolved backend model id/profile (for example gpt-5.5 or
 	// grok-4.5) from the effective harness after composition. Empty when the
 	// backend uses its runner default or does not select a model.

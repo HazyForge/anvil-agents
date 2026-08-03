@@ -123,6 +123,21 @@ spec:
                   RunTemplate is copied into each scheduled AgentRun. The controller fills
                   purpose, sourceRef, trigger, and scheduleRef defaults when they are empty.
                 properties:
+                  councilRef:
+                    description: |-
+                      CouncilRef optionally associates this run with a same-namespace
+                      AgentCouncil. A non-nil run ref overrides a profile-level councilRef;
+                      omission inherits the profile association. There is no run-level clear
+                      signal in v1alpha1. A selected council's non-empty prompt is injected as a
+                      reserved skill only after its member profile references validate.
+                    properties:
+                      name:
+                        type: string
+                      namespace:
+                        type: string
+                    required:
+                    - name
+                    type: object
                   docs:
                     description: Docs tells the harness which docs/runtime surfaces
                       must be kept aligned.
@@ -2933,6 +2948,21 @@ spec:
                       description: Template is copied into each AgentRun created from
                         this template.
                       properties:
+                        councilRef:
+                          description: |-
+                            CouncilRef optionally associates this run with a same-namespace
+                            AgentCouncil. A non-nil run ref overrides a profile-level councilRef;
+                            omission inherits the profile association. There is no run-level clear
+                            signal in v1alpha1. A selected council's non-empty prompt is injected as a
+                            reserved skill only after its member profile references validate.
+                          properties:
+                            name:
+                              type: string
+                            namespace:
+                              type: string
+                          required:
+                          - name
+                          type: object
                         docs:
                           description: Docs tells the harness which docs/runtime surfaces
                             must be kept aligned.

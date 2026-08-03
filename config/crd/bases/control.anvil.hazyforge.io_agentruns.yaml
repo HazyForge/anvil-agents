@@ -55,6 +55,21 @@ spec:
             type: object
           spec:
             properties:
+              councilRef:
+                description: |-
+                  CouncilRef optionally associates this run with a same-namespace
+                  AgentCouncil. A non-nil run ref overrides a profile-level councilRef;
+                  omission inherits the profile association. There is no run-level clear
+                  signal in v1alpha1. A selected council's non-empty prompt is injected as a
+                  reserved skill only after its member profile references validate.
+                properties:
+                  name:
+                    type: string
+                  namespace:
+                    type: string
+                required:
+                - name
+                type: object
               docs:
                 description: Docs tells the harness which docs/runtime surfaces must
                   be kept aligned.
@@ -3078,6 +3093,33 @@ spec:
                   AgentRun spec; PayloadDigest covers the final mounted payload including
                   remote skill bytes.
                 properties:
+                  councilRef:
+                    description: |-
+                      CouncilRef records the exact AgentCouncil object version and spec digest
+                      accepted for this run without copying its prompt or member profiles.
+                    properties:
+                      digest:
+                        type: string
+                      generation:
+                        format: int64
+                        type: integer
+                      global:
+                        description: |-
+                          Global is true when this skill/tool set was attached because
+                          AgentSkillSet/AgentToolSet.spec.global is set (namespace default),
+                          rather than only via an explicit profile/run ref.
+                        type: boolean
+                      name:
+                        type: string
+                      namespace:
+                        type: string
+                      resourceVersion:
+                        type: string
+                      uid:
+                        type: string
+                    required:
+                    - name
+                    type: object
                   effectiveDigest:
                     type: string
                   harnessProfileRef:

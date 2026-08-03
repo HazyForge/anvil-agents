@@ -64,6 +64,7 @@ export interface ResolvedComposition {
   resolvedAt?: string;
   profileRef?: ResolvedObjectRef;
   harnessProfileRef?: ResolvedObjectRef;
+  councilRef?: ResolvedObjectRef;
   skillSetRefs?: ResolvedObjectRef[];
   toolSetRefs?: ResolvedObjectRef[];
   scope?: {

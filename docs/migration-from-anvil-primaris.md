@@ -12,15 +12,16 @@ against two deployments that use different election IDs.
 
 ## Handoff
 
-1. Back up the twelve agent CRDs and all agent custom resources.
+1. Back up the fourteen agent CRDs and all agent custom resources.
 2. Record the embedded controller replica count and confirm there are no
    unexpected terminating runs.
 3. Stage the standalone release with `crds.install=true` and zero replicas
    while the old chart still renders the legacy CRDs. This applies the schema
    superset and the chart's Helm and Argo retention annotations without
    starting a second reconciler.
-4. Verify the seven existing CRD UIDs did not change, the three composition
-   CRDs, `AdverseSignal`, and `AgentAuthSession` CRDs exist, and all twelve CRDs carry
+4. Verify the eight baseline CRD UIDs did not change, the four composition
+   CRDs (including `AgentCouncil`), `AdverseSignal`, and `AgentAuthSession`
+   exist, and all fourteen CRDs carry
    `helm.sh/resource-policy: keep` and
    `argocd.argoproj.io/sync-options: Prune=false`.
 5. Deploy the Anvil Primaris version where the embedded agent registrations and

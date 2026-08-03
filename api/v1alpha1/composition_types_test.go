@@ -17,6 +17,7 @@ func TestCompositionResourcesAreRegistered(t *testing.T) {
 		&AgentHarnessProfile{}, &AgentHarnessProfileList{},
 		&AgentSkillSet{}, &AgentSkillSetList{},
 		&AgentToolSet{}, &AgentToolSetList{},
+		&AgentCouncil{}, &AgentCouncilList{},
 		&AdverseSignal{}, &AdverseSignalList{},
 	} {
 		gvks, _, err := scheme.ObjectKinds(object)

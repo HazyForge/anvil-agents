@@ -28,6 +28,7 @@ rules:
       - agentharnessprofiles
       - agentskillsets
       - agenttoolsets
+      - agentcouncils
       - volumeprofiles
       - agentdatavolumes
       # Append-only auth maintenance CRs: read for console cards; mutate via anvil-agentctl only.
@@ -42,6 +43,7 @@ rules:
       - agentharnessprofiles
       - agentskillsets
       - agenttoolsets
+      - agentcouncils
       - volumeprofiles
       - agentdatavolumes
     verbs:
