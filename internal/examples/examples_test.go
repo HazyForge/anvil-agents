@@ -39,8 +39,8 @@ func TestExampleManifestsParseAndIdentifyObjects(t *testing.T) {
 				if len(object.Object) == 0 {
 					continue
 				}
-				if object.GetAPIVersion() == "" || object.GetKind() == "" || object.GetName() == "" {
-					t.Fatalf("%s document %d must set apiVersion, kind, and metadata.name", path, document)
+				if object.GetAPIVersion() == "" || object.GetKind() == "" || (object.GetName() == "" && object.GetGenerateName() == "") {
+					t.Fatalf("%s document %d must set apiVersion, kind, and metadata.name or metadata.generateName", path, document)
 				}
 				if object.GetKind() == "AgentRun" {
 					kind, _, _ := unstructured.NestedString(object.Object, "spec", "sourceRef", "kind")

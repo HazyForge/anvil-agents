@@ -18,8 +18,10 @@ status_file="${ANVIL_AGENT_RUN_STATUS_FILE:-/tmp/anvil-agent-run-status/status.j
 repository="${ANVIL_AGENT_RUN_REPOSITORY:-}"
 repository_url="${ANVIL_AGENT_RUN_REPOSITORY_URL:-}"
 repository_ref="${ANVIL_AGENT_RUN_REPOSITORY_REF:-}"
-github_host="${ANVIL_GITHUB_HOST:-github.com}"
+github_host="${ANVIL_GITHUB_HOST:-${GH_HOST:-github.com}}"
 
+source /opt/anvil-agent-run/lib/github-auth.sh
+anvil_configure_github_auth "$0" "$@"
 source /opt/anvil-agent-run/lib/repository-checkout.sh
 
 mkdir -p "$(dirname "${status_file}")"
@@ -28,12 +30,6 @@ export ANVIL_AGENT_RUN_STATUS_FILE="${status_file}"
 export ANVIL_AGENT_RUN_STATUS_LOG_PREFIX="${ANVIL_AGENT_RUN_STATUS_LOG_PREFIX:-ANVIL_AGENT_RUN_STATUS_JSON=}"
 export ANVIL_AGENT_RUN_STATUS_TOOL="${ANVIL_AGENT_RUN_STATUS_TOOL:-anvil-agent-status}"
 
-if [[ -n "${GITHUB_TOKEN:-}" && -z "${GH_TOKEN:-}" ]]; then
-	export GH_TOKEN="${GITHUB_TOKEN}"
-fi
-if [[ -n "${GH_TOKEN:-}" && -z "${GITHUB_TOKEN:-}" ]]; then
-	export GITHUB_TOKEN="${GH_TOKEN}"
-fi
 if [[ "${github_host}" != "github.com" ]]; then
 	export GH_HOST="${github_host}"
 fi
@@ -106,7 +102,7 @@ github_preflight() {
 	local repo="${ANVIL_AGENT_RUN_GITHUB_REPOSITORY:-${repository}}"
 	local permission=""
 	local default_branch=""
-	local status="missing-token"
+	local status="missing-credential"
 
 	export ANVIL_AGENT_RUN_GITHUB_CAN_PUSH="false"
 
@@ -114,8 +110,8 @@ github_preflight() {
 	git config --global user.email "${ANVIL_AGENT_GIT_AUTHOR_EMAIL:-agent-run@anvil-agents.invalid}" >/dev/null 2>&1 || true
 	git config --global init.defaultBranch "${ANVIL_AGENT_GIT_DEFAULT_BRANCH:-main}" >/dev/null 2>&1 || true
 
-	if [[ -z "${GH_TOKEN:-}" ]]; then
-		echo "ANVIL_AGENT_RUN_GITHUB_AUTH status=missing-token host=${github_host} repository=${repo:-unset}"
+	if ! gh auth status --hostname "${github_host}" >/dev/null 2>&1; then
+		echo "ANVIL_AGENT_RUN_GITHUB_AUTH status=missing-credential host=${github_host} repository=${repo:-unset}"
 		if truthy "${ANVIL_GITHUB_AUTH_REQUIRED:-false}"; then
 			echo "ANVIL_AGENT_RUN_GITHUB_AUTH_REQUIRED_MISSING host=${github_host}" >&2
 			exit 1
@@ -123,11 +119,7 @@ github_preflight() {
 		return 0
 	fi
 
-	if gh auth status --hostname "${github_host}" >/dev/null 2>&1; then
-		status="authenticated"
-	else
-		status="token-present"
-	fi
+	status="authenticated:${ANVIL_AGENT_RUN_GITHUB_AUTH_SOURCE:-configured}"
 	if gh auth setup-git --hostname "${github_host}" --force >/dev/null 2>&1; then
 		status="${status}+git-helper"
 	else

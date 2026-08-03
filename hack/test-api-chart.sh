@@ -60,8 +60,9 @@ fi
 if grep -Eq '^kind: CustomResourceDefinition$' "${tmp_dir}/without-crds.yaml"; then
   fail "CRDs rendered while crds.install=false"
 fi
-[[ "$(grep -c 'helm.sh/resource-policy: keep' "${tmp_dir}/disabled.yaml")" -eq 12 ]] || fail "all twelve CRDs must be retained on Helm uninstall"
-[[ "$(grep -c 'argocd.argoproj.io/sync-options: Prune=false' "${tmp_dir}/disabled.yaml")" -eq 12 ]] || fail "all twelve CRDs must be retained during Argo ownership transfer"
+expected_crd_count="$(find "${root_dir}/config/crd/bases" -maxdepth 1 -type f -name '*.yaml' | wc -l)"
+[[ "$(grep -c 'helm.sh/resource-policy: keep' "${tmp_dir}/disabled.yaml")" -eq "${expected_crd_count}" ]] || fail "all ${expected_crd_count} CRDs must be retained on Helm uninstall"
+[[ "$(grep -c 'argocd.argoproj.io/sync-options: Prune=false' "${tmp_dir}/disabled.yaml")" -eq "${expected_crd_count}" ]] || fail "all ${expected_crd_count} CRDs must be retained during Argo ownership transfer"
 for crd in agentharnessprofiles agentskillsets agenttoolsets adversesignals; do
   grep -Eq "name: ${crd}\.control\.anvil\.hazyforge\.io" "${tmp_dir}/disabled.yaml" || fail "${crd} CRD was not rendered"
 done

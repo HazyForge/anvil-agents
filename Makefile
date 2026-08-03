@@ -214,6 +214,7 @@ verify-runner-contract:
 	@bash -n hack/test-kind-upgrade.sh
 	@bash -n hack/test-kind-upgrade-cleanup.sh
 	@bash -n hack/test-runner-repository-checkout.sh
+	@bash -n hack/test-runner-github-auth.sh
 	@bash -n hack/test-opencode-runner.sh
 	@bash -n hack/stream-agent-run.sh
 	@hack/build-images.sh --help >/dev/null
@@ -264,6 +265,7 @@ verify-runner-contract:
 	@hack/release-primaris_test.sh
 	@hack/test-kind-upgrade-cleanup.sh
 	@hack/test-runner-repository-checkout.sh
+	@hack/test-runner-github-auth.sh
 	@hack/test-opencode-runner.sh
 	@hack/stream-agent-run.sh --help >/dev/null
 	@if ANVIL_AGENTS_ACCESS_TOKEN=dummy hack/stream-agent-run.sh \
@@ -282,6 +284,8 @@ verify-runner-contract:
 	done
 	@for dockerfile in docker/agent-run-*/Dockerfile; do \
 		rg -q 'agent-run-common/repository-checkout.sh' "$$dockerfile"; \
+		rg -q 'agent-run-common/github-auth.sh' "$$dockerfile"; \
+		rg -q 'openssl' "$$dockerfile"; \
 	done
 
 verify: manifests test build helm-lint verify-runner-contract console-typecheck

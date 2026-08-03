@@ -18,6 +18,7 @@ opencode_root="${ANVIL_OPENCODE_HOME:-/opt/anvil/opencode}"
 opencode_home="${ANVIL_OPENCODE_USER_HOME:-${opencode_root}/home}"
 
 source /opt/anvil-agent-run/lib/github-auth.sh
+anvil_configure_github_auth "$0" "$@"
 source /opt/anvil-agent-run/lib/repository-checkout.sh
 source /opt/anvil-agent-run/lib/opencode-args.sh
 
@@ -63,8 +64,6 @@ if [[ -n "${OPENCODE_AUTH_JSON:-}" ]]; then
 		echo "ANVIL_OPENCODE_AUTH status=existing"
 	fi
 fi
-
-anvil_configure_github_auth
 
 cd "${workdir}"
 git config --global --add safe.directory "${workdir}" >/dev/null 2>&1 || true

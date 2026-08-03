@@ -1,0 +1,35 @@
+apiVersion: control.anvil.hazyforge.io/v1alpha1
+kind: AgentHarnessProfile
+metadata:
+  name: opencode-github-app
+  namespace: agents
+spec:
+  description: OpenCode runner with one-repository GitHub App authentication.
+  backend:
+    kind: openCode
+    openCode:
+      model: opencode/big-pickle
+      format: json
+      auto: false
+  execution:
+    serviceAccountName: agent-runner
+    # This same-namespace Secret contains only GITHUB_APP_ID,
+    # GITHUB_APP_INSTALLATION_ID, and GITHUB_APP_PRIVATE_KEY.
+    envSecretRefs:
+      - name: example-agent-github-app
+    extraEnv:
+      - name: ANVIL_GITHUB_APP_REPOSITORY
+        value: HazyForge/example-agent
+      - name: ANVIL_GITHUB_APP_REPOSITORY_ID
+        value: "123456789"
+      - name: ANVIL_GITHUB_APP_PERMISSIONS_JSON
+        value: '{"checks":"read","contents":"write","issues":"write","pull_requests":"write","statuses":"read"}'
+    # App credentials are intentionally bounded below the one-hour token life.
+    timeoutSeconds: 1800
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: "2"
+        memory: 2Gi

@@ -17,6 +17,7 @@ repository_ref="${ANVIL_AGENT_RUN_REPOSITORY_REF:-}"
 grok_build_home="${GROK_BUILD_HOME:-${ANVIL_GROK_BUILD_HOME:-/opt/anvil/grok-build}}"
 
 source /opt/anvil-agent-run/lib/github-auth.sh
+anvil_configure_github_auth "$0" "$@"
 source /opt/anvil-agent-run/lib/repository-checkout.sh
 
 mkdir -p "$(dirname "${status_file}")" "${grok_build_home}/.grok" "${workdir}"
@@ -84,8 +85,6 @@ seed_grok_auth_home() {
 }
 
 seed_grok_auth_home
-
-anvil_configure_github_auth
 
 cd "${workdir}"
 git config --global --add safe.directory "${workdir}" >/dev/null 2>&1 || true

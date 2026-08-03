@@ -18,6 +18,7 @@ hermes_home="${HERMES_HOME:-/opt/anvil/hermes}"
 codex_home="${CODEX_HOME:-/opt/anvil/codex}"
 
 source /opt/anvil-agent-run/lib/github-auth.sh
+anvil_configure_github_auth "$0" "$@"
 source /opt/anvil-agent-run/lib/repository-checkout.sh
 
 mkdir -p "$(dirname "${status_file}")" "${hermes_home}" "${codex_home}" "${workdir}"
@@ -35,12 +36,6 @@ truthy() {
 	esac
 }
 
-if [[ -n "${GITHUB_TOKEN:-}" && -z "${GH_TOKEN:-}" ]]; then
-	export GH_TOKEN="${GITHUB_TOKEN}"
-fi
-if [[ -n "${GH_TOKEN:-}" && -z "${GITHUB_TOKEN:-}" ]]; then
-	export GITHUB_TOKEN="${GH_TOKEN}"
-fi
 if [[ -n "${CODEX_AUTH_JSON:-}" && ! -f "${CODEX_HOME}/auth.json" ]]; then
 	umask 077
 	printf '%s' "${CODEX_AUTH_JSON}" > "${CODEX_HOME}/auth.json"
@@ -68,8 +63,6 @@ if [[ -n "${CODEX_AUTH_JSON:-}" && ! -f "${HERMES_HOME}/auth.json" ]]; then
 		printf '%s' "${hermes_auth_json}" > "${HERMES_HOME}/auth.json"
 	fi
 fi
-
-anvil_configure_github_auth
 
 cd "${workdir}"
 git config --global --add safe.directory "${workdir}" >/dev/null 2>&1 || true

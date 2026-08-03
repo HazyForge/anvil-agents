@@ -42,6 +42,10 @@ the explicit Auto field. The runner allowlists only `--thinking`,
 The image also includes kubectl, gh, git, curl, jq, rg, Python, the status
 helper, feedback helper, and observability helper. OpenCode auto-update checks
 are disabled so the runtime stays coupled to the image digest.
+Repository auth may use the legacy static token or the shared one-repository
+GitHub App adapter documented in
+[agent-run-common](../agent-run-common/README.md). Raw App bootstrap environment
+is removed before OpenCode starts.
 
 ## Verified smoke run
 

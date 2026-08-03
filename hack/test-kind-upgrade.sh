@@ -68,7 +68,7 @@ if [[ -n "${baseline_ref}" ]]; then
 else
 	# The portable default does not depend on an intermediate commit surviving a
 	# squash merge. Install the current release without CRDs, then establish the
-	# seven pre-composition and pre-AdverseSignal kinds using legacy-shaped
+	# pre-composition and pre-AdverseSignal kinds using legacy-shaped
 	# fixtures.
 	helm --kube-context "${kube_context}" install anvil-agents "${root_dir}/charts/anvil-agents" \
 		--namespace anvil-agents-system \
@@ -78,8 +78,8 @@ else
 		--set image.pullPolicy=Never >/dev/null
 	for crd in "${root_dir}"/config/crd/bases/*.yaml; do
 		case "${crd}" in
-			# Keep the pre-composition / pre-AdverseSignal / pre-AuthSession baseline
-			# at seven kinds so the upgrade path still exercises CRD growth.
+		# Keep the pre-composition / pre-AdverseSignal / pre-AuthSession baseline
+		# fixed so the upgrade path still exercises CRD growth.
 			*_agentharnessprofiles.yaml|*_agentskillsets.yaml|*_agenttoolsets.yaml|*_adversesignals.yaml|*_agentauthsessions.yaml) continue ;;
 		esac
 		resource="$(kubectl --context "${kube_context}" apply --filename "${crd}" --output=name)"
@@ -92,9 +92,11 @@ else
 	done
 fi
 
+expected_crd_count="$(find "${root_dir}/config/crd/bases" -maxdepth 1 -type f -name '*.yaml' | wc -l)"
+expected_baseline_count=8
 baseline_count="$(kubectl --context "${kube_context}" get crd --output=name | rg -c 'control\.anvil\.hazyforge\.io')"
-[[ "${baseline_count}" -eq 7 ]] || {
-	echo "baseline rendered ${baseline_count} agent CRDs, want 7" >&2
+[[ "${baseline_count}" -eq "${expected_baseline_count}" ]] || {
+	echo "baseline rendered ${baseline_count} agent CRDs, want ${expected_baseline_count}" >&2
 	exit 1
 }
 kubectl --context "${kube_context}" apply --filename "${root_dir}/hack/fixtures/upgrade-v0.1.yaml" >/dev/null
@@ -105,8 +107,8 @@ helm --kube-context "${kube_context}" upgrade anvil-agents "${root_dir}/charts/a
 	--set image.pullPolicy=Never >/dev/null
 
 upgraded_count="$(kubectl --context "${kube_context}" get crd --output=name | rg -c 'control\.anvil\.hazyforge\.io')"
-[[ "${upgraded_count}" -eq 12 ]] || {
-	echo "upgrade rendered ${upgraded_count} agent CRDs, want 12" >&2
+[[ "${upgraded_count}" -eq "${expected_crd_count}" ]] || {
+	echo "upgrade rendered ${upgraded_count} agent CRDs, want ${expected_crd_count}" >&2
 	exit 1
 }
 kubectl --context "${kube_context}" get agentrunprofile legacy-review --namespace agents-upgrade >/dev/null
@@ -115,8 +117,8 @@ kubectl --context "${kube_context}" apply --filename "${root_dir}/hack/fixtures/
 
 helm --kube-context "${kube_context}" uninstall anvil-agents --namespace anvil-agents-system >/dev/null
 retained_count="$(kubectl --context "${kube_context}" get crd --output=name | rg -c 'control\.anvil\.hazyforge\.io')"
-[[ "${retained_count}" -eq 12 ]] || {
-	echo "upgrade uninstall retained ${retained_count} agent CRDs, want 12" >&2
+[[ "${retained_count}" -eq "${expected_crd_count}" ]] || {
+	echo "upgrade uninstall retained ${retained_count} agent CRDs, want ${expected_crd_count}" >&2
 	exit 1
 }
 for resource in \
@@ -128,4 +130,4 @@ for resource in \
 	kubectl --context "${kube_context}" get "${resource}" --namespace agents-upgrade >/dev/null
 done
 
-printf 'Seven-to-twelve CRD Helm upgrade contract passed\n'
+printf '%s-to-%s CRD Helm upgrade contract passed\n' "${expected_baseline_count}" "${expected_crd_count}"
