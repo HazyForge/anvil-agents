@@ -11,14 +11,21 @@ anvil_github_auth_clear_app_environment() {
 		GITHUB_APP_PRIVATE_KEY \
 		ANVIL_GITHUB_APP_REPOSITORY \
 		ANVIL_GITHUB_APP_REPOSITORY_ID \
-		ANVIL_GITHUB_APP_PERMISSIONS_JSON
+		ANVIL_GITHUB_APP_PERMISSIONS_JSON \
+		ANVIL_GITHUB_HOST
 }
 
-anvil_github_auth_api_url() {
+anvil_github_auth_normalize_host() {
 	local github_host="${1:-}"
 	if [[ -z "${github_host}" || ! "${github_host}" =~ ^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?$ || "${github_host}" == *..* ]]; then
 		return 1
 	fi
+	printf '%s\n' "${github_host,,}"
+}
+
+anvil_github_auth_api_url() {
+	local github_host=""
+	github_host="$(anvil_github_auth_normalize_host "${1:-}")" || return 1
 	if [[ "${github_host}" == "github.com" ]]; then
 		printf '%s\n' "https://api.github.com"
 	else
@@ -50,6 +57,7 @@ anvil_mint_github_app_token() {
 	local repository_id="${5:-}"
 	local permissions_json="${6:-}"
 	local github_host="${7:-github.com}"
+	local timeout_seconds="${8:-}"
 	local scoped_repository="${repository}"
 	local repository_name=""
 	local api_url=""
@@ -62,6 +70,8 @@ anvil_mint_github_app_token() {
 	local request_body=""
 	local response=""
 	local token=""
+	local expires_at=""
+	local expires_epoch=""
 
 	if [[ ! "${app_id}" =~ ^[1-9][0-9]*$ || ! "${installation_id}" =~ ^[1-9][0-9]*$ ]]; then
 		echo "AgentRun GitHub App IDs must be positive integers." >&2
@@ -101,6 +111,18 @@ anvil_mint_github_app_token() {
 	fi
 	if ! permissions_json="$(anvil_github_auth_permissions "${permissions_json}")"; then
 		echo "ANVIL_GITHUB_APP_PERMISSIONS_JSON contains an empty, unsupported, or over-privileged permission set." >&2
+		return 1
+	fi
+	github_host="$(anvil_github_auth_normalize_host "${github_host}")" || {
+		echo "ANVIL_GITHUB_HOST is not a valid exact GitHub hostname." >&2
+		return 1
+	}
+	if [[ "${github_host}" != "github.com" ]]; then
+		echo "AgentRun GitHub App auth currently supports github.com only." >&2
+		return 1
+	fi
+	if [[ ! "${timeout_seconds}" =~ ^[1-9][0-9]*$ || "${timeout_seconds}" -gt 3000 ]]; then
+		echo "AgentRun GitHub App auth requires timeoutSeconds between 1 and 3000." >&2
 		return 1
 	fi
 	api_url="$(anvil_github_auth_api_url "${github_host}")" || {
@@ -149,7 +171,7 @@ anvil_mint_github_app_token() {
 	if ! jq -e --argjson expected_permissions "${permissions_json}" '
 		(.token | type == "string" and length > 0) and
 		(.expires_at | type == "string" and length > 0) and
-		(.permissions == ($expected_permissions + {metadata:"read"})) and
+		(.permissions == $expected_permissions or .permissions == ($expected_permissions + {metadata:"read"})) and
 		(.repositories | type == "array" and length == 1)
 	' >/dev/null <<< "${response}"; then
 		echo "GitHub returned a token outside the requested repository or permission boundary." >&2
@@ -163,10 +185,48 @@ anvil_mint_github_app_token() {
 		echo "GitHub installation token did not resolve the requested repository name." >&2
 		return 1
 	fi
+	expires_at="$(jq -r '.expires_at' <<< "${response}")"
+	if ! expires_epoch="$(date -u -d "${expires_at}" +%s 2>/dev/null)" || [[ ! "${expires_epoch}" =~ ^[0-9]+$ ]]; then
+		echo "GitHub installation token returned an invalid expiration time." >&2
+		return 1
+	fi
+	now="$(date +%s)"
+	if (( expires_epoch - now < timeout_seconds + 300 )); then
+		echo "GitHub installation token expires before the bounded AgentRun can finish safely." >&2
+		return 1
+	fi
 	token="$(jq -r '.token' <<< "${response}")"
 	response=""
 	printf '%s' "${token}"
 	token=""
+}
+
+anvil_github_auth_reexec_sanitized() {
+	local auth_source="${1:-}"
+	local github_host="${2:-}"
+	local entrypoint="${3:-}"
+	shift 3 || true
+	if [[ -z "${entrypoint}" || ! -x "${entrypoint}" ]]; then
+		echo "AgentRun GitHub auth requires an executable second-stage entrypoint." >&2
+		return 1
+	fi
+	# An unset shell variable remains recoverable from /proc/1/environ until the
+	# process image is replaced. Re-exec the runner with a newly constructed
+	# environment before any model or tool process starts.
+	exec env \
+		-u GH_TOKEN \
+		-u GITHUB_TOKEN \
+		-u GH_HOST \
+		-u GITHUB_APP_ID \
+		-u GITHUB_APP_INSTALLATION_ID \
+		-u GITHUB_APP_PRIVATE_KEY \
+		-u ANVIL_GITHUB_APP_REPOSITORY \
+		-u ANVIL_GITHUB_APP_REPOSITORY_ID \
+		-u ANVIL_GITHUB_APP_PERMISSIONS_JSON \
+		-u ANVIL_GITHUB_HOST \
+		${github_host:+GH_HOST="${github_host}"} \
+		ANVIL_AGENT_RUN_GITHUB_AUTH_SOURCE="${auth_source}" \
+		"${entrypoint}" "$@"
 }
 
 anvil_configure_github_token() {
@@ -200,6 +260,8 @@ anvil_configure_github_token() {
 }
 
 anvil_configure_github_auth() {
+	local entrypoint="${1:-}"
+	shift || true
 	local token="${GH_TOKEN:-${GITHUB_TOKEN:-}}"
 	local app_id="${GITHUB_APP_ID:-}"
 	local installation_id="${GITHUB_APP_INSTALLATION_ID:-}"
@@ -210,6 +272,7 @@ anvil_configure_github_auth() {
 	local github_host="${ANVIL_GITHUB_HOST:-github.com}"
 	local app_configured="false"
 	local minted_token=""
+	local timeout_seconds="${ANVIL_AGENT_RUN_TIMEOUT_SECONDS:-}"
 
 	if [[ -n "${app_id}" || -n "${installation_id}" || -n "${private_key}" || -n "${repository}" || -n "${repository_id}" || -n "${permissions_json}" ]]; then
 		app_configured="true"
@@ -218,6 +281,10 @@ anvil_configure_github_auth() {
 	# bootstrap value before invoking jq, openssl, curl, gh, git, or a model.
 	unset GH_TOKEN GITHUB_TOKEN
 	anvil_github_auth_clear_app_environment
+	github_host="$(anvil_github_auth_normalize_host "${github_host}")" || {
+		echo "ANVIL_GITHUB_HOST is not a valid exact GitHub hostname." >&2
+		return 1
+	}
 
 	if [[ -n "${token}" && "${app_configured}" == "true" ]]; then
 		echo "AgentRun GitHub auth must select either a static token or a GitHub App, not both." >&2
@@ -226,8 +293,7 @@ anvil_configure_github_auth() {
 	if [[ -n "${token}" ]]; then
 		anvil_configure_github_token "${token}" "${github_host}"
 		token=""
-		export ANVIL_AGENT_RUN_GITHUB_AUTH_SOURCE=static-token
-		return 0
+		anvil_github_auth_reexec_sanitized static-token "${github_host}" "${entrypoint}" "$@"
 	fi
 	if [[ "${app_configured}" != "true" ]]; then
 		return 0
@@ -238,7 +304,7 @@ anvil_configure_github_auth() {
 	fi
 	if ! minted_token="$(anvil_mint_github_app_token \
 		"${app_id}" "${installation_id}" "${private_key}" \
-		"${repository}" "${repository_id}" "${permissions_json}" "${github_host}")"; then
+		"${repository}" "${repository_id}" "${permissions_json}" "${github_host}" "${timeout_seconds}")"; then
 		private_key=""
 		return 1
 	fi
@@ -248,5 +314,5 @@ anvil_configure_github_auth() {
 		return 1
 	fi
 	minted_token=""
-	export ANVIL_AGENT_RUN_GITHUB_AUTH_SOURCE=github-app
+	anvil_github_auth_reexec_sanitized github-app "${github_host}" "${entrypoint}" "$@"
 }

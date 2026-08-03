@@ -24,6 +24,7 @@ spec:
         value: "123456789"
       - name: ANVIL_GITHUB_APP_PERMISSIONS_JSON
         value: '{"checks":"read","contents":"write","issues":"write","pull_requests":"write","statuses":"read"}'
+    # App credentials are intentionally bounded below the one-hour token life.
     timeoutSeconds: 1800
     resources:
       requests:

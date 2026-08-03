@@ -18,9 +18,10 @@ status_file="${ANVIL_AGENT_RUN_STATUS_FILE:-/tmp/anvil-agent-run-status/status.j
 repository="${ANVIL_AGENT_RUN_REPOSITORY:-}"
 repository_url="${ANVIL_AGENT_RUN_REPOSITORY_URL:-}"
 repository_ref="${ANVIL_AGENT_RUN_REPOSITORY_REF:-}"
-github_host="${ANVIL_GITHUB_HOST:-github.com}"
+github_host="${ANVIL_GITHUB_HOST:-${GH_HOST:-github.com}}"
 
 source /opt/anvil-agent-run/lib/github-auth.sh
+anvil_configure_github_auth "$0" "$@"
 source /opt/anvil-agent-run/lib/repository-checkout.sh
 
 mkdir -p "$(dirname "${status_file}")"
@@ -85,7 +86,6 @@ seed_codex_auth_home() {
 }
 
 seed_codex_auth_home
-anvil_configure_github_auth
 
 mkdir -p "${workdir}"
 cd "${workdir}"

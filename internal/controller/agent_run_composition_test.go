@@ -620,7 +620,7 @@ func TestAgentRunCompositionAttachesGlobalSkillAndToolSets(t *testing.T) {
 	globalSkill := &controlv1alpha1.AgentSkillSet{
 		ObjectMeta: metav1.ObjectMeta{Name: "namespace-knowledge-skill", Namespace: "agents", UID: "skill-uid", Generation: 1},
 		Spec: controlv1alpha1.AgentSkillSetSpec{
-			Global: true,
+			Global:      true,
 			Description: "Shared knowledge usage",
 			Skills: []controlv1alpha1.AgentRunSkillInjectionSpec{{
 				Name:    "knowledge-base",
@@ -631,7 +631,7 @@ func TestAgentRunCompositionAttachesGlobalSkillAndToolSets(t *testing.T) {
 	globalTool := &controlv1alpha1.AgentToolSet{
 		ObjectMeta: metav1.ObjectMeta{Name: "namespace-knowledge-tool", Namespace: "agents", UID: "tool-uid", Generation: 1},
 		Spec: controlv1alpha1.AgentToolSetSpec{
-			Global: true,
+			Global:      true,
 			Description: "Shared knowledge client",
 			Tools: []controlv1alpha1.AgentRunToolSpec{{
 				Name:          "knowledge-search",
@@ -770,5 +770,37 @@ func TestAgentRunCompositionExcludeGlobal(t *testing.T) {
 	}
 	if len(resolution.SkillSetRefs) != 0 || len(resolution.ToolSetRefs) != 0 {
 		t.Fatalf("resolution refs should be empty, skills=%#v tools=%#v", resolution.SkillSetRefs, resolution.ToolSetRefs)
+	}
+}
+
+func TestAgentRunCompositionRejectsRunLocalCredentialBootstrapEnvironment(t *testing.T) {
+	t.Parallel()
+
+	for _, name := range []string{
+		"ANVIL_GITHUB_HOST",
+		"ANVIL_GITHUB_APP_REPOSITORY_ID",
+		"ANVIL_GITHUB_APP_PERMISSIONS_JSON",
+		"ANVIL_AGENT_RUN_TIMEOUT_SECONDS",
+		"ANVIL_AGENT_RUN_GH_CONFIG_DIR",
+		"GITHUB_APP_PRIVATE_KEY",
+		"GH_TOKEN",
+	} {
+		name := name
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			run := &controlv1alpha1.AgentRun{
+				ObjectMeta: metav1.ObjectMeta{Name: "reserved-env", Namespace: "agents"},
+				Spec: controlv1alpha1.AgentRunSpec{Harness: controlv1alpha1.AgentRunHarnessSpec{Execution: controlv1alpha1.AgentRunHarnessExecutionSpec{
+					ExtraEnv: []corev1.EnvVar{{Name: name, Value: "run-controlled"}},
+				}}},
+			}
+			_, _, phase, reason, _, err := testCompositionReconciler(t).resolveAgentRunComposition(context.Background(), run)
+			if err != nil {
+				t.Fatalf("resolve: %v", err)
+			}
+			if phase != controlv1alpha1.AgentRunPhaseFailed || reason != "ReservedCredentialBootstrapEnvironment" {
+				t.Fatalf("block = phase:%q reason:%q", phase, reason)
+			}
+		})
 	}
 }

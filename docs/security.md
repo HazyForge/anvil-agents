@@ -32,8 +32,11 @@ agent namespace.
 
 Prefer one-repository GitHub App installations over human PATs for repository
 agents. Built-in runners require exact repository and explicit token-permission
-inputs, reject static-token/App ambiguity, and remove exported App key material
-before invoking external tools or models. Registration permissions and the App
+inputs, reject static-token/App ambiguity and run-local bootstrap overrides,
+restrict App JWT exchange to `github.com`, and re-exec a sanitized process so
+exported App key material is absent from `/proc/1/environ` before invoking
+external tools or models. App-authenticated runs are bounded below token expiry
+instead of retaining the reusable key in a refresher. Registration permissions and the App
 installation's selected-repository list remain external authority and must be
 reviewed independently; a narrowly requested installation token cannot reduce
 an unnoticed extra repository unless the request also selects the exact

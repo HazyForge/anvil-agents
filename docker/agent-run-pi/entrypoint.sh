@@ -21,6 +21,7 @@ pi_home="${ANVIL_PI_USER_HOME:-${pi_root}/home}"
 pi_xai_extension="${ANVIL_PI_XAI_EXTENSION:-/usr/local/lib/node_modules/pi-xai-oauth/extensions/xai-oauth.ts}"
 
 source /opt/anvil-agent-run/lib/github-auth.sh
+anvil_configure_github_auth "$0" "$@"
 source /opt/anvil-agent-run/lib/repository-checkout.sh
 
 mkdir -p "$(dirname "${status_file}")" "${pi_agent_dir}" "${pi_session_dir}" "${pi_home}/.grok" "${workdir}"
@@ -38,8 +39,6 @@ truthy() {
 		*) return 1 ;;
 	esac
 }
-
-anvil_configure_github_auth
 
 seed_pi_grok_auth_home() {
 	local grok_home="${HOME}/.grok"

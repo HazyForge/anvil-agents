@@ -19,6 +19,7 @@ openclaw_workspace="${OPENCLAW_WORKSPACE_DIR:-/opt/anvil/openclaw/workspace}"
 codex_home="${CODEX_HOME:-/codex-home}"
 
 source /opt/anvil-agent-run/lib/github-auth.sh
+anvil_configure_github_auth "$0" "$@"
 source /opt/anvil-agent-run/lib/repository-checkout.sh
 
 mkdir -p "$(dirname "${status_file}")" "${openclaw_state}" "${openclaw_workspace}" "${codex_home}" "${workdir}"
@@ -36,18 +37,10 @@ truthy() {
 	esac
 }
 
-if [[ -n "${GITHUB_TOKEN:-}" && -z "${GH_TOKEN:-}" ]]; then
-	export GH_TOKEN="${GITHUB_TOKEN}"
-fi
-if [[ -n "${GH_TOKEN:-}" && -z "${GITHUB_TOKEN:-}" ]]; then
-	export GITHUB_TOKEN="${GH_TOKEN}"
-fi
 if [[ -n "${CODEX_AUTH_JSON:-}" && ! -f "${CODEX_HOME}/auth.json" ]]; then
 	umask 077
 	printf '%s' "${CODEX_AUTH_JSON}" > "${CODEX_HOME}/auth.json"
 fi
-
-anvil_configure_github_auth
 
 cd "${workdir}"
 git config --global --add safe.directory "${workdir}" >/dev/null 2>&1 || true

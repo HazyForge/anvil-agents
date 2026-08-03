@@ -17,6 +17,9 @@ import (
 )
 
 func (r *AgentRunReconciler) resolveAgentRunComposition(ctx context.Context, obj *controlv1alpha1.AgentRun) (*controlv1alpha1.AgentRun, *controlv1alpha1.AgentRunResolvedCompositionStatus, controlv1alpha1.AgentRunPhase, string, string, error) {
+	if reason, message := validateAgentRunCredentialBootstrapEnvironment(obj); reason != "" {
+		return obj.DeepCopy(), nil, controlv1alpha1.AgentRunPhaseFailed, reason, message, nil
+	}
 	reader := client.Reader(r.Client)
 	if r.APIReader != nil {
 		reader = r.APIReader
@@ -87,6 +90,39 @@ func (r *AgentRunReconciler) resolveAgentRunComposition(ctx context.Context, obj
 	status.EffectiveDigest = digestJSON(effective.Spec)
 	effective.Status.ResolvedComposition = status.DeepCopy()
 	return effective, status, "", "", "", nil
+}
+
+var agentRunReservedCredentialBootstrapEnvironment = map[string]struct{}{
+	"ANVIL_AGENT_RUN_GH_CONFIG_DIR":     {},
+	"ANVIL_AGENT_RUN_TIMEOUT_SECONDS":   {},
+	"ANVIL_GITHUB_APP_PERMISSIONS_JSON": {},
+	"ANVIL_GITHUB_APP_REPOSITORY":       {},
+	"ANVIL_GITHUB_APP_REPOSITORY_ID":    {},
+	"ANVIL_GITHUB_HOST":                 {},
+	"GH_CONFIG_DIR":                     {},
+	"GH_HOST":                           {},
+	"GH_TOKEN":                          {},
+	"GITHUB_APP_ID":                     {},
+	"GITHUB_APP_INSTALLATION_ID":        {},
+	"GITHUB_APP_PRIVATE_KEY":            {},
+	"GITHUB_TOKEN":                      {},
+}
+
+// Credential bootstrap values belong to reusable, policy-reviewed profiles or
+// referenced Secrets. A run-local overlay must not redirect the App JWT,
+// widen repository/permission scope, weaken the bounded lifetime, or persist
+// the resulting token outside the runner's pod-local credential directory.
+func validateAgentRunCredentialBootstrapEnvironment(obj *controlv1alpha1.AgentRun) (string, string) {
+	if obj == nil {
+		return "", ""
+	}
+	for _, item := range obj.Spec.Harness.Execution.ExtraEnv {
+		name := strings.TrimSpace(item.Name)
+		if _, reserved := agentRunReservedCredentialBootstrapEnvironment[name]; reserved {
+			return "ReservedCredentialBootstrapEnvironment", fmt.Sprintf("spec.harness.execution.extraEnv must not set reserved credential bootstrap variable %q; configure it in a policy-reviewed profile or Secret.", name)
+		}
+	}
+	return "", ""
 }
 
 func agentRunResolvedScopeStatus(scope controlv1alpha1.AgentRunScopeSpec) *controlv1alpha1.AgentRunResolvedScopeStatus {

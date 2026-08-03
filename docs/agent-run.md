@@ -182,8 +182,13 @@ envelope separately declares exact `ANVIL_GITHUB_APP_REPOSITORY` and/or
 read-only checks/statuses/metadata and read-or-write contents/issues/pull
 requests. The runner requests an installation token for exactly one repository
 and verifies GitHub's returned repository and permission set before configuring
-pod-local `gh` and Git authentication. App bootstrap values and raw token
-environment are removed before checkout, tool setup, and model execution.
+pod-local `gh` and Git authentication. App-authenticated runs are restricted to
+`github.com` and a 1-3000 second timeout, with a five-minute token-expiry margin.
+Credential bootstrap names are forbidden in run-local `extraEnv`; define them
+in a policy-reviewed reusable profile or referenced Secret. The runner re-execs
+a sanitized second stage so App bootstrap values and raw tokens are absent from
+both inherited environment and `/proc/1/environ` before checkout, tool setup,
+and model execution.
 Static `GH_TOKEN`/`GITHUB_TOKEN` remains a mutually exclusive compatibility
 adapter. See [the shared runner contract](../docker/agent-run-common/README.md)
 and the [GitHub App harness sample](../config/samples/control_v1alpha1_agentharnessprofile_github_app.yaml).
