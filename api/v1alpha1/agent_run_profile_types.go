@@ -38,6 +38,12 @@ type AgentRunProfileSpec struct {
 	// skills that teach agents when and how to use them.
 	// +optional
 	ToolSets *AgentToolCompositionSpec `json:"toolSets,omitempty"`
+	// CouncilRef optionally associates this profile with a same-namespace
+	// AgentCouncil workforce. Membership alone does not inject council guidance;
+	// the executing profile or run must opt in through councilRef. A run-local
+	// councilRef overrides this value, while an omitted run field inherits it.
+	// +optional
+	CouncilRef *NamespacedObjectReference `json:"councilRef,omitempty"`
 	// Notifications supplies default operator notification routing.
 	// +optional
 	Notifications *AgentRunNotificationSpec `json:"notifications,omitempty"`

@@ -63,17 +63,19 @@ fi
 expected_crd_count="$(find "${root_dir}/config/crd/bases" -maxdepth 1 -type f -name '*.yaml' | wc -l)"
 [[ "$(grep -c 'helm.sh/resource-policy: keep' "${tmp_dir}/disabled.yaml")" -eq "${expected_crd_count}" ]] || fail "all ${expected_crd_count} CRDs must be retained on Helm uninstall"
 [[ "$(grep -c 'argocd.argoproj.io/sync-options: Prune=false' "${tmp_dir}/disabled.yaml")" -eq "${expected_crd_count}" ]] || fail "all ${expected_crd_count} CRDs must be retained during Argo ownership transfer"
-for crd in agentharnessprofiles agentskillsets agenttoolsets adversesignals; do
+for crd in agentharnessprofiles agentskillsets agenttoolsets agentcouncils adversesignals; do
   grep -Eq "name: ${crd}\.control\.anvil\.hazyforge\.io" "${tmp_dir}/disabled.yaml" || fail "${crd} CRD was not rendered"
 done
 grep -q 'harnessProfileRef:' "${tmp_dir}/disabled.yaml" || fail "composition harnessProfileRef schema is missing"
 grep -q 'skillSets:' "${tmp_dir}/disabled.yaml" || fail "composition skillSets schema is missing"
 grep -q 'toolSets:' "${tmp_dir}/disabled.yaml" || fail "composition toolSets schema is missing"
+grep -q 'councilRef:' "${tmp_dir}/disabled.yaml" || fail "composition councilRef schema is missing"
+grep -q 'councilPrompt:' "${tmp_dir}/disabled.yaml" || fail "AgentCouncil councilPrompt schema is missing"
 grep -q 'maxRunsPerDay:' "${tmp_dir}/disabled.yaml" || fail "AgentSchedule daily run budget schema is missing"
 grep -q 'name: adversesignals.control.anvil.hazyforge.io' "${tmp_dir}/disabled.yaml" || fail "AdverseSignal CRD is missing"
 grep -q 'AdverseSignal spec is immutable' "${tmp_dir}/disabled.yaml" || fail "AdverseSignal immutability validation is missing"
 helm template "${release}" "${chart}" --show-only templates/clusterrole.yaml >"${tmp_dir}/controller-rbac.yaml"
-for resource in agentharnessprofiles agentskillsets agenttoolsets; do
+for resource in agentharnessprofiles agentskillsets agenttoolsets agentcouncils; do
   grep -q "${resource}" "${tmp_dir}/controller-rbac.yaml" || fail "controller RBAC is missing ${resource}"
 done
 grep -q 'adversesignals' "${tmp_dir}/controller-rbac.yaml" || fail "controller RBAC is missing adversesignals"
@@ -152,6 +154,7 @@ helm template "${release}" "${chart}" "${api_args[@]}" \
   --set-string 'api.config.authorization.bindings[0].permissions[2]=anvil-agents:composition:read' \
   --show-only templates/api-clusterrole.yaml >"${tmp_dir}/rbac-composition-read.yaml"
 grep -q 'agentskillsets' "${tmp_dir}/rbac-composition-read.yaml" || fail "composition read RBAC missing agentskillsets"
+grep -q 'agentcouncils' "${tmp_dir}/rbac-composition-read.yaml" || fail "composition read RBAC missing agentcouncils"
 grep -q 'agentrunprofiles' "${tmp_dir}/rbac-composition-read.yaml" || fail "composition read RBAC missing agentrunprofiles"
 if grep -Eq 'verbs:.*create| - create' "${tmp_dir}/rbac-composition-read.yaml"; then
   fail "composition read RBAC must not grant create"

@@ -131,7 +131,7 @@ Permissions:
 | `anvil-agents:composition:write` | Create/update/delete **console-managed** composition CRs (when `composition.writeEnabled`) |
 
 Composition kinds: `AgentRunProfile`, `AgentHarnessProfile`, `AgentSkillSet`,
-`AgentToolSet`, `VolumeProfile`, `AgentDataVolume`.
+`AgentToolSet`, `AgentCouncil`, `VolumeProfile`, `AgentDataVolume`.
 
 **GitOps is source of truth.** Even with composition write enabled, the API
 refuses to update or delete objects that:

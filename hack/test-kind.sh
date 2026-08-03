@@ -12,8 +12,11 @@ decision="$(kubectl --context "${kube_context}" get agentrun demo-001 --namespac
 harness_profile="$(kubectl --context "${kube_context}" get agentrun demo-001 --namespace agents-quickstart --output=jsonpath='{.status.resolvedComposition.harnessProfileRef.name}')"
 skill_set="$(kubectl --context "${kube_context}" get agentrun demo-001 --namespace agents-quickstart --output=jsonpath='{.status.resolvedComposition.skillSetRefs[0].name}')"
 tool_set="$(kubectl --context "${kube_context}" get agentrun demo-001 --namespace agents-quickstart --output=jsonpath='{.status.resolvedComposition.toolSetRefs[0].name}')"
+council="$(kubectl --context "${kube_context}" get agentrun demo-001 --namespace agents-quickstart --output=jsonpath='{.status.resolvedComposition.councilRef.name}')"
+council_digest="$(kubectl --context "${kube_context}" get agentrun demo-001 --namespace agents-quickstart --output=jsonpath='{.status.resolvedComposition.councilRef.digest}')"
 effective_digest="$(kubectl --context "${kube_context}" get agentrun demo-001 --namespace agents-quickstart --output=jsonpath='{.status.resolvedComposition.effectiveDigest}')"
 payload_digest="$(kubectl --context "${kube_context}" get agentrun demo-001 --namespace agents-quickstart --output=jsonpath='{.status.resolvedComposition.payloadDigest}')"
+payload_name="$(kubectl --context "${kube_context}" get agentrun demo-001 --namespace agents-quickstart --output=jsonpath='{.status.payloadRef.name}')"
 claim_name="$(kubectl --context "${kube_context}" get agentrun demo-001 --namespace agents-quickstart --output=jsonpath='{.status.dataVolumes[0].claimName}')"
 [[ "${phase}" == "Succeeded" ]] || {
 	echo "quickstart AgentRun phase is ${phase}, want Succeeded" >&2
@@ -23,12 +26,22 @@ claim_name="$(kubectl --context "${kube_context}" get agentrun demo-001 --namesp
 	echo "quickstart AgentRun did not record a structured decision" >&2
 	exit 1
 }
-[[ "${harness_profile}" == "demo-runtime" && "${skill_set}" == "demo-contract" && "${tool_set}" == "demo-tools" ]] || {
-	echo "quickstart composition resolved harness=${harness_profile} skillSet=${skill_set} toolSet=${tool_set}" >&2
+[[ "${harness_profile}" == "demo-runtime" && "${skill_set}" == "demo-contract" && "${tool_set}" == "demo-tools" && "${council}" == "demo-council" ]] || {
+	echo "quickstart composition resolved harness=${harness_profile} skillSet=${skill_set} toolSet=${tool_set} council=${council}" >&2
 	exit 1
 }
-[[ "${effective_digest}" == sha256:* && "${payload_digest}" == sha256:* ]] || {
+[[ "${council_digest}" == sha256:* && "${effective_digest}" == sha256:* && "${payload_digest}" == sha256:* ]] || {
 	echo "quickstart composition digests are incomplete" >&2
+	exit 1
+}
+kubectl --context "${kube_context}" get configmap "${payload_name}" --namespace agents-quickstart --output=jsonpath='{.data}' | \
+	grep -Fq 'Keep this proof bounded to the quickstart run' || {
+	echo "quickstart payload is missing materialized council guidance" >&2
+	exit 1
+}
+job_count="$(kubectl --context "${kube_context}" get job --namespace agents-quickstart --selector control.anvil.hazyforge.io/agent-run=demo-001 --no-headers | wc -l | tr -d ' ')"
+[[ "${job_count}" == "1" ]] || {
+	echo "quickstart council run created ${job_count} Jobs, want exactly one" >&2
 	exit 1
 }
 [[ "${claim_name}" == "agent-data-demo-state" ]] || {
@@ -58,6 +71,8 @@ expected_crds=(
 	adversesignals.control.anvil.hazyforge.io
 	adversesituations.control.anvil.hazyforge.io
 	agentauthsessions.control.anvil.hazyforge.io
+	agentcouncils.control.anvil.hazyforge.io
+	agentdatavolumecopies.control.anvil.hazyforge.io
 	agentdatavolumes.control.anvil.hazyforge.io
 	agentharnessprofiles.control.anvil.hazyforge.io
 	agentruncontrols.control.anvil.hazyforge.io
@@ -80,6 +95,7 @@ for resource in \
 	agentharnessprofile/demo-runtime \
 	agentskillset/demo-contract \
 	agenttoolset/demo-tools \
+	agentcouncil/demo-council \
 	agentrunprofile/demo \
 	agentrun/demo-001; do
 	kubectl --context "${kube_context}" get "${resource}" --namespace agents-quickstart >/dev/null

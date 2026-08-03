@@ -80,7 +80,7 @@ else
 		case "${crd}" in
 		# Keep the pre-composition / pre-AdverseSignal / pre-AuthSession baseline
 		# fixed so the upgrade path still exercises CRD growth.
-			*_agentharnessprofiles.yaml|*_agentskillsets.yaml|*_agenttoolsets.yaml|*_adversesignals.yaml|*_agentauthsessions.yaml) continue ;;
+			*_agentharnessprofiles.yaml|*_agentskillsets.yaml|*_agenttoolsets.yaml|*_agentcouncils.yaml|*_adversesignals.yaml|*_agentauthsessions.yaml) continue ;;
 		esac
 		resource="$(kubectl --context "${kube_context}" apply --filename "${crd}" --output=name)"
 		kubectl --context "${kube_context}" label "${resource}" \
@@ -126,7 +126,8 @@ for resource in \
 	agentrun/legacy-run \
 	agentharnessprofile/custom-runtime \
 	agentskillset/repository-review \
-	agenttoolset/repository-tools; do
+	agenttoolset/repository-tools \
+	agentcouncil/repository-council; do
 	kubectl --context "${kube_context}" get "${resource}" --namespace agents-upgrade >/dev/null
 done
 

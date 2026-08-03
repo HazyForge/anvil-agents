@@ -3616,6 +3616,123 @@ metadata:
     helm.sh/resource-policy: keep
     argocd.argoproj.io/sync-options: Prune=false
     controller-gen.kubebuilder.io/version: v0.19.0
+  name: agentcouncils.control.anvil.hazyforge.io
+spec:
+  group: control.anvil.hazyforge.io
+  names:
+    kind: AgentCouncil
+    listKind: AgentCouncilList
+    plural: agentcouncils
+    shortNames:
+    - agcouncil
+    singular: agentcouncil
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.description
+      name: Description
+      type: string
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: |-
+              AgentCouncilSpec is a named, durable group of highest-level AgentRunProfile
+              members (a workforce). An optional CouncilPrompt explains multi-agent
+              interaction and is materialized only when an executing profile or run opts
+              in via councilRef.
+
+              Councils do not create multi-agent Jobs. The controller still runs one
+              adapter per AgentRun. Councils cannot select Secrets, ServiceAccounts,
+              harnesses, tools, storage, or any other execution authority.
+            properties:
+              councilPrompt:
+                description: |-
+                  CouncilPrompt is optional multi-agent interaction guidance. When non-empty
+                  and the run/profile associates this council via councilRef, the controller
+                  injects a reserved skill named council-<council-name>. Empty means
+                  association-only inventory/evidence without prompt injection.
+                maxLength: 65536
+                type: string
+              description:
+                description: Description explains the workforce boundary and when
+                  to select this council.
+                type: string
+              members:
+                description: |-
+                  Members lists the highest-level roles in this workforce. Each referenced
+                  profile must exist in the council namespace and may appear only once.
+                items:
+                  description: |-
+                    AgentCouncilMemberSpec names one highest-level AgentRunProfile role in a
+                    durable multi-agent workforce inventory. Membership is inventory only; it
+                    does not auto-inject peer prompts, credentials, or execution authority.
+                  properties:
+                    description:
+                      description: |-
+                        Description is an optional human/manager inventory note. It is not
+                        auto-injected as peer authority into member runs.
+                      type: string
+                    profileRef:
+                      description: |-
+                        ProfileRef selects an existing same-namespace AgentRunProfile that plays
+                        this role. Namespace must be empty or the council namespace.
+                      properties:
+                        name:
+                          type: string
+                        namespace:
+                          type: string
+                      required:
+                      - name
+                      type: object
+                    role:
+                      description: |-
+                        Role is a human-readable council role label such as coordinator or
+                        implementer. It is inventory metadata, not automatic peer authority.
+                      minLength: 1
+                      type: string
+                  required:
+                  - profileRef
+                  - role
+                  type: object
+                maxItems: 32
+                minItems: 1
+                type: array
+            required:
+            - members
+            type: object
+        required:
+        - spec
+        type: object
+    served: true
+    storage: true
+    subresources: {}
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    helm.sh/resource-policy: keep
+    argocd.argoproj.io/sync-options: Prune=false
+    controller-gen.kubebuilder.io/version: v0.19.0
   name: agentdatavolumecopies.control.anvil.hazyforge.io
 spec:
   group: control.anvil.hazyforge.io
@@ -6911,6 +7028,20 @@ spec:
               AgentRunProfileSpec stores reusable role, scope, policy, prompt, and
               composition defaults for AgentRuns in the same namespace.
             properties:
+              councilRef:
+                description: |-
+                  CouncilRef optionally associates this profile with a same-namespace
+                  AgentCouncil workforce. Membership alone does not inject council guidance;
+                  the executing profile or run must opt in through councilRef. A run-local
+                  councilRef overrides this value, while an omitted run field inherits it.
+                properties:
+                  name:
+                    type: string
+                  namespace:
+                    type: string
+                required:
+                - name
+                type: object
               description:
                 description: Description explains the profile's intended ownership
                   boundary and use.
@@ -9678,6 +9809,21 @@ spec:
             type: object
           spec:
             properties:
+              councilRef:
+                description: |-
+                  CouncilRef optionally associates this run with a same-namespace
+                  AgentCouncil. A non-nil run ref overrides a profile-level councilRef;
+                  omission inherits the profile association. There is no run-level clear
+                  signal in v1alpha1. A selected council's non-empty prompt is injected as a
+                  reserved skill only after its member profile references validate.
+                properties:
+                  name:
+                    type: string
+                  namespace:
+                    type: string
+                required:
+                - name
+                type: object
               docs:
                 description: Docs tells the harness which docs/runtime surfaces must
                   be kept aligned.
@@ -12701,6 +12847,33 @@ spec:
                   AgentRun spec; PayloadDigest covers the final mounted payload including
                   remote skill bytes.
                 properties:
+                  councilRef:
+                    description: |-
+                      CouncilRef records the exact AgentCouncil object version and spec digest
+                      accepted for this run without copying its prompt or member profiles.
+                    properties:
+                      digest:
+                        type: string
+                      generation:
+                        format: int64
+                        type: integer
+                      global:
+                        description: |-
+                          Global is true when this skill/tool set was attached because
+                          AgentSkillSet/AgentToolSet.spec.global is set (namespace default),
+                          rather than only via an explicit profile/run ref.
+                        type: boolean
+                      name:
+                        type: string
+                      namespace:
+                        type: string
+                      resourceVersion:
+                        type: string
+                      uid:
+                        type: string
+                    required:
+                    - name
+                    type: object
                   effectiveDigest:
                     type: string
                   harnessProfileRef:
@@ -13001,6 +13174,21 @@ spec:
                   RunTemplate is copied into each scheduled AgentRun. The controller fills
                   purpose, sourceRef, trigger, and scheduleRef defaults when they are empty.
                 properties:
+                  councilRef:
+                    description: |-
+                      CouncilRef optionally associates this run with a same-namespace
+                      AgentCouncil. A non-nil run ref overrides a profile-level councilRef;
+                      omission inherits the profile association. There is no run-level clear
+                      signal in v1alpha1. A selected council's non-empty prompt is injected as a
+                      reserved skill only after its member profile references validate.
+                    properties:
+                      name:
+                        type: string
+                      namespace:
+                        type: string
+                    required:
+                    - name
+                    type: object
                   docs:
                     description: Docs tells the harness which docs/runtime surfaces
                       must be kept aligned.
@@ -15811,6 +15999,21 @@ spec:
                       description: Template is copied into each AgentRun created from
                         this template.
                       properties:
+                        councilRef:
+                          description: |-
+                            CouncilRef optionally associates this run with a same-namespace
+                            AgentCouncil. A non-nil run ref overrides a profile-level councilRef;
+                            omission inherits the profile association. There is no run-level clear
+                            signal in v1alpha1. A selected council's non-empty prompt is injected as a
+                            reserved skill only after its member profile references validate.
+                          properties:
+                            name:
+                              type: string
+                            namespace:
+                              type: string
+                          required:
+                          - name
+                          type: object
                         docs:
                           description: Docs tells the harness which docs/runtime surfaces
                             must be kept aligned.

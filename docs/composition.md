@@ -1,6 +1,6 @@
 # Agent Composition
 
-Anvil Agents uses four namespaced resources for reusable configuration:
+Anvil Agents uses five namespaced resources for reusable configuration:
 
 | Resource | Owns | Must not own |
 | --- | --- | --- |
@@ -8,11 +8,16 @@ Anvil Agents uses four namespaced resources for reusable configuration:
 | `AgentHarnessProfile` | one backend adapter, image, Kubernetes execution identity, credentials, storage, placement, and limits | task instructions or skills |
 | `AgentSkillSet` | backend-neutral skills and optional delegated personas | images, ServiceAccounts, Secrets, storage, or placement |
 | `AgentToolSet` | reusable setup and verification contracts for external tools | the external service, credentials, ServiceAccounts, networking, storage, or placement |
+| `AgentCouncil` | durable workforce inventory and optional interaction guidance | Secrets, ServiceAccounts, harnesses, tools, storage, Jobs, or automatic peer injection |
 
 `AgentToolSet` exists because external tools commonly have an independent
 owner and lifecycle from the instructions that use them. It never installs the
 external service. Prompt sets and personas remain part of role or skill
 composition until they demonstrate the same independent lifecycle.
+
+`AgentCouncil` groups highest-level roles without merging their execution
+authority. Membership is inventory only. Guidance materialization is opt-in
+through `councilRef` on the executing profile or run.
 
 All references must resolve in the `AgentRun` namespace. This keeps Kubernetes
 RBAC and Secret ownership understandable. A platform can distribute identical
@@ -145,11 +150,67 @@ an atomic harness-profile swap for a clean runtime envelope. Restating the same
 run-local `harnessProfileRef` still requests an atomic swap and therefore skips
 profile-inline backend/execution overlays.
 
+## AgentCouncil
+
+A council names 1-32 existing same-namespace `AgentRunProfile` members:
+
+```yaml
+apiVersion: control.anvil.hazyforge.io/v1alpha1
+kind: AgentCouncil
+metadata:
+  name: release-council
+  namespace: agents
+spec:
+  description: Release improvement workforce
+  members:
+    - role: manager
+      profileRef:
+        name: release-manager
+    - role: auditor
+      profileRef:
+        name: release-auditor
+  councilPrompt: |
+    Coordinate through durable issues and exact release evidence.
+```
+
+Association is explicit:
+
+```yaml
+# On AgentRunProfile or AgentRun
+spec:
+  councilRef:
+    name: release-council
+```
+
+Rules:
+
+- An omitted run `councilRef` inherits its profile association. A non-nil run
+  ref overrides the profile; v1alpha1 has no run-level clear signal.
+- Council and member profile references must stay in the executing namespace.
+  Every member profile must exist, roles must be non-empty, and the same
+  profile cannot appear twice.
+- Membership alone never injects guidance or creates an `AgentRun`. A selected
+  council with an empty prompt records association evidence only.
+- A non-empty prompt is injected as reserved skill `council-<name>`. Resolution
+  fails if another composition layer already uses that name, so recorded
+  council provenance cannot silently point at shadowed guidance.
+- Resolution records the council name, namespace, UID, generation, resource
+  version, and spec digest. It does not copy member profiles or their harness,
+  Secret, ServiceAccount, tool, or storage references.
+- One `AgentRun` still creates at most one Job with one adapter. Council prose
+  is guidance, not release or deployment evidence.
+
+Upgrade order matters: install the CRD/controller/chart RBAC first, allow the
+kind in GitOps policy, apply councils after their member profiles, and only then
+add `councilRef` to scheduled profiles or runs. A missing council or member
+profile produces `NeedsHuman` and requires a new append-only run after repair.
+
 ## Resolution Evidence
 
 At Job materialization, `status.resolvedComposition` records each selected
 object's name, namespace, UID, generation, resource version, and spec digest.
-This includes separate `skillSetRefs` and `toolSetRefs` evidence.
+This includes separate `skillSetRefs`, `toolSetRefs`, and optional `councilRef`
+evidence.
 `effectiveDigest` covers the complete resolved `AgentRun` spec.
 `payloadDigest` covers the exact mounted ConfigMap data, including resolved
 remote skill bytes. The read-only OIDC API exposes this sanitized evidence with

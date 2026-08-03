@@ -58,6 +58,20 @@ spec:
               AgentRunProfileSpec stores reusable role, scope, policy, prompt, and
               composition defaults for AgentRuns in the same namespace.
             properties:
+              councilRef:
+                description: |-
+                  CouncilRef optionally associates this profile with a same-namespace
+                  AgentCouncil workforce. Membership alone does not inject council guidance;
+                  the executing profile or run must opt in through councilRef. A run-local
+                  councilRef overrides this value, while an omitted run field inherits it.
+                properties:
+                  name:
+                    type: string
+                  namespace:
+                    type: string
+                required:
+                - name
+                type: object
               description:
                 description: Description explains the profile's intended ownership
                   boundary and use.

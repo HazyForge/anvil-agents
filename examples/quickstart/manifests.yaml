@@ -87,6 +87,21 @@ spec:
       verifyCommand: ["/bin/sh", "-c", "test -s \"${ANVIL_AGENT_RUN_CONTEXT_FILE}\""]
 ---
 apiVersion: control.anvil.hazyforge.io/v1alpha1
+kind: AgentCouncil
+metadata:
+  name: demo-council
+  namespace: agents-quickstart
+spec:
+  description: Credential-free council composition smoke test.
+  members:
+    - role: worker
+      profileRef:
+        name: demo
+  councilPrompt: |
+    Keep this proof bounded to the quickstart run and report exact evidence.
+    Council membership does not expand the worker runtime authority.
+---
+apiVersion: control.anvil.hazyforge.io/v1alpha1
 kind: AgentRunProfile
 metadata:
   name: demo
@@ -103,6 +118,8 @@ spec:
   toolSets:
     refs:
       - name: demo-tools
+  councilRef:
+    name: demo-council
   harness:
     intent: observe
     systemPrompt: Read the mounted payload and emit one structured decision.

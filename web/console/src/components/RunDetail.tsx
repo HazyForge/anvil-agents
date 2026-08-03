@@ -197,6 +197,10 @@ export function RunDetail({ run, token, onRunUpdate }: Props) {
               <dd className="mono">
                 {compositionRefLink(run.namespace, "harness-profiles", composition.harnessProfileRef)}
               </dd>
+              <dt>Council</dt>
+              <dd className="mono">
+                {compositionRefLink(run.namespace, "councils", composition.councilRef)}
+              </dd>
               <dt>Skill sets</dt>
               <dd>
                 {(composition.skillSetRefs ?? []).length > 0

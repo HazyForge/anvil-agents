@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -802,5 +803,244 @@ func TestAgentRunCompositionRejectsRunLocalCredentialBootstrapEnvironment(t *tes
 				t.Fatalf("block = phase:%q reason:%q", phase, reason)
 			}
 		})
+	}
+}
+
+func testAgentCouncil(name, prompt string, members ...controlv1alpha1.AgentCouncilMemberSpec) *controlv1alpha1.AgentCouncil {
+	if len(members) == 0 {
+		members = []controlv1alpha1.AgentCouncilMemberSpec{{Role: "worker", ProfileRef: controlv1alpha1.NamespacedObjectReference{Name: "worker-profile"}}}
+	}
+	return &controlv1alpha1.AgentCouncil{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "agents", UID: typesUID(name + "-uid"), Generation: 3, ResourceVersion: "17"},
+		Spec: controlv1alpha1.AgentCouncilSpec{
+			Description: "test council", Members: members, CouncilPrompt: prompt,
+		},
+	}
+}
+
+func testCouncilMemberProfile(name string) *controlv1alpha1.AgentRunProfile {
+	return &controlv1alpha1.AgentRunProfile{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "agents", UID: typesUID(name + "-uid"), Generation: 1}}
+}
+
+func TestAgentRunCompositionCouncilPromptHasDeterministicProvenanceAndNoAuthorityEscalation(t *testing.T) {
+	t.Parallel()
+
+	executingHarness := testAgentHarnessProfile("executing-runtime", controlv1alpha1.AgentRunHarnessBackendCodex, "executing-credentials")
+	memberHarness := testAgentHarnessProfile("member-runtime", controlv1alpha1.AgentRunHarnessBackendPiAgent, "member-credentials")
+	member := testCouncilMemberProfile("worker-profile")
+	member.Spec.HarnessProfileRef = &controlv1alpha1.NamespacedObjectReference{Name: memberHarness.Name}
+	member.Spec.Harness.Execution.ServiceAccountName = "privileged-member"
+	member.Spec.Harness.Execution.EnvSecretRefs = []controlv1alpha1.NamespacedObjectReference{{Name: "member-secret"}}
+	council := testAgentCouncil("repo-council", "Manager coordinates; workers remain within their own authority.")
+	profile := &controlv1alpha1.AgentRunProfile{
+		ObjectMeta: metav1.ObjectMeta{Name: "executing-profile", Namespace: "agents", UID: "executing-profile-uid", Generation: 2},
+		Spec: controlv1alpha1.AgentRunProfileSpec{
+			HarnessProfileRef: &controlv1alpha1.NamespacedObjectReference{Name: executingHarness.Name},
+			CouncilRef:        &controlv1alpha1.NamespacedObjectReference{Name: council.Name},
+		},
+	}
+	run := &controlv1alpha1.AgentRun{ObjectMeta: metav1.ObjectMeta{Name: "team-1", Namespace: "agents"}, Spec: controlv1alpha1.AgentRunSpec{ProfileRef: &controlv1alpha1.NamespacedObjectReference{Name: profile.Name}}}
+	reconciler := testCompositionReconciler(t, profile, executingHarness, memberHarness, member, council)
+
+	first, firstStatus, phase, reason, message, err := reconciler.resolveAgentRunComposition(context.Background(), run)
+	if err != nil || phase != "" {
+		t.Fatalf("first resolve: phase=%q reason=%q message=%q err=%v", phase, reason, message, err)
+	}
+	second, secondStatus, phase, reason, message, err := reconciler.resolveAgentRunComposition(context.Background(), run.DeepCopy())
+	if err != nil || phase != "" {
+		t.Fatalf("second resolve: phase=%q reason=%q message=%q err=%v", phase, reason, message, err)
+	}
+	if firstStatus.CouncilRef == nil {
+		t.Fatal("resolved council provenance is missing")
+	}
+	if got, want := firstStatus.CouncilRef.Name, council.Name; got != want {
+		t.Fatalf("council name = %q, want %q", got, want)
+	}
+	if got, want := firstStatus.CouncilRef.UID, string(council.UID); got != want {
+		t.Fatalf("council UID = %q, want %q", got, want)
+	}
+	if got, want := firstStatus.CouncilRef.Generation, council.Generation; got != want {
+		t.Fatalf("council generation = %d, want %d", got, want)
+	}
+	if got, want := firstStatus.CouncilRef.ResourceVersion, council.ResourceVersion; got != want {
+		t.Fatalf("council resourceVersion = %q, want %q", got, want)
+	}
+	if got, want := firstStatus.CouncilRef.Digest, digestJSON(council.Spec); got != want {
+		t.Fatalf("council digest = %q, want %q", got, want)
+	}
+	if firstStatus.EffectiveDigest != secondStatus.EffectiveDigest || firstStatus.CouncilRef.Digest != secondStatus.CouncilRef.Digest || !reflect.DeepEqual(first.Spec, second.Spec) {
+		t.Fatalf("council resolution is not deterministic: first=%#v second=%#v", firstStatus, secondStatus)
+	}
+	if got := first.Spec.Harness.Execution.ServiceAccountName; got != executingHarness.Spec.Execution.ServiceAccountName {
+		t.Fatalf("member ServiceAccount escalated execution to %q", got)
+	}
+	for _, ref := range first.Spec.Harness.Execution.EnvSecretRefs {
+		if ref.Name == "member-secret" {
+			t.Fatalf("member credential leaked into executing run: %#v", first.Spec.Harness.Execution.EnvSecretRefs)
+		}
+	}
+	foundCouncilSkill := false
+	for _, skill := range first.Spec.Harness.SkillInjections {
+		if skill.Name == "council-repo-council" {
+			foundCouncilSkill = true
+			if skill.Content != strings.TrimSpace(council.Spec.CouncilPrompt) {
+				t.Fatalf("council prompt = %q, want %q", skill.Content, council.Spec.CouncilPrompt)
+			}
+		}
+	}
+	if !foundCouncilSkill {
+		t.Fatalf("council skill missing from %#v", first.Spec.Harness.SkillInjections)
+	}
+}
+
+func TestAgentRunCompositionCouncilAssociationIsExplicitAndRunRefOverridesProfile(t *testing.T) {
+	t.Parallel()
+
+	harness := testAgentHarnessProfile("runtime", controlv1alpha1.AgentRunHarnessBackendCodex, "creds")
+	member := testCouncilMemberProfile("worker-profile")
+	profileCouncil := testAgentCouncil("profile-council", "Profile guidance.")
+	runCouncil := testAgentCouncil("run-council", "Run guidance.")
+	profile := &controlv1alpha1.AgentRunProfile{
+		ObjectMeta: metav1.ObjectMeta{Name: "worker", Namespace: "agents"},
+		Spec:       controlv1alpha1.AgentRunProfileSpec{HarnessProfileRef: &controlv1alpha1.NamespacedObjectReference{Name: harness.Name}, CouncilRef: &controlv1alpha1.NamespacedObjectReference{Name: profileCouncil.Name}},
+	}
+
+	withoutAssociation := &controlv1alpha1.AgentRun{ObjectMeta: metav1.ObjectMeta{Name: "solo", Namespace: "agents"}, Spec: controlv1alpha1.AgentRunSpec{HarnessProfileRef: &controlv1alpha1.NamespacedObjectReference{Name: harness.Name}}}
+	_, status, phase, reason, message, err := testCompositionReconciler(t, harness, member, profileCouncil).resolveAgentRunComposition(context.Background(), withoutAssociation)
+	if err != nil || phase != "" {
+		t.Fatalf("unassociated resolve: phase=%q reason=%q message=%q err=%v", phase, reason, message, err)
+	}
+	if status.CouncilRef != nil {
+		t.Fatalf("object presence selected a council: %#v", status.CouncilRef)
+	}
+
+	override := &controlv1alpha1.AgentRun{
+		ObjectMeta: metav1.ObjectMeta{Name: "override", Namespace: "agents"},
+		Spec:       controlv1alpha1.AgentRunSpec{ProfileRef: &controlv1alpha1.NamespacedObjectReference{Name: profile.Name}, CouncilRef: &controlv1alpha1.NamespacedObjectReference{Name: runCouncil.Name}},
+	}
+	effective, status, phase, reason, message, err := testCompositionReconciler(t, harness, member, profile, profileCouncil, runCouncil).resolveAgentRunComposition(context.Background(), override)
+	if err != nil || phase != "" {
+		t.Fatalf("override resolve: phase=%q reason=%q message=%q err=%v", phase, reason, message, err)
+	}
+	if status.CouncilRef == nil || status.CouncilRef.Name != runCouncil.Name {
+		t.Fatalf("run council did not override profile: %#v", status.CouncilRef)
+	}
+	for _, skill := range effective.Spec.Harness.SkillInjections {
+		if skill.Name == "council-profile-council" {
+			t.Fatalf("profile council prompt leaked through run override: %#v", skill)
+		}
+	}
+}
+
+func TestAgentRunCompositionCouncilWithoutPromptRecordsAssociationOnly(t *testing.T) {
+	t.Parallel()
+
+	harness := testAgentHarnessProfile("runtime", controlv1alpha1.AgentRunHarnessBackendCodex, "creds")
+	member := testCouncilMemberProfile("worker-profile")
+	council := testAgentCouncil("inventory-only", " \n\t ")
+	run := &controlv1alpha1.AgentRun{
+		ObjectMeta: metav1.ObjectMeta{Name: "association", Namespace: "agents"},
+		Spec: controlv1alpha1.AgentRunSpec{
+			HarnessProfileRef: &controlv1alpha1.NamespacedObjectReference{Name: harness.Name},
+			CouncilRef:        &controlv1alpha1.NamespacedObjectReference{Name: council.Name},
+		},
+	}
+	effective, status, phase, reason, message, err := testCompositionReconciler(t, harness, member, council).resolveAgentRunComposition(context.Background(), run)
+	if err != nil || phase != "" {
+		t.Fatalf("resolve: phase=%q reason=%q message=%q err=%v", phase, reason, message, err)
+	}
+	if status.CouncilRef == nil || status.CouncilRef.Name != council.Name {
+		t.Fatalf("association evidence = %#v", status.CouncilRef)
+	}
+	for _, skill := range effective.Spec.Harness.SkillInjections {
+		if strings.HasPrefix(skill.Name, "council-") {
+			t.Fatalf("whitespace prompt injected a skill: %#v", skill)
+		}
+	}
+}
+
+func TestAgentRunCompositionCouncilValidationFailsClosed(t *testing.T) {
+	t.Parallel()
+
+	harness := testAgentHarnessProfile("runtime", controlv1alpha1.AgentRunHarnessBackendCodex, "creds")
+	member := testCouncilMemberProfile("worker-profile")
+	manyMembers := make([]controlv1alpha1.AgentCouncilMemberSpec, 33)
+	for i := range manyMembers {
+		manyMembers[i] = controlv1alpha1.AgentCouncilMemberSpec{Role: "worker", ProfileRef: controlv1alpha1.NamespacedObjectReference{Name: fmt.Sprintf("worker-%02d", i)}}
+	}
+	tests := []struct {
+		name       string
+		councilRef *controlv1alpha1.NamespacedObjectReference
+		council    *controlv1alpha1.AgentCouncil
+		wantPhase  controlv1alpha1.AgentRunPhase
+		wantReason string
+	}{
+		{name: "empty council ref", councilRef: &controlv1alpha1.NamespacedObjectReference{Name: "  "}, wantPhase: controlv1alpha1.AgentRunPhaseFailed, wantReason: "InvalidCouncilRef"},
+		{name: "cross namespace council", councilRef: &controlv1alpha1.NamespacedObjectReference{Name: "other", Namespace: "other"}, wantPhase: controlv1alpha1.AgentRunPhaseFailed, wantReason: "CrossNamespaceCouncilRef"},
+		{name: "missing council", councilRef: &controlv1alpha1.NamespacedObjectReference{Name: "missing"}, wantPhase: controlv1alpha1.AgentRunPhaseNeedsHuman, wantReason: "CouncilNotFound"},
+		{name: "zero members", council: &controlv1alpha1.AgentCouncil{ObjectMeta: metav1.ObjectMeta{Name: "zero", Namespace: "agents"}}, wantPhase: controlv1alpha1.AgentRunPhaseFailed, wantReason: "InvalidCouncilMembers"},
+		{name: "too many members", council: testAgentCouncil("many", "prompt", manyMembers...), wantPhase: controlv1alpha1.AgentRunPhaseFailed, wantReason: "InvalidCouncilMembers"},
+		{name: "empty role", council: testAgentCouncil("bad-role", "prompt", controlv1alpha1.AgentCouncilMemberSpec{Role: " ", ProfileRef: controlv1alpha1.NamespacedObjectReference{Name: member.Name}}), wantPhase: controlv1alpha1.AgentRunPhaseFailed, wantReason: "InvalidCouncilMemberRole"},
+		{name: "empty member profile ref", council: testAgentCouncil("bad-ref", "prompt", controlv1alpha1.AgentCouncilMemberSpec{Role: "worker", ProfileRef: controlv1alpha1.NamespacedObjectReference{Name: " "}}), wantPhase: controlv1alpha1.AgentRunPhaseFailed, wantReason: "InvalidCouncilMemberProfileRef"},
+		{name: "cross namespace member profile ref", council: testAgentCouncil("cross-member", "prompt", controlv1alpha1.AgentCouncilMemberSpec{Role: "worker", ProfileRef: controlv1alpha1.NamespacedObjectReference{Name: member.Name, Namespace: "other"}}), wantPhase: controlv1alpha1.AgentRunPhaseFailed, wantReason: "CrossNamespaceCouncilMemberProfileRef"},
+		{name: "duplicate member profile", council: testAgentCouncil("duplicate", "prompt", controlv1alpha1.AgentCouncilMemberSpec{Role: "worker", ProfileRef: controlv1alpha1.NamespacedObjectReference{Name: member.Name}}, controlv1alpha1.AgentCouncilMemberSpec{Role: "auditor", ProfileRef: controlv1alpha1.NamespacedObjectReference{Name: member.Name}}), wantPhase: controlv1alpha1.AgentRunPhaseFailed, wantReason: "DuplicateCouncilMemberProfile"},
+		{name: "missing member profile object", council: testAgentCouncil("missing-member", "prompt", controlv1alpha1.AgentCouncilMemberSpec{Role: "worker", ProfileRef: controlv1alpha1.NamespacedObjectReference{Name: "does-not-exist"}}), wantPhase: controlv1alpha1.AgentRunPhaseNeedsHuman, wantReason: "CouncilMemberProfileNotFound"},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			ref := tt.councilRef
+			objects := []client.Object{harness, member}
+			if tt.council != nil {
+				ref = &controlv1alpha1.NamespacedObjectReference{Name: tt.council.Name}
+				objects = append(objects, tt.council)
+			}
+			run := &controlv1alpha1.AgentRun{ObjectMeta: metav1.ObjectMeta{Name: "validate", Namespace: "agents"}, Spec: controlv1alpha1.AgentRunSpec{HarnessProfileRef: &controlv1alpha1.NamespacedObjectReference{Name: harness.Name}, CouncilRef: ref}}
+			_, _, phase, reason, message, err := testCompositionReconciler(t, objects...).resolveAgentRunComposition(context.Background(), run)
+			if err != nil {
+				t.Fatalf("resolve: %v", err)
+			}
+			if phase != tt.wantPhase || reason != tt.wantReason {
+				t.Fatalf("block = phase:%q reason:%q message:%q, want phase:%q reason:%q", phase, reason, message, tt.wantPhase, tt.wantReason)
+			}
+		})
+	}
+}
+
+func TestAgentRunCompositionCouncilPromptCannotBeShadowed(t *testing.T) {
+	t.Parallel()
+
+	harness := testAgentHarnessProfile("runtime", controlv1alpha1.AgentRunHarnessBackendCodex, "creds")
+	member := testCouncilMemberProfile("worker-profile")
+	council := testAgentCouncil("repo-council", "Authoritative council guidance.")
+	run := &controlv1alpha1.AgentRun{
+		ObjectMeta: metav1.ObjectMeta{Name: "collision", Namespace: "agents"},
+		Spec: controlv1alpha1.AgentRunSpec{
+			HarnessProfileRef: &controlv1alpha1.NamespacedObjectReference{Name: harness.Name},
+			CouncilRef:        &controlv1alpha1.NamespacedObjectReference{Name: council.Name},
+			Harness:           controlv1alpha1.AgentRunHarnessSpec{SkillInjections: []controlv1alpha1.AgentRunSkillInjectionSpec{{Name: "council-repo-council", Content: "Shadow text."}}},
+		},
+	}
+	_, _, phase, reason, message, err := testCompositionReconciler(t, harness, member, council).resolveAgentRunComposition(context.Background(), run)
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if phase != controlv1alpha1.AgentRunPhaseFailed || reason != "CouncilSkillNameConflict" {
+		t.Fatalf("block = phase:%q reason:%q message:%q", phase, reason, message)
+	}
+}
+
+func TestAgentCouncilPromptLimitMatchesOpenAPIRuneCount(t *testing.T) {
+	t.Parallel()
+
+	council := testAgentCouncil("unicode-boundary", strings.Repeat("界", 65536))
+	if reason, message := validateAgentCouncilShape(council); reason != "" {
+		t.Fatalf("valid multibyte prompt rejected: reason=%q message=%q", reason, message)
+	}
+	council.Spec.CouncilPrompt += "界"
+	if reason, _ := validateAgentCouncilShape(council); reason != "CouncilPromptTooLarge" {
+		t.Fatalf("oversized multibyte prompt reason = %q, want CouncilPromptTooLarge", reason)
 	}
 }

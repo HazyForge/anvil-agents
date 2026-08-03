@@ -16,6 +16,7 @@ The operator owns these resources:
 | `AgentHarnessProfile` | namespaced | Reusable backend and Kubernetes execution envelope |
 | `AgentSkillSet` | namespaced | Reusable backend-neutral instruction and persona pack |
 | `AgentToolSet` | namespaced | Reusable external tool setup and verification contracts |
+| `AgentCouncil` | namespaced | Durable workforce inventory plus opt-in interaction guidance |
 | `AgentSchedule` | namespaced | Interval and manual child-run creation |
 | `AgentRunControl` | cluster | Pause or allow launches for an opaque application key |
 | `AgentDataVolume` | namespaced | Durable PVC lifecycle and expansion-only resizing |
@@ -29,8 +30,8 @@ looks up another API group.
 ## Run lifecycle
 
 An `AgentRun` resolves its optional `AgentRunProfile`, selected
-`AgentHarnessProfile`, and ordered `AgentSkillSet` and `AgentToolSet`
-references, validates
+`AgentHarnessProfile`, ordered `AgentSkillSet` and `AgentToolSet` references,
+and optional `AgentCouncil` association, validates
 credentials and durable volume references, writes a payload ConfigMap, records
 the payload UID/digest and normalized Job execution digest in status, then
 records a create-attempt timestamp immediately before creating one Job. The Job
@@ -64,11 +65,11 @@ Profiles contain durable role, scope, and policy defaults plus references to a
 runtime and capability packs. Run-local non-empty and non-zero compatibility
 fields override profile values; lists use field-specific append/deduplication
 rules. Use a harness-profile swap when inherited false/zero runtime values must
-be cleared. All profile, harness, skill-set, and tool-set references are
-namespace-local.
+be cleared. All profile, harness, skill-set, tool-set, and council references
+are namespace-local.
 See
 [Agent Composition](composition.md) for precedence, atomic harness swaps, skill
-collision rules, and the four explicit override operations.
+collision rules, council association, and the four explicit override operations.
 
 At Job materialization, `status.resolvedComposition` records the exact object
 versions and digests used. `effectiveDigest` covers the complete resolved

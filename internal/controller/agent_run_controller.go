@@ -35,9 +35,9 @@ import (
 )
 
 const (
-	agentRunPollInterval                            = 10 * time.Second
-	agentRunExternalSecretRefreshPollInterval       = 2 * time.Second
-	agentRunExternalSecretRefreshTimeout            = 2 * time.Minute
+	agentRunPollInterval                      = 10 * time.Second
+	agentRunExternalSecretRefreshPollInterval = 2 * time.Second
+	agentRunExternalSecretRefreshTimeout      = 2 * time.Minute
 	// agentRunExternalSecretHealthyMaxAge is how recent status.refreshTime may
 	// be for a Ready ExternalSecret to satisfy preflight when force-sync does
 	// not advance refreshTime (common when the provider value is unchanged).
@@ -45,19 +45,19 @@ const (
 	// agentRunExternalSecretHealthyAcceptAfter is a short grace after the
 	// force-sync request so ESO can attempt a provider reconcile before the
 	// controller accepts an already-healthy stable secret.
-	agentRunExternalSecretHealthyAcceptAfter = 10 * time.Second
-	agentRunReady                            = "Ready"
-	agentRunDefaultCodexImage                       = "anvil-agent-run-codex:dev"
-	agentRunDefaultOpenCodeImage                    = "anvil-agent-run-opencode:dev"
-	agentRunDefaultHermesAgentImage                 = "anvil-agent-run-hermes:dev"
-	agentRunDefaultOpenClawImage                    = "anvil-agent-run-openclaw:dev"
-	agentRunDefaultGrokBuildImage                   = "anvil-agent-run-grok-build:dev"
-	agentRunDefaultPiAgentImage                     = "anvil-agent-run-pi:dev"
-	agentRunDefaultGitHubAPIBaseURL                 = "https://api.github.com"
-	agentRunRemoteSkillMaxBytes                     = 256 * 1024
-	agentRunPayloadConfigMapMaxBytes                = 900 * 1024
-	agentRunPodLogTailLines                   int64 = 10_000
-	agentRunPodLogMaxBytes                    int64 = 4 * 1024 * 1024
+	agentRunExternalSecretHealthyAcceptAfter       = 10 * time.Second
+	agentRunReady                                  = "Ready"
+	agentRunDefaultCodexImage                      = "anvil-agent-run-codex:dev"
+	agentRunDefaultOpenCodeImage                   = "anvil-agent-run-opencode:dev"
+	agentRunDefaultHermesAgentImage                = "anvil-agent-run-hermes:dev"
+	agentRunDefaultOpenClawImage                   = "anvil-agent-run-openclaw:dev"
+	agentRunDefaultGrokBuildImage                  = "anvil-agent-run-grok-build:dev"
+	agentRunDefaultPiAgentImage                    = "anvil-agent-run-pi:dev"
+	agentRunDefaultGitHubAPIBaseURL                = "https://api.github.com"
+	agentRunRemoteSkillMaxBytes                    = 256 * 1024
+	agentRunPayloadConfigMapMaxBytes               = 900 * 1024
+	agentRunPodLogTailLines                  int64 = 10_000
+	agentRunPodLogMaxBytes                   int64 = 4 * 1024 * 1024
 
 	agentRunContainerName              = "agent"
 	agentRunPayloadVolume              = "agent-run-payload"
@@ -96,7 +96,7 @@ var agentRunImmutableGitRefPattern = regexp.MustCompile(`^([0-9a-fA-F]{40}|[0-9a
 // +kubebuilder:rbac:groups="control.anvil.hazyforge.io",resources=agentruns/status,verbs=get;patch;update
 // +kubebuilder:rbac:groups="control.anvil.hazyforge.io",resources=agentruns/finalizers,verbs=update
 // +kubebuilder:rbac:groups="control.anvil.hazyforge.io",resources=agentrunprofiles,verbs=get;list;watch
-// +kubebuilder:rbac:groups="control.anvil.hazyforge.io",resources=agentharnessprofiles;agentskillsets;agenttoolsets,verbs=get;list;watch
+// +kubebuilder:rbac:groups="control.anvil.hazyforge.io",resources=agentcouncils;agentharnessprofiles;agentskillsets;agenttoolsets,verbs=get;list;watch
 // +kubebuilder:rbac:groups="control.anvil.hazyforge.io",resources=adversesituations,verbs=get;list;watch
 // +kubebuilder:rbac:groups="control.anvil.hazyforge.io",resources=agentdatavolumes,verbs=get;list;watch
 // +kubebuilder:rbac:groups="batch",resources=jobs,verbs=create;delete;get;list;patch;update;watch
@@ -2328,6 +2328,10 @@ func agentRunApplyProfile(obj *controlv1alpha1.AgentRun, profile *controlv1alpha
 	}
 	out.Spec.SkillSets = agentRunMergeSkillComposition(profile.Spec.SkillSets, obj.Spec.SkillSets)
 	out.Spec.ToolSets = agentRunMergeToolComposition(profile.Spec.ToolSets, obj.Spec.ToolSets)
+	out.Spec.CouncilRef = deepCopyNamespacedObjectReference(profile.Spec.CouncilRef)
+	if obj.Spec.CouncilRef != nil {
+		out.Spec.CouncilRef = obj.Spec.CouncilRef.DeepCopy()
+	}
 	out.Spec.Notifications = agentRunMergeNotifications(profile.Spec.Notifications, obj.Spec.Notifications)
 	return out
 }
@@ -3601,7 +3605,7 @@ func (r *AgentRunReconciler) agentRunContextJSON(ctx context.Context, obj *contr
 			"repository":    platform.Repository,
 			"repositoryURL": platform.RepositoryURL,
 			"docsPaths":     append([]string(nil), platform.DocsPaths...),
-			"scopeRule":     "Use this anvil-agents context when evidence points at AgentRun, AgentSchedule, AgentRunProfile, AgentHarnessProfile, AgentSkillSet, AdverseSituation, backend adapters, harness prompts, data volumes, RBAC, images, or controller behavior. Product behavior remains owned by the opaque application scope.",
+			"scopeRule":     "Use this anvil-agents context when evidence points at AgentRun, AgentSchedule, AgentRunProfile, AgentHarnessProfile, AgentSkillSet, AgentToolSet, AgentCouncil, AdverseSituation, backend adapters, harness prompts, data volumes, RBAC, images, or controller behavior. Product behavior remains owned by the opaque application scope.",
 		},
 	}
 	if obj.Spec.SituationRef != nil && strings.TrimSpace(obj.Spec.SituationRef.Name) != "" {

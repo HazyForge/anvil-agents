@@ -51,14 +51,15 @@ is pinned to `kind-anvil-agents` (or the selected
 `ANVIL_AGENTS_KIND_CLUSTER`) rather than the ambient context. It leaves the
 cluster available for inspection.
 
-`make kind-e2e` first uses a disposable cluster to upgrade a portable seven-CRD
-legacy-object baseline to the twelve-CRD composition and signal API without losing
+`make kind-e2e` first uses a disposable cluster to upgrade a portable eight-CRD
+legacy-object baseline to the fourteen-CRD composition and signal API without losing
 existing objects. It then runs the current execution, validates every sample with
-server-side dry-run, uninstalls the chart, proves all twelve CRDs plus the run,
-profiles, skill set, tool set, data volume, and PVC were retained, and reinstalls the
-controller. A second run then executes through the retained composition and
-storage objects. The quickstart also asserts the resolved harness, skill-set,
-and tool-set refs, data-volume claim, and both composition digests.
+server-side dry-run, uninstalls the chart, proves all fourteen CRDs plus the run,
+profiles, skill set, tool set, council, data volume, and PVC were retained, and
+reinstalls the controller. A second run then executes through the retained
+composition and storage objects. The quickstart also asserts the resolved harness,
+skill-set, tool-set, and council refs, council guidance payload, one-Job boundary,
+data-volume claim, and composition digests.
 
 ```bash
 kubectl --context kind-anvil-agents get agentrun -n agents-quickstart demo-001 -o yaml

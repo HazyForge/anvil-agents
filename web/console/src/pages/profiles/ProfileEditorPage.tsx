@@ -60,6 +60,16 @@ function toolSetMeta(doc: CompositionDocument): string | undefined {
   return bits.length ? bits.join(" · ") : undefined;
 }
 
+function councilMeta(doc: CompositionDocument): string | undefined {
+  const members = arrayLen(doc.spec ?? {}, "members");
+  const hasPrompt = Boolean(String(doc.spec?.councilPrompt ?? "").trim());
+  const bits = [
+    members ? `${members} member${members === 1 ? "" : "s"}` : null,
+    hasPrompt ? "interaction prompt" : "inventory only",
+  ].filter(Boolean);
+  return bits.join(" · ");
+}
+
 interface ProfileForm {
   name: string;
   description: string;
@@ -68,6 +78,7 @@ interface ProfileForm {
   harnessProfileName: string;
   skillSetNames: string[];
   toolSetNames: string[];
+  councilName: string;
   intent: string;
   systemPrompt: string;
   applicationName: string;
@@ -82,6 +93,7 @@ function emptyForm(): ProfileForm {
     harnessProfileName: "",
     skillSetNames: [],
     toolSetNames: [],
+    councilName: "",
     intent: "",
     systemPrompt: "",
     applicationName: "",
@@ -124,6 +136,10 @@ function formFromDoc(doc: CompositionDocument): ProfileForm {
           .map((ref) => String(ref.name ?? "").trim())
           .filter(Boolean)
       : [];
+  const councilRef =
+    typeof spec.councilRef === "object" && spec.councilRef
+      ? String((spec.councilRef as { name?: string }).name ?? "")
+      : "";
   const scope =
     typeof spec.scope === "object" && spec.scope
       ? (spec.scope as { applicationRef?: { name?: string } })
@@ -136,6 +152,7 @@ function formFromDoc(doc: CompositionDocument): ProfileForm {
     harnessProfileName: harnessRef,
     skillSetNames: uniqueNames(skillRefs),
     toolSetNames: uniqueNames(toolRefs),
+    councilName: councilRef,
     intent: String(harness.intent ?? ""),
     systemPrompt: String(harness.systemPrompt ?? ""),
     applicationName: String(scope.applicationRef?.name ?? ""),
@@ -169,6 +186,9 @@ function buildSpec(form: ProfileForm): Record<string, unknown> {
       refs: toolNames.map((name) => ({ name })),
     };
   }
+  if (form.councilName.trim()) {
+    spec.councilRef = { name: form.councilName.trim() };
+  }
   if (Object.keys(harness).length > 0) {
     spec.harness = harness;
   }
@@ -196,6 +216,7 @@ export function ProfileEditorPage({ token, namespace: activeNamespace, writeEnab
   const [harnessDocs, setHarnessDocs] = useState<CompositionDocument[]>([]);
   const [skillSetDocs, setSkillSetDocs] = useState<CompositionDocument[]>([]);
   const [toolSetDocs, setToolSetDocs] = useState<CompositionDocument[]>([]);
+  const [councilDocs, setCouncilDocs] = useState<CompositionDocument[]>([]);
 
   useEffect(() => {
     if (!namespace || !token) {
@@ -206,11 +227,13 @@ export function ProfileEditorPage({ token, namespace: activeNamespace, writeEnab
       listComposition(token, namespace, "agent-harness-profiles", 200, controller.signal),
       listComposition(token, namespace, "agent-skill-sets", 200, controller.signal),
       listComposition(token, namespace, "agent-tool-sets", 200, controller.signal),
+      listComposition(token, namespace, "agent-councils", 200, controller.signal),
     ])
-      .then(([h, s, t]) => {
+      .then(([h, s, t, c]) => {
         setHarnessDocs(h);
         setSkillSetDocs(s);
         setToolSetDocs(t);
+        setCouncilDocs(c);
       })
       .catch(() => {
         // card grid will show empty; selected names still render as orphan cards
@@ -229,6 +252,10 @@ export function ProfileEditorPage({ token, namespace: activeNamespace, writeEnab
   const toolSetOptions = useMemo(
     () => optionsFromDocs(toolSetDocs, toolSetMeta),
     [toolSetDocs],
+  );
+  const councilOptions = useMemo(
+    () => optionsFromDocs(councilDocs, councilMeta),
+    [councilDocs],
   );
 
   useEffect(() => {
@@ -325,6 +352,9 @@ export function ProfileEditorPage({ token, namespace: activeNamespace, writeEnab
       if (form.toolSetNames.length === 0) {
         delete mergedSpec.toolSets;
       }
+      if (!form.councilName.trim()) {
+        delete mergedSpec.councilRef;
+      }
       // Keep existing harness fields (backend/image/etc) while applying intent/systemPrompt.
       if (typeof doc.spec?.harness === "object" && doc.spec.harness) {
         const prior = doc.spec.harness as Record<string, unknown>;
@@ -400,7 +430,7 @@ export function ProfileEditorPage({ token, namespace: activeNamespace, writeEnab
           <p className="page-sub">
             Namespace <span className="mono">{namespace}</span>
             {" · "}
-            compose by picking harness / skill / tool cards
+            compose by picking harness / skill / tool / council cards
           </p>
         </div>
         <div className="chip-row">
@@ -499,6 +529,18 @@ export function ProfileEditorPage({ token, namespace: activeNamespace, writeEnab
               disabled={!writable}
               emptyLabel="No tool sets in this namespace."
               onChange={(next) => update("toolSetNames", next)}
+            />
+
+            <CompositionCardPicker
+              mode="single"
+              label="Council"
+              help="Optionally associate this profile with one same-namespace AgentCouncil. Membership does not grant peer credentials or launch extra Jobs."
+              options={councilOptions}
+              value={form.councilName}
+              disabled={!writable}
+              emptyLabel="No councils in this namespace."
+              allowClear
+              onChange={(next) => update("councilName", next)}
             />
 
             <div className="field-row">

@@ -3,6 +3,7 @@ export type CompositionPathSegment =
   | "agent-harness-profiles"
   | "agent-skill-sets"
   | "agent-tool-sets"
+  | "agent-councils"
   | "volume-profiles"
   | "agent-data-volumes"
   | "agent-auth-sessions";
@@ -12,6 +13,7 @@ export type CompositionKindName =
   | "AgentHarnessProfile"
   | "AgentSkillSet"
   | "AgentToolSet"
+  | "AgentCouncil"
   | "VolumeProfile"
   | "AgentDataVolume"
   | "AgentAuthSession";
@@ -100,6 +102,14 @@ export const COMPOSITION_KINDS: CompositionKindInfo[] = [
     route: "tool-sets",
     description: "Setup scripts and verify contracts (code-execution authority)",
     danger: true,
+  },
+  {
+    segment: "agent-councils",
+    kind: "AgentCouncil",
+    title: "Councils",
+    plural: "councils",
+    route: "councils",
+    description: "Durable workforce inventory and opt-in interaction guidance",
   },
   {
     segment: "volume-profiles",

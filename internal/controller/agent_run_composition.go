@@ -9,6 +9,7 @@ import (
 	"reflect"
 	"sort"
 	"strings"
+	"unicode/utf8"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -53,6 +54,10 @@ func (r *AgentRunReconciler) resolveAgentRunComposition(ctx context.Context, obj
 	if err != nil || phase != "" {
 		return effective, nil, phase, reason, message, err
 	}
+	council, phase, reason, message, err := resolveAgentCouncilObject(ctx, reader, obj, profile, effective)
+	if err != nil || phase != "" {
+		return effective, nil, phase, reason, message, err
+	}
 
 	// Inline v1alpha1 entries remain the final compatibility overlay. Later
 	// entries with the same name intentionally replace set-provided entries.
@@ -65,6 +70,9 @@ func (r *AgentRunReconciler) resolveAgentRunComposition(ctx context.Context, obj
 	for _, subagent := range effective.Spec.Harness.Subagents {
 		capabilities.upsertSubagent(subagent)
 	}
+	if reason, message := capabilities.applyCouncilPrompt(council); reason != "" {
+		return effective, nil, controlv1alpha1.AgentRunPhaseFailed, reason, message, nil
+	}
 	effective.Spec.Harness.SkillInjections = capabilities.skills
 	effective.Spec.Harness.Tools = capabilities.tools
 	effective.Spec.Harness.Subagents = capabilities.subagents
@@ -75,6 +83,9 @@ func (r *AgentRunReconciler) resolveAgentRunComposition(ctx context.Context, obj
 	}
 	if harnessProfile != nil {
 		status.HarnessProfileRef = resolvedObjectReferenceStatus(harnessProfile, digestJSON(harnessProfile.Spec))
+	}
+	if council != nil {
+		status.CouncilRef = resolvedObjectReferenceStatus(council, digestJSON(council.Spec))
 	}
 	for _, skillSet := range resolvedSkillSets {
 		ref := *resolvedObjectReferenceStatus(skillSet, digestJSON(skillSet.Spec))
@@ -490,6 +501,89 @@ func listGlobalAgentToolSets(ctx context.Context, reader client.Reader, namespac
 	return out, nil
 }
 
+// selectedAgentCouncilRef returns the run-local councilRef when set, otherwise
+// the profile-level association. Membership by itself never selects a council.
+func selectedAgentCouncilRef(profile *controlv1alpha1.AgentRunProfile, obj *controlv1alpha1.AgentRun) *controlv1alpha1.NamespacedObjectReference {
+	if obj != nil && obj.Spec.CouncilRef != nil {
+		return obj.Spec.CouncilRef
+	}
+	if profile != nil {
+		return profile.Spec.CouncilRef
+	}
+	return nil
+}
+
+// resolveAgentCouncilObject resolves inventory and validates every member
+// profile without copying any member profile fields into the effective run.
+// In particular, member harnesses, ServiceAccounts, credentials, tools, and
+// storage never become execution authority for the associated run.
+func resolveAgentCouncilObject(ctx context.Context, reader client.Reader, obj *controlv1alpha1.AgentRun, profile *controlv1alpha1.AgentRunProfile, effective *controlv1alpha1.AgentRun) (*controlv1alpha1.AgentCouncil, controlv1alpha1.AgentRunPhase, string, string, error) {
+	ref := selectedAgentCouncilRef(profile, obj)
+	effective.Spec.CouncilRef = deepCopyNamespacedObjectReference(ref)
+	if ref == nil {
+		return nil, "", "", "", nil
+	}
+	name := strings.TrimSpace(ref.Name)
+	if name == "" {
+		return nil, controlv1alpha1.AgentRunPhaseFailed, "InvalidCouncilRef", "spec.councilRef.name is required when councilRef is set.", nil
+	}
+	namespace := firstNonEmpty(strings.TrimSpace(ref.Namespace), obj.Namespace)
+	if namespace != obj.Namespace {
+		return nil, controlv1alpha1.AgentRunPhaseFailed, "CrossNamespaceCouncilRef", "AgentRun councilRef must reference an AgentCouncil in the AgentRun namespace.", nil
+	}
+	council := &controlv1alpha1.AgentCouncil{}
+	if err := reader.Get(ctx, client.ObjectKey{Namespace: namespace, Name: name}, council); err != nil {
+		if apierrors.IsNotFound(err) {
+			return nil, controlv1alpha1.AgentRunPhaseNeedsHuman, "CouncilNotFound", fmt.Sprintf("AgentCouncil %s/%s was not found.", namespace, name), nil
+		}
+		return nil, "", "", "", err
+	}
+	if reason, message := validateAgentCouncilShape(council); reason != "" {
+		return nil, controlv1alpha1.AgentRunPhaseFailed, reason, message, nil
+	}
+	for i, member := range council.Spec.Members {
+		profileName := strings.TrimSpace(member.ProfileRef.Name)
+		memberProfile := &controlv1alpha1.AgentRunProfile{}
+		if err := reader.Get(ctx, client.ObjectKey{Namespace: council.Namespace, Name: profileName}, memberProfile); err != nil {
+			if apierrors.IsNotFound(err) {
+				return nil, controlv1alpha1.AgentRunPhaseNeedsHuman, "CouncilMemberProfileNotFound", fmt.Sprintf("AgentCouncil %s/%s members[%d] references missing AgentRunProfile %s/%s.", council.Namespace, council.Name, i, council.Namespace, profileName), nil
+			}
+			return nil, "", "", "", err
+		}
+	}
+	return council, "", "", "", nil
+}
+
+func validateAgentCouncilShape(council *controlv1alpha1.AgentCouncil) (string, string) {
+	if council == nil {
+		return "InvalidCouncil", "AgentCouncil is required."
+	}
+	if len(council.Spec.Members) < 1 || len(council.Spec.Members) > 32 {
+		return "InvalidCouncilMembers", fmt.Sprintf("AgentCouncil %s/%s must list between 1 and 32 members.", council.Namespace, council.Name)
+	}
+	seenProfiles := map[string]struct{}{}
+	for i, member := range council.Spec.Members {
+		if strings.TrimSpace(member.Role) == "" {
+			return "InvalidCouncilMemberRole", fmt.Sprintf("AgentCouncil %s/%s members[%d].role is required.", council.Namespace, council.Name, i)
+		}
+		profileName := strings.TrimSpace(member.ProfileRef.Name)
+		if profileName == "" {
+			return "InvalidCouncilMemberProfileRef", fmt.Sprintf("AgentCouncil %s/%s members[%d].profileRef.name is required.", council.Namespace, council.Name, i)
+		}
+		if memberNamespace := strings.TrimSpace(member.ProfileRef.Namespace); memberNamespace != "" && memberNamespace != council.Namespace {
+			return "CrossNamespaceCouncilMemberProfileRef", fmt.Sprintf("AgentCouncil %s/%s members[%d].profileRef must stay in the council namespace.", council.Namespace, council.Name, i)
+		}
+		if _, exists := seenProfiles[profileName]; exists {
+			return "DuplicateCouncilMemberProfile", fmt.Sprintf("AgentCouncil %s/%s lists profile %q more than once.", council.Namespace, council.Name, profileName)
+		}
+		seenProfiles[profileName] = struct{}{}
+	}
+	if utf8.RuneCountInString(council.Spec.CouncilPrompt) > 65536 {
+		return "CouncilPromptTooLarge", fmt.Sprintf("AgentCouncil %s/%s councilPrompt exceeds 65536 characters.", council.Namespace, council.Name)
+	}
+	return "", ""
+}
+
 type agentRunCapabilities struct {
 	skills          []controlv1alpha1.AgentRunSkillInjectionSpec
 	tools           []controlv1alpha1.AgentRunToolSpec
@@ -505,6 +599,29 @@ func newAgentRunCapabilities() *agentRunCapabilities {
 		toolIndexes:     map[string]int{},
 		subagentIndexes: map[string]int{},
 	}
+}
+
+// applyCouncilPrompt reserves council-<name> for controller-proven council
+// guidance. Failing on a pre-existing skill avoids recording council
+// provenance while silently executing different inline or set-provided text.
+func (c *agentRunCapabilities) applyCouncilPrompt(council *controlv1alpha1.AgentCouncil) (string, string) {
+	if council == nil {
+		return "", ""
+	}
+	prompt := strings.TrimSpace(council.Spec.CouncilPrompt)
+	if prompt == "" {
+		return "", ""
+	}
+	name := "council-" + council.Name
+	if _, exists := c.skillIndexes[name]; exists {
+		return "CouncilSkillNameConflict", fmt.Sprintf("Skill name %q is reserved for AgentCouncil %s/%s guidance.", name, council.Namespace, council.Name)
+	}
+	c.upsertSkill(controlv1alpha1.AgentRunSkillInjectionSpec{
+		Name:        name,
+		Description: "Multi-agent interaction guidance for AgentCouncil " + council.Name + ".",
+		Content:     prompt,
+	})
+	return "", ""
 }
 
 func (c *agentRunCapabilities) applySkillSet(skillSet *controlv1alpha1.AgentSkillSet) (string, string) {

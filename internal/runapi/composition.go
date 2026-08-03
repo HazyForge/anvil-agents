@@ -84,6 +84,12 @@ var compositionKinds = map[string]compositionKind{
 		NewObject:   func() client.Object { return &agentsv1alpha1.AgentToolSet{} },
 		NewList:     func() client.ObjectList { return &agentsv1alpha1.AgentToolSetList{} },
 	},
+	"agent-councils": {
+		PathSegment: "agent-councils",
+		Kind:        "AgentCouncil",
+		NewObject:   func() client.Object { return &agentsv1alpha1.AgentCouncil{} },
+		NewList:     func() client.ObjectList { return &agentsv1alpha1.AgentCouncilList{} },
+	},
 	"volume-profiles": {
 		PathSegment: "volume-profiles",
 		Kind:        "VolumeProfile",
@@ -591,6 +597,12 @@ func objectListItems(list client.ObjectList) []client.Object {
 		}
 		return out
 	case *agentsv1alpha1.AgentToolSetList:
+		out := make([]client.Object, len(typed.Items))
+		for i := range typed.Items {
+			out[i] = &typed.Items[i]
+		}
+		return out
+	case *agentsv1alpha1.AgentCouncilList:
 		out := make([]client.Object, len(typed.Items))
 		for i := range typed.Items {
 			out[i] = &typed.Items[i]
