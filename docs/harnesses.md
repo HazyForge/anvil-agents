@@ -1,5 +1,7 @@
 # Harnesses
 
+![Multi-harness agent council: Codex, OpenCode, Hermes, OpenClaw, Grok Build, and Pi around the Anvil controller core](images/multi-harness.jpg)
+
 One `AgentRun` creates one Job and selects one harness. Install-wide
 `runnerImages` values provide defaults; the source chart uses local `:dev`
 names and a packaged chart uses its matching `vVERSION`. An

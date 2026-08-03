@@ -1,5 +1,7 @@
 # Agent Composition
 
+![Composition model: profiles, harness, skills, tools, and schedules compose into one Kubernetes Job](images/composition-model.jpg)
+
 Anvil Agents uses four namespaced resources for reusable configuration:
 
 | Resource | Owns | Must not own |

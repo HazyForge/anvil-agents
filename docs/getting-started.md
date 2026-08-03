@@ -5,6 +5,8 @@ controller, CRDs, PVC-backed state, Job creation, mounted payload, custom
 harness, logs, and structured terminal status before a model provider is
 introduced.
 
+![AgentRun lifecycle overview for first-time installs](images/agentrun-lifecycle.jpg)
+
 ## Prerequisites
 
 - Linux amd64 for the currently validated image set

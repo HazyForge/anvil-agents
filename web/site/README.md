@@ -20,19 +20,27 @@ pnpm install
 pnpm dev
 ```
 
+Docs are loaded live from the monorepo `docs/` tree (Vite alias `@repo-docs`).
+Diagrams live in `docs/images/` and are synced into `public/docs/` on
+`pnpm dev` / `pnpm build`.
+
 ```bash
 pnpm build
 pnpm preview
+# open http://127.0.0.1:4173/docs
 ```
 
 ## Container
 
+Build from the **repository root** so operator markdown is embedded:
+
 ```bash
-docker build -t ghcr.io/hazyforge/anvil-agents-site:dev web/site
+docker build -f web/site/Dockerfile -t ghcr.io/hazyforge/anvil-agents-site:dev .
 docker run --rm -p 8080:8080 ghcr.io/hazyforge/anvil-agents-site:dev
 ```
 
 Probes: `GET /healthz`, `GET /readyz`.
+Routes: `/`, `/docs`, `/docs/<slug>` (SPA fallback via nginx).
 
 ## Production wiring
 

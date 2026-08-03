@@ -5,6 +5,8 @@
 Primaris and does not read Application, Repository, task, build, release, or Hub
 resources.
 
+![AgentRun lifecycle: create run, resolve composition, materialize payload, create Job, harness executes, terminal status and archive](images/agentrun-lifecycle.jpg)
+
 ## Ownership
 
 The operator owns these resources:

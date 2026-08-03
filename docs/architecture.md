@@ -5,6 +5,8 @@ controller resolves a run, materializes immutable payload files in a ConfigMap,
 creates one Kubernetes Job, and projects Job, Pod, log, and structured report
 state back onto the `AgentRun`.
 
+![Anvil Agents operator architecture: AgentRun and AgentSchedule feed the controller, which creates Jobs and Pods and uses AgentDataVolume PVC state](images/architecture-overview.jpg)
+
 ## Control Loop
 
 1. A user or `AgentSchedule` creates an `AgentRun`.
