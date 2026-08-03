@@ -42,7 +42,8 @@ exposes sanitized AgentRun state and live streams through OIDC-protected read
 endpoints. On anvil-primaris this is already deployed:
 
 - Deployment: `anvil-agents-system/anvil-agents-system-api`
-- HTTPRoute host: `agents.anvil.hazyforge.io`
+- HTTPRoute host: `agents.anvil.hazyforge.io` (operator console)
+- Product marketing site: `anvil-agents.hazyforge.io` (`web/site/`)
 
 Existing endpoints:
 
