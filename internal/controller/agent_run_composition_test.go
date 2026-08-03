@@ -1031,3 +1031,16 @@ func TestAgentRunCompositionCouncilPromptCannotBeShadowed(t *testing.T) {
 		t.Fatalf("block = phase:%q reason:%q message:%q", phase, reason, message)
 	}
 }
+
+func TestAgentCouncilPromptLimitMatchesOpenAPIRuneCount(t *testing.T) {
+	t.Parallel()
+
+	council := testAgentCouncil("unicode-boundary", strings.Repeat("界", 65536))
+	if reason, message := validateAgentCouncilShape(council); reason != "" {
+		t.Fatalf("valid multibyte prompt rejected: reason=%q message=%q", reason, message)
+	}
+	council.Spec.CouncilPrompt += "界"
+	if reason, _ := validateAgentCouncilShape(council); reason != "CouncilPromptTooLarge" {
+		t.Fatalf("oversized multibyte prompt reason = %q, want CouncilPromptTooLarge", reason)
+	}
+}

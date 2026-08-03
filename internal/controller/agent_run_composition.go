@@ -9,6 +9,7 @@ import (
 	"reflect"
 	"sort"
 	"strings"
+	"unicode/utf8"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -577,8 +578,8 @@ func validateAgentCouncilShape(council *controlv1alpha1.AgentCouncil) (string, s
 		}
 		seenProfiles[profileName] = struct{}{}
 	}
-	if len(council.Spec.CouncilPrompt) > 65536 {
-		return "CouncilPromptTooLarge", fmt.Sprintf("AgentCouncil %s/%s councilPrompt exceeds 65536 bytes.", council.Namespace, council.Name)
+	if utf8.RuneCountInString(council.Spec.CouncilPrompt) > 65536 {
+		return "CouncilPromptTooLarge", fmt.Sprintf("AgentCouncil %s/%s councilPrompt exceeds 65536 characters.", council.Namespace, council.Name)
 	}
 	return "", ""
 }
