@@ -1804,7 +1804,8 @@ spec:
                   resources:
                     description: |-
                       Resources bounds the CPU, memory, and ephemeral storage assigned to the
-                      agent container. Cluster policy may require explicit requests and limits.
+                      agent container and every OCI tool initializer. Cluster policy may require
+                      explicit requests and limits.
                     properties:
                       claims:
                         description: |-

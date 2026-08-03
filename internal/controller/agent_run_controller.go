@@ -61,6 +61,9 @@ const (
 
 	agentRunContainerName              = "agent"
 	agentRunPayloadVolume              = "agent-run-payload"
+	agentRunToolsVolume                = "agent-run-tools"
+	agentRunToolsMountPath             = "/opt/anvil/tools"
+	agentRunToolsDefaultFSGroup        = 10001
 	agentRunDataVolumePrefix           = "agent-data-"
 	agentRunSpiffeWorkloadAPIVolume    = "spiffe-workload-api"
 	agentRunSpiffeWorkloadAPIMountPath = "/spiffe-workload-api"
@@ -91,6 +94,7 @@ const (
 
 var agentRunSkillFileNameUnsafeChars = regexp.MustCompile(`[^A-Za-z0-9_.-]+`)
 var agentRunImmutableGitRefPattern = regexp.MustCompile(`^([0-9a-fA-F]{40}|[0-9a-fA-F]{64})$`)
+var agentRunImmutableToolImagePattern = regexp.MustCompile(`^[^[:space:]@]+@sha256:[0-9a-f]{64}$`)
 
 // +kubebuilder:rbac:groups="control.anvil.hazyforge.io",resources=agentruns,verbs=create;delete;get;list;patch;update;watch
 // +kubebuilder:rbac:groups="control.anvil.hazyforge.io",resources=agentruns/status,verbs=get;patch;update
@@ -1288,6 +1292,20 @@ func (r *AgentRunReconciler) agentRunJob(obj *controlv1alpha1.AgentRun, jobName,
 			},
 		},
 	}}
+	initContainers := agentRunToolImageInitializerContainers(obj)
+	if len(initContainers) > 0 {
+		volumeMounts = append(volumeMounts, corev1.VolumeMount{
+			Name:      agentRunToolsVolume,
+			MountPath: agentRunToolsMountPath,
+			ReadOnly:  true,
+		})
+		volumes = append(volumes, corev1.Volume{
+			Name: agentRunToolsVolume,
+			VolumeSource: corev1.VolumeSource{
+				EmptyDir: &corev1.EmptyDirVolumeSource{},
+			},
+		})
+	}
 	for index, item := range dataVolumes {
 		volumeName := agentRunDataVolumeName(index, item)
 		volumeMounts = append(volumeMounts, corev1.VolumeMount{
@@ -1360,12 +1378,60 @@ func (r *AgentRunReconciler) agentRunJob(obj *controlv1alpha1.AgentRun, jobName,
 					Tolerations:        obj.Spec.Harness.Execution.Tolerations,
 					ImagePullSecrets:   obj.Spec.Harness.Execution.ImagePullSecrets,
 					SecurityContext:    agentRunPodSecurityContext(obj),
+					InitContainers:     initContainers,
 					Containers:         []corev1.Container{container},
 					Volumes:            volumes,
 				},
 			},
 		},
 	}
+}
+
+func agentRunToolImageInitializerContainers(obj *controlv1alpha1.AgentRun) []corev1.Container {
+	if obj == nil {
+		return nil
+	}
+	containers := make([]corev1.Container, 0, len(obj.Spec.Harness.Tools))
+	for index, tool := range obj.Spec.Harness.Tools {
+		initializer := tool.ImageInitializer
+		if initializer == nil {
+			continue
+		}
+		containers = append(containers, corev1.Container{
+			Name:            agentRunToolImageInitializerName(index, tool),
+			Image:           strings.TrimSpace(initializer.Image),
+			ImagePullPolicy: corev1.PullIfNotPresent,
+			Command:         append([]string(nil), initializer.Command...),
+			Args:            append([]string(nil), initializer.Args...),
+			WorkingDir:      agentRunToolsMountPath,
+			SecurityContext: agentRunContainerSecurityContext(obj),
+			Resources:       *obj.Spec.Harness.Execution.Resources.DeepCopy(),
+			VolumeMounts: []corev1.VolumeMount{{
+				Name:      agentRunToolsVolume,
+				MountPath: agentRunToolsMountPath,
+			}},
+		})
+	}
+	if len(containers) == 0 {
+		return nil
+	}
+	return containers
+}
+
+func agentRunHasToolImageInitializers(obj *controlv1alpha1.AgentRun) bool {
+	if obj == nil {
+		return false
+	}
+	for _, tool := range obj.Spec.Harness.Tools {
+		if tool.ImageInitializer != nil {
+			return true
+		}
+	}
+	return false
+}
+
+func agentRunToolImageInitializerName(index int, tool controlv1alpha1.AgentRunToolSpec) string {
+	return agentRunChildName("tool-init", strconv.Itoa(index+1), tool.Name)
 }
 
 func agentRunJobAnnotations(obj *controlv1alpha1.AgentRun) map[string]string {
@@ -3298,6 +3364,17 @@ func (r *AgentRunReconciler) agentRunBlockingValidation(obj *controlv1alpha1.Age
 		if len(tool.VerifyCommand) > 0 && strings.TrimSpace(tool.VerifyCommand[0]) == "" {
 			return controlv1alpha1.AgentRunPhaseFailed, "InvalidToolVerifyCommand", "spec.harness.tools verifyCommand entries must start with a command."
 		}
+		if initializer := tool.ImageInitializer; initializer != nil {
+			image := strings.TrimSpace(initializer.Image)
+			if !agentRunImmutableToolImagePattern.MatchString(image) {
+				return controlv1alpha1.AgentRunPhaseFailed, "MutableToolInitializerImage", "spec.harness.tools imageInitializer.image must be an OCI image reference pinned as image@sha256:<64 lowercase hex>."
+			}
+			for _, command := range initializer.Command {
+				if strings.TrimSpace(command) == "" {
+					return controlv1alpha1.AgentRunPhaseFailed, "InvalidToolInitializerCommand", "spec.harness.tools imageInitializer.command entries must not be empty."
+				}
+			}
+		}
 	}
 	switch agentRunBackendKind(obj) {
 	case controlv1alpha1.AgentRunHarnessBackendCodex:
@@ -3519,6 +3596,16 @@ func agentRunPodSecurityContext(obj *controlv1alpha1.AgentRun) *corev1.PodSecuri
 		out.SeccompProfile = &corev1.SeccompProfile{
 			Type: corev1.SeccompProfileTypeRuntimeDefault,
 		}
+	}
+	// EmptyDir ownership is otherwise runtime-dependent when every container is
+	// restricted to a non-root UID. Apply the supplementary group only to runs
+	// that materialize OCI tools, and retain any explicit profile/run fsGroup.
+	// The fixed group makes /opt/anvil/tools writable without a privileged chmod
+	// initializer and leaves runs without tool initializers unchanged. Profiles
+	// that also mount PVCs can set an explicit fsGroup to retain their intended
+	// volume ownership contract.
+	if out.FSGroup == nil && agentRunHasToolImageInitializers(obj) {
+		out.FSGroup = int64Ptr(agentRunToolsDefaultFSGroup)
 	}
 	return out
 }

@@ -1867,7 +1867,8 @@ spec:
                       resources:
                         description: |-
                           Resources bounds the CPU, memory, and ephemeral storage assigned to the
-                          agent container. Cluster policy may require explicit requests and limits.
+                          agent container and every OCI tool initializer. Cluster policy may require
+                          explicit requests and limits.
                         properties:
                           claims:
                             description: |-
@@ -2372,6 +2373,43 @@ spec:
                           description: Description explains what this tool is for
                             during the run.
                           type: string
+                        imageInitializer:
+                          description: |-
+                            ImageInitializer optionally materializes the tool from an immutable OCI
+                            image into /opt/anvil/tools before the agent container starts. This is
+                            independent of the selected runner image. Use SetupScript to add the fixed
+                            directory to PATH when the runner does not already search it.
+                          properties:
+                            args:
+                              description: |-
+                                Args optionally replaces the image arguments. It follows Kubernetes
+                                container args semantics.
+                              items:
+                                type: string
+                              maxItems: 64
+                              type: array
+                            command:
+                              description: |-
+                                Command optionally replaces the image entrypoint. It follows Kubernetes
+                                container command semantics and must write the tool into
+                                /opt/anvil/tools before exiting successfully.
+                              items:
+                                minLength: 1
+                                type: string
+                              maxItems: 32
+                              type: array
+                            image:
+                              description: |-
+                                Image is an OCI image reference pinned by canonical sha256 digest. Tags
+                                alone are rejected so an accepted AgentRun composition always identifies
+                                the exact initializer bytes.
+                              maxLength: 512
+                              minLength: 73
+                              pattern: ^[^[:space:]@]+@sha256:[0-9a-f]{64}$
+                              type: string
+                          required:
+                          - image
+                          type: object
                         name:
                           description: Name is a stable tool identifier such as kbctl.
                           minLength: 1

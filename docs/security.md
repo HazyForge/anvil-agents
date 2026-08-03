@@ -6,23 +6,38 @@ multi-tenant sandbox.
 
 ## Authority Model
 
-An `AgentRun`, `AgentRunProfile`, or `AgentHarnessProfile` author can select an
-image, custom command, ServiceAccount, same-namespace Secrets, pull
+An `AgentRun`, `AgentRunProfile`, or `AgentHarnessProfile` author can select a
+runner image, custom command, ServiceAccount, same-namespace Secrets, pull
 credentials, security context, node placement, and tolerations. An
 `AgentToolSet` author, or an author using the legacy `AgentSkillSet.spec.tools`
-field, can supply setup scripts that execute in consuming Jobs.
+field, can supply setup scripts and exact-digest OCI initializers that execute
+in consuming Jobs.
 Granting write access to any of these resources is therefore equivalent to
 granting substantial code-execution authority in that namespace. An admission
 controller should enforce allowed registries, ServiceAccounts, Secret and PVC
 refs, security contexts, resources, and placement rules.
 
-Skill and tool sets cannot directly select images, identities, Secrets,
-storage, or placement. Remote skill sources must identify a full immutable Git
-commit, and private-source tokens are selected by exact API host only from the
-trusted harness execution envelope. Keep those boundaries in admission policy too. A
-run-local harness swap replaces the profile-inline runtime envelope so
-provider credentials do not leak between harnesses; migrate runtime fields
-into dedicated harness profiles before relying on this behavior.
+Skill and tool sets cannot select identities, Secrets, durable storage, or
+placement. A tool contract can select only an initializer image pinned as
+`image@sha256:<64 lowercase hex>`; the init container gets the fixed tool
+`emptyDir`, not harness Secret env, payload, data-volume, or SPIFFE mounts. It
+still shares the pod's ServiceAccount and network boundary, just as its setup
+script later would, so registry and digest allowlists remain necessary. Remote
+skill sources must identify a full immutable Git commit, and private-source
+tokens are selected by exact API host only from the trusted harness execution
+envelope. Keep those boundaries in admission policy too. A run-local harness
+swap replaces the profile-inline runtime envelope so provider credentials do
+not leak between harnesses; migrate runtime fields into dedicated harness
+profiles before relying on this behavior.
+
+Tool initializer images must declare a numeric non-zero `USER` unless the
+harness supplies a numeric non-root `runAsUser`. Initializer runs default a
+missing pod `fsGroup` to `10001` so the non-root container can write the tools
+`emptyDir`; explicit profile/run values take precedence. This default is not
+applied to runs without initializers. Set `fsGroup` explicitly when a run also
+mounts PVCs with another ownership contract. Initializers inherit the same
+resource requests and limits as the agent container, so namespace quota and
+scheduler accounting cover their peak execution.
 
 Use a dedicated namespace per trust domain. Put only agent-consumable Secrets
 there. Disable unnecessary token mounting on runner ServiceAccounts, grant

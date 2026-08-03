@@ -15,7 +15,8 @@ state back onto the `AgentRun`.
 4. It writes `prompt.md`, `source.json`, skill files, and tool setup scripts,
    then records composition and payload digests.
 5. It creates exactly one Job using the selected backend image and runner
-   ServiceAccount.
+   ServiceAccount. Optional digest-pinned tool init containers populate a
+   shared pod-local directory before the agent container starts.
 6. The selected built-in adapter prepares configured source and bootstraps
    tools; a custom harness implements the same parts it needs. The harness then
    performs the prompt and emits structured status records.
@@ -71,7 +72,9 @@ An `AgentRunProfile` owns why and where a role operates. An
 image, workload identity, credentials, storage, placement, and limits. An
 `AgentSkillSet` owns reusable backend-neutral instruction packs and optional
 delegated personas. `AgentToolSet` owns setup and verification contracts for
-external tools whose lifecycle is independent from those instructions.
+external tools whose lifecycle is independent from those instructions,
+including optional exact-digest OCI initializers that populate the fixed
+pod-local tool directory without changing a runner image.
 `AgentCouncil` owns a durable workforce inventory of highest-level profile
 roles plus optional interaction guidance. Councils never create Jobs and never
 grant Secrets, ServiceAccounts, harnesses, tools, or storage; association via
@@ -79,9 +82,11 @@ grant Secrets, ServiceAccounts, harnesses, tools, or storage; association via
 
 The split allows the same knowledge or review policy and external client to run
 through Codex, OpenCode, Pi, or a custom harness without copying them. Skill
-and tool sets cannot select a Secret, ServiceAccount, image, or volume, so
-choosing one never silently grants runtime identity. Tool setup scripts still
-execute code, so their authors remain a code-execution authority. See [Agent
+and tool sets cannot select a Secret, ServiceAccount, durable volume, or
+placement. A tool set may select only a digest-pinned initializer image, which
+adds code but no new runtime identity or credential reference. Tool setup
+scripts and initializers still execute code, so their authors remain a
+code-execution authority. See [Agent
 Composition](composition.md) for the exact merge and override rules.
 
 ## Policy Boundaries
