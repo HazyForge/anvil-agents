@@ -51,6 +51,7 @@ RUN apt-get update \
 		jq \
 		gzip \
 		make \
+		openssl \
 		openssh-client \
 		python3 \
 		ripgrep \

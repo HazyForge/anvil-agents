@@ -30,6 +30,17 @@ least-privilege RBAC, apply Pod Security Admission, and restrict egress with
 NetworkPolicy. Never place broad production or cluster-admin credentials in an
 agent namespace.
 
+Prefer one-repository GitHub App installations over human PATs for repository
+agents. Built-in runners require exact repository and explicit token-permission
+inputs, reject static-token/App ambiguity, and remove exported App key material
+before invoking external tools or models. Registration permissions and the App
+installation's selected-repository list remain external authority and must be
+reviewed independently; a narrowly requested installation token cannot reduce
+an unnoticed extra repository unless the request also selects the exact
+repository, and it cannot grant permissions absent from the App registration.
+Do not expose Actions, administration, secrets, workflow, package, or
+organization permissions through the generic runner adapter.
+
 `anvil-agentctl` uses the caller's kubeconfig and Kubernetes RBAC. It has no
 embedded service identity or authorization bypass. `run create` requires the
 caller to have `create` access to AgentRuns and never updates an existing run.

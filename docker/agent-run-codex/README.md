@@ -38,6 +38,9 @@ blocks reseeding until the next successful reauth.
 Repository cloning, tool setup, and GitHub authentication happen before Codex
 starts. Tokens are not printed. A missing repository or insufficient push
 permission is reported as residual risk unless the run requires it.
+GitHub auth may use the legacy static token or the shared one-repository GitHub
+App adapter documented in [agent-run-common](../agent-run-common/README.md).
+Raw App bootstrap environment is removed before Codex starts.
 
 Immutable prompts in `static-prompts/` load before profile, event, skill, goal,
 and environment overlays. Structured status lines are written to pod stdout so

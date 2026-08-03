@@ -43,6 +43,7 @@ RUN apt-get update \
 		git \
 		gnupg \
 		jq \
+		openssl \
 		openssh-client \
 		python3 \
 		ripgrep \

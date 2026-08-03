@@ -173,6 +173,21 @@ vault properties that reconcile healthy without rewriting the refresh stamp.
 The chart grants ExternalSecret mutation only when
 `externalSecrets.enabled=true`.
 
+Every built-in runner supports a generic GitHub App credential adapter. The
+namespace-local Secret provides `GITHUB_APP_ID`,
+`GITHUB_APP_INSTALLATION_ID`, and `GITHUB_APP_PRIVATE_KEY`; the execution
+envelope separately declares exact `ANVIL_GITHUB_APP_REPOSITORY` and/or
+`ANVIL_GITHUB_APP_REPOSITORY_ID` plus a non-empty
+`ANVIL_GITHUB_APP_PERMISSIONS_JSON`. Token permissions are hard-capped to
+read-only checks/statuses/metadata and read-or-write contents/issues/pull
+requests. The runner requests an installation token for exactly one repository
+and verifies GitHub's returned repository and permission set before configuring
+pod-local `gh` and Git authentication. App bootstrap values and raw token
+environment are removed before checkout, tool setup, and model execution.
+Static `GH_TOKEN`/`GITHUB_TOKEN` remains a mutually exclusive compatibility
+adapter. See [the shared runner contract](../docker/agent-run-common/README.md)
+and the [GitHub App harness sample](../config/samples/control_v1alpha1_agentharnessprofile_github_app.yaml).
+
 SPIFFE Workload API mounting is opt-in and requires an exact SPIFFE ID. The
 operator only mounts the CSI socket; workload registration and authorization
 remain external responsibilities.
