@@ -71,3 +71,29 @@ func TestCompositionDeepCopyDoesNotAliasOverrides(t *testing.T) {
 		t.Fatalf("source tool set ref mutated to %q", got)
 	}
 }
+
+func TestToolImageInitializerDeepCopyDoesNotAliasCommandOrArgs(t *testing.T) {
+	t.Parallel()
+
+	toolSet := &AgentToolSet{Spec: AgentToolSetSpec{Tools: []AgentRunToolSpec{{
+		Name: "anvilctl",
+		ImageInitializer: &AgentRunToolImageInitializerSpec{
+			Image:   "registry.example/anvilctl@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+			Command: []string{"/install-tool"},
+			Args:    []string{"/source/anvilctl", "/opt/anvil/tools/anvilctl"},
+		},
+	}}}}
+
+	copy := toolSet.DeepCopy()
+	copy.Spec.Tools[0].ImageInitializer.Image = "registry.example/other@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	copy.Spec.Tools[0].ImageInitializer.Command[0] = "/other-installer"
+	copy.Spec.Tools[0].ImageInitializer.Args[0] = "/other-source"
+
+	initializer := toolSet.Spec.Tools[0].ImageInitializer
+	if initializer.Image != "registry.example/anvilctl@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" {
+		t.Fatalf("source initializer image mutated to %q", initializer.Image)
+	}
+	if initializer.Command[0] != "/install-tool" || initializer.Args[0] != "/source/anvilctl" {
+		t.Fatalf("source initializer command/args mutated to %#v / %#v", initializer.Command, initializer.Args)
+	}
+}

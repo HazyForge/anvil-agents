@@ -1357,6 +1357,264 @@ func TestAgentRunToolsBecomeSetupFilesAndEnv(t *testing.T) {
 	}
 }
 
+func TestAgentRunJobMaterializesDigestPinnedToolImageInitializers(t *testing.T) {
+	t.Parallel()
+
+	digest := strings.Repeat("a", 64)
+	run := &controlv1alpha1.AgentRun{
+		ObjectMeta: metav1.ObjectMeta{Name: "release-manager", Namespace: "agents"},
+		Spec: controlv1alpha1.AgentRunSpec{
+			SourceRef: controlv1alpha1.AgentRunSourceRef{Kind: "Manual", Name: "operator"},
+			Harness: controlv1alpha1.AgentRunHarnessSpec{
+				Execution: controlv1alpha1.AgentRunHarnessExecutionSpec{
+					ImagePullSecrets: []corev1.LocalObjectReference{{Name: "ghcr-pull"}},
+					EnvSecretRefs:    []controlv1alpha1.NamespacedObjectReference{{Name: "runner-credentials"}},
+					ExtraEnv:         []corev1.EnvVar{{Name: "RUNNER_SETTING", Value: "enabled"}},
+					Resources: corev1.ResourceRequirements{
+						Requests: corev1.ResourceList{
+							corev1.ResourceCPU:    resource.MustParse("25m"),
+							corev1.ResourceMemory: resource.MustParse("32Mi"),
+						},
+						Limits: corev1.ResourceList{
+							corev1.ResourceCPU:    resource.MustParse("100m"),
+							corev1.ResourceMemory: resource.MustParse("64Mi"),
+						},
+					},
+					SpiffeWorkloadAPI: controlv1alpha1.AgentRunSpiffeWorkloadAPISpec{
+						Enabled:  true,
+						SPIFFEID: "spiffe://anvil.hazyforge.io/workload/agents/release-manager",
+					},
+				},
+				Tools: []controlv1alpha1.AgentRunToolSpec{
+					{Name: "repository-status", VerifyCommand: []string{"git", "status", "--short"}},
+					{
+						Name: "anvilctl",
+						ImageInitializer: &controlv1alpha1.AgentRunToolImageInitializerSpec{
+							Image:   "ghcr.io/hazyforge/anvilctl@sha256:" + digest,
+							Command: []string{"/tool-image-init"},
+							Args:    []string{"/usr/local/bin/anvilctl", agentRunToolsMountPath + "/anvilctl"},
+						},
+						SetupScript:   `export PATH="/opt/anvil/tools:${PATH}"`,
+						VerifyCommand: []string{"anvilctl", "--version"},
+					},
+				},
+			},
+		},
+	}
+
+	job := agentRunJob(run, "release-manager-harness", "release-manager-context", []resolvedAgentRunDataVolume{{
+		Name: "manager-home", ClaimName: "manager-home-pvc", MountPath: "/agent-home",
+	}})
+	pod := job.Spec.Template.Spec
+	if len(pod.InitContainers) != 1 {
+		t.Fatalf("init containers = %#v, want one OCI tool initializer", pod.InitContainers)
+	}
+	initializer := pod.InitContainers[0]
+	if got, want := initializer.Name, "tool-init-2-anvilctl"; got != want {
+		t.Fatalf("initializer name = %q, want %q", got, want)
+	}
+	if got, want := initializer.Image, "ghcr.io/hazyforge/anvilctl@sha256:"+digest; got != want {
+		t.Fatalf("initializer image = %q, want %q", got, want)
+	}
+	if initializer.ImagePullPolicy != corev1.PullIfNotPresent {
+		t.Fatalf("initializer pull policy = %q, want %q", initializer.ImagePullPolicy, corev1.PullIfNotPresent)
+	}
+	if got := initializer.Command; len(got) != 1 || got[0] != "/tool-image-init" {
+		t.Fatalf("initializer command = %#v", got)
+	}
+	if got := initializer.Args; len(got) != 2 || got[1] != agentRunToolsMountPath+"/anvilctl" {
+		t.Fatalf("initializer args = %#v", got)
+	}
+	if initializer.WorkingDir != agentRunToolsMountPath {
+		t.Fatalf("initializer working dir = %q, want %q", initializer.WorkingDir, agentRunToolsMountPath)
+	}
+	if len(initializer.Env) != 0 || len(initializer.EnvFrom) != 0 {
+		t.Fatalf("initializer received unexpected environment credentials: env=%#v envFrom=%#v", initializer.Env, initializer.EnvFrom)
+	}
+	if len(initializer.VolumeMounts) != 1 || initializer.VolumeMounts[0].Name != agentRunToolsVolume || initializer.VolumeMounts[0].MountPath != agentRunToolsMountPath || initializer.VolumeMounts[0].ReadOnly {
+		t.Fatalf("initializer volume mounts = %#v, want one writable tools mount", initializer.VolumeMounts)
+	}
+	if initializer.SecurityContext == nil || initializer.SecurityContext.AllowPrivilegeEscalation == nil || *initializer.SecurityContext.AllowPrivilegeEscalation {
+		t.Fatalf("initializer security context = %#v, want privilege escalation disabled", initializer.SecurityContext)
+	}
+	if initializer.SecurityContext.RunAsNonRoot == nil || !*initializer.SecurityContext.RunAsNonRoot {
+		t.Fatalf("initializer security context = %#v, want non-root", initializer.SecurityContext)
+	}
+	if initializer.SecurityContext.Capabilities == nil || !agentRunDropsCapability(initializer.SecurityContext.Capabilities.Drop, "ALL") {
+		t.Fatalf("initializer capabilities = %#v, want ALL dropped", initializer.SecurityContext.Capabilities)
+	}
+	if got := initializer.Resources.Requests.Cpu(); got == nil || got.Cmp(resource.MustParse("25m")) != 0 {
+		t.Fatalf("initializer CPU request = %v, want 25m", got)
+	}
+	if got := initializer.Resources.Limits.Memory(); got == nil || got.Cmp(resource.MustParse("64Mi")) != 0 {
+		t.Fatalf("initializer memory limit = %v, want 64Mi", got)
+	}
+	if pod.SecurityContext == nil || pod.SecurityContext.FSGroup == nil || *pod.SecurityContext.FSGroup != agentRunToolsDefaultFSGroup {
+		t.Fatalf("tool initializer pod fsGroup = %#v, want %d", pod.SecurityContext, agentRunToolsDefaultFSGroup)
+	}
+	if len(pod.ImagePullSecrets) != 1 || pod.ImagePullSecrets[0].Name != "ghcr-pull" {
+		t.Fatalf("pod image pull secrets = %#v, want shared ghcr-pull", pod.ImagePullSecrets)
+	}
+	if len(pod.Containers) != 1 {
+		t.Fatalf("agent containers = %#v, want exactly one", pod.Containers)
+	}
+	agentMounts := pod.Containers[0].VolumeMounts
+	var toolsMount *corev1.VolumeMount
+	for index := range agentMounts {
+		if agentMounts[index].Name == agentRunToolsVolume {
+			toolsMount = &agentMounts[index]
+			break
+		}
+	}
+	if toolsMount == nil || toolsMount.MountPath != agentRunToolsMountPath || !toolsMount.ReadOnly {
+		t.Fatalf("agent tools mount = %#v, want read-only %s", toolsMount, agentRunToolsMountPath)
+	}
+	foundEmptyDir := false
+	for _, volume := range pod.Volumes {
+		if volume.Name == agentRunToolsVolume {
+			foundEmptyDir = volume.EmptyDir != nil
+		}
+	}
+	if !foundEmptyDir {
+		t.Fatalf("pod volumes = %#v, want tools emptyDir", pod.Volumes)
+	}
+	baselineDigest, err := agentRunJobSnapshotDigest(job)
+	if err != nil {
+		t.Fatalf("digest initializer Job: %v", err)
+	}
+	tampered := job.DeepCopy()
+	tampered.Spec.Template.Spec.InitContainers[0].Image = "ghcr.io/hazyforge/anvilctl@sha256:" + strings.Repeat("d", 64)
+	tamperedDigest, err := agentRunJobSnapshotDigest(tampered)
+	if err != nil {
+		t.Fatalf("digest tampered initializer Job: %v", err)
+	}
+	if tamperedDigest == baselineDigest {
+		t.Fatal("initializer image mutation did not change the append-only Job snapshot digest")
+	}
+}
+
+func TestAgentRunToolInitializerFSGroupDefaultIsScopedAndOverridable(t *testing.T) {
+	t.Parallel()
+
+	digest := strings.Repeat("e", 64)
+	base := &controlv1alpha1.AgentRun{Spec: controlv1alpha1.AgentRunSpec{Harness: controlv1alpha1.AgentRunHarnessSpec{
+		Tools: []controlv1alpha1.AgentRunToolSpec{{Name: "repository-status"}},
+	}}}
+	withoutInitializer := agentRunJob(base, "without-initializer", "payload", nil)
+	if got := withoutInitializer.Spec.Template.Spec.SecurityContext.FSGroup; got != nil {
+		t.Fatalf("run without tool initializer fsGroup = %v, want unset", *got)
+	}
+
+	withInitializerRun := base.DeepCopy()
+	withInitializerRun.Spec.Harness.Tools[0].ImageInitializer = &controlv1alpha1.AgentRunToolImageInitializerSpec{
+		Image: "registry.example/repository-status@sha256:" + digest,
+	}
+	withInitializer := agentRunJob(withInitializerRun, "with-initializer", "payload", nil)
+	if got := withInitializer.Spec.Template.Spec.SecurityContext.FSGroup; got == nil || *got != agentRunToolsDefaultFSGroup {
+		t.Fatalf("run with tool initializer fsGroup = %#v, want %d", got, agentRunToolsDefaultFSGroup)
+	}
+
+	explicitFSGroup := int64(4242)
+	withInitializerRun.Spec.Harness.Execution.PodSecurityContext = &corev1.PodSecurityContext{FSGroup: &explicitFSGroup}
+	explicit := agentRunJob(withInitializerRun, "explicit-fsgroup", "payload", nil)
+	if got := explicit.Spec.Template.Spec.SecurityContext.FSGroup; got == nil || *got != explicitFSGroup {
+		t.Fatalf("explicit tool initializer fsGroup = %#v, want %d", got, explicitFSGroup)
+	}
+}
+
+func TestAgentRunEveryToolInitializerInheritsHarnessResources(t *testing.T) {
+	t.Parallel()
+
+	digest := strings.Repeat("f", 64)
+	run := &controlv1alpha1.AgentRun{Spec: controlv1alpha1.AgentRunSpec{Harness: controlv1alpha1.AgentRunHarnessSpec{
+		Execution: controlv1alpha1.AgentRunHarnessExecutionSpec{Resources: corev1.ResourceRequirements{
+			Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("75m")},
+			Limits:   corev1.ResourceList{corev1.ResourceMemory: resource.MustParse("96Mi")},
+		}},
+		Tools: []controlv1alpha1.AgentRunToolSpec{
+			{Name: "anvilctl", ImageInitializer: &controlv1alpha1.AgentRunToolImageInitializerSpec{Image: "registry.example/anvilctl@sha256:" + digest}},
+			{Name: "scanner", ImageInitializer: &controlv1alpha1.AgentRunToolImageInitializerSpec{Image: "registry.example/scanner@sha256:" + digest}},
+		},
+	}}}
+
+	job := agentRunJob(run, "resource-initializers", "payload", nil)
+	initializers := job.Spec.Template.Spec.InitContainers
+	if len(initializers) != 2 {
+		t.Fatalf("initializers = %#v, want two", initializers)
+	}
+	for _, initializer := range initializers {
+		if got := initializer.Resources.Requests.Cpu(); got == nil || got.Cmp(resource.MustParse("75m")) != 0 {
+			t.Fatalf("initializer %s CPU request = %v, want 75m", initializer.Name, got)
+		}
+		if got := initializer.Resources.Limits.Memory(); got == nil || got.Cmp(resource.MustParse("96Mi")) != 0 {
+			t.Fatalf("initializer %s memory limit = %v, want 96Mi", initializer.Name, got)
+		}
+	}
+	initializers[0].Resources.Requests[corev1.ResourceCPU] = resource.MustParse("900m")
+	if got := initializers[1].Resources.Requests.Cpu(); got == nil || got.Cmp(resource.MustParse("75m")) != 0 {
+		t.Fatalf("initializer resource maps alias each other: second CPU request = %v", got)
+	}
+}
+
+func TestAgentRunToolImageInitializerValidation(t *testing.T) {
+	t.Parallel()
+
+	digest := strings.Repeat("b", 64)
+	for _, test := range []struct {
+		name        string
+		initializer controlv1alpha1.AgentRunToolImageInitializerSpec
+		wantPhase   controlv1alpha1.AgentRunPhase
+		wantReason  string
+	}{
+		{
+			name:        "exact digest",
+			initializer: controlv1alpha1.AgentRunToolImageInitializerSpec{Image: "registry.example/tools/anvilctl@sha256:" + digest},
+		},
+		{
+			name:        "tag only",
+			initializer: controlv1alpha1.AgentRunToolImageInitializerSpec{Image: "registry.example/tools/anvilctl:latest"},
+			wantPhase:   controlv1alpha1.AgentRunPhaseFailed,
+			wantReason:  "MutableToolInitializerImage",
+		},
+		{
+			name:        "short digest",
+			initializer: controlv1alpha1.AgentRunToolImageInitializerSpec{Image: "registry.example/tools/anvilctl@sha256:abc123"},
+			wantPhase:   controlv1alpha1.AgentRunPhaseFailed,
+			wantReason:  "MutableToolInitializerImage",
+		},
+		{
+			name:        "uppercase digest",
+			initializer: controlv1alpha1.AgentRunToolImageInitializerSpec{Image: "registry.example/tools/anvilctl@sha256:" + strings.Repeat("B", 64)},
+			wantPhase:   controlv1alpha1.AgentRunPhaseFailed,
+			wantReason:  "MutableToolInitializerImage",
+		},
+		{
+			name:        "empty command element",
+			initializer: controlv1alpha1.AgentRunToolImageInitializerSpec{Image: "registry.example/tools/anvilctl@sha256:" + digest, Command: []string{"/bin/sh", " "}},
+			wantPhase:   controlv1alpha1.AgentRunPhaseFailed,
+			wantReason:  "InvalidToolInitializerCommand",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			initializer := test.initializer
+			run := &controlv1alpha1.AgentRun{
+				ObjectMeta: metav1.ObjectMeta{Name: "run", Namespace: "agents"},
+				Spec: controlv1alpha1.AgentRunSpec{
+					SourceRef: controlv1alpha1.AgentRunSourceRef{Kind: "Manual", Name: "operator"},
+					Harness: controlv1alpha1.AgentRunHarnessSpec{Tools: []controlv1alpha1.AgentRunToolSpec{{
+						Name:             "anvilctl",
+						ImageInitializer: &initializer,
+					}}},
+				},
+			}
+			phase, reason, message := agentRunBlockingValidation(run)
+			if phase != test.wantPhase || reason != test.wantReason {
+				t.Fatalf("validation = (%q, %q, %q), want (%q, %q)", phase, reason, message, test.wantPhase, test.wantReason)
+			}
+		})
+	}
+}
+
 func TestAgentRunJobInjectsStatusToolEnv(t *testing.T) {
 	t.Parallel()
 

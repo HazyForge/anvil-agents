@@ -60,7 +60,13 @@ func TestAgentRunCompositionSwapsHarnessAndAppliesSkillLayers(t *testing.T) {
 	knowledgeTools := &controlv1alpha1.AgentToolSet{
 		ObjectMeta: metav1.ObjectMeta{Name: "knowledge-tools", Namespace: "agents", UID: "knowledge-tools-uid", Generation: 4},
 		Spec: controlv1alpha1.AgentToolSetSpec{Tools: []controlv1alpha1.AgentRunToolSpec{{
-			Name: "knowledge-search", VerifyCommand: []string{"knowledge-search", "--help"},
+			Name: "knowledge-search",
+			ImageInitializer: &controlv1alpha1.AgentRunToolImageInitializerSpec{
+				Image:   "registry.example/knowledge-search@sha256:" + strings.Repeat("c", 64),
+				Command: []string{"/install-tool"},
+				Args:    []string{"/opt/anvil/tools/knowledge-search"},
+			},
+			VerifyCommand: []string{"knowledge-search", "--help"},
 		}}},
 	}
 	profile.Spec.ToolSets = &controlv1alpha1.AgentToolCompositionSpec{
@@ -122,6 +128,10 @@ func TestAgentRunCompositionSwapsHarnessAndAppliesSkillLayers(t *testing.T) {
 	}
 	if len(effective.Spec.Harness.Tools) != 2 || effective.Spec.Harness.Tools[0].Name != "legacy-repository-status" || effective.Spec.Harness.Tools[1].Name != "knowledge-search" || len(effective.Spec.Harness.Subagents) != 1 {
 		t.Fatalf("resolved tools/subagents = %#v / %#v", effective.Spec.Harness.Tools, effective.Spec.Harness.Subagents)
+	}
+	initializer := effective.Spec.Harness.Tools[1].ImageInitializer
+	if initializer == nil || !strings.HasPrefix(initializer.Image, "registry.example/knowledge-search@sha256:") || len(initializer.Command) != 1 || initializer.Command[0] != "/install-tool" {
+		t.Fatalf("resolved OCI tool initializer = %#v", initializer)
 	}
 	if resolution == nil || resolution.ProfileRef == nil || resolution.HarnessProfileRef == nil || len(resolution.SkillSetRefs) != 2 || len(resolution.ToolSetRefs) != 1 {
 		t.Fatalf("resolution status = %#v", resolution)

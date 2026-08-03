@@ -10,13 +10,14 @@ AgentRun that can install tools, follow skills, contact a human, and open PRs.
 | **AgentRunProfile** | Role, scope, standing system prompt, intent, composition refs |
 | **AgentHarnessProfile** (optional) | Backend image, SA, secrets, volumes, limits |
 | **AgentSkillSet** | When/how instructions (may reference image tools) |
-| **AgentToolSet** | Runtime install of tools (`setupScript` + `verifyCommand`) |
+| **AgentToolSet** | Runtime install of tools (`setupScript`, optional OCI initializer, and `verifyCommand`) |
 | **AgentSchedule** | Cadence that creates append-only AgentRuns |
 | **AgentRun** | One immutable execution (append-only) |
 
 **ToolSets vs skills**
 
-- **ToolSet** = install something at runtime (e.g. `go install` anvil-hotline).
+- **ToolSet** = install something at runtime with a setup script or a
+  digest-pinned OCI initializer.
 - **Skill** = teach when/how to use a tool (including tools already on the image).
 
 **Human communications**

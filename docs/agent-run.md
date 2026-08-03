@@ -38,6 +38,16 @@ records a create-attempt timestamp immediately before creating one Job. The Job
 and ConfigMap are owned by the run. Status is derived from the Job, pod state,
 logs, and the structured harness status contract.
 
+Digest-pinned OCI initializers declared by resolved tool contracts run before
+that one Job's `agent` container and materialize executables into a pod-local
+`emptyDir` mounted read-only at `/opt/anvil/tools` in the agent container. They
+inherit harness resource requirements and use a tool-run-only default fsGroup
+when none is declared, so reviewed numeric non-root images can populate the
+directory without a privileged helper. They do not alter or rebuild the
+selected runner image. See
+[Agent Composition](composition.md#oci-tool-initializers) for the exact image,
+mount, credential, and verification boundary.
+
 Terminal phases are `Succeeded`, `Failed`, and `NeedsHuman`. Pending and
 running resources remain resumable. A controller restart observes the existing
 children rather than creating a replacement Job. If creation succeeded before
@@ -57,7 +67,9 @@ bundle another control-plane CLI.
 One run selects exactly one adapter. Named schedule templates can rotate or
 queue independent runs across adapters, but the controller does not create a
 shared multi-agent conversation. `subagents` are instructions to the selected
-harness, not controller-created child Jobs.
+harness, not controller-created child Jobs. `AgentCouncil` remains association
+and optional guidance only; neither council membership nor tool initialization
+fans out member profiles.
 
 ## Profiles and schedules
 

@@ -607,6 +607,35 @@ type AgentRunSubagentSpec struct {
 	SystemPrompt string `json:"systemPrompt,omitempty"`
 }
 
+// AgentRunToolImageInitializerSpec initializes a tool from an immutable OCI
+// image before the agent container starts. The image's entrypoint, or the
+// optional command and args override, must copy executable content into the
+// shared /opt/anvil/tools directory. The initializer receives no harness
+// envSecretRefs, data volumes, payload files, or SPIFFE socket. Its image must
+// declare a numeric non-zero USER unless the harness security context sets a
+// numeric non-root runAsUser.
+type AgentRunToolImageInitializerSpec struct {
+	// Image is an OCI image reference pinned by canonical sha256 digest. Tags
+	// alone are rejected so an accepted AgentRun composition always identifies
+	// the exact initializer bytes.
+	// +kubebuilder:validation:MinLength=73
+	// +kubebuilder:validation:MaxLength=512
+	// +kubebuilder:validation:Pattern=`^[^[:space:]@]+@sha256:[0-9a-f]{64}$`
+	Image string `json:"image"`
+	// Command optionally replaces the image entrypoint. It follows Kubernetes
+	// container command semantics and must write the tool into
+	// /opt/anvil/tools before exiting successfully.
+	// +kubebuilder:validation:MaxItems=32
+	// +kubebuilder:validation:items:MinLength=1
+	// +optional
+	Command []string `json:"command,omitempty"`
+	// Args optionally replaces the image arguments. It follows Kubernetes
+	// container args semantics.
+	// +kubebuilder:validation:MaxItems=64
+	// +optional
+	Args []string `json:"args,omitempty"`
+}
+
 type AgentRunToolSpec struct {
 	// Name is a stable tool identifier such as kbctl.
 	// +kubebuilder:validation:MinLength=1
@@ -621,6 +650,12 @@ type AgentRunToolSpec struct {
 	// pass credentials through envSecretRefs instead of inline script text.
 	// +optional
 	SetupScript string `json:"setupScript,omitempty"`
+	// ImageInitializer optionally materializes the tool from an immutable OCI
+	// image into /opt/anvil/tools before the agent container starts. This is
+	// independent of the selected runner image. Use SetupScript to add the fixed
+	// directory to PATH when the runner does not already search it.
+	// +optional
+	ImageInitializer *AgentRunToolImageInitializerSpec `json:"imageInitializer,omitempty"`
 	// VerifyCommand is an optional argv array run after SetupScript to prove
 	// the tool is available, for example ["kbctl", "--version"].
 	// +optional
@@ -705,7 +740,8 @@ type AgentRunHarnessExecutionSpec struct {
 	// +optional
 	SpiffeWorkloadAPI AgentRunSpiffeWorkloadAPISpec `json:"spiffeWorkloadAPI,omitempty"`
 	// Resources bounds the CPU, memory, and ephemeral storage assigned to the
-	// agent container. Cluster policy may require explicit requests and limits.
+	// agent container and every OCI tool initializer. Cluster policy may require
+	// explicit requests and limits.
 	// +optional
 	Resources corev1.ResourceRequirements `json:"resources,omitempty"`
 	// NodeSelector constrains the agent pod to selected nodes. It is merged with

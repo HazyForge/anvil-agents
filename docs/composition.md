@@ -7,7 +7,7 @@ Anvil Agents uses five namespaced resources for reusable configuration:
 | `AgentRunProfile` | role, scope, policy, standing prompt, intent, notifications, and composition choices | shared capability definitions |
 | `AgentHarnessProfile` | one backend adapter, image, Kubernetes execution identity, credentials, storage, placement, and limits | task instructions or skills |
 | `AgentSkillSet` | backend-neutral skills and optional delegated personas | images, ServiceAccounts, Secrets, storage, or placement |
-| `AgentToolSet` | reusable setup and verification contracts for external tools | the external service, credentials, ServiceAccounts, networking, storage, or placement |
+| `AgentToolSet` | reusable setup and verification contracts plus optional digest-pinned OCI tool initializers | the external service, credentials, ServiceAccounts, networking, storage, or placement |
 | `AgentCouncil` | durable workforce inventory and optional interaction guidance | Secrets, ServiceAccounts, harnesses, tools, storage, Jobs, or automatic peer injection |
 
 `AgentToolSet` exists because external tools commonly have an independent
@@ -95,6 +95,60 @@ host to a same-namespace token Secret in the selected
 `AgentHarnessProfile.spec.execution.skillSourceCredentials`. This lets the same
 skill set remain portable across public, private, and mirrored deployments
 without transferring credential authority to capability-pack authors.
+
+## OCI Tool Initializers
+
+A tool can use an immutable OCI image to copy a small client into the run
+without adding that client or its language toolchain to every runner image:
+
+```yaml
+apiVersion: control.anvil.hazyforge.io/v1alpha1
+kind: AgentToolSet
+metadata:
+  name: anvil-client
+  namespace: agents
+spec:
+  tools:
+    - name: anvilctl
+      imageInitializer:
+        image: ghcr.io/hazyforge/anvilctl@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+        command: ["/tool-image-init"]
+        args: ["/usr/local/bin/anvilctl", "/opt/anvil/tools/anvilctl"]
+      setupScript: |
+        export PATH="/opt/anvil/tools:${PATH}"
+      verifyCommand: ["bash", "-lc", "export PATH=/opt/anvil/tools:${PATH}; anvilctl --version"]
+```
+
+The image must be pinned exactly as `image@sha256:<64 lowercase hex>`; mutable
+tag-only references are rejected by both the CRD schema and controller. The
+controller creates one deterministic init container per configured tool, in
+resolved tool order. Each initializer gets a writable shared `emptyDir` at
+`/opt/anvil/tools`; the agent container receives the same directory read-only.
+An initializer entrypoint, or its explicit `command` and `args`, is responsible
+for writing executable content there and exiting successfully. The controller
+does not interpret image layers or guess a source path.
+
+The initializer reuses the Job's pod-level image pull secrets and restricted
+pod/container security settings. It receives no harness `envSecretRefs`,
+payload ConfigMap, `AgentDataVolume`, or SPIFFE socket mounts, and selecting it
+does not select a ServiceAccount or any additional identity. Like a setup
+script, the initializer still executes reviewed code inside the consuming pod;
+admission policy should allowlist its registry and digest. The selected runner
+image and entrypoint remain unchanged. `setupScript` can add the fixed directory
+to `PATH`, and the normal `verifyCommand` proves the initialized binary is
+usable before the model starts.
+
+Every initializer receives the harness execution `resources` requests and
+limits. Restricted execution also requires a numeric non-zero image `USER`, or
+an explicitly configured numeric non-root `securityContext.runAsUser`;
+Kubernetes cannot verify a named image user under `runAsNonRoot: true`. When a
+run has an initializer and its pod security context omits `fsGroup`, the
+controller defaults only that run to supplementary group `10001`. Kubernetes
+then makes the tools `emptyDir` group-writable without a root permission-fixing
+container. An explicit `fsGroup` always wins. Profiles that combine tool
+initializers with PVCs should set it deliberately when those volumes require a
+different ownership group. Runs without OCI tool initializers retain their
+existing pod and PVC ownership semantics.
 
 ## Skill Overrides
 
@@ -199,6 +253,9 @@ Rules:
   Secret, ServiceAccount, tool, or storage references.
 - One `AgentRun` still creates at most one Job with one adapter. Council prose
   is guidance, not release or deployment evidence.
+- OCI tool initialization is a property of a selected tool contract. It does
+  not activate other council members, create peer Jobs, or change council
+  association semantics.
 
 Upgrade order matters: install the CRD/controller/chart RBAC first, allow the
 kind in GitOps policy, apply councils after their member profiles, and only then

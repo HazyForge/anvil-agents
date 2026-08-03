@@ -128,6 +128,10 @@ only bounded output.
 ## Supply-Chain Rules
 
 - Pin tool versions and verify checksums or signatures.
+- Prefer `imageInitializer` for a reviewed, prebuilt client when compiling it
+  in every AgentRun would be wasteful. Pin `image` by exact sha256 digest; the
+  image command must copy only the intended executable into
+  `/opt/anvil/tools`, and the runner remains unchanged.
 - Never curl an unversioned installer in a production profile.
 - Keep setup scripts reviewable and idempotent.
 - Treat write access to `AgentToolSet` and the legacy

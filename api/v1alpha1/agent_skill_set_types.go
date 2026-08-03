@@ -4,8 +4,10 @@ import metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 // AgentSkillSetSpec is a reusable, backend-neutral instruction pack. Skills
 // and optional delegated personas stay together, while independently owned
-// tools should use AgentToolSet. Images, workload identities, credentials, and
-// placement remain owned by a harness profile or run profile.
+// tools should use AgentToolSet. Runner images, workload identities,
+// credentials, and placement remain owned by a harness profile or run profile;
+// a legacy tool entry can use only the same digest-pinned OCI initializer
+// contract as AgentToolSet.
 type AgentSkillSetSpec struct {
 	// Description explains when this capability pack should be selected.
 	// +optional
