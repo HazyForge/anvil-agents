@@ -1,7 +1,6 @@
 import { Link } from "react-router-dom";
 
 const GITHUB = "https://github.com/HazyForge/anvil-agents";
-const CONSOLE = "https://agents.anvil.hazyforge.io";
 
 export default function SiteFooter() {
   return (
@@ -14,7 +13,6 @@ export default function SiteFooter() {
         <div className="footer-links mono">
           <Link to="/docs">Docs</Link>
           <a href={GITHUB}>GitHub</a>
-          <a href={CONSOLE}>Console</a>
           <a href="https://hazyforge.io">Hazy Forge</a>
         </div>
       </div>

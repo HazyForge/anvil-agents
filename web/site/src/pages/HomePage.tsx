@@ -3,7 +3,6 @@ import AgentCouncil from "../components/AgentCouncil";
 import ClusterFieldBackground from "../components/ClusterFieldBackground";
 
 const GITHUB = "https://github.com/HazyForge/anvil-agents";
-const CONSOLE = "https://agents.anvil.hazyforge.io";
 
 const COMPOSITION = [
   {
@@ -32,9 +31,9 @@ const COMPOSITION = [
       "Cadence and launch policy for append-only runs — suspension, concurrency, named templates, backoff.",
   },
   {
-    name: "OIDC Console",
+    name: "Optional OIDC API",
     detail:
-      "Optional API, live SSE logs, and a console SPA so operators inspect runs without raw cluster access.",
+      "Optional read API and live SSE logs so operators can inspect runs with their own OIDC-protected deployment.",
   },
 ];
 
@@ -97,9 +96,6 @@ export default function HomePage() {
               </Link>
               <a className="btn btn-ghost" href={GITHUB}>
                 View on GitHub
-              </a>
-              <a className="btn btn-ghost" href={CONSOLE}>
-                Open console
               </a>
             </div>
           </div>
@@ -209,8 +205,8 @@ export default function HomePage() {
             <Link className="btn btn-ghost" to="/docs/getting-started">
               Getting started
             </Link>
-            <a className="btn btn-ghost" href={CONSOLE}>
-              Live console
+            <a className="btn btn-ghost" href={GITHUB}>
+              View on GitHub
             </a>
           </div>
         </div>

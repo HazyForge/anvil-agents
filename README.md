@@ -2,7 +2,6 @@
 
 **Product site:** [anvil-agents.hazyforge.io](https://anvil-agents.hazyforge.io)
 · **Docs:** [anvil-agents.hazyforge.io/docs](https://anvil-agents.hazyforge.io/docs)
-· **Console:** [agents.anvil.hazyforge.io](https://agents.anvil.hazyforge.io)
 
 Anvil Agents is an open-source Hazy Forge project for durable, distributed
 agent loops on Kubernetes. It turns independent, heavyweight agent work into

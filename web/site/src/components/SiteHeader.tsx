@@ -1,6 +1,5 @@
 import { Link, NavLink } from "react-router-dom";
 
-const CONSOLE = "https://agents.anvil.hazyforge.io";
 const GITHUB = "https://github.com/HazyForge/anvil-agents";
 
 export default function SiteHeader() {
@@ -19,7 +18,6 @@ export default function SiteHeader() {
             Home
           </NavLink>
           <NavLink to="/docs">Docs</NavLink>
-          <a href={CONSOLE}>Console</a>
           <a href={GITHUB}>GitHub</a>
         </nav>
         <div className="header-actions">
