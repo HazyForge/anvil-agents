@@ -1,5 +1,7 @@
 # Anvil Agents
 
+**Product site:** [anvil-agents.hazyforge.io](https://anvil-agents.hazyforge.io) · **Docs:** [anvil-agents.hazyforge.io/docs](https://anvil-agents.hazyforge.io/docs)
+
 Anvil Agents is an open-source Hazy Forge project for durable, distributed
 agent loops on Kubernetes. It turns independent, heavyweight agent work into
 schedulable Jobs, so repository builds, test suites, security analysis,
@@ -198,6 +200,7 @@ audience, and explicit namespace authorization bindings are configured. See
 
 ## Documentation
 
+- **[Product site and docs](https://anvil-agents.hazyforge.io)** — public marketing site and operator docs
 - [Architecture and multi-harness semantics](docs/architecture.md)
 - [Distributed heavy workloads across machines](docs/distributed-workloads.md)
 - [Composable profiles, harnesses, skill sets, tool sets, councils, and overrides](docs/composition.md)
