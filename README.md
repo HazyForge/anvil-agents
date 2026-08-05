@@ -200,6 +200,7 @@ audience, and explicit namespace authorization bindings are configured. See
 
 ## Documentation
 
+- [Blog: Agents as cluster jobs, not chatbots](docs/blog/2026-08-02-agents-as-cluster-jobs-not-chatbots.md)
 - **[Product site and docs](https://anvil-agents.hazyforge.io)** — public marketing site and operator docs
 - [Architecture and multi-harness semantics](docs/architecture.md)
 - [Distributed heavy workloads across machines](docs/distributed-workloads.md)
