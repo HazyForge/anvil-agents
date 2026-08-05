@@ -10,8 +10,9 @@ Use this skill for `AgentRun`, `AgentRunProfile`, `AgentSchedule`,
 `AdverseSituation`.
 
 1. Read `docs/agent-run.md`, `docs/cli.md`, and the namespace's repository guidance.
-2. Prefer `anvil-agentctl` over raw manifests for run create/list/get/logs/debug
-   and for Codex auth maintenance.
+2. Prefer `anvil-agentctl` over raw manifests for run create/list/get/logs/debug,
+   for Codex auth maintenance, and for `AgentRunControl` launch gates
+   (`anvil-agentctl control list|get|pause|resume`).
 3. Inspect the CRD, resource generation, conditions, controller-owned status,
    child Job, payload ConfigMap, pod events, and relevant logs.
 4. Treat application references as opaque keys. Do not assume another control
@@ -20,8 +21,12 @@ Use this skill for `AgentRun`, `AgentRunProfile`, `AgentSchedule`,
 6. Use a profile for durable defaults and a run prompt for one request.
 7. Nudge schedules by changing the
    `control.anvil.hazyforge.io/run-now` annotation token.
-8. Use `AgentRunControl` to pause future launches. A pause never terminates an
-   active Job.
+8. Use `AgentRunControl` to pause future launches (`anvil-agentctl control
+   pause --application APP --reason TEXT --for 4h`). A pause never terminates
+   an active Job. Record the concrete reason, a bounded `spec.expiresAt`, and
+   the immutable event or directive ID in `spec.source`; never renew a pause
+   from an unchanged event. Resume only the issuing authority's named control
+   (`control resume`); `--all-controls` is a human-only break-glass action.
 9. Never delete an AgentDataVolume or PVC as a troubleshooting shortcut.
    Storage may expand but not shrink; cross-namespace mounts are invalid.
 10. Configure external adverse watches and their read RBAC explicitly. Agent

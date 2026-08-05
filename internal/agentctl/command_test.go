@@ -49,6 +49,11 @@ type fakeBackend struct {
 	authSessions     []agentsv1alpha1.AgentAuthSession
 	createAuthErr    error
 	volumeCopy       *agentsv1alpha1.AgentDataVolumeCopy
+	controls         []agentsv1alpha1.AgentRunControl
+	controlGet       *agentsv1alpha1.AgentRunControl
+	controlGetErr    error
+	createdControl   *agentsv1alpha1.AgentRunControl
+	updatedControls  []*agentsv1alpha1.AgentRunControl
 }
 
 func (backend *fakeBackend) DefaultNamespace() string { return backend.defaultNamespace }
@@ -174,6 +179,40 @@ func (backend *fakeBackend) GetDataVolumeCopy(_ context.Context, _, _ string) (*
 		return nil, apierrors.NewNotFound(schema.GroupResource{Group: agentsv1alpha1.GroupVersion.Group, Resource: "agentdatavolumecopies"}, "missing")
 	}
 	return backend.volumeCopy.DeepCopy(), nil
+}
+
+func (backend *fakeBackend) ListControls(_ context.Context) (*agentsv1alpha1.AgentRunControlList, error) {
+	return &agentsv1alpha1.AgentRunControlList{Items: backend.controls}, nil
+}
+
+func (backend *fakeBackend) GetControl(_ context.Context, name string) (*agentsv1alpha1.AgentRunControl, error) {
+	if backend.controlGet != nil {
+		return backend.controlGet.DeepCopy(), backend.controlGetErr
+	}
+	for i := range backend.controls {
+		if backend.controls[i].Name == name {
+			return backend.controls[i].DeepCopy(), nil
+		}
+	}
+	return nil, apierrors.NewNotFound(schema.GroupResource{Group: agentsv1alpha1.GroupVersion.Group, Resource: "agentruncontrols"}, name)
+}
+
+func (backend *fakeBackend) CreateControl(_ context.Context, control *agentsv1alpha1.AgentRunControl) error {
+	backend.createdControl = control.DeepCopy()
+	backend.controls = append(backend.controls, *control.DeepCopy())
+	return nil
+}
+
+func (backend *fakeBackend) UpdateControl(_ context.Context, control *agentsv1alpha1.AgentRunControl) error {
+	backend.updatedControls = append(backend.updatedControls, control.DeepCopy())
+	for i := range backend.controls {
+		if backend.controls[i].Name == control.Name {
+			backend.controls[i] = *control.DeepCopy()
+			return nil
+		}
+	}
+	backend.controls = append(backend.controls, *control.DeepCopy())
+	return nil
 }
 
 func TestRunCreateClientDryRunDoesNotLoadKubernetes(t *testing.T) {

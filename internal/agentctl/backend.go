@@ -44,6 +44,10 @@ type Backend interface {
 	ListAuthSessions(context.Context, string) (*agentsv1alpha1.AgentAuthSessionList, error)
 	CreateDataVolumeCopy(context.Context, *agentsv1alpha1.AgentDataVolumeCopy) error
 	GetDataVolumeCopy(context.Context, string, string) (*agentsv1alpha1.AgentDataVolumeCopy, error)
+	ListControls(context.Context) (*agentsv1alpha1.AgentRunControlList, error)
+	GetControl(context.Context, string) (*agentsv1alpha1.AgentRunControl, error)
+	CreateControl(context.Context, *agentsv1alpha1.AgentRunControl) error
+	UpdateControl(context.Context, *agentsv1alpha1.AgentRunControl) error
 }
 
 type KubernetesBackend struct {
@@ -229,4 +233,34 @@ func (backend *KubernetesBackend) GetDataVolumeCopy(ctx context.Context, namespa
 		return nil, fmt.Errorf("get AgentDataVolumeCopy %s/%s: %w", namespace, name, err)
 	}
 	return copyObj, nil
+}
+
+func (backend *KubernetesBackend) ListControls(ctx context.Context) (*agentsv1alpha1.AgentRunControlList, error) {
+	list := &agentsv1alpha1.AgentRunControlList{}
+	if err := backend.runs.List(ctx, list); err != nil {
+		return nil, fmt.Errorf("list AgentRunControls: %w", err)
+	}
+	return list, nil
+}
+
+func (backend *KubernetesBackend) GetControl(ctx context.Context, name string) (*agentsv1alpha1.AgentRunControl, error) {
+	control := &agentsv1alpha1.AgentRunControl{}
+	if err := backend.runs.Get(ctx, client.ObjectKey{Name: name}, control); err != nil {
+		return nil, fmt.Errorf("get AgentRunControl %s: %w", name, err)
+	}
+	return control, nil
+}
+
+func (backend *KubernetesBackend) CreateControl(ctx context.Context, control *agentsv1alpha1.AgentRunControl) error {
+	if err := backend.runs.Create(ctx, control); err != nil {
+		return fmt.Errorf("create AgentRunControl %s: %w", control.Name, err)
+	}
+	return nil
+}
+
+func (backend *KubernetesBackend) UpdateControl(ctx context.Context, control *agentsv1alpha1.AgentRunControl) error {
+	if err := backend.runs.Update(ctx, control); err != nil {
+		return fmt.Errorf("update AgentRunControl %s: %w", control.Name, err)
+	}
+	return nil
 }
