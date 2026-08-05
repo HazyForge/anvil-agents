@@ -18,6 +18,8 @@ const (
 	PermissionRunsCreate       = "anvil-agents:runs:create"
 	PermissionCompositionRead  = "anvil-agents:composition:read"
 	PermissionCompositionWrite = "anvil-agents:composition:write"
+	PermissionControlsRead     = "anvil-agents:controls:read"
+	PermissionControlsWrite    = "anvil-agents:controls:write"
 )
 
 // knownPermissions is the closed set of OIDC permissions the API accepts.
@@ -27,6 +29,8 @@ var knownPermissions = map[string]struct{}{
 	PermissionRunsCreate:       {},
 	PermissionCompositionRead:  {},
 	PermissionCompositionWrite: {},
+	PermissionControlsRead:     {},
+	PermissionControlsWrite:    {},
 }
 
 type Config struct {
@@ -39,6 +43,8 @@ type Config struct {
 	UI            UIConfig            `json:"ui"`
 	// Composition gates library read/write endpoints. Write remains opt-in.
 	Composition CompositionConfig `json:"composition"`
+	// Controls gates AgentRunControl launch-gate read and pause/resume writes.
+	Controls ControlsConfig `json:"controls"`
 	// Runs gates append-only AgentRun create from the console/API.
 	Runs RunsConfig `json:"runs"`
 }
@@ -57,6 +63,16 @@ type CompositionConfig struct {
 	ReadEnabled bool `json:"readEnabled"`
 	// WriteEnabled serves POST/PUT/DELETE for console-managed composition
 	// objects when true. Requires ReadEnabled.
+	WriteEnabled bool `json:"writeEnabled"`
+}
+
+// ControlsConfig controls cluster-scoped AgentRunControl launch gates. Writes
+// pause or resume launches for one Application scope. GitOps-owned controls
+// remain read-only; see evaluateControlManagement.
+type ControlsConfig struct {
+	// ReadEnabled serves GET list/detail for AgentRunControls when true.
+	ReadEnabled bool `json:"readEnabled"`
+	// WriteEnabled serves PUT pause/resume when true. Requires ReadEnabled.
 	WriteEnabled bool `json:"writeEnabled"`
 }
 
@@ -284,6 +300,14 @@ func (config Config) Validate() error {
 			if permission == PermissionRunsCreate && !config.Runs.CreateEnabled {
 				return fmt.Errorf("authorization %s grants %s but runs.createEnabled is false", name, permission)
 			}
+			if permission == PermissionControlsRead || permission == PermissionControlsWrite {
+				if permission == PermissionControlsRead && !config.Controls.ReadEnabled {
+					return fmt.Errorf("authorization %s grants %s but controls.readEnabled is false", name, permission)
+				}
+				if permission == PermissionControlsWrite && !config.Controls.WriteEnabled {
+					return fmt.Errorf("authorization %s grants %s but controls.writeEnabled is false", name, permission)
+				}
+			}
 		}
 		if len(binding.Namespaces) == 0 && !binding.NamespacesFromClaim {
 			return fmt.Errorf("authorization %s must grant namespaces or enable namespacesFromClaim", name)
@@ -318,6 +342,9 @@ func (config Config) Validate() error {
 	}
 	if config.Composition.WriteEnabled && !config.Composition.ReadEnabled {
 		return fmt.Errorf("composition.writeEnabled requires composition.readEnabled")
+	}
+	if config.Controls.WriteEnabled && !config.Controls.ReadEnabled {
+		return fmt.Errorf("controls.writeEnabled requires controls.readEnabled")
 	}
 	return nil
 }

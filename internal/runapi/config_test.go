@@ -80,3 +80,32 @@ func TestConfigRejectsImplicitAuthorization(t *testing.T) {
 		t.Fatalf("expected wildcard CORS rejection, got %v", err)
 	}
 }
+
+func TestConfigControlsWriteRequiresRead(t *testing.T) {
+	config := DefaultConfig()
+	config.OIDC.Issuer = "https://issuer.example"
+	config.OIDC.Audiences = []string{"anvil-agents"}
+	config.Controls.WriteEnabled = true
+	config.Authorization.Bindings = []AuthorizationBinding{{
+		Roles:       []string{"operator"},
+		Permissions: []string{PermissionRunsRead},
+		Namespaces:  []string{"hazy-trade"},
+	}}
+	if err := config.Validate(); err == nil || !strings.Contains(err.Error(), "controls.writeEnabled requires controls.readEnabled") {
+		t.Fatalf("expected controls write-requires-read rejection, got %v", err)
+	}
+}
+
+func TestConfigRejectsControlsPermissionWithoutGate(t *testing.T) {
+	config := DefaultConfig()
+	config.OIDC.Issuer = "https://issuer.example"
+	config.OIDC.Audiences = []string{"anvil-agents"}
+	config.Authorization.Bindings = []AuthorizationBinding{{
+		Roles:       []string{"operator"},
+		Permissions: []string{PermissionControlsWrite},
+		Namespaces:  []string{"hazy-trade"},
+	}}
+	if err := config.Validate(); err == nil || !strings.Contains(err.Error(), "controls.writeEnabled is false") {
+		t.Fatalf("expected controls gate rejection, got %v", err)
+	}
+}
