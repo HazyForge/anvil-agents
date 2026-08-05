@@ -18,6 +18,9 @@ export default function SiteHeader() {
             Home
           </NavLink>
           <NavLink to="/docs">Docs</NavLink>
+          <NavLink to="/docs/blog/agents-as-cluster-jobs-not-chatbots">
+            Blog
+          </NavLink>
           <a href={GITHUB}>GitHub</a>
         </nav>
         <div className="header-actions">
