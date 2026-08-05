@@ -20,6 +20,8 @@ spec:
       auto: false
       pure: true
   execution:
+    nodeSelector:
+      hazyforge.io/home-lab: "true"
     serviceAccountName: opencode-public-smoke
     imagePullSecrets:
       - name: ghcr-creds

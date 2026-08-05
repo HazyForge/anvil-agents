@@ -11,6 +11,8 @@ spec:
     grokBuild:
       model: grok-4.5
   execution:
+    nodeSelector:
+      hazyforge.io/home-lab: "true"
     serviceAccountName: anvil-agents-self-development-reader
     workdir: /workspace
     envSecretRefs:
@@ -45,6 +47,8 @@ spec:
     grokBuild:
       model: grok-4.5
   execution:
+    nodeSelector:
+      hazyforge.io/home-lab: "true"
     serviceAccountName: anvil-agents-self-development-writer
     workdir: /workspace
     envSecretRefs:
