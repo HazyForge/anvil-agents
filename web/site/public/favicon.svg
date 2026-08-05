@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="Anvil Agents">
+  <!-- Hunter-green tile + emerald anvil mark (reads at 16px) -->
+  <rect width="32" height="32" rx="8" fill="#06110c"/>
+  <rect x="1" y="1" width="30" height="30" rx="7" fill="none" stroke="#3dff9a" stroke-opacity="0.22" stroke-width="1"/>
+  <!-- Anvil body -->
+  <path
+    fill="#3dff9a"
+    d="M7.5 12.2h17c.7 0 1.1.8.7 1.4l-2.1 3.1c-.2.3-.6.5-1 .5H16.6v3.2h3.4c.4 0 .7.3.7.7v1.1c0 .4-.3.7-.7.7H11.9c-.4 0-.7-.3-.7-.7v-1.1c0-.4.3-.7.7-.7h3.4v-3.2H9.9c-.4 0-.8-.2-1-.5L6.8 13.6c-.4-.6 0-1.4.7-1.4z"
+  />
+  <!-- Horn highlight -->
+  <path fill="#2fd9b0" d="M7.5 12.2h5.2l-1.4 2.1H8.6z" opacity="0.85"/>
+  <!-- Job spark -->
+  <circle cx="23.2" cy="8.6" r="1.35" fill="#e8fff4"/>
+  <circle cx="23.2" cy="8.6" r="2.6" fill="none" stroke="#3dff9a" stroke-opacity="0.55" stroke-width="0.9"/>
+</svg>
