@@ -39,6 +39,10 @@ The caller needs only the Kubernetes verbs used by each command:
 | `auth grok\|xai reauth` | same as codex reauth; staging key is `GROK_AUTH_JSON` |
 | `auth grok\|xai logout` | same as codex logout for Grok durable homes |
 | `volume copy` | create an append-only `AgentDataVolumeCopy` (stream source claim to a new volume on a target node) |
+| `control list` | `list` on cluster-scoped `agentruncontrols` |
+| `control get` | `get` on the selected `agentruncontrol` |
+| `control pause` | `create` or `update` on the selected `agentruncontrol` |
+| `control resume` | `update` on the selected `agentruncontrol` |
 | `self report` | none (writes local status JSONL / pod log only) |
 
 ## Create An Append-Only Run
@@ -242,6 +246,64 @@ active Jobs.
 
 Exit code `3` means diagnose finished and found an unhealthy state. Exit code
 `2` is usage; `1` is operational failure.
+
+## Launch Controls
+
+`AgentRunControl` is a cluster-scoped launch gate for one opaque Application
+scope. Active, non-expired `Paused` controls are additive: any one of them
+blocks new application-scoped AgentRun Jobs. A pause never terminates an
+already-created Job.
+
+List and inspect controls:
+
+```bash
+anvil-agentctl control list
+anvil-agentctl control list --application hazy-trade -o yaml
+anvil-agentctl control get hazy-trade -o summary
+```
+
+Preview and then apply a bounded pause (server-side apply is not used; the
+command creates the control or updates its spec in place):
+
+```bash
+anvil-agentctl control pause \
+  --application hazy-trade \
+  --control-name hazy-trade \
+  --for 4h \
+  --reason "Maintainer requested a bounded review window" \
+  --source-name MDExOlJlZExhYmVsZWRFdmVudDEyMw== \
+  --source-url https://github.com/HazyForge/hazy-trade/pull/123 \
+  --dry-run client -o yaml
+
+anvil-agentctl control pause \
+  --application hazy-trade \
+  --for 4h \
+  --reason "Maintainer requested a bounded review window"
+```
+
+`--control-name` defaults to the Application name and isolates one authority's
+hold; use `--for` for a bounded window (default `4h`) or `--indefinite` for an
+explicit human-owned hold. `--reason` is required, and `spec.source` records
+immutable event or directive metadata for deduplication (authorization still
+comes from the authenticated Kubernetes caller, not the source fields).
+
+Resume only the control owned by the issuing authority. Creating an `Allowed`
+control cannot override an active, non-expired `Paused` control, so resume
+updates the existing control instead:
+
+```bash
+anvil-agentctl control resume \
+  --application hazy-trade \
+  --control-name hazy-trade \
+  --reason "Maintainer approved launches after review"
+```
+
+`--all-controls` clears every active hold for the Application and is a
+human-only break-glass action; a manager or automation must never use it to
+erase another authority's pause. A bounded pause recovers automatically at
+`spec.expiresAt`. After any mutation, re-run `control list` to verify the
+`Paused`/`Allowed` phase and the affected schedule count before treating the
+fleet as quiescent.
 
 ## In-Pod Status Reporting
 

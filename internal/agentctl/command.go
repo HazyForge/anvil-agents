@@ -129,6 +129,8 @@ func (app App) Run(ctx context.Context, args []string) error {
 		return app.runAuth(ctx, options, remaining[1:])
 	case "volume":
 		return app.runVolume(ctx, options, remaining[1:])
+	case "control":
+		return app.runControl(ctx, options, remaining[1:])
 	case "self":
 		return app.runSelf(remaining[1:])
 	case "help":
@@ -143,10 +145,11 @@ func (app App) Run(ctx context.Context, args []string) error {
 func writeRootUsage(writer io.Writer) {
 	fmt.Fprintln(writer, "Usage: anvil-agentctl [--kubeconfig PATH] [--context NAME] COMMAND")
 	fmt.Fprintln(writer, "")
-	fmt.Fprintln(writer, "Commands: run, auth, volume, self")
+	fmt.Fprintln(writer, "Commands: run, auth, volume, control, self")
 	writeRunUsage(writer)
 	writeAuthUsage(writer)
 	writeVolumeUsage(writer)
+	writeControlUsage(writer)
 	writeSelfUsage(writer)
 }
 
@@ -598,16 +601,20 @@ func resolvedNamespace(value string, backend Backend) string {
 func writeObject(writer io.Writer, object any, format string) error {
 	switch format {
 	case "name":
-		run, ok := object.(*agentsv1alpha1.AgentRun)
-		if !ok {
-			return &usageError{message: "name output is supported only for one AgentRun"}
+		switch typed := object.(type) {
+		case *agentsv1alpha1.AgentRun:
+			name := typed.Name
+			if name == "" {
+				name = typed.GenerateName
+			}
+			_, err := fmt.Fprintf(writer, "agentrun.control.anvil.hazyforge.io/%s\n", name)
+			return err
+		case *agentsv1alpha1.AgentRunControl:
+			_, err := fmt.Fprintf(writer, "agentruncontrol.control.anvil.hazyforge.io/%s\n", typed.Name)
+			return err
+		default:
+			return &usageError{message: "name output is supported only for one AgentRun or AgentRunControl"}
 		}
-		name := run.Name
-		if name == "" {
-			name = run.GenerateName
-		}
-		_, err := fmt.Fprintf(writer, "agentrun.control.anvil.hazyforge.io/%s\n", name)
-		return err
 	case "json":
 		cleaned, err := cleanObject(object)
 		if err != nil {
