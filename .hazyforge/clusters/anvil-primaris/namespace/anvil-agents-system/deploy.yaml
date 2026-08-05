@@ -9,7 +9,7 @@ serviceAccount:
   name: anvil-agents
 image:
   # Controller/API image embeds Anvil Agents Console SPA (served at /).
-  reference: ghcr.io/hazyforge/anvil-agents@sha256:b423d36e8c5f1292824e53c4cf106f916efc915ea0e1670965b928c38ee6d4d4
+  reference: ghcr.io/hazyforge/anvil-agents@sha256:4d09bbb31be86b90f95c5e31b53be1b46c50ca762dbdc4a0e8e538cc444bc14c
   pullPolicy: IfNotPresent
 imagePullSecrets:
   - name: ghcr-creds
@@ -62,6 +62,11 @@ api:
       # GitOps-owned objects remain immutable via managed-by / Argo markers.
       readEnabled: true
       writeEnabled: true
+    controls:
+      # Pause/resume launch gates from the console. Authorization is per
+      # application: binding namespaces match each control's applicationRef.name.
+      readEnabled: true
+      writeEnabled: true
     runs:
       # Append-only AgentRun create remains available for future run launch UI.
       createEnabled: true
@@ -77,6 +82,7 @@ api:
             - anvil-agents:runs:read
             - anvil-agents:runs:stream
             - anvil-agents:composition:read
+            - anvil-agents:controls:read
           namespaces:
             - anvilhub
             - hazy-trade
@@ -89,6 +95,8 @@ api:
             - anvil-agents:runs:create
             - anvil-agents:composition:read
             - anvil-agents:composition:write
+            - anvil-agents:controls:read
+            - anvil-agents:controls:write
           namespaces:
             - anvilhub
             - hazy-trade
