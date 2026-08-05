@@ -196,6 +196,12 @@ api:
     # Append-only AgentRun create for console agent cards.
     runs:
       createEnabled: false
+    # Cluster-scoped AgentRunControl launch gates (pause/resume from the console).
+    # GitOps-owned controls remain read-only; operator-created controls are
+    # writable when writeEnabled is true.
+    controls:
+      readEnabled: false
+      writeEnabled: false
     list:
       maxItems: 5000
     stream:

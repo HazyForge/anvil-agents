@@ -2,8 +2,13 @@
 {{- $compositionRead := dig "composition" "readEnabled" false .Values.api.config }}
 {{- $compositionWrite := dig "composition" "writeEnabled" false .Values.api.config }}
 {{- $runsCreate := dig "runs" "createEnabled" false .Values.api.config }}
+{{- $controlsRead := dig "controls" "readEnabled" false .Values.api.config }}
+{{- $controlsWrite := dig "controls" "writeEnabled" false .Values.api.config }}
 {{- if and $compositionWrite (not $compositionRead) }}
 {{- fail "api.config.composition.writeEnabled requires api.config.composition.readEnabled" }}
+{{- end }}
+{{- if and $controlsWrite (not $controlsRead) }}
+{{- fail "api.config.controls.writeEnabled requires api.config.controls.readEnabled" }}
 {{- end }}
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
@@ -51,6 +56,17 @@ rules:
       - update
       - patch
       - delete
+{{- end }}
+{{- end }}
+{{- if $controlsRead }}
+  - apiGroups: ["control.anvil.hazyforge.io"]
+    resources: ["agentruncontrols"]
+    verbs:
+      - get
+      - list
+{{- if $controlsWrite }}
+      - update
+      - patch
 {{- end }}
 {{- end }}
   - apiGroups: [""]

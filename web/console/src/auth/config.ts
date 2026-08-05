@@ -13,6 +13,10 @@ export type UIConfig = {
     readEnabled: boolean;
     writeEnabled: boolean;
   };
+  controls?: {
+    readEnabled: boolean;
+    writeEnabled: boolean;
+  };
   runs: {
     createEnabled: boolean;
   };
@@ -41,6 +45,7 @@ export async function loadUIConfig(force = false): Promise<UIConfig> {
       throw new Error("ui-config missing oidc.issuer or oidc.clientId");
     }
     const composition = (body as UIConfig).composition;
+    const controls = (body as UIConfig).controls;
     const runs = (body as UIConfig).runs;
     cached = {
       productTitle: body.productTitle || "Anvil Agents Console",
@@ -57,6 +62,10 @@ export async function loadUIConfig(force = false): Promise<UIConfig> {
       composition: {
         readEnabled: Boolean(composition?.readEnabled),
         writeEnabled: Boolean(composition?.writeEnabled),
+      },
+      controls: {
+        readEnabled: Boolean(controls?.readEnabled),
+        writeEnabled: Boolean(controls?.writeEnabled),
       },
       runs: {
         createEnabled: Boolean(runs?.createEnabled),

@@ -8,6 +8,7 @@ interface Props {
   namespaces: string[];
   activeNamespace: string;
   compositionRead: boolean;
+  controlsRead: boolean;
   onSelectNamespace: (namespace: string) => void;
   onAddNamespace: (namespace: string) => void;
   onRemoveNamespace: (namespace: string) => void;
@@ -16,6 +17,9 @@ interface Props {
 function leafForPath(pathname: string): TreeLeafId {
   if (pathname === "/" || pathname.includes("/runs/")) {
     return "agent-runs";
+  }
+  if (pathname.startsWith("/controls")) {
+    return "controls";
   }
   if (pathname.startsWith("/profiles") || /\/ns\/[^/]+\/profiles(\/|$)/.test(pathname)) {
     return "profiles";
@@ -65,6 +69,7 @@ export function NamespaceTree({
   namespaces,
   activeNamespace,
   compositionRead,
+  controlsRead,
   onSelectNamespace,
   onAddNamespace,
   onRemoveNamespace,
@@ -199,6 +204,21 @@ export function NamespaceTree({
                             <span className="ns-subfolder-glyph" aria-hidden />
                             <span className="ns-subfolder-label">Library hub</span>
                             <span className="ns-subfolder-kind mono">all CRDs</span>
+                          </Link>
+                        </li>
+                      ) : null}
+                      {controlsRead ? (
+                        <li>
+                          <Link
+                            className={`ns-subfolder ns-subfolder-link${
+                              isActiveNs && activeLeaf === "controls" ? " active" : ""
+                            }`}
+                            to="/controls"
+                            onClick={() => onSelectNamespace(ns)}
+                          >
+                            <span className="ns-subfolder-glyph" aria-hidden />
+                            <span className="ns-subfolder-label">Launch controls</span>
+                            <span className="ns-subfolder-kind mono">AgentRunControl</span>
                           </Link>
                         </li>
                       ) : null}

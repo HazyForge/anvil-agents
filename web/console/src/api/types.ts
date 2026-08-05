@@ -107,6 +107,52 @@ export interface AgentRunListResponse {
   items: AgentRunView[];
 }
 
+export type ControlLaunchPolicy = "Allowed" | "Paused" | string;
+
+export interface ControlSourceView {
+  kind?: string;
+  name?: string;
+  url?: string;
+  actor?: string;
+}
+
+export interface ControlManagement {
+  writable: boolean;
+  reason?: string;
+  managedBy?: string;
+}
+
+export interface ControlView {
+  name: string;
+  application: string;
+  launchPolicy: ControlLaunchPolicy;
+  phase?: string;
+  reason?: string;
+  expiresAt?: string;
+  source?: ControlSourceView;
+  affectedSchedules?: number;
+  pendingRuns?: number;
+  activeRuns?: number;
+  resourceVersion: string;
+  generation?: number;
+  createdAt: string;
+  management: ControlManagement;
+}
+
+export interface ControlListResponse {
+  items: ControlView[];
+}
+
+export interface ControlWriteRequest {
+  launchPolicy: ControlLaunchPolicy;
+  reason: string;
+  expiresAt?: string;
+  sourceName?: string;
+  sourceUrl?: string;
+  sourceActor?: string;
+  resourceVersion: string;
+}
+
 export interface APIErrorBody {
   error?: {
     code?: string;

@@ -144,6 +144,8 @@ Permissions:
 | `anvil-agents:runs:stream` | Live log/status streams (with read) |
 | `anvil-agents:composition:read` | List/get composition CRs (when `composition.readEnabled`) |
 | `anvil-agents:composition:write` | Create/update/delete **console-managed** composition CRs (when `composition.writeEnabled`) |
+| `anvil-agents:controls:read` | List/get cluster-scoped `AgentRunControl` launch gates for authorized applications (when `controls.readEnabled`) |
+| `anvil-agents:controls:write` | Pause/resume launch gates for authorized applications (when `controls.writeEnabled`) |
 
 Composition kinds: `AgentRunProfile`, `AgentHarnessProfile`, `AgentSkillSet`,
 `AgentToolSet`, `AgentCouncil`, `VolumeProfile`, `AgentDataVolume`.
@@ -158,6 +160,16 @@ Console creates always stamp that label and strip client-supplied GitOps
 markers. Granting `composition:write` is still code-execution authority for
 console-managed objects (tool setup scripts, harness image/SA/Secret *refs*).
 The API never grants Secret data access and never mutates AgentRuns.
+
+Launch gates (`controls:write`) pause or resume launches for one Application
+scope. Authorization is per application: a binding's namespaces are matched
+against each control's `spec.applicationRef.name`, so an operator granted
+`hazy-trade` can pause hazy-trade but not another application. A pause records
+a required reason and an optional bounded `expiresAt`; a resume flips the gate
+to `Allowed`. Well-known GitOps ownership markers on a control block writes
+(the API never edits a GitOps-owned gate), but ordinary operator-created
+controls remain writable — launch gates are operational state, not GitOps
+composition source. Pauses never terminate an already-created Job.
 
 The API still has cluster-wide read access to AgentRuns, Jobs, Pods, and logs,
 so compromise can expose workload output. Its resolved-composition view

@@ -8,6 +8,7 @@ import { AuthCallbackPage } from "./pages/AuthCallbackPage";
 import { LibraryHubPage } from "./pages/library/LibraryHubPage";
 import { CompositionListPage } from "./pages/library/CompositionListPage";
 import { CompositionEditorPage } from "./pages/library/CompositionEditorPage";
+import { ControlsPage } from "./pages/ControlsPage";
 import { ProfileCardsPage } from "./pages/profiles/ProfileCardsPage";
 import { ProfileEditorPage } from "./pages/profiles/ProfileEditorPage";
 import { loadUIConfig } from "./auth/config";
@@ -31,6 +32,8 @@ export default function App() {
   const [authError, setAuthError] = useState<string | null>(null);
   const [compositionRead, setCompositionRead] = useState(false);
   const [compositionWrite, setCompositionWrite] = useState(false);
+  const [controlsRead, setControlsRead] = useState(false);
+  const [controlsWrite, setControlsWrite] = useState(false);
   /** Avoid catch-all redirect until /api/v1/ui-config finishes — deep links like /harness-profiles/new must not bounce to /. */
   const [configReady, setConfigReady] = useState(false);
 
@@ -46,6 +49,8 @@ export default function App() {
         setProductTitle(config.productTitle);
         setCompositionRead(config.composition.readEnabled);
         setCompositionWrite(config.composition.writeEnabled);
+        setControlsRead(config.controls?.readEnabled ?? false);
+        setControlsWrite(config.controls?.writeEnabled ?? false);
         if (config.defaultNamespaces.length > 0) {
           setNamespaces((prev) => {
             const next = uniqueNamespaces([...config.defaultNamespaces, ...prev]);
@@ -180,6 +185,7 @@ export default function App() {
                   namespaces={namespaces}
                   activeNamespace={activeNamespace}
                   compositionRead={compositionRead}
+                  controlsRead={controlsRead}
                   onSelectNamespace={onSelectNamespace}
                   onAddNamespace={onAddNamespace}
                   onRemoveNamespace={onRemoveNamespace}
@@ -191,6 +197,12 @@ export default function App() {
                       path="/ns/:namespace/runs/:name"
                       element={<RunPage token={token} onViewNamespace={onViewNamespace} />}
                     />
+                    {controlsRead ? (
+                      <Route
+                        path="/controls"
+                        element={<ControlsPage token={token} writeEnabled={controlsWrite} />}
+                      />
+                    ) : null}
                     {compositionRead ? (
                       <>
                         <Route
