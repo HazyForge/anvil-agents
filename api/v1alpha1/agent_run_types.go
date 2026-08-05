@@ -51,6 +51,7 @@ const (
 	AgentRunModelProviderOpenAICodex AgentRunModelProvider = "openai-codex"
 	AgentRunModelProviderOpenAI      AgentRunModelProvider = "openai"
 	AgentRunModelProviderXAI         AgentRunModelProvider = "xai"
+	AgentRunModelProviderDeepSeek    AgentRunModelProvider = "deepseek"
 )
 
 type AgentRunProviderAuthMode string
@@ -412,7 +413,9 @@ type AgentRunHarnessBackendSpec struct {
 	// openClaw.model, grokBuild.model, piAgent.model, or codex.model. OpenCode
 	// does not use this shared selector; set openCode.model to its native
 	// provider/model value and inject provider-native authentication instead.
-	// +kubebuilder:validation:Enum=openai-codex;openai;xai
+	// deepseek selects the Hermes Agent DeepSeek provider (apiKey mode;
+	// DEEPSEEK_API_KEY env).
+	// +kubebuilder:validation:Enum=openai-codex;openai;xai;deepseek
 	// +optional
 	ModelProvider AgentRunModelProvider `json:"modelProvider,omitempty"`
 	// ProviderAuthMode selects how a provider-aware adapter should authenticate
