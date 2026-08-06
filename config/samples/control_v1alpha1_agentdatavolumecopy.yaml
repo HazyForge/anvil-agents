@@ -1,7 +1,7 @@
 apiVersion: control.anvil.hazyforge.io/v1alpha1
 kind: AgentDataVolumeCopy
 metadata:
-  generateName: volume-copy-
+  name: volume-copy-example
   namespace: agents
 spec:
   sourceRef:
