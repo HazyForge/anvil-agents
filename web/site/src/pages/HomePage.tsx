@@ -1,6 +1,5 @@
 import { Link } from "react-router-dom";
-import AgentCouncil from "../components/AgentCouncil";
-import ClusterFieldBackground from "../components/ClusterFieldBackground";
+import HeroCinematic from "../components/HeroCinematic";
 
 const GITHUB = "https://github.com/HazyForge/anvil-agents";
 
@@ -64,9 +63,9 @@ export default function HomePage() {
   return (
     <main>
       <section className="hero">
-        <ClusterFieldBackground />
+        <HeroCinematic />
         <div className="hero-scrim" aria-hidden="true" />
-        <div className="container hero-grid">
+        <div className="container hero-inner">
           <div className="hero-copy">
             <div className="eyebrow">Open source · Kubernetes operator</div>
             <h1 className="display hero-title">
@@ -99,8 +98,32 @@ export default function HomePage() {
               </a>
             </div>
           </div>
-          <div className="hero-visual">
-            <AgentCouncil />
+        </div>
+        <div className="hero-ticker" aria-hidden="true">
+          <div className="container hero-ticker-inner">
+            <span className="mono hero-ticker-label">Cluster</span>
+            <div className="hero-ticker-runs">
+              <span className="ticker-run">
+                <span className="ticker-dot live" />
+                <span className="ticker-name mono">anvil-codex-7f3k9</span>
+                <span className="ticker-phase">Running</span>
+              </span>
+              <span className="ticker-run">
+                <span className="ticker-dot live" />
+                <span className="ticker-name mono">opencode-runner-4p2m</span>
+                <span className="ticker-phase">Running</span>
+              </span>
+              <span className="ticker-run">
+                <span className="ticker-dot" />
+                <span className="ticker-name mono">hermes-scan-9c1a</span>
+                <span className="ticker-phase">Succeeded</span>
+              </span>
+              <span className="ticker-run">
+                <span className="ticker-dot" />
+                <span className="ticker-name mono">grok-build-suite-2b1d</span>
+                <span className="ticker-phase">Succeeded</span>
+              </span>
+            </div>
           </div>
         </div>
       </section>
