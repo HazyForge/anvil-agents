@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -125,6 +126,23 @@ func (app App) Run(ctx context.Context, args []string) error {
 			writeRunUsage(app.Err)
 			return &usageError{message: fmt.Sprintf("unknown run command %q", remaining[1])}
 		}
+	case "submit":
+		return app.runSubmit(ctx, options, remaining[1:])
+	case "profile":
+		if len(remaining) < 2 {
+			writeProfileUsage(app.Err)
+			return &usageError{message: "a profile command is required"}
+		}
+		switch remaining[1] {
+		case "list":
+			return app.runProfileList(ctx, options, remaining[2:])
+		case "help":
+			writeProfileUsage(app.Out)
+			return nil
+		default:
+			writeProfileUsage(app.Err)
+			return &usageError{message: fmt.Sprintf("unknown profile command %q", remaining[1])}
+		}
 	case "auth":
 		return app.runAuth(ctx, options, remaining[1:])
 	case "volume":
@@ -143,8 +161,10 @@ func (app App) Run(ctx context.Context, args []string) error {
 func writeRootUsage(writer io.Writer) {
 	fmt.Fprintln(writer, "Usage: anvil-agentctl [--kubeconfig PATH] [--context NAME] COMMAND")
 	fmt.Fprintln(writer, "")
-	fmt.Fprintln(writer, "Commands: run, auth, volume, self")
+	fmt.Fprintln(writer, "Commands: run, submit, profile, auth, volume, self")
 	writeRunUsage(writer)
+	writeSubmitUsage(writer)
+	writeProfileUsage(writer)
 	writeAuthUsage(writer)
 	writeVolumeUsage(writer)
 	writeSelfUsage(writer)
@@ -152,6 +172,15 @@ func writeRootUsage(writer io.Writer) {
 
 func writeRunUsage(writer io.Writer) {
 	fmt.Fprintln(writer, "Run commands: create, list, get, logs, debug")
+}
+
+func writeSubmitUsage(writer io.Writer) {
+	fmt.Fprintln(writer, "Submit a prompt or idea to any profile as a new AgentRun:")
+	fmt.Fprintln(writer, "  anvil-agentctl submit PROMPT --profile NAME [flags]")
+}
+
+func writeProfileUsage(writer io.Writer) {
+	fmt.Fprintln(writer, "Profile commands: list")
 }
 
 type createOptions struct {
@@ -267,34 +296,9 @@ func (app App) buildRun(options createOptions) (*agentsv1alpha1.AgentRun, error)
 	if options.sourceGeneration < 0 {
 		return nil, &usageError{message: "--source-generation cannot be negative"}
 	}
-	if options.prompt != "" && options.promptFile != "" {
-		return nil, &usageError{message: "set only one of --prompt or --prompt-file"}
-	}
-	prompt := options.prompt
-	if options.promptFile != "" {
-		reader := app.In
-		var closer io.Closer
-		if options.promptFile != "-" {
-			file, err := os.Open(options.promptFile)
-			if err != nil {
-				return nil, err
-			}
-			reader, closer = file, file
-		}
-		if closer != nil {
-			defer closer.Close()
-		}
-		body, err := io.ReadAll(io.LimitReader(reader, maxPromptBytes+1))
-		if err != nil {
-			return nil, fmt.Errorf("read prompt: %w", err)
-		}
-		if len(body) > maxPromptBytes {
-			return nil, &usageError{message: fmt.Sprintf("prompt exceeds %d bytes", maxPromptBytes)}
-		}
-		prompt = string(body)
-	}
-	if strings.TrimSpace(prompt) == "" {
-		return nil, &usageError{message: "--prompt or --prompt-file is required"}
+	prompt, err := app.readPrompt(options.prompt, options.promptFile)
+	if err != nil {
+		return nil, err
 	}
 	purpose := agentsv1alpha1.AgentRunPurpose(options.purpose)
 	if !validPurpose(purpose) {
@@ -329,6 +333,260 @@ func (app App) buildRun(options createOptions) (*agentsv1alpha1.AgentRun, error)
 		run.Spec.Harness.Intent = intent
 	}
 	return run, nil
+}
+
+func (app App) readPrompt(prompt, promptFile string) (string, error) {
+	if prompt != "" && promptFile != "" {
+		return "", &usageError{message: "set only one of --prompt or --prompt-file"}
+	}
+	if promptFile != "" {
+		reader := app.In
+		var closer io.Closer
+		if promptFile != "-" {
+			file, err := os.Open(promptFile)
+			if err != nil {
+				return "", err
+			}
+			reader, closer = file, file
+		}
+		if closer != nil {
+			defer closer.Close()
+		}
+		body, err := io.ReadAll(io.LimitReader(reader, maxPromptBytes+1))
+		if err != nil {
+			return "", fmt.Errorf("read prompt: %w", err)
+		}
+		if len(body) > maxPromptBytes {
+			return "", &usageError{message: fmt.Sprintf("prompt exceeds %d bytes", maxPromptBytes)}
+		}
+		prompt = string(body)
+	}
+	if strings.TrimSpace(prompt) == "" {
+		return "", &usageError{message: "--prompt or --prompt-file is required"}
+	}
+	return prompt, nil
+}
+
+type submitOptions struct {
+	namespace        string
+	name             string
+	generateName     string
+	profile          string
+	prompt           string
+	promptFile       string
+	purpose          string
+	intent           string
+	ticketRepository string
+	sourceAPIVersion string
+	sourceKind       string
+	sourceNamespace  string
+	sourceName       string
+	sourceUID        string
+	sourceGeneration int64
+	dryRun           string
+	output           string
+}
+
+func (app App) runSubmit(ctx context.Context, kubeOptions KubeOptions, args []string) error {
+	options := submitOptions{
+		purpose:    string(agentsv1alpha1.AgentRunPurposeManual),
+		sourceKind: "CLITicket",
+		intent:     string(agentsv1alpha1.AgentRunIntentProposeChange),
+	}
+	flags := newCommandFlags("submit", app.Err)
+	flags.StringVarP(&options.namespace, "namespace", "n", "", "Namespace for the new AgentRun (required).")
+	flags.StringVar(&options.name, "name", "", "Exact name for the new append-only AgentRun.")
+	flags.StringVar(&options.generateName, "generate-name", "", "Server-generated name prefix; defaults to <profile>-.")
+	flags.StringVar(&options.profile, "profile", "", "Same-namespace AgentRunProfile to target (required).")
+	flags.StringVar(&options.prompt, "prompt", "", "One-off run prompt; alternative to the positional prompt argument.")
+	flags.StringVar(&options.promptFile, "prompt-file", "", "Read the one-off prompt from a file, or - for stdin.")
+	flags.StringVar(&options.purpose, "purpose", options.purpose, "Run purpose: manual, adverseSituation, or scheduledHealthCheck.")
+	flags.StringVar(&options.intent, "intent", options.intent, "Run intent: observe, fixTransient, proposeChange, or cleanup (default proposeChange).")
+	flags.StringVar(&options.ticketRepository, "ticket-repository", "", "Owner/name GitHub repository that receives the created ticket (for example HazyForge/anvil-agents).")
+	flags.StringVar(&options.sourceAPIVersion, "source-api-version", "", "Opaque source API version metadata.")
+	flags.StringVar(&options.sourceKind, "source-kind", options.sourceKind, "Opaque source kind metadata; defaults to CLITicket.")
+	flags.StringVar(&options.sourceNamespace, "source-namespace", "", "Opaque source namespace metadata.")
+	flags.StringVar(&options.sourceName, "source-name", "", "Opaque source name metadata; defaults to a slug of the prompt.")
+	flags.StringVar(&options.sourceUID, "source-uid", "", "Opaque source UID metadata.")
+	flags.Int64Var(&options.sourceGeneration, "source-generation", 0, "Opaque source generation metadata.")
+	flags.StringVar(&options.dryRun, "dry-run", "", "Set to client to render without contacting Kubernetes.")
+	flags.StringVarP(&options.output, "output", "o", "", "Output format: name, yaml, or json. Client dry-run defaults to yaml.")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	positional := flags.Args()
+	if len(positional) > 1 {
+		return &usageError{message: "submit accepts at most one positional prompt argument"}
+	}
+	if len(positional) == 1 {
+		if options.prompt != "" {
+			return &usageError{message: "set only one of the positional prompt or --prompt"}
+		}
+		if options.promptFile != "" {
+			return &usageError{message: "set only one of the positional prompt or --prompt-file"}
+		}
+		options.prompt = positional[0]
+	}
+	if options.output != "" && options.output != "name" && options.output != "yaml" && options.output != "json" {
+		return &usageError{message: fmt.Sprintf("unsupported output format %q", options.output)}
+	}
+	if options.dryRun != "" && options.dryRun != "client" {
+		return &usageError{message: "--dry-run supports only client"}
+	}
+	run, err := app.buildSubmitRun(options)
+	if err != nil {
+		return err
+	}
+	if options.dryRun == "client" {
+		format := options.output
+		if format == "" {
+			format = "yaml"
+		}
+		return writeObject(app.Out, run, format)
+	}
+	backend, err := app.Factory(kubeOptions)
+	if err != nil {
+		return err
+	}
+	if err := backend.CreateRun(ctx, run); err != nil {
+		if apierrors.IsAlreadyExists(err) {
+			return fmt.Errorf("AgentRun %s/%s already exists; AgentRuns are append-only, choose a new name: %w", run.Namespace, run.Name, err)
+		}
+		return err
+	}
+	format := options.output
+	if format == "" {
+		format = "name"
+	}
+	if err := writeObject(app.Out, run, format); err != nil {
+		return err
+	}
+	if format == "name" {
+		fmt.Fprintf(app.Out, "Watch progress: anvil-agentctl run logs -n %s %s --follow\n", run.Namespace, run.Name)
+		if options.ticketRepository != "" {
+			fmt.Fprintf(app.Out, "Ticket target: %s (the run creates or matches a GitHub issue)\n", options.ticketRepository)
+		}
+	}
+	return nil
+}
+
+func (app App) buildSubmitRun(options submitOptions) (*agentsv1alpha1.AgentRun, error) {
+	options.namespace = strings.TrimSpace(options.namespace)
+	options.name = strings.TrimSpace(options.name)
+	options.generateName = strings.TrimSpace(options.generateName)
+	options.profile = strings.TrimSpace(options.profile)
+	options.sourceKind = strings.TrimSpace(options.sourceKind)
+	options.sourceName = strings.TrimSpace(options.sourceName)
+	options.ticketRepository = strings.TrimSpace(options.ticketRepository)
+	if options.namespace == "" {
+		return nil, &usageError{message: "--namespace is required"}
+	}
+	if problems := apiValidation.NameIsDNSSubdomain(options.namespace, false); len(problems) > 0 {
+		return nil, &usageError{message: fmt.Sprintf("invalid --namespace: %s", strings.Join(problems, "; "))}
+	}
+	if options.profile == "" {
+		return nil, &usageError{message: "--profile is required"}
+	}
+	if options.name != "" && options.generateName != "" {
+		return nil, &usageError{message: "set only one of --name or --generate-name"}
+	}
+	if options.name != "" {
+		if problems := apiValidation.NameIsDNSSubdomain(options.name, false); len(problems) > 0 {
+			return nil, &usageError{message: fmt.Sprintf("invalid --name: %s", strings.Join(problems, "; "))}
+		}
+	}
+	if options.generateName == "" {
+		options.generateName = sanitizeLabelValue(options.profile) + "-"
+	}
+	if problems := apiValidation.NameIsDNSSubdomain(options.generateName, true); len(problems) > 0 {
+		return nil, &usageError{message: fmt.Sprintf("invalid --generate-name: %s", strings.Join(problems, "; "))}
+	}
+	prompt, err := app.readPrompt(options.prompt, options.promptFile)
+	if err != nil {
+		return nil, err
+	}
+	sourceSlug := promptSlug(prompt)
+	if options.ticketRepository != "" {
+		if !validRepository(options.ticketRepository) {
+			return nil, &usageError{message: fmt.Sprintf("invalid --ticket-repository %q; expected owner/name", options.ticketRepository)}
+		}
+		prompt += fmt.Sprintf(ticketPromptSuffix, options.ticketRepository, options.ticketRepository)
+	}
+	purpose := agentsv1alpha1.AgentRunPurpose(options.purpose)
+	if !validPurpose(purpose) {
+		return nil, &usageError{message: fmt.Sprintf("invalid --purpose %q", options.purpose)}
+	}
+	intent := agentsv1alpha1.AgentRunIntent(options.intent)
+	if intent != "" && !validIntent(intent) {
+		return nil, &usageError{message: fmt.Sprintf("invalid --intent %q", options.intent)}
+	}
+	if options.sourceKind == "" {
+		return nil, &usageError{message: "--source-kind cannot be empty"}
+	}
+	if options.sourceName == "" {
+		options.sourceName = sourceSlug
+		if options.sourceName == "" {
+			options.sourceName = options.profile
+		}
+	}
+	if options.sourceGeneration < 0 {
+		return nil, &usageError{message: "--source-generation cannot be negative"}
+	}
+	run := &agentsv1alpha1.AgentRun{
+		TypeMeta: metav1.TypeMeta{APIVersion: agentsv1alpha1.GroupVersion.String(), Kind: "AgentRun"},
+		ObjectMeta: metav1.ObjectMeta{
+			Name:         options.name,
+			GenerateName: options.generateName,
+			Namespace:    options.namespace,
+		},
+		Spec: agentsv1alpha1.AgentRunSpec{
+			Purpose: purpose,
+			SourceRef: agentsv1alpha1.AgentRunSourceRef{
+				APIVersion: strings.TrimSpace(options.sourceAPIVersion),
+				Kind:       options.sourceKind,
+				Namespace:  strings.TrimSpace(options.sourceNamespace),
+				Name:       options.sourceName,
+			},
+			SourceUID:        strings.TrimSpace(options.sourceUID),
+			SourceGeneration: options.sourceGeneration,
+			Prompt:           prompt,
+			ProfileRef:       &agentsv1alpha1.NamespacedObjectReference{Name: options.profile},
+		},
+	}
+	if intent != "" {
+		run.Spec.Harness.Intent = intent
+	}
+	if options.ticketRepository != "" {
+		run.Spec.IssueTracking = &agentsv1alpha1.AgentRunIssueTrackingSpec{
+			Provider:     agentsv1alpha1.AgentRunIssueTrackingProviderGitHub,
+			Repository:   options.ticketRepository,
+			UpdatePolicy: agentsv1alpha1.AgentRunIssueUpdatePolicyTriage,
+		}
+	}
+	return run, nil
+}
+
+const ticketPromptSuffix = `
+
+TICKET REQUEST
+The operator submitted this idea through the CLI and asked the system to create a ticket in %s.
+
+Create a GitHub issue in %s that captures this idea. Before creating anything, search for an existing issue that already tracks the same intent; if one exists, do not duplicate it — instead add one concise comment with any new evidence and report the existing issue number. When you create a new issue:
+- give it a concise, searchable title derived from the idea;
+- write a body that states the requested feature, its motivation, and any acceptance criteria described above;
+- include the originating AgentRun identity (name, namespace, UID) and this prompt text;
+- only add labels or a milestone when repository conventions and evidence support them.
+Report the created or matched issue number and URL in your final status summary.
+`
+
+var repositoryPattern = regexp.MustCompile(`^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$`)
+
+func validRepository(value string) bool {
+	return repositoryPattern.MatchString(strings.TrimSpace(value))
+}
+
+func promptSlug(prompt string) string {
+	return sanitizeLabelValue(prompt)
 }
 
 func validPurpose(value agentsv1alpha1.AgentRunPurpose) bool {
@@ -384,6 +642,81 @@ func (app App) runList(ctx context.Context, kubeOptions KubeOptions, args []stri
 		return &usageError{message: fmt.Sprintf("unsupported output format %q", output)}
 	}
 	return writeRunTable(app.Out, list.Items, allNamespaces)
+}
+
+func (app App) runProfileList(ctx context.Context, kubeOptions KubeOptions, args []string) error {
+	var namespace, output string
+	var allNamespaces bool
+	flags := newCommandFlags("profile list", app.Err)
+	flags.StringVarP(&namespace, "namespace", "n", "", "Namespace; defaults to the current kubeconfig context.")
+	flags.BoolVarP(&allNamespaces, "all-namespaces", "A", false, "List AgentRunProfiles across all namespaces allowed by caller RBAC.")
+	flags.StringVarP(&output, "output", "o", "", "Output format: table, yaml, or json.")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	if flags.NArg() != 0 {
+		return &usageError{message: "profile list does not accept positional arguments"}
+	}
+	backend, err := app.Factory(kubeOptions)
+	if err != nil {
+		return err
+	}
+	namespace = resolvedNamespace(namespace, backend)
+	if allNamespaces {
+		namespace = ""
+	}
+	list, err := backend.ListProfiles(ctx, namespace, allNamespaces)
+	if err != nil {
+		return err
+	}
+	sort.Slice(list.Items, func(i, j int) bool {
+		return list.Items[i].CreationTimestamp.After(list.Items[j].CreationTimestamp.Time)
+	})
+	if output == "yaml" || output == "json" {
+		list.TypeMeta = metav1.TypeMeta{APIVersion: agentsv1alpha1.GroupVersion.String(), Kind: "AgentRunProfileList"}
+		return writeObject(app.Out, list, output)
+	}
+	if output != "" && output != "table" {
+		return &usageError{message: fmt.Sprintf("unsupported output format %q", output)}
+	}
+	return writeProfileTable(app.Out, list.Items, allNamespaces)
+}
+
+func writeProfileTable(writer io.Writer, profiles []agentsv1alpha1.AgentRunProfile, allNamespaces bool) error {
+	table := tabwriter.NewWriter(writer, 0, 4, 2, ' ', 0)
+	if allNamespaces {
+		fmt.Fprint(table, "NAMESPACE\t")
+	}
+	fmt.Fprintln(table, "NAME\tINTENT\tBACKEND\tHARNESS PROFILE\tAPPLICATION\tTARGET\tAGE")
+	now := time.Now()
+	for i := range profiles {
+		profile := &profiles[i]
+		if allNamespaces {
+			fmt.Fprintf(table, "%s\t", profile.Namespace)
+		}
+		harnessProfile := "-"
+		if profile.Spec.HarnessProfileRef != nil {
+			harnessProfile = valueOrDash(profile.Spec.HarnessProfileRef.Name)
+		}
+		application := "-"
+		if profile.Spec.Scope.ApplicationRef != nil {
+			application = valueOrDash(profile.Spec.Scope.ApplicationRef.Name)
+		}
+		target := "-"
+		if profile.Spec.Scope.ApplicationTargetRef != nil {
+			target = valueOrDash(profile.Spec.Scope.ApplicationTargetRef.Name)
+		}
+		fmt.Fprintf(table, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+			profile.Name,
+			valueOrDash(string(profile.Spec.Harness.Intent)),
+			valueOrDash(string(profile.Spec.Harness.Backend.Kind)),
+			harnessProfile,
+			application,
+			target,
+			humanAge(now.Sub(profile.CreationTimestamp.Time)),
+		)
+	}
+	return table.Flush()
 }
 
 func (app App) runGet(ctx context.Context, kubeOptions KubeOptions, args []string) error {

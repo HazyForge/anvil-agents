@@ -28,6 +28,8 @@ The caller needs only the Kubernetes verbs used by each command:
 | Command | Kubernetes access |
 | --- | --- |
 | `run create` | `create` on `agentruns` |
+| `submit` | `create` on `agentruns` |
+| `profile list` | `list` on `agentrunprofiles` in the selected scope |
 | `run list` | `list` on `agentruns` in the selected scope |
 | `run get` | `get` on the selected `agentrun` |
 | `run logs` | `get` on the run, referenced Job and Pod, plus `get` on `pods/log` |
@@ -94,6 +96,86 @@ printf '%s\n' "Inspect the failing release gate." | \
 `scheduledHealthCheck`. `--intent` is an optional explicit override accepting
 `observe`, `fixTransient`, `proposeChange`, or `cleanup`; omit it to retain the
 profile's declared intent.
+
+## Submit An Idea To Any Profile
+
+`submit` is the ergonomic idea-ingestion entry point: one prompt, any
+same-namespace profile, and the run carries the operator's intent. It wraps
+`run create` with sensible defaults so an idea can go straight into the system
+without assembling source and name metadata by hand.
+
+```bash
+anvil-agentctl submit "Add a dry-run flag to the CLI" \
+  -n agents \
+  --profile feature-triage
+```
+
+The first positional argument is the prompt; `--prompt` and `--prompt-file`
+(including `-` for stdin) work exactly like `run create`. `--profile` is
+required and can name any AgentRunProfile in the namespace; the controller
+resolves the rest of the composition from that profile.
+
+The command fills in the bookkeeping automatically:
+
+- `--generate-name` defaults to `<profile>-`, so the created run gets a unique
+  server-generated suffix (`feature-triage-abc12`).
+- The run intent defaults to `proposeChange` (an idea is a proposed change);
+  override it with `--intent observe|fixTransient|proposeChange|cleanup`.
+- The source is recorded as `CLITicket/<slug-of-the-prompt>`, so `run list`
+  makes CLI submissions easy to spot. `--source-kind` and `--source-name`
+  override the defaults.
+
+After creation the command prints the created run and a ready-to-paste follow
+command:
+
+```text
+agentrun.control.anvil.hazyforge.io/feature-triage-abc12
+Watch progress: anvil-agentctl run logs -n agents feature-triage-abc12 --follow
+```
+
+### Turn An Idea Into A Ticket
+
+Pass `--ticket-repository OWNER/REPO` to instruct the run to create a GitHub
+issue that captures the idea:
+
+```bash
+anvil-agentctl submit "Stream live run events to the console" \
+  -n agents \
+  --profile feature-triage \
+  --ticket-repository HazyForge/anvil-agents
+```
+
+This configures the run's `issueTracking` (provider `github`, repository
+`OWNER/REPO`, update policy `Triage`) and appends an explicit TICKET REQUEST
+block to the prompt. The run searches for an existing issue with the same
+intent first and reports the created or matched issue number in its final
+status. The selected profile must supply the GitHub tooling (`gh` and a
+`GH_TOKEN` credential); `submit` only sets the tracking contract and the
+request, it never grants credentials.
+
+Client dry-run renders the full AgentRun without contacting Kubernetes:
+
+```bash
+anvil-agentctl submit "Stream live run events" \
+  -n agents --profile feature-triage \
+  --ticket-repository HazyForge/anvil-agents \
+  --dry-run=client -o yaml
+```
+
+## Discover Profiles
+
+`profile list` shows the same-namespace AgentRunProfiles that `submit` and
+`run create` can target, including each profile's declared intent, backend,
+harness profile, and opaque application scope:
+
+```bash
+anvil-agentctl profile list -n agents
+anvil-agentctl profile list -A
+anvil-agentctl profile list -n agents -o json
+```
+
+When `--namespace` is omitted it uses the namespace selected by the current
+kubeconfig context, matching `run list`.
 
 ## List And Inspect Runs
 

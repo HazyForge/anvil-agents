@@ -75,7 +75,8 @@ the certified submission contract.
 - `anvil-agents-api`: optional OIDC-protected summaries, live SSE logs, and the
   read-only **Anvil Agents Console** SPA at `/` (see `web/console/`).
 - `anvil-agentctl`: Kubernetes-authenticated creation and diagnosis of runs,
-  Codex durable-home reauth, and in-pod status reporting without raw manifests.
+  CLI idea/ticket submission to any profile, Codex durable-home reauth, and
+  in-pod status reporting without raw manifests.
 - Collector-neutral Job and Pod labels for external log and telemetry
   pipelines.
 

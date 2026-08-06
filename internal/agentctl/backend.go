@@ -30,6 +30,7 @@ type Backend interface {
 	DefaultNamespace() string
 	CreateRun(context.Context, *agentsv1alpha1.AgentRun) error
 	ListRuns(context.Context, string, bool) (*agentsv1alpha1.AgentRunList, error)
+	ListProfiles(context.Context, string, bool) (*agentsv1alpha1.AgentRunProfileList, error)
 	GetRun(context.Context, string, string) (*agentsv1alpha1.AgentRun, error)
 	OpenLogs(context.Context, *agentsv1alpha1.AgentRun, corev1.PodLogOptions) (io.ReadCloser, error)
 	GetJob(context.Context, string, string) (*batchv1.Job, error)
@@ -107,6 +108,18 @@ func (backend *KubernetesBackend) ListRuns(ctx context.Context, namespace string
 	}
 	if err := backend.runs.List(ctx, list, options...); err != nil {
 		return nil, fmt.Errorf("list AgentRuns: %w", err)
+	}
+	return list, nil
+}
+
+func (backend *KubernetesBackend) ListProfiles(ctx context.Context, namespace string, allNamespaces bool) (*agentsv1alpha1.AgentRunProfileList, error) {
+	list := &agentsv1alpha1.AgentRunProfileList{}
+	var options []client.ListOption
+	if !allNamespaces {
+		options = append(options, client.InNamespace(namespace))
+	}
+	if err := backend.runs.List(ctx, list, options...); err != nil {
+		return nil, fmt.Errorf("list AgentRunProfiles: %w", err)
 	}
 	return list, nil
 }

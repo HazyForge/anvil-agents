@@ -25,6 +25,7 @@ type fakeBackend struct {
 	created          *agentsv1alpha1.AgentRun
 	createErr        error
 	runs             []agentsv1alpha1.AgentRun
+	profiles         []agentsv1alpha1.AgentRunProfile
 	getRun           *agentsv1alpha1.AgentRun
 	getRunErr        error
 	getRunCalls      int
@@ -66,6 +67,10 @@ func (backend *fakeBackend) CreateRun(_ context.Context, run *agentsv1alpha1.Age
 
 func (backend *fakeBackend) ListRuns(_ context.Context, _ string, _ bool) (*agentsv1alpha1.AgentRunList, error) {
 	return &agentsv1alpha1.AgentRunList{Items: append([]agentsv1alpha1.AgentRun(nil), backend.runs...)}, nil
+}
+
+func (backend *fakeBackend) ListProfiles(_ context.Context, _ string, _ bool) (*agentsv1alpha1.AgentRunProfileList, error) {
+	return &agentsv1alpha1.AgentRunProfileList{Items: append([]agentsv1alpha1.AgentRunProfile(nil), backend.profiles...)}, nil
 }
 
 func (backend *fakeBackend) GetRun(_ context.Context, _, _ string) (*agentsv1alpha1.AgentRun, error) {
@@ -289,6 +294,191 @@ func TestRunCreateRejectsInvalidOutputBeforeMutation(t *testing.T) {
 	}
 	if backend.created != nil {
 		t.Fatal("invalid output mutated Kubernetes")
+	}
+}
+
+func TestSubmitCreatesRunWithProfileIntentAndDerivedSource(t *testing.T) {
+	backend := &fakeBackend{defaultNamespace: "ignored"}
+	var output strings.Builder
+	app := testApp(backend, &output)
+	err := app.Run(context.Background(), []string{
+		"submit", "Add a dry-run flag to the CLI", "-n", "agents", "--profile", "feature-triage",
+	})
+	if err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+	if backend.created == nil {
+		t.Fatal("AgentRun was not created")
+	}
+	created := backend.created
+	if created.Spec.ProfileRef == nil || created.Spec.ProfileRef.Name != "feature-triage" {
+		t.Fatalf("profile ref = %#v", created.Spec.ProfileRef)
+	}
+	if created.Spec.Harness.Intent != agentsv1alpha1.AgentRunIntentProposeChange {
+		t.Fatalf("intent = %q, want proposeChange", created.Spec.Harness.Intent)
+	}
+	if created.Spec.Purpose != agentsv1alpha1.AgentRunPurposeManual {
+		t.Fatalf("purpose = %q, want manual", created.Spec.Purpose)
+	}
+	if created.Spec.SourceRef.Kind != "CLITicket" || created.Spec.SourceRef.Name != "add-a-dry-run-flag-to-the-cli" {
+		t.Fatalf("source ref = %#v", created.Spec.SourceRef)
+	}
+	if created.GenerateName != "feature-triage-" {
+		t.Fatalf("generate name = %q, want feature-triage-", created.GenerateName)
+	}
+	if created.Spec.IssueTracking != nil {
+		t.Fatalf("issue tracking set without --ticket-repository: %#v", created.Spec.IssueTracking)
+	}
+	for _, expected := range []string{
+		"agentrun.control.anvil.hazyforge.io/feature-triage-abc12",
+		"Watch progress: anvil-agentctl run logs -n agents feature-triage-abc12 --follow",
+	} {
+		if !strings.Contains(output.String(), expected) {
+			t.Fatalf("output missing %q:\n%s", expected, output.String())
+		}
+	}
+}
+
+func TestSubmitTicketRepositoryConfiguresGithubTriage(t *testing.T) {
+	backend := &fakeBackend{}
+	app := testApp(backend, io.Discard)
+	err := app.Run(context.Background(), []string{
+		"submit", "Add streaming mode to the API", "-n", "agents", "--profile", "feature-triage",
+		"--ticket-repository", "HazyForge/anvil-agents", "--intent", "proposeChange",
+	})
+	if err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+	created := backend.created
+	if created.Spec.IssueTracking == nil {
+		t.Fatal("issue tracking was not configured")
+	}
+	if created.Spec.IssueTracking.Provider != agentsv1alpha1.AgentRunIssueTrackingProviderGitHub {
+		t.Fatalf("provider = %q", created.Spec.IssueTracking.Provider)
+	}
+	if created.Spec.IssueTracking.Repository != "HazyForge/anvil-agents" {
+		t.Fatalf("repository = %q", created.Spec.IssueTracking.Repository)
+	}
+	if created.Spec.IssueTracking.UpdatePolicy != agentsv1alpha1.AgentRunIssueUpdatePolicyTriage {
+		t.Fatalf("update policy = %q, want Triage", created.Spec.IssueTracking.UpdatePolicy)
+	}
+	if !strings.Contains(created.Spec.Prompt, "TICKET REQUEST") || !strings.Contains(created.Spec.Prompt, "HazyForge/anvil-agents") {
+		t.Fatalf("prompt lacks ticket instruction:\n%s", created.Spec.Prompt)
+	}
+	if created.Spec.SourceRef.Name != "add-streaming-mode-to-the-api" {
+		t.Fatalf("source name = %q, want slug of the idea without the ticket suffix", created.Spec.SourceRef.Name)
+	}
+}
+
+func TestSubmitClientDryRunDoesNotLoadKubernetes(t *testing.T) {
+	var output, errorOutput strings.Builder
+	factoryCalled := false
+	app := App{
+		In:  strings.NewReader("Create a ticket for background sync.\n"),
+		Out: &output,
+		Err: &errorOutput,
+		Factory: func(KubeOptions) (Backend, error) {
+			factoryCalled = true
+			return nil, errors.New("unexpected factory call")
+		},
+	}
+	err := app.Run(context.Background(), []string{
+		"submit", "-n", "agents", "--profile", "feature-triage", "--prompt-file", "-",
+		"--ticket-repository", "HazyForge/anvil-agents", "--dry-run", "client", "--output", "yaml",
+	})
+	if err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+	if factoryCalled {
+		t.Fatal("client dry-run loaded Kubernetes")
+	}
+	for _, expected := range []string{
+		"apiVersion: control.anvil.hazyforge.io/v1alpha1",
+		"kind: AgentRun",
+		"generateName: feature-triage-",
+		"namespace: agents",
+		"profileRef:",
+		"name: feature-triage",
+		"intent: proposeChange",
+		"kind: CLITicket",
+		"name: create-a-ticket-for-background-sync",
+		"updatePolicy: Triage",
+	} {
+		if !strings.Contains(output.String(), expected) {
+			t.Fatalf("dry-run output missing %q:\n%s", expected, output.String())
+		}
+	}
+}
+
+func TestSubmitValidation(t *testing.T) {
+	for name, args := range map[string][]string{
+		"no profile": {"submit", "an idea", "-n", "agents"},
+		"no prompt":  {"submit", "-n", "agents", "--profile", "p"},
+		"no namespace": {"submit", "an idea", "--profile", "p"},
+		"both names": {"submit", "an idea", "-n", "agents", "--profile", "p", "--name", "a", "--generate-name", "b-"},
+		"positional and flag": {"submit", "an idea", "-n", "agents", "--profile", "p", "--prompt", "other"},
+		"bad repository": {"submit", "an idea", "-n", "agents", "--profile", "p", "--ticket-repository", "no-slash"},
+		"bad intent": {"submit", "an idea", "-n", "agents", "--profile", "p", "--intent", "explode"},
+		"extra positional": {"submit", "first", "second", "-n", "agents", "--profile", "p"},
+		"bad output": {"submit", "an idea", "-n", "agents", "--profile", "p", "--output", "xml"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			backend := &fakeBackend{}
+			app := testApp(backend, io.Discard)
+			if err := app.Run(context.Background(), args); err == nil {
+				t.Fatal("expected validation error")
+			}
+			if backend.created != nil {
+				t.Fatal("validation failure mutated Kubernetes")
+			}
+		})
+	}
+}
+
+func TestSubmitRejectsAppendOnlyNameCollision(t *testing.T) {
+	backend := &fakeBackend{createErr: fmt.Errorf("create AgentRun: %w", apierrors.NewAlreadyExists(schema.GroupResource{Group: agentsv1alpha1.GroupVersion.Group, Resource: "agentruns"}, "feature-triage-001"))}
+	app := testApp(backend, io.Discard)
+	err := app.Run(context.Background(), []string{
+		"submit", "an idea", "-n", "agents", "--profile", "feature-triage", "--name", "feature-triage-001",
+	})
+	if err == nil || !strings.Contains(err.Error(), "AgentRuns are append-only, choose a new name") {
+		t.Fatalf("collision error = %v", err)
+	}
+}
+
+func TestProfileListShowsReusableTargets(t *testing.T) {
+	backend := &fakeBackend{
+		defaultNamespace: "agents",
+		profiles: []agentsv1alpha1.AgentRunProfile{
+			{ObjectMeta: metav1.ObjectMeta{Name: "feature-triage", Namespace: "agents", CreationTimestamp: metav1.NewTime(time.Now().Add(-time.Hour))}, Spec: agentsv1alpha1.AgentRunProfileSpec{
+				Harness: agentsv1alpha1.AgentRunHarnessSpec{Intent: agentsv1alpha1.AgentRunIntentProposeChange, Backend: agentsv1alpha1.AgentRunHarnessBackendSpec{Kind: agentsv1alpha1.AgentRunHarnessBackendPiAgent}},
+			}},
+			{ObjectMeta: metav1.ObjectMeta{Name: "repo-review", Namespace: "agents", CreationTimestamp: metav1.NewTime(time.Now().Add(-2 * time.Hour))}, Spec: agentsv1alpha1.AgentRunProfileSpec{
+				Harness: agentsv1alpha1.AgentRunHarnessSpec{Intent: agentsv1alpha1.AgentRunIntentObserve, Backend: agentsv1alpha1.AgentRunHarnessBackendSpec{Kind: agentsv1alpha1.AgentRunHarnessBackendCodex}},
+			}},
+		},
+	}
+	var output strings.Builder
+	if err := testApp(backend, &output).Run(context.Background(), []string{"profile", "list"}); err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+	for _, expected := range []string{"feature-triage", "proposeChange", "piAgent", "repo-review", "observe", "codex"} {
+		if !strings.Contains(output.String(), expected) {
+			t.Fatalf("profile table missing %q:\n%s", expected, output.String())
+		}
+	}
+}
+
+func TestProfileListJSONUsesListTypeMeta(t *testing.T) {
+	backend := &fakeBackend{defaultNamespace: "agents", profiles: []agentsv1alpha1.AgentRunProfile{
+		{ObjectMeta: metav1.ObjectMeta{Name: "feature-triage", Namespace: "agents"}},
+	}}
+	var output strings.Builder
+	if err := testApp(backend, &output).Run(context.Background(), []string{"profile", "list", "-o", "json"}); err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+	if !strings.Contains(output.String(), `"kind": "AgentRunProfileList"`) || !strings.Contains(output.String(), `"name": "feature-triage"`) {
+		t.Fatalf("profile JSON output unexpected:\n%s", output.String())
 	}
 }
 
