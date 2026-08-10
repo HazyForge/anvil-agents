@@ -15,12 +15,12 @@ presence grants no Kubernetes authority.
 | Schedule list / suspend / resume / run-now | **`anvil-agentctl schedule`** | kubeconfig + RBAC |
 | Run create / list / logs / debug | **`anvil-agentctl run`** | kubeconfig + RBAC |
 | Durable-home auth reauth | **`anvil-agentctl auth`** | kubeconfig + RBAC |
-| Manager mutations under Application policy | **`anvilctl agent --hub-url …`** (private Primaris) | SPIFFE / Hub session |
-| Static `.hazyforge/agents` PR proposals | **`anvilctl agent config propose --hub-url …`** | Hub only |
+| Manager mutations under Application policy | **Anvil Hub agent-management HTTP API** (private Primaris) | SPIFFE / Hub session |
+| Static `.hazyforge/agents` PR proposals | Hub + `AgentConfigurationChange` | Hub / policy-gated SA |
 
-Do **not** use private Primaris `anvilctl agent` for kube-backed pause, schedule
-suspend, or cluster inventory. That command family is Hub-only for product
-managers. Open-source installs never need Primaris `anvilctl`.
+There is **no** `anvilctl agent` command on private Primaris `anvilctl`. Product
+managers call Hub; human kube fleet ops use this CLI. Open-source installs
+never need Primaris `anvilctl`.
 
 The first client transport talks directly to Kubernetes using the caller's
 normal kubeconfig loading rules and RBAC. Build it from a checkout with:

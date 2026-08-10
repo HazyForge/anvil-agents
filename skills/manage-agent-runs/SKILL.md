@@ -17,11 +17,10 @@ Use this skill for `AgentRun`, `AgentRunProfile`, `AgentSchedule`,
 | List/suspend/resume/nudge schedules | `anvil-agentctl schedule …` |
 | Create/list/logs/debug runs | `anvil-agentctl run …` |
 | Durable home reauth | `anvil-agentctl auth …` |
-| Manager Hub mutations (Primaris product only) | `anvilctl agent --hub-url …` (separate skill) |
+| Manager Hub mutations (Primaris product only) | Hub `/v1/agent-management/…` HTTP API |
 
-This skill is the **public runtime** path. Do not use private Primaris
-`anvilctl agent` for kube-backed pause, schedule suspend, or inventory without
-Hub.
+This skill is the **public runtime** path. Private Primaris `anvilctl` has no
+`agent` subcommand.
 
 1. Read `docs/agent-run.md`, `docs/cli.md`, and the namespace's repository guidance.
 2. Prefer `anvil-agentctl` over raw manifests for run create/list/get/logs/debug,

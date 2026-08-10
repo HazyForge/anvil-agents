@@ -41,9 +41,9 @@ anvil-agentctl schedule run-now NAME -n NS
 anvil-agentctl run list -A
 ```
 
-Anvil Primaris `anvilctl agent` is a separate, private product CLI. It talks to
-Anvil Hub only (`--hub-url` required) for manager-scoped mutations and does not
-replace `anvil-agentctl` for launch gates or kube-backed fleet ops.
+Anvil Primaris has no `anvilctl agent` command. Managers call the Hub
+agent-management HTTP API. This CLI remains the Kubernetes fleet client for
+launch gates and schedule ops.
 
 ## Run lifecycle
 

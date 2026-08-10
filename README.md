@@ -81,8 +81,8 @@ the certified submission contract.
 - `anvil-agentctl`: Kubernetes-authenticated fleet CLI for runs (create/list/
   get/logs/debug), `AgentRunControl` launch gates (`control pause|resume`),
   schedules (`schedule list|suspend|resume|run-now`), durable-home auth, volume
-  copy, and in-pod status reporting. Distinct from private Primaris
-  `anvilctl agent`, which is Hub-only for managers.
+  copy, and in-pod status reporting. Private Primaris `anvilctl` has no
+  `agent` subcommand; managers use the Hub HTTP API.
 - Collector-neutral Job and Pod labels for external log and telemetry
   pipelines.
 
@@ -133,8 +133,8 @@ Operators with Kubernetes credentials use `anvil-agentctl` as the runtime CLI:
 create one append-only run from a profile, pause/resume application launch
 gates, suspend or nudge schedules, inspect status, stream the verified runner
 container, and aggregate controller, Job, Pod, and Event evidence. See
-[AgentRun CLI](docs/cli.md). Product managers on Anvil Primaris use private
-`anvilctl agent --hub-url` for Hub-brokered mutations only.
+[AgentRun CLI](docs/cli.md). Product managers on Anvil Primaris call the Hub
+agent-management HTTP API for brokered mutations (no `anvilctl agent`).
 
 ## Build Without GitHub Actions
 
