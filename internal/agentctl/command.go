@@ -131,6 +131,8 @@ func (app App) Run(ctx context.Context, args []string) error {
 		return app.runVolume(ctx, options, remaining[1:])
 	case "control":
 		return app.runControl(ctx, options, remaining[1:])
+	case "schedule":
+		return app.runSchedule(ctx, options, remaining[1:])
 	case "self":
 		return app.runSelf(remaining[1:])
 	case "help":
@@ -145,11 +147,12 @@ func (app App) Run(ctx context.Context, args []string) error {
 func writeRootUsage(writer io.Writer) {
 	fmt.Fprintln(writer, "Usage: anvil-agentctl [--kubeconfig PATH] [--context NAME] COMMAND")
 	fmt.Fprintln(writer, "")
-	fmt.Fprintln(writer, "Commands: run, auth, volume, control, self")
+	fmt.Fprintln(writer, "Commands: run, auth, volume, control, schedule, self")
 	writeRunUsage(writer)
 	writeAuthUsage(writer)
 	writeVolumeUsage(writer)
 	writeControlUsage(writer)
+	writeScheduleUsage(writer)
 	writeSelfUsage(writer)
 }
 
@@ -612,8 +615,11 @@ func writeObject(writer io.Writer, object any, format string) error {
 		case *agentsv1alpha1.AgentRunControl:
 			_, err := fmt.Fprintf(writer, "agentruncontrol.control.anvil.hazyforge.io/%s\n", typed.Name)
 			return err
+		case *agentsv1alpha1.AgentSchedule:
+			_, err := fmt.Fprintf(writer, "agentschedule.control.anvil.hazyforge.io/%s\n", typed.Name)
+			return err
 		default:
-			return &usageError{message: "name output is supported only for one AgentRun or AgentRunControl"}
+			return &usageError{message: "name output is supported only for one AgentRun, AgentRunControl, or AgentSchedule"}
 		}
 	case "json":
 		cleaned, err := cleanObject(object)
