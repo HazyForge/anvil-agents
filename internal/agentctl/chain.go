@@ -20,12 +20,13 @@ const (
 )
 
 func writeChainUsage(writer io.Writer) {
-	fmt.Fprintln(writer, "Chain commands: list, get, suspend, resume, start")
+	fmt.Fprintln(writer, "Chain commands: list, get, suspend, resume, start, cancel")
 	fmt.Fprintln(writer, "  anvil-agentctl chain list [-n NS|-A] [-o table|yaml|json]")
 	fmt.Fprintln(writer, "  anvil-agentctl chain get NAME [-n NS] [-o summary|yaml|json]")
 	fmt.Fprintln(writer, "  anvil-agentctl chain suspend NAME --reason TEXT [-n NS]")
 	fmt.Fprintln(writer, "  anvil-agentctl chain resume NAME --reason TEXT [-n NS]")
 	fmt.Fprintln(writer, "  anvil-agentctl chain start NAME [-n NS]")
+	fmt.Fprintln(writer, "  anvil-agentctl chain cancel NAME [-n NS] [--instance ID|*]")
 }
 
 func (app App) runChain(ctx context.Context, kubeOptions KubeOptions, args []string) error {
@@ -44,6 +45,8 @@ func (app App) runChain(ctx context.Context, kubeOptions KubeOptions, args []str
 		return app.chainSetSuspend(ctx, kubeOptions, args[1:], false)
 	case "start":
 		return app.chainStart(ctx, kubeOptions, args[1:])
+	case "cancel":
+		return app.chainCancel(ctx, kubeOptions, args[1:])
 	case "help":
 		writeChainUsage(app.Out)
 		return nil
@@ -199,6 +202,41 @@ func (app App) chainStart(ctx context.Context, kubeOptions KubeOptions, args []s
 		chain.Annotations = map[string]string{}
 	}
 	chain.Annotations[agentsv1alpha1.AgentChainStartNowAnnotation] = time.Now().UTC().Format(time.RFC3339Nano)
+	if err := backend.UpdateChain(ctx, chain); err != nil {
+		return err
+	}
+	return writeObject(app.Out, chain, "name")
+}
+
+func (app App) chainCancel(ctx context.Context, kubeOptions KubeOptions, args []string) error {
+	var namespace, instance string
+	flags := newCommandFlags("chain cancel", app.Err)
+	flags.StringVarP(&namespace, "namespace", "n", "", "Namespace; defaults to the current kubeconfig context.")
+	flags.StringVar(&instance, "instance", "*", "Instance id to stop advancing, or * for the active instance.")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	if flags.NArg() != 1 {
+		return &usageError{message: "chain cancel requires exactly one AgentChain name"}
+	}
+	backend, err := app.Factory(kubeOptions)
+	if err != nil {
+		return err
+	}
+	ns := resolvedNamespace(namespace, backend)
+	name := flags.Arg(0)
+	chain, err := backend.GetChain(ctx, ns, name)
+	if err != nil {
+		return err
+	}
+	if chain.Annotations == nil {
+		chain.Annotations = map[string]string{}
+	}
+	token := strings.TrimSpace(instance)
+	if token == "" {
+		token = "*"
+	}
+	chain.Annotations[agentsv1alpha1.AgentChainCancelInstanceAnnotation] = token
 	if err := backend.UpdateChain(ctx, chain); err != nil {
 		return err
 	}

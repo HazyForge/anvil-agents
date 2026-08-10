@@ -191,7 +191,7 @@ func (app App) runCreate(ctx context.Context, kubeOptions KubeOptions, args []st
 	flags.StringVar(&options.profile, "profile", "", "Same-namespace AgentRunProfile name (required).")
 	flags.StringVar(&options.prompt, "prompt", "", "One-off run prompt.")
 	flags.StringVar(&options.promptFile, "prompt-file", "", "Read the one-off prompt from a file, or - for stdin.")
-	flags.StringVar(&options.purpose, "purpose", options.purpose, "Run purpose: manual, adverseSituation, scheduledHealthCheck, or chained.")
+	flags.StringVar(&options.purpose, "purpose", options.purpose, "Run purpose: manual, adverseSituation, or scheduledHealthCheck (chained is controller-only).")
 	flags.StringVar(&options.intent, "intent", "", "Optional intent override: observe, fixTransient, proposeChange, or cleanup.")
 	flags.StringVar(&options.sourceAPIVersion, "source-api-version", "", "Opaque source API version metadata.")
 	flags.StringVar(&options.sourceKind, "source-kind", options.sourceKind, "Opaque source kind metadata.")
@@ -342,7 +342,8 @@ func (app App) buildRun(options createOptions) (*agentsv1alpha1.AgentRun, error)
 
 func validPurpose(value agentsv1alpha1.AgentRunPurpose) bool {
 	switch value {
-	case agentsv1alpha1.AgentRunPurposeManual, agentsv1alpha1.AgentRunPurposeAdverseSituation, agentsv1alpha1.AgentRunPurposeScheduledHealthCheck, agentsv1alpha1.AgentRunPurposeChained:
+	// purpose=chained is controller-only (AgentChain children).
+	case agentsv1alpha1.AgentRunPurposeManual, agentsv1alpha1.AgentRunPurposeAdverseSituation, agentsv1alpha1.AgentRunPurposeScheduledHealthCheck:
 		return true
 	default:
 		return false

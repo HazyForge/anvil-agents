@@ -69,7 +69,7 @@ func (r *AgentChainReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 
 	if obj.Spec.Suspend {
 		status.Phase = controlv1alpha1.AgentChainPhaseSuspended
-		status.NextStartAt = nil
+		// Keep NextStartAt so resume does not immediately fire a due interval.
 		status.LastError = ""
 		apimeta.SetStatusCondition(&status.Conditions, metav1.Condition{
 			Type:               agentChainReady,
@@ -106,7 +106,7 @@ func (r *AgentChainReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	}
 	if pause != nil {
 		status.Phase = controlv1alpha1.AgentChainPhaseSuspended
-		status.NextStartAt = nil
+		// Keep NextStartAt across application pause (same as suspend).
 		status.LastError = ""
 		message := fmt.Sprintf("Application %q is paused by AgentRunControl %q.", applicationName, pause.ControlName)
 		if pause.Reason != "" {
@@ -175,10 +175,17 @@ func (r *AgentChainReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	// Start a new instance when manually nudged or interval-due.
 	startToken := strings.TrimSpace(obj.Annotations[controlv1alpha1.AgentChainStartNowAnnotation])
 	manualPending := startToken != "" && startToken != status.LastStartToken
+
+	// Preserve any future NextStartAt already on status (suspend must not force
+	// an immediate fire on resume when a deadline was already scheduled).
+	preservedNext := status.NextStartAt
 	nextStart := agentChainNextStartTime(obj, status, now.Time)
-	status.NextStartAt = nil
 	if nextStart != nil {
 		status.NextStartAt = &metav1.Time{Time: *nextStart}
+	} else if preservedNext != nil {
+		status.NextStartAt = preservedNext.DeepCopy()
+	} else {
+		status.NextStartAt = nil
 	}
 
 	shouldStart := manualPending
@@ -189,8 +196,8 @@ func (r *AgentChainReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		status.Phase = controlv1alpha1.AgentChainPhaseIdle
 		status.LastError = ""
 		message := "AgentChain is idle."
-		if nextStart != nil {
-			message = fmt.Sprintf("Next automatic instance start is scheduled for %s.", nextStart.UTC().Format(time.RFC3339))
+		if status.NextStartAt != nil {
+			message = fmt.Sprintf("Next automatic instance start is scheduled for %s.", status.NextStartAt.UTC().Format(time.RFC3339))
 		}
 		apimeta.SetStatusCondition(&status.Conditions, metav1.Condition{
 			Type:               agentChainReady,
@@ -202,8 +209,8 @@ func (r *AgentChainReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		})
 		obj.Status = status
 		requeue := agentChainPollInterval
-		if nextStart != nil && nextStart.After(now.Time) {
-			requeue = nextStart.Sub(now.Time)
+		if status.NextStartAt != nil && status.NextStartAt.After(now.Time) {
+			requeue = status.NextStartAt.Time.Sub(now.Time)
 		}
 		return r.patchAgentChainStatus(ctx, original, obj, requeue)
 	}
@@ -223,9 +230,9 @@ func (r *AgentChainReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		return r.patchAgentChainStatus(ctx, original, obj, agentChainPollInterval)
 	}
 
-	// Terminal backoff for automatic starts only.
+	// Terminal backoff for automatic starts only (anchored on prior terminal run).
 	if !manualPending {
-		if delayed, until := agentChainTerminalBackoffUntil(obj, status, now.Time); delayed {
+		if delayed, until := agentChainTerminalBackoffUntil(obj, status, runs, now.Time); delayed {
 			status.Phase = controlv1alpha1.AgentChainPhaseIdle
 			status.NextStartAt = &metav1.Time{Time: until}
 			status.LastError = ""
@@ -242,7 +249,9 @@ func (r *AgentChainReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		}
 	}
 
-	instanceID := now.UTC().Format("20060102T150405Z") + "-" + shortHash(strings.Join([]string{string(obj.UID), startToken, now.Format(time.RFC3339Nano)}, "|"))[:8]
+	// Stable instance ID per start intent so create+status-patch retries are idempotent.
+	dueAt := agentChainStartDueAt(obj, manualPending, nextStart, now.Time)
+	instanceID := agentChainInstanceID(obj, manualPending, startToken, dueAt)
 	first := obj.Spec.Steps[0]
 	run, err := r.createChainedAgentRun(ctx, obj, applicationName, instanceID, first, nil, now, "AgentChainStart",
 		fmt.Sprintf("instance=%s step=%s", instanceID, first.Name))
@@ -265,14 +274,24 @@ func (r *AgentChainReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	if manualPending {
 		status.LastStartToken = startToken
 	}
-	// Advance next automatic start after an interval start.
+	// Advance next automatic start after an instance start (manual or interval).
 	if obj.Spec.StartIntervalSeconds > 0 {
-		next := now.Time.Add(time.Duration(obj.Spec.StartIntervalSeconds) * time.Second)
+		// Anchor on dueAt for interval starts so retries keep the same cadence.
+		base := dueAt
+		if manualPending {
+			base = now.Time
+		}
+		next := base.Add(time.Duration(obj.Spec.StartIntervalSeconds) * time.Second)
 		status.NextStartAt = &metav1.Time{Time: next}
-	} else {
+	} else if !manualPending {
 		status.NextStartAt = nil
 	}
-	status.InstancesToday = instancesToday + 1
+	// Recompute instancesToday after create (idempotent retries must not double-count).
+	_, instancesToday, err = r.agentChainRuns(ctx, obj, now.Time)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	status.InstancesToday = instancesToday
 	apimeta.SetStatusCondition(&status.Conditions, metav1.Condition{
 		Type:               agentChainReady,
 		Status:             metav1.ConditionFalse,
@@ -298,6 +317,14 @@ func (r *AgentChainReconciler) reconcileActiveInstance(
 	if stepIndex < 0 {
 		status.Phase = controlv1alpha1.AgentChainPhaseBlocked
 		status.LastError = fmt.Sprintf("active step %q is not in the chain spec", status.ActiveStep)
+		apimeta.SetStatusCondition(&status.Conditions, metav1.Condition{
+			Type:               agentChainReady,
+			Status:             metav1.ConditionFalse,
+			ObservedGeneration: chain.Generation,
+			LastTransitionTime: now,
+			Reason:             "InvalidActiveStep",
+			Message:            status.LastError,
+		})
 		return false, 0, nil
 	}
 
@@ -314,6 +341,14 @@ func (r *AgentChainReconciler) reconcileActiveInstance(
 	if current == nil {
 		status.Phase = controlv1alpha1.AgentChainPhaseBlocked
 		status.LastError = fmt.Sprintf("missing AgentRun for active instance %s step %s", instanceID, status.ActiveStep)
+		apimeta.SetStatusCondition(&status.Conditions, metav1.Condition{
+			Type:               agentChainReady,
+			Status:             metav1.ConditionFalse,
+			ObservedGeneration: chain.Generation,
+			LastTransitionTime: now,
+			Reason:             "MissingStepRun",
+			Message:            status.LastError,
+		})
 		return false, agentChainPollInterval, nil
 	}
 
@@ -343,11 +378,12 @@ func (r *AgentChainReconciler) reconcileActiveInstance(
 	if current.Status.Phase == controlv1alpha1.AgentRunPhaseNeedsHuman {
 		status.Phase = controlv1alpha1.AgentChainPhaseWaitingHuman
 		status.LastError = ""
-		// Stop advancing; keep activeInstance for operator visibility, but clear active to allow new starts after backoff.
+		// Stop advancing; clear active so a new instance can start after backoff.
 		status.LastInstanceID = instanceID
 		status.ActiveInstanceID = ""
 		status.ActiveStep = ""
 		status.ActiveRunRef = nil
+		agentChainApplyTerminalBackoffDeadline(chain, status, current, now.Time)
 		apimeta.SetStatusCondition(&status.Conditions, metav1.Condition{
 			Type:               agentChainReady,
 			Status:             metav1.ConditionFalse,
@@ -361,21 +397,35 @@ func (r *AgentChainReconciler) reconcileActiveInstance(
 
 	nextIndex := stepIndex + 1
 	if nextIndex >= len(chain.Spec.Steps) {
-		// Chain complete.
-		status.Phase = controlv1alpha1.AgentChainPhaseIdle
+		// Final step terminal — distinguish success from failure for operators.
 		status.LastInstanceID = instanceID
 		status.ActiveInstanceID = ""
 		status.ActiveStep = ""
 		status.ActiveRunRef = nil
 		status.LastError = ""
-		apimeta.SetStatusCondition(&status.Conditions, metav1.Condition{
-			Type:               agentChainReady,
-			Status:             metav1.ConditionTrue,
-			ObservedGeneration: chain.Generation,
-			LastTransitionTime: now,
-			Reason:             "InstanceCompleted",
-			Message:            fmt.Sprintf("Instance %s completed at final step %q (%s).", instanceID, chain.Spec.Steps[stepIndex].Name, current.Status.Phase),
-		})
+		status.Phase = controlv1alpha1.AgentChainPhaseIdle
+		finalStep := chain.Spec.Steps[stepIndex].Name
+		if current.Status.Phase == controlv1alpha1.AgentRunPhaseSucceeded {
+			apimeta.SetStatusCondition(&status.Conditions, metav1.Condition{
+				Type:               agentChainReady,
+				Status:             metav1.ConditionTrue,
+				ObservedGeneration: chain.Generation,
+				LastTransitionTime: now,
+				Reason:             "InstanceCompleted",
+				Message:            fmt.Sprintf("Instance %s completed successfully at final step %q.", instanceID, finalStep),
+			})
+		} else {
+			// Failed (or any other non-NeedsHuman terminal) at the last step.
+			agentChainApplyTerminalBackoffDeadline(chain, status, current, now.Time)
+			apimeta.SetStatusCondition(&status.Conditions, metav1.Condition{
+				Type:               agentChainReady,
+				Status:             metav1.ConditionTrue,
+				ObservedGeneration: chain.Generation,
+				LastTransitionTime: now,
+				Reason:             "InstanceFailed",
+				Message:            fmt.Sprintf("Instance %s stopped at final step %q with phase %s.", instanceID, finalStep, current.Status.Phase),
+			})
+		}
 		return true, agentChainPollInterval, nil
 	}
 
@@ -387,6 +437,7 @@ func (r *AgentChainReconciler) reconcileActiveInstance(
 		status.ActiveStep = ""
 		status.ActiveRunRef = nil
 		status.LastError = ""
+		agentChainApplyTerminalBackoffDeadline(chain, status, current, now.Time)
 		apimeta.SetStatusCondition(&status.Conditions, metav1.Condition{
 			Type:               agentChainReady,
 			Status:             metav1.ConditionTrue,
@@ -568,9 +619,15 @@ func (r *AgentChainReconciler) agentChainRuns(ctx context.Context, chain *contro
 		if inst == "" {
 			continue
 		}
-		// Count unique instances that started today (step 0 create time).
+		// Count unique instances whose first step was created in the UTC day.
+		firstStep := ""
+		if len(chain.Spec.Steps) > 0 {
+			firstStep = sanitizeLabelValue(chain.Spec.Steps[0].Name)
+		}
+		if firstStep == "" || run.Labels[agentRunChainStepLabel] != firstStep {
+			continue
+		}
 		if !run.CreationTimestamp.Time.Before(dayStart) && run.CreationTimestamp.Time.Before(dayStart.Add(24*time.Hour)) {
-			// Prefer counting first step only when label present; else count instance once.
 			instancesToday[inst] = struct{}{}
 		}
 	}
@@ -694,6 +751,9 @@ func agentChainWhenMatches(when *controlv1alpha1.AgentChainWhenSpec, expectedPre
 	if prior == nil {
 		return false
 	}
+	if expectedPrev != "" && prior.Labels[agentRunChainStepLabel] != sanitizeLabelValue(expectedPrev) {
+		return false
+	}
 	phases := []controlv1alpha1.AgentRunPhase{controlv1alpha1.AgentRunPhaseSucceeded}
 	if when != nil && len(when.OnPhases) > 0 {
 		phases = when.OnPhases
@@ -724,8 +784,82 @@ func agentChainWhenMatches(when *controlv1alpha1.AgentChainWhenSpec, expectedPre
 			return false
 		}
 	}
-	_ = expectedPrev
 	return true
+}
+
+func agentChainInstanceID(chain *controlv1alpha1.AgentChain, manual bool, startToken string, dueAt time.Time) string {
+	if chain == nil {
+		return shortHash(dueAt.UTC().Format(time.RFC3339))[:12]
+	}
+	if manual {
+		token := strings.TrimSpace(startToken)
+		if token == "" {
+			token = dueAt.UTC().Format(time.RFC3339Nano)
+		}
+		return "m-" + shortHash(strings.Join([]string{string(chain.UID), "manual", token}, "|"))[:12]
+	}
+	// Interval (or automatic) starts: stable per due wall time.
+	return "i-" + shortHash(strings.Join([]string{string(chain.UID), "interval", dueAt.UTC().Format(time.RFC3339)}, "|"))[:12]
+}
+
+// agentChainStartDueAt picks a stable due timestamp for the instance id.
+// Manual starts use the start annotation token's wall time via now; interval
+// starts prefer the scheduled NextStartAt or the current interval period slot
+// so create+status retries in the same period stay idempotent.
+func agentChainStartDueAt(chain *controlv1alpha1.AgentChain, manual bool, nextStart *time.Time, now time.Time) time.Time {
+	if manual {
+		return now.UTC().Truncate(time.Second)
+	}
+	if nextStart != nil {
+		return nextStart.UTC().Truncate(time.Second)
+	}
+	if chain != nil && chain.Spec.StartIntervalSeconds > 0 {
+		interval := time.Duration(chain.Spec.StartIntervalSeconds) * time.Second
+		base := chain.CreationTimestamp.Time.UTC()
+		if chain.Spec.StartInitialDelaySeconds > 0 {
+			base = base.Add(time.Duration(chain.Spec.StartInitialDelaySeconds) * time.Second)
+		}
+		if now.Before(base) {
+			return base
+		}
+		elapsed := now.Sub(base)
+		period := int64(elapsed / interval)
+		return base.Add(time.Duration(period) * interval)
+	}
+	return now.UTC().Truncate(time.Second)
+}
+
+// agentChainApplyTerminalBackoffDeadline sets NextStartAt to terminalAt+delay when
+// backoff is configured for the terminal phase. Leaves an existing later deadline alone.
+func agentChainApplyTerminalBackoffDeadline(chain *controlv1alpha1.AgentChain, status *controlv1alpha1.AgentChainStatus, terminal *controlv1alpha1.AgentRun, now time.Time) {
+	if chain == nil || status == nil || chain.Spec.Backoff == nil || terminal == nil {
+		return
+	}
+	var delay int
+	switch terminal.Status.Phase {
+	case controlv1alpha1.AgentRunPhaseFailed:
+		delay = chain.Spec.Backoff.FailedSeconds
+	case controlv1alpha1.AgentRunPhaseNeedsHuman:
+		delay = chain.Spec.Backoff.NeedsHumanSeconds
+	default:
+		return
+	}
+	if delay <= 0 {
+		return
+	}
+	terminalAt := terminal.CreationTimestamp.Time
+	if terminal.Status.CompletedAt != nil && !terminal.Status.CompletedAt.IsZero() {
+		terminalAt = terminal.Status.CompletedAt.Time
+	}
+	until := terminalAt.Add(time.Duration(delay) * time.Second)
+	if until.Before(now) {
+		// Already expired; do not invent a new deadline.
+		return
+	}
+	if status.NextStartAt != nil && status.NextStartAt.After(until) {
+		return
+	}
+	status.NextStartAt = &metav1.Time{Time: until}
 }
 
 func agentChainUpsertStepRun(existing []controlv1alpha1.AgentChainStepRunStatus, next controlv1alpha1.AgentChainStepRunStatus) []controlv1alpha1.AgentChainStepRunStatus {
@@ -770,11 +904,23 @@ func agentChainNextStartTime(chain *controlv1alpha1.AgentChain, status controlv1
 	return &base
 }
 
-func agentChainTerminalBackoffUntil(chain *controlv1alpha1.AgentChain, status controlv1alpha1.AgentChainStatus, now time.Time) (bool, time.Time) {
-	if chain.Spec.Backoff == nil || len(status.StepRuns) == 0 {
+func agentChainTerminalBackoffUntil(chain *controlv1alpha1.AgentChain, status controlv1alpha1.AgentChainStatus, runs []*controlv1alpha1.AgentRun, now time.Time) (bool, time.Time) {
+	if chain.Spec.Backoff == nil {
 		return false, time.Time{}
 	}
-	// Look at last step of last instance.
+	// Prefer a deadline already computed and stored when the instance stopped.
+	if status.NextStartAt != nil && status.NextStartAt.After(now) {
+		// Only treat as backoff when the last step is a terminal failure/human hold.
+		if len(status.StepRuns) > 0 {
+			last := status.StepRuns[len(status.StepRuns)-1]
+			if last.Phase == controlv1alpha1.AgentRunPhaseFailed || last.Phase == controlv1alpha1.AgentRunPhaseNeedsHuman {
+				return true, status.NextStartAt.Time
+			}
+		}
+	}
+	if len(status.StepRuns) == 0 {
+		return false, time.Time{}
+	}
 	last := status.StepRuns[len(status.StepRuns)-1]
 	var delay int
 	switch last.Phase {
@@ -788,10 +934,20 @@ func agentChainTerminalBackoffUntil(chain *controlv1alpha1.AgentChain, status co
 	if delay <= 0 {
 		return false, time.Time{}
 	}
-	// Without per-step finishedAt on status, use nextStartAt or now+delay once.
-	until := now.Add(time.Duration(delay) * time.Second)
-	if status.NextStartAt != nil && status.NextStartAt.After(now) {
-		return true, status.NextStartAt.Time
+	// Anchor on the terminal run's CompletedAt (fallback CreationTimestamp).
+	terminalAt := now
+	for _, run := range runs {
+		if last.RunRef != nil && run.Name == last.RunRef.Name && run.Namespace == last.RunRef.Namespace {
+			terminalAt = run.CreationTimestamp.Time
+			if run.Status.CompletedAt != nil && !run.Status.CompletedAt.IsZero() {
+				terminalAt = run.Status.CompletedAt.Time
+			}
+			break
+		}
+	}
+	until := terminalAt.Add(time.Duration(delay) * time.Second)
+	if !until.After(now) {
+		return false, time.Time{}
 	}
 	return true, until
 }
@@ -852,8 +1008,12 @@ func renderAgentChainHandoff(step controlv1alpha1.AgentChainStepSpec, priorBySte
 }
 
 func truncateRunes(value string, max int) string {
-	if max <= 0 || len(value) <= max {
+	if max <= 0 {
 		return value
 	}
-	return value[:max] + "…"
+	runes := []rune(value)
+	if len(runes) <= max {
+		return value
+	}
+	return string(runes[:max]) + "…"
 }

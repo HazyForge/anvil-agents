@@ -54,9 +54,12 @@ spec:
 ## Starting an instance
 
 - **Manual:** `anvil-agentctl chain start NAME -n NS`  
-  (sets annotation `control.anvil.hazyforge.io/chain-start-now` to a unique token)
+  (sets annotation `control.anvil.hazyforge.io/chain-start-now` to a unique token;
+  instance id is stable for that token so create+status retries stay idempotent)
 - **Interval:** `spec.startIntervalSeconds` (+ optional `startInitialDelaySeconds`)
 - **Suspend:** `anvil-agentctl chain suspend NAME --reason TEXT -n NS`
+- **Cancel advance:** `anvil-agentctl chain cancel NAME -n NS [--instance ID|*]`
+  (stops further steps; does not delete the active Job)
 
 Each instance gets a stable `status.activeInstanceId`. Child runs are labeled:
 

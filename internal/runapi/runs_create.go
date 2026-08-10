@@ -138,7 +138,8 @@ func buildAgentRunFromCreateRequest(namespace string, body CreateAgentRunRequest
 	if strings.TrimSpace(body.Purpose) != "" {
 		purpose = agentsv1alpha1.AgentRunPurpose(strings.TrimSpace(body.Purpose))
 		switch purpose {
-		case agentsv1alpha1.AgentRunPurposeManual, agentsv1alpha1.AgentRunPurposeAdverseSituation, agentsv1alpha1.AgentRunPurposeScheduledHealthCheck, agentsv1alpha1.AgentRunPurposeChained:
+		case agentsv1alpha1.AgentRunPurposeManual, agentsv1alpha1.AgentRunPurposeAdverseSituation, agentsv1alpha1.AgentRunPurposeScheduledHealthCheck:
+			// purpose=chained is controller-only (AgentChain); reject on public create.
 		default:
 			return nil, fmt.Errorf("invalid purpose %q", body.Purpose)
 		}

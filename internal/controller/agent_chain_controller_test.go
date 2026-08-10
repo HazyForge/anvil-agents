@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -227,5 +228,94 @@ func TestAgentChainSuspend(t *testing.T) {
 	}
 	if stored.Status.Phase != controlv1alpha1.AgentChainPhaseSuspended {
 		t.Fatalf("phase = %s", stored.Status.Phase)
+	}
+}
+
+func TestAgentChainInstanceIDStableForManualToken(t *testing.T) {
+	chain := baseChain("id-stable")
+	token := "token-abc"
+	a := agentChainInstanceID(chain, true, token, time.Unix(100, 0).UTC())
+	b := agentChainInstanceID(chain, true, token, time.Unix(200, 0).UTC())
+	if a != b {
+		t.Fatalf("manual instance id should ignore wall clock: %q vs %q", a, b)
+	}
+	c := agentChainInstanceID(chain, true, "other", time.Unix(100, 0).UTC())
+	if a == c {
+		t.Fatal("different tokens must yield different instance ids")
+	}
+}
+
+func TestAgentChainStartIdempotentOnRetry(t *testing.T) {
+	scheme := newAgentChainScheme(t)
+	chain := baseChain("lab-chain-idem")
+	chain.Annotations = map[string]string{
+		controlv1alpha1.AgentChainStartNowAnnotation: "same-token",
+	}
+	c := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(&controlv1alpha1.AgentChain{}).WithObjects(chain).Build()
+	r := &AgentChainReconciler{Client: c, Scheme: scheme}
+	req := reconcile.Request{NamespacedName: types.NamespacedName{Namespace: chain.Namespace, Name: chain.Name}}
+	if _, err := r.Reconcile(context.Background(), req); err != nil {
+		t.Fatalf("first reconcile: %v", err)
+	}
+	// Simulate lost status patch: clear status but keep the first-step run.
+	stored := &controlv1alpha1.AgentChain{}
+	if err := c.Get(context.Background(), client.ObjectKeyFromObject(chain), stored); err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	stored.Status = controlv1alpha1.AgentChainStatus{ObservedGeneration: stored.Generation}
+	if err := c.Status().Update(context.Background(), stored); err != nil {
+		t.Fatalf("clear status: %v", err)
+	}
+	if _, err := r.Reconcile(context.Background(), req); err != nil {
+		t.Fatalf("retry reconcile: %v", err)
+	}
+	runs := &controlv1alpha1.AgentRunList{}
+	if err := c.List(context.Background(), runs); err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(runs.Items) != 1 {
+		t.Fatalf("expected single first-step run after retry, got %d", len(runs.Items))
+	}
+}
+
+func TestAgentChainFinalFailedNotCompleted(t *testing.T) {
+	scheme := newAgentChainScheme(t)
+	chain := baseChain("lab-final-fail")
+	// Single-step chain so Failed is the final step.
+	chain.Spec.Steps = chain.Spec.Steps[:1]
+	chain.Status = controlv1alpha1.AgentChainStatus{
+		ObservedGeneration: 1,
+		Phase:              controlv1alpha1.AgentChainPhaseRunning,
+		ActiveInstanceID:   "inst-f",
+		ActiveStep:         "exercise",
+	}
+	run := &controlv1alpha1.AgentRun{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "agentrun-final-fail",
+			Namespace: "anvilhub",
+			Labels: map[string]string{
+				agentRunChainLabel:     sanitizeLabelValue(chain.Name),
+				agentRunChainInstLabel: sanitizeLabelValue("inst-f"),
+				agentRunChainStepLabel: sanitizeLabelValue("exercise"),
+			},
+		},
+		Spec:   controlv1alpha1.AgentRunSpec{Purpose: controlv1alpha1.AgentRunPurposeChained, SourceUID: string(chain.UID)},
+		Status: controlv1alpha1.AgentRunStatus{Phase: controlv1alpha1.AgentRunPhaseFailed},
+	}
+	c := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(&controlv1alpha1.AgentChain{}).WithObjects(chain, run).Build()
+	r := &AgentChainReconciler{Client: c, Scheme: scheme}
+	if _, err := r.Reconcile(context.Background(), reconcile.Request{NamespacedName: types.NamespacedName{Namespace: chain.Namespace, Name: chain.Name}}); err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+	stored := &controlv1alpha1.AgentChain{}
+	if err := c.Get(context.Background(), client.ObjectKeyFromObject(chain), stored); err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	cond := apimeta.FindStatusCondition(stored.Status.Conditions, agentChainReady)
+	if cond == nil || cond.Reason != "InstanceFailed" {
+		t.Fatalf("expected InstanceFailed condition, got %#v", cond)
+	}
+	if stored.Status.ActiveInstanceID != "" {
+		t.Fatalf("active instance should clear, got %q", stored.Status.ActiveInstanceID)
 	}
 }

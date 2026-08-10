@@ -70,6 +70,7 @@ The caller needs only the Kubernetes verbs used by each command:
 | `chain suspend` | `update` on the selected `agentchain` (`spec.suspend=true`) |
 | `chain resume` | `update` on the selected `agentchain` (`spec.suspend=false`) |
 | `chain start` | `update` on the selected `agentchain` (chain-start-now annotation) |
+| `chain cancel` | `update` on the selected `agentchain` (chain-cancel-instance annotation) |
 | `self report` | none (writes local status JSONL / pod log only) |
 
 ## Create An Append-Only Run
@@ -376,13 +377,16 @@ rotation). See `docs/agent-chain.md`.
 anvil-agentctl chain list -n anvilhub
 anvil-agentctl chain get lab-evidence-loop -n anvilhub -o summary
 anvil-agentctl chain start lab-evidence-loop -n anvilhub
+anvil-agentctl chain cancel lab-evidence-loop -n anvilhub --instance '*'
 anvil-agentctl chain suspend lab-evidence-loop -n anvilhub --reason "hold"
 anvil-agentctl chain resume lab-evidence-loop -n anvilhub --reason "resume"
 ```
 
 `chain start` writes a new `control.anvil.hazyforge.io/chain-start-now` token so
-the controller begins one instance at step 0. Step advancement is controller
-authority on terminal phases; runners do not create peer runs.
+the controller begins one instance at step 0. `chain cancel` stops further step
+advancement for the active instance without deleting Jobs. Step advancement is
+controller authority on terminal phases; runners do not create peer runs, and
+`purpose=chained` is rejected on public `run create`.
 
 ## In-Pod Status Reporting
 
