@@ -6,6 +6,22 @@ the APIs in this repository and does not require Anvil Primaris or Anvil Hub.
 Built-in runner images ship the same binary for in-pod status reporting; binary
 presence grants no Kubernetes authority.
 
+## Ownership versus Anvil Primaris `anvilctl`
+
+| Concern | Tool | Auth |
+| --- | --- | --- |
+| Human/admin Kubernetes fleet ops | **`anvil-agentctl`** (this CLI) | kubeconfig + RBAC |
+| Application launch gates (`AgentRunControl`) | **`anvil-agentctl control`** | kubeconfig + RBAC |
+| Schedule list / suspend / resume / run-now | **`anvil-agentctl schedule`** | kubeconfig + RBAC |
+| Run create / list / logs / debug | **`anvil-agentctl run`** | kubeconfig + RBAC |
+| Durable-home auth reauth | **`anvil-agentctl auth`** | kubeconfig + RBAC |
+| Manager mutations under Application policy | **`anvilctl agent --hub-url …`** (private Primaris) | SPIFFE / Hub session |
+| Static `.hazyforge/agents` PR proposals | **`anvilctl agent config propose --hub-url …`** | Hub only |
+
+Do **not** use private Primaris `anvilctl agent` for kube-backed pause, schedule
+suspend, or cluster inventory. That command family is Hub-only for product
+managers. Open-source installs never need Primaris `anvilctl`.
+
 The first client transport talks directly to Kubernetes using the caller's
 normal kubeconfig loading rules and RBAC. Build it from a checkout with:
 
@@ -43,6 +59,11 @@ The caller needs only the Kubernetes verbs used by each command:
 | `control get` | `get` on the selected `agentruncontrol` |
 | `control pause` | `create` or `update` on the selected `agentruncontrol` |
 | `control resume` | `update` on the selected `agentruncontrol` |
+| `schedule list` | `list` on `agentschedules` in the selected scope |
+| `schedule get` | `get` on the selected `agentschedule` |
+| `schedule suspend` | `update` on the selected `agentschedule` (`spec.suspend=true`) |
+| `schedule resume` | `update` on the selected `agentschedule` (`spec.suspend=false`) |
+| `schedule run-now` | `update` on the selected `agentschedule` (run-now annotation) |
 | `self report` | none (writes local status JSONL / pod log only) |
 
 ## Create An Append-Only Run
@@ -304,6 +325,41 @@ erase another authority's pause. A bounded pause recovers automatically at
 `spec.expiresAt`. After any mutation, re-run `control list` to verify the
 `Paused`/`Allowed` phase and the affected schedule count before treating the
 fleet as quiescent.
+
+## Schedules
+
+`AgentSchedule` owns cadence. Application-scoped launch holds (`AgentRunControl`)
+block Job launches without suspending the schedule object. Use schedule
+suspend when you need the schedule itself stopped independently of the launch
+gate.
+
+```bash
+anvil-agentctl schedule list -A
+anvil-agentctl schedule list -n hazy-trade --application hazy-trade
+anvil-agentctl schedule get hazy-trade-production-auditor -n hazy-trade -o summary
+
+anvil-agentctl schedule suspend hazy-trade-backlog-worker-1h \
+  -n hazy-trade \
+  --reason "Operator paused Hazy Trade agent schedules"
+
+anvil-agentctl schedule resume hazy-trade-backlog-worker-1h \
+  -n hazy-trade \
+  --reason "Operator resumed Hazy Trade agent schedules"
+
+anvil-agentctl schedule run-now hazy-trade-production-auditor \
+  -n hazy-trade \
+  --template primary
+```
+
+`schedule suspend|resume` require `--reason` and record
+`control.anvil.hazyforge.io/pause-reason` plus
+`control.anvil.hazyforge.io/pause-changed-at` for audit. `schedule run-now`
+writes a new `control.anvil.hazyforge.io/run-now` token (and optional
+`control.anvil.hazyforge.io/run-template`) so the controller creates one
+replay-safe immediate child without rewriting history.
+
+Static GitOps-owned schedules remain source-of-truth for create/update of
+templates and intervals; the CLI mutates live suspend and nudge fields only.
 
 ## In-Pod Status Reporting
 

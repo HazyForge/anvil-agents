@@ -78,8 +78,11 @@ the certified submission contract.
 - `AdverseSignal`: immutable, provider-neutral adverse evidence from any app.
 - `anvil-agents-api`: optional OIDC-protected summaries, live SSE logs, and the
   read-only **Anvil Agents Console** SPA at `/` (see `web/console/`).
-- `anvil-agentctl`: Kubernetes-authenticated creation and diagnosis of runs,
-  Codex durable-home reauth, and in-pod status reporting without raw manifests.
+- `anvil-agentctl`: Kubernetes-authenticated fleet CLI for runs (create/list/
+  get/logs/debug), `AgentRunControl` launch gates (`control pause|resume`),
+  schedules (`schedule list|suspend|resume|run-now`), durable-home auth, volume
+  copy, and in-pod status reporting. Distinct from private Primaris
+  `anvilctl agent`, which is Hub-only for managers.
 - Collector-neutral Job and Pod labels for external log and telemetry
   pipelines.
 
@@ -126,10 +129,12 @@ harness, installs the chart, binds and mounts durable state, creates an
 See [Getting Started](docs/getting-started.md) for prerequisites, manual steps,
 existing-cluster installation, and cleanup.
 
-Operators with Kubernetes credentials can use `anvil-agentctl` to create one
-append-only run from a profile, inspect status, stream the verified runner
+Operators with Kubernetes credentials use `anvil-agentctl` as the runtime CLI:
+create one append-only run from a profile, pause/resume application launch
+gates, suspend or nudge schedules, inspect status, stream the verified runner
 container, and aggregate controller, Job, Pod, and Event evidence. See
-[AgentRun CLI](docs/cli.md).
+[AgentRun CLI](docs/cli.md). Product managers on Anvil Primaris use private
+`anvilctl agent --hub-url` for Hub-brokered mutations only.
 
 ## Build Without GitHub Actions
 

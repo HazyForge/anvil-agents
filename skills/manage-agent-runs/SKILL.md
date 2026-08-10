@@ -1,6 +1,6 @@
 ---
 name: manage-agent-runs
-description: Inspect and manage anvil-agents resources with Kubernetes while preserving append-only run history, launch controls, durable volume safety, and Codex auth maintenance.
+description: Inspect and manage anvil-agents resources with Kubernetes (anvil-agentctl) while preserving append-only run history, launch controls, durable volume safety, and Codex auth maintenance. Not the Primaris Hub anvilctl agent path.
 ---
 
 # Manage Agent Runs
@@ -9,29 +9,48 @@ Use this skill for `AgentRun`, `AgentRunProfile`, `AgentSchedule`,
 `AgentRunControl`, `AgentDataVolume`, `VolumeProfile`, `AgentAuthSession`, and
 `AdverseSituation`.
 
+## CLI ownership
+
+| Need | Command |
+| --- | --- |
+| Pause/resume application launches | `anvil-agentctl control pause\|resume` |
+| List/suspend/resume/nudge schedules | `anvil-agentctl schedule …` |
+| Create/list/logs/debug runs | `anvil-agentctl run …` |
+| Durable home reauth | `anvil-agentctl auth …` |
+| Manager Hub mutations (Primaris product only) | `anvilctl agent --hub-url …` (separate skill) |
+
+This skill is the **public runtime** path. Do not use private Primaris
+`anvilctl agent` for kube-backed pause, schedule suspend, or inventory without
+Hub.
+
 1. Read `docs/agent-run.md`, `docs/cli.md`, and the namespace's repository guidance.
 2. Prefer `anvil-agentctl` over raw manifests for run create/list/get/logs/debug,
-   for Codex auth maintenance, and for `AgentRunControl` launch gates
-   (`anvil-agentctl control list|get|pause|resume`).
+   Codex auth maintenance, `AgentRunControl` launch gates
+   (`anvil-agentctl control list|get|pause|resume`), and schedule ops
+   (`anvil-agentctl schedule list|get|suspend|resume|run-now`).
 3. Inspect the CRD, resource generation, conditions, controller-owned status,
    child Job, payload ConfigMap, pod events, and relevant logs.
 4. Treat application references as opaque keys. Do not assume another control
    plane is installed.
 5. Create a new AgentRun for new work. Never rewrite a completed run to replay it.
 6. Use a profile for durable defaults and a run prompt for one request.
-7. Nudge schedules by changing the
-   `control.anvil.hazyforge.io/run-now` annotation token.
+7. Nudge schedules with `anvil-agentctl schedule run-now NAME` (sets the
+   `control.anvil.hazyforge.io/run-now` annotation token). Optionally pass
+   `--template` for a named run template.
 8. Use `AgentRunControl` to pause future launches (`anvil-agentctl control
    pause --application APP --reason TEXT --for 4h`). A pause never terminates
    an active Job. Record the concrete reason, a bounded `spec.expiresAt`, and
    the immutable event or directive ID in `spec.source`; never renew a pause
    from an unchanged event. Resume only the issuing authority's named control
    (`control resume`); `--all-controls` is a human-only break-glass action.
-9. Never delete an AgentDataVolume or PVC as a troubleshooting shortcut.
-   Storage may expand but not shrink; cross-namespace mounts are invalid.
-10. Configure external adverse watches and their read RBAC explicitly. Agent
+9. Suspend or resume individual schedules with
+   `anvil-agentctl schedule suspend|resume NAME --reason TEXT` when the schedule
+   object itself must stop; that is independent of application launch holds.
+10. Never delete an AgentDataVolume or PVC as a troubleshooting shortcut.
+    Storage may expand but not shrink; cross-namespace mounts are invalid.
+11. Configure external adverse watches and their read RBAC explicitly. Agent
     responders remain opt-in.
-11. Verify resulting status and child-object identity before reporting success.
+12. Verify resulting status and child-object identity before reporting success.
 
 ## In-pod reporting
 

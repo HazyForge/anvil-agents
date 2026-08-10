@@ -27,6 +27,24 @@ Application and target references are compatibility metadata. The operator
 compares their names for scope, concurrency, and launch controls, but never
 looks up another API group.
 
+## Operator CLI
+
+Human and automation clients with Kubernetes RBAC use **`anvil-agentctl`** from
+this repository (see [AgentRun CLI](cli.md)):
+
+```bash
+anvil-agentctl control pause --application my-app --for 4h --reason "…"
+anvil-agentctl control resume --application my-app --reason "…"
+anvil-agentctl schedule list -A
+anvil-agentctl schedule suspend NAME -n NS --reason "…"
+anvil-agentctl schedule run-now NAME -n NS
+anvil-agentctl run list -A
+```
+
+Anvil Primaris `anvilctl agent` is a separate, private product CLI. It talks to
+Anvil Hub only (`--hub-url` required) for manager-scoped mutations and does not
+replace `anvil-agentctl` for launch gates or kube-backed fleet ops.
+
 ## Run lifecycle
 
 An `AgentRun` resolves its optional `AgentRunProfile`, selected
@@ -123,7 +141,9 @@ an Application CRD.
 
 ## Launch controls
 
-`AgentRunControl` is cluster-scoped. `Paused` blocks new Jobs for runs whose
+Manage launch gates with `anvil-agentctl control pause|resume` (see
+[AgentRun CLI](cli.md)). `AgentRunControl` is cluster-scoped. `Paused` blocks
+new Jobs for runs whose
 application key matches; it never terminates an existing Job. An optional
 `expiresAt` makes a pause inactive after the deadline. Source fields are audit
 metadata and do not establish authorization. Kubernetes API authorization is

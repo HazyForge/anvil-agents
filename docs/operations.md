@@ -61,14 +61,31 @@ intermediate Git object surviving a squash merge.
 ## Health And Troubleshooting
 
 The controller exposes `/healthz` and `/readyz` on port 8081 and metrics on
-8080. Start with:
+8080. Prefer `anvil-agentctl` for fleet inspection when you have kubeconfig:
 
 ```bash
-kubectl get agentruns,agentschedules,agentdatavolumes -A
+anvil-agentctl control list
+anvil-agentctl schedule list -A
+anvil-agentctl run list -A
+anvil-agentctl run get -n <namespace> <name>
+anvil-agentctl run debug -n <namespace> <name>
+```
+
+Raw kubectl remains valid for deep debugging:
+
+```bash
+kubectl get agentruns,agentschedules,agentdatavolumes,agentruncontrols -A
 kubectl describe agentrun -n <namespace> <name>
 kubectl get agentharnessprofiles,agentskillsets,agenttoolsets,agentcouncils -n <namespace>
 kubectl get jobs,pods -n <namespace> \
   -l control.anvil.hazyforge.io/agent-run=<name>
+```
+
+To pause new launches for an opaque application scope without killing Jobs:
+
+```bash
+anvil-agentctl control pause --application <app> --for 4h --reason "…"
+anvil-agentctl control list --application <app>
 ```
 
 Controller-owned status reasons distinguish invalid composition refs and

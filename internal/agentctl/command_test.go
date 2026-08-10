@@ -54,6 +54,8 @@ type fakeBackend struct {
 	controlGetErr    error
 	createdControl   *agentsv1alpha1.AgentRunControl
 	updatedControls  []*agentsv1alpha1.AgentRunControl
+	schedules        []agentsv1alpha1.AgentSchedule
+	updatedSchedules []*agentsv1alpha1.AgentSchedule
 }
 
 func (backend *fakeBackend) DefaultNamespace() string { return backend.defaultNamespace }
@@ -212,6 +214,31 @@ func (backend *fakeBackend) UpdateControl(_ context.Context, control *agentsv1al
 		}
 	}
 	backend.controls = append(backend.controls, *control.DeepCopy())
+	return nil
+}
+
+func (backend *fakeBackend) ListSchedules(_ context.Context, _ string, _ bool) (*agentsv1alpha1.AgentScheduleList, error) {
+	return &agentsv1alpha1.AgentScheduleList{Items: append([]agentsv1alpha1.AgentSchedule(nil), backend.schedules...)}, nil
+}
+
+func (backend *fakeBackend) GetSchedule(_ context.Context, namespace, name string) (*agentsv1alpha1.AgentSchedule, error) {
+	for i := range backend.schedules {
+		if backend.schedules[i].Namespace == namespace && backend.schedules[i].Name == name {
+			return backend.schedules[i].DeepCopy(), nil
+		}
+	}
+	return nil, apierrors.NewNotFound(schema.GroupResource{Group: agentsv1alpha1.GroupVersion.Group, Resource: "agentschedules"}, name)
+}
+
+func (backend *fakeBackend) UpdateSchedule(_ context.Context, schedule *agentsv1alpha1.AgentSchedule) error {
+	backend.updatedSchedules = append(backend.updatedSchedules, schedule.DeepCopy())
+	for i := range backend.schedules {
+		if backend.schedules[i].Namespace == schedule.Namespace && backend.schedules[i].Name == schedule.Name {
+			backend.schedules[i] = *schedule.DeepCopy()
+			return nil
+		}
+	}
+	backend.schedules = append(backend.schedules, *schedule.DeepCopy())
 	return nil
 }
 

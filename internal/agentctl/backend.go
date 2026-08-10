@@ -48,6 +48,9 @@ type Backend interface {
 	GetControl(context.Context, string) (*agentsv1alpha1.AgentRunControl, error)
 	CreateControl(context.Context, *agentsv1alpha1.AgentRunControl) error
 	UpdateControl(context.Context, *agentsv1alpha1.AgentRunControl) error
+	ListSchedules(context.Context, string, bool) (*agentsv1alpha1.AgentScheduleList, error)
+	GetSchedule(context.Context, string, string) (*agentsv1alpha1.AgentSchedule, error)
+	UpdateSchedule(context.Context, *agentsv1alpha1.AgentSchedule) error
 }
 
 type KubernetesBackend struct {
@@ -261,6 +264,33 @@ func (backend *KubernetesBackend) CreateControl(ctx context.Context, control *ag
 func (backend *KubernetesBackend) UpdateControl(ctx context.Context, control *agentsv1alpha1.AgentRunControl) error {
 	if err := backend.runs.Update(ctx, control); err != nil {
 		return fmt.Errorf("update AgentRunControl %s: %w", control.Name, err)
+	}
+	return nil
+}
+
+func (backend *KubernetesBackend) ListSchedules(ctx context.Context, namespace string, allNamespaces bool) (*agentsv1alpha1.AgentScheduleList, error) {
+	list := &agentsv1alpha1.AgentScheduleList{}
+	var options []client.ListOption
+	if !allNamespaces {
+		options = append(options, client.InNamespace(namespace))
+	}
+	if err := backend.runs.List(ctx, list, options...); err != nil {
+		return nil, fmt.Errorf("list AgentSchedules: %w", err)
+	}
+	return list, nil
+}
+
+func (backend *KubernetesBackend) GetSchedule(ctx context.Context, namespace, name string) (*agentsv1alpha1.AgentSchedule, error) {
+	schedule := &agentsv1alpha1.AgentSchedule{}
+	if err := backend.runs.Get(ctx, client.ObjectKey{Namespace: namespace, Name: name}, schedule); err != nil {
+		return nil, fmt.Errorf("get AgentSchedule %s/%s: %w", namespace, name, err)
+	}
+	return schedule, nil
+}
+
+func (backend *KubernetesBackend) UpdateSchedule(ctx context.Context, schedule *agentsv1alpha1.AgentSchedule) error {
+	if err := backend.runs.Update(ctx, schedule); err != nil {
+		return fmt.Errorf("update AgentSchedule %s/%s: %w", schedule.Namespace, schedule.Name, err)
 	}
 	return nil
 }

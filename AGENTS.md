@@ -14,6 +14,10 @@ documentation.
 - Manager authorization, repository mutation, and product delivery policy are
   external policy-plane concerns. Do not add imports from anvil-primaris or
   Anvil Hub to implement them here.
+- Public runtime CLI is `anvil-agentctl` (kube RBAC): runs, `control`
+  pause/resume, schedules, auth, volumes. Private Primaris `anvilctl agent` is
+  Hub-only for managers (`--hub-url` required) and must not reabsorb kube-backed
+  launch-gate or schedule ops into this repository's operator surface.
 - Avoid running this controller and the former anvil-primaris agent
   reconcilers at the same time.
 - Keep the optional OIDC-facing AgentRun API in a separate process and
