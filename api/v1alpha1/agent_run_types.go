@@ -22,6 +22,8 @@ const (
 	AgentRunPurposeManual               AgentRunPurpose = "manual"
 	AgentRunPurposeAdverseSituation     AgentRunPurpose = "adverseSituation"
 	AgentRunPurposeScheduledHealthCheck AgentRunPurpose = "scheduledHealthCheck"
+	// AgentRunPurposeChained is set on AgentRuns created by an AgentChain step.
+	AgentRunPurposeChained AgentRunPurpose = "chained"
 )
 
 type AgentRunIntent string
@@ -841,7 +843,7 @@ type AgentRunNotificationSpec struct {
 
 type AgentRunSpec struct {
 	// Purpose explains why this run exists.
-	// +kubebuilder:validation:Enum=manual;adverseSituation;scheduledHealthCheck
+	// +kubebuilder:validation:Enum=manual;adverseSituation;scheduledHealthCheck;chained
 	// +optional
 	Purpose          AgentRunPurpose         `json:"purpose,omitempty"`
 	SourceRef        AgentRunSourceRef       `json:"sourceRef,omitempty"`

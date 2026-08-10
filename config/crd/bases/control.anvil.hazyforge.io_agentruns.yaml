@@ -2585,6 +2585,7 @@ spec:
                 - manual
                 - adverseSituation
                 - scheduledHealthCheck
+                - chained
                 type: string
               scheduleRef:
                 description: ScheduleRef attaches this run to the AgentSchedule that

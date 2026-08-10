@@ -1,0 +1,51 @@
+apiVersion: control.anvil.hazyforge.io/v1alpha1
+kind: AgentChain
+metadata:
+  name: example-delivery-chain
+  namespace: anvilhub
+  labels:
+    control.anvil.hazyforge.io/ownership: gitops
+    control.anvil.hazyforge.io/application: example-app
+spec:
+  applicationRef:
+    name: example-app
+  # Manual start by default. Set startIntervalSeconds for cadence, or use:
+  #   anvil-agentctl chain start example-delivery-chain -n anvilhub
+  concurrencyPolicy: Forbid
+  maxInstancesPerDay: 12
+  backoff:
+    failedSeconds: 3600
+    needsHumanSeconds: 7200
+  steps:
+    - name: exercise
+      runTemplate:
+        profileRef:
+          name: example-exerciser
+        prompt: |
+          Advance one delivery cycle for the fixture. Emit a structured terminal decision.
+    - name: monitor
+      when:
+        previousStep: exercise
+        onPhases: [Succeeded]
+      runTemplate:
+        profileRef:
+          name: example-monitor
+        prompt: |
+          Independently rebuild claims from CRDs and workloads for the prior step.
+      handoff:
+        includeDecision: true
+        includeLatestReports: true
+        includePullRequestURL: true
+    - name: propose
+      when:
+        previousStep: monitor
+        onPhases: [Succeeded]
+      runTemplate:
+        profileRef:
+          name: example-proposer
+        prompt: |
+          Open focused platform issues/PRs from chain evidence only.
+      handoff:
+        includeDecision: true
+        includeLatestReports: true
+        includeAncestorSteps: [exercise, monitor]

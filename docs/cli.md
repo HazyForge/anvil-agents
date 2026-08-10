@@ -13,6 +13,7 @@ presence grants no Kubernetes authority.
 | Human/admin Kubernetes fleet ops | **`anvil-agentctl`** (this CLI) | kubeconfig + RBAC |
 | Application launch gates (`AgentRunControl`) | **`anvil-agentctl control`** | kubeconfig + RBAC |
 | Schedule list / suspend / resume / run-now | **`anvil-agentctl schedule`** | kubeconfig + RBAC |
+| Chain list / suspend / resume / start | **`anvil-agentctl chain`** | kubeconfig + RBAC |
 | Run create / list / logs / debug | **`anvil-agentctl run`** | kubeconfig + RBAC |
 | Durable-home auth reauth | **`anvil-agentctl auth`** | kubeconfig + RBAC |
 | Manager mutations under Application policy | **Anvil Hub agent-management HTTP API** (private Primaris) | SPIFFE / Hub session |
@@ -64,6 +65,11 @@ The caller needs only the Kubernetes verbs used by each command:
 | `schedule suspend` | `update` on the selected `agentschedule` (`spec.suspend=true`) |
 | `schedule resume` | `update` on the selected `agentschedule` (`spec.suspend=false`) |
 | `schedule run-now` | `update` on the selected `agentschedule` (run-now annotation) |
+| `chain list` | `list` on `agentchains` in the selected scope |
+| `chain get` | `get` on the selected `agentchain` |
+| `chain suspend` | `update` on the selected `agentchain` (`spec.suspend=true`) |
+| `chain resume` | `update` on the selected `agentchain` (`spec.suspend=false`) |
+| `chain start` | `update` on the selected `agentchain` (chain-start-now annotation) |
 | `self report` | none (writes local status JSONL / pod log only) |
 
 ## Create An Append-Only Run
@@ -360,6 +366,23 @@ replay-safe immediate child without rewriting history.
 
 Static GitOps-owned schedules remain source-of-truth for create/update of
 templates and intervals; the CLI mutates live suspend and nudge fields only.
+
+## Chains
+
+`AgentChain` owns **completion-driven** sequential `AgentRun`s (not wall-clock
+rotation). See `docs/agent-chain.md`.
+
+```bash
+anvil-agentctl chain list -n anvilhub
+anvil-agentctl chain get lab-evidence-loop -n anvilhub -o summary
+anvil-agentctl chain start lab-evidence-loop -n anvilhub
+anvil-agentctl chain suspend lab-evidence-loop -n anvilhub --reason "hold"
+anvil-agentctl chain resume lab-evidence-loop -n anvilhub --reason "resume"
+```
+
+`chain start` writes a new `control.anvil.hazyforge.io/chain-start-now` token so
+the controller begins one instance at step 0. Step advancement is controller
+authority on terminal phases; runners do not create peer runs.
 
 ## In-Pod Status Reporting
 

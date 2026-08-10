@@ -56,6 +56,8 @@ type fakeBackend struct {
 	updatedControls  []*agentsv1alpha1.AgentRunControl
 	schedules        []agentsv1alpha1.AgentSchedule
 	updatedSchedules []*agentsv1alpha1.AgentSchedule
+	chains           []agentsv1alpha1.AgentChain
+	updatedChains    []*agentsv1alpha1.AgentChain
 }
 
 func (backend *fakeBackend) DefaultNamespace() string { return backend.defaultNamespace }
@@ -239,6 +241,31 @@ func (backend *fakeBackend) UpdateSchedule(_ context.Context, schedule *agentsv1
 		}
 	}
 	backend.schedules = append(backend.schedules, *schedule.DeepCopy())
+	return nil
+}
+
+func (backend *fakeBackend) ListChains(_ context.Context, _ string, _ bool) (*agentsv1alpha1.AgentChainList, error) {
+	return &agentsv1alpha1.AgentChainList{Items: append([]agentsv1alpha1.AgentChain(nil), backend.chains...)}, nil
+}
+
+func (backend *fakeBackend) GetChain(_ context.Context, namespace, name string) (*agentsv1alpha1.AgentChain, error) {
+	for i := range backend.chains {
+		if backend.chains[i].Namespace == namespace && backend.chains[i].Name == name {
+			return backend.chains[i].DeepCopy(), nil
+		}
+	}
+	return nil, apierrors.NewNotFound(schema.GroupResource{Group: agentsv1alpha1.GroupVersion.Group, Resource: "agentchains"}, name)
+}
+
+func (backend *fakeBackend) UpdateChain(_ context.Context, chain *agentsv1alpha1.AgentChain) error {
+	backend.updatedChains = append(backend.updatedChains, chain.DeepCopy())
+	for i := range backend.chains {
+		if backend.chains[i].Namespace == chain.Namespace && backend.chains[i].Name == chain.Name {
+			backend.chains[i] = *chain.DeepCopy()
+			return nil
+		}
+	}
+	backend.chains = append(backend.chains, *chain.DeepCopy())
 	return nil
 }
 
