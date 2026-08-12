@@ -51,6 +51,9 @@ type Backend interface {
 	ListSchedules(context.Context, string, bool) (*agentsv1alpha1.AgentScheduleList, error)
 	GetSchedule(context.Context, string, string) (*agentsv1alpha1.AgentSchedule, error)
 	UpdateSchedule(context.Context, *agentsv1alpha1.AgentSchedule) error
+	ListChains(context.Context, string, bool) (*agentsv1alpha1.AgentChainList, error)
+	GetChain(context.Context, string, string) (*agentsv1alpha1.AgentChain, error)
+	UpdateChain(context.Context, *agentsv1alpha1.AgentChain) error
 }
 
 type KubernetesBackend struct {
@@ -291,6 +294,33 @@ func (backend *KubernetesBackend) GetSchedule(ctx context.Context, namespace, na
 func (backend *KubernetesBackend) UpdateSchedule(ctx context.Context, schedule *agentsv1alpha1.AgentSchedule) error {
 	if err := backend.runs.Update(ctx, schedule); err != nil {
 		return fmt.Errorf("update AgentSchedule %s/%s: %w", schedule.Namespace, schedule.Name, err)
+	}
+	return nil
+}
+
+func (backend *KubernetesBackend) ListChains(ctx context.Context, namespace string, allNamespaces bool) (*agentsv1alpha1.AgentChainList, error) {
+	list := &agentsv1alpha1.AgentChainList{}
+	var options []client.ListOption
+	if !allNamespaces {
+		options = append(options, client.InNamespace(namespace))
+	}
+	if err := backend.runs.List(ctx, list, options...); err != nil {
+		return nil, fmt.Errorf("list AgentChains: %w", err)
+	}
+	return list, nil
+}
+
+func (backend *KubernetesBackend) GetChain(ctx context.Context, namespace, name string) (*agentsv1alpha1.AgentChain, error) {
+	chain := &agentsv1alpha1.AgentChain{}
+	if err := backend.runs.Get(ctx, client.ObjectKey{Namespace: namespace, Name: name}, chain); err != nil {
+		return nil, fmt.Errorf("get AgentChain %s/%s: %w", namespace, name, err)
+	}
+	return chain, nil
+}
+
+func (backend *KubernetesBackend) UpdateChain(ctx context.Context, chain *agentsv1alpha1.AgentChain) error {
+	if err := backend.runs.Update(ctx, chain); err != nil {
+		return fmt.Errorf("update AgentChain %s/%s: %w", chain.Namespace, chain.Name, err)
 	}
 	return nil
 }

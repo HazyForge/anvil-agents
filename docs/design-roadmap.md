@@ -38,9 +38,14 @@ with. These are product boundaries, not branding substitutions.
 ## Workflow Boundary
 
 `AgentSchedule.runTemplates` rotates independent runs; `subagents` is harness
-prompt metadata. A future workflow resource should own fan-out, dependencies,
-routing, fallback, approval, and child-run status. That should not be hidden in
-an increasingly overloaded AgentRun.
+prompt metadata. **`AgentChain` owns linear completion-driven sequencing**:
+GitOps steps create append-only `AgentRun`s when the prior step reaches an
+allowed terminal phase, with status-only handoff and no peer credential
+sharing. See `docs/agent-chain.md`.
+
+Still out of scope for the first chain cut (and for overloaded AgentRun):
+fan-out, join, routing, approval gates, and external event sources. Those
+belong on later workflow extensions, not schedule or council.
 
 Horizontal distribution of independent Jobs across worker nodes inside one
 Kubernetes cluster is already implemented and is a primary workload model.

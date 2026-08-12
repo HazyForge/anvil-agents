@@ -73,6 +73,7 @@ func Run(ctx context.Context, options *Options) error {
 		{"AgentRunControl", (&AgentRunControlReconciler{Client: mgr.GetClient(), Scheme: mgr.GetScheme()}).SetupWithManager},
 		{"AgentRun", (&AgentRunReconciler{Client: mgr.GetClient(), Scheme: mgr.GetScheme(), CommonReconcilerOptions: common, AgentRunArchive: archiveStore}).SetupWithManager},
 		{"AgentSchedule", (&AgentScheduleReconciler{Client: mgr.GetClient(), Scheme: mgr.GetScheme()}).SetupWithManager},
+		{"AgentChain", (&AgentChainReconciler{Client: mgr.GetClient(), Scheme: mgr.GetScheme()}).SetupWithManager},
 		{"AdverseSignal", (&AdverseSignalReconciler{Client: mgr.GetClient(), Scheme: mgr.GetScheme()}).SetupWithManager},
 		{"AdverseSituation", (&AdverseSituationReconciler{Client: mgr.GetClient(), Scheme: mgr.GetScheme()}).SetupWithManager},
 	}

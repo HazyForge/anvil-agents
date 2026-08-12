@@ -133,6 +133,8 @@ func (app App) Run(ctx context.Context, args []string) error {
 		return app.runControl(ctx, options, remaining[1:])
 	case "schedule":
 		return app.runSchedule(ctx, options, remaining[1:])
+	case "chain":
+		return app.runChain(ctx, options, remaining[1:])
 	case "self":
 		return app.runSelf(remaining[1:])
 	case "help":
@@ -147,12 +149,13 @@ func (app App) Run(ctx context.Context, args []string) error {
 func writeRootUsage(writer io.Writer) {
 	fmt.Fprintln(writer, "Usage: anvil-agentctl [--kubeconfig PATH] [--context NAME] COMMAND")
 	fmt.Fprintln(writer, "")
-	fmt.Fprintln(writer, "Commands: run, auth, volume, control, schedule, self")
+	fmt.Fprintln(writer, "Commands: run, auth, volume, control, schedule, chain, self")
 	writeRunUsage(writer)
 	writeAuthUsage(writer)
 	writeVolumeUsage(writer)
 	writeControlUsage(writer)
 	writeScheduleUsage(writer)
+	writeChainUsage(writer)
 	writeSelfUsage(writer)
 }
 
@@ -188,7 +191,7 @@ func (app App) runCreate(ctx context.Context, kubeOptions KubeOptions, args []st
 	flags.StringVar(&options.profile, "profile", "", "Same-namespace AgentRunProfile name (required).")
 	flags.StringVar(&options.prompt, "prompt", "", "One-off run prompt.")
 	flags.StringVar(&options.promptFile, "prompt-file", "", "Read the one-off prompt from a file, or - for stdin.")
-	flags.StringVar(&options.purpose, "purpose", options.purpose, "Run purpose: manual, adverseSituation, or scheduledHealthCheck.")
+	flags.StringVar(&options.purpose, "purpose", options.purpose, "Run purpose: manual, adverseSituation, or scheduledHealthCheck (chained is controller-only).")
 	flags.StringVar(&options.intent, "intent", "", "Optional intent override: observe, fixTransient, proposeChange, or cleanup.")
 	flags.StringVar(&options.sourceAPIVersion, "source-api-version", "", "Opaque source API version metadata.")
 	flags.StringVar(&options.sourceKind, "source-kind", options.sourceKind, "Opaque source kind metadata.")
@@ -339,6 +342,7 @@ func (app App) buildRun(options createOptions) (*agentsv1alpha1.AgentRun, error)
 
 func validPurpose(value agentsv1alpha1.AgentRunPurpose) bool {
 	switch value {
+	// purpose=chained is controller-only (AgentChain children).
 	case agentsv1alpha1.AgentRunPurposeManual, agentsv1alpha1.AgentRunPurposeAdverseSituation, agentsv1alpha1.AgentRunPurposeScheduledHealthCheck:
 		return true
 	default:
@@ -618,8 +622,11 @@ func writeObject(writer io.Writer, object any, format string) error {
 		case *agentsv1alpha1.AgentSchedule:
 			_, err := fmt.Fprintf(writer, "agentschedule.control.anvil.hazyforge.io/%s\n", typed.Name)
 			return err
+		case *agentsv1alpha1.AgentChain:
+			_, err := fmt.Fprintf(writer, "agentchain.control.anvil.hazyforge.io/%s\n", typed.Name)
+			return err
 		default:
-			return &usageError{message: "name output is supported only for one AgentRun, AgentRunControl, or AgentSchedule"}
+			return &usageError{message: "name output is supported only for one AgentRun, AgentRunControl, AgentSchedule, or AgentChain"}
 		}
 	case "json":
 		cleaned, err := cleanObject(object)
