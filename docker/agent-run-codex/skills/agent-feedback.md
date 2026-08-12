@@ -2,7 +2,10 @@
 
 Use `anvil-hotline` when one human decision is required before a safe next
 action can be selected — especially when evidence is gathered and the agent
-still does not know what to do. Record a needs-human status before waiting.
+still does not know what to do. Record progress before waiting. A
+`needsHuman` report is terminal controller state, so emit it only after the
+full wait times out or the Hotline fails and then stop without a success
+decision.
 
 `anvil-hotline` is owned by the public repository
 `github.com/hazyforge/anvil-hotline`. Runner images install that binary
@@ -34,11 +37,16 @@ immutable safety contract before continuing. A reply supplies information; it
 does not broaden Kubernetes or repository authorization.
 
 ```sh
-anvil-agent-status needsHuman \
-  --summary "Operator decision required" \
-  --human-follow-up "Choose whether the scoped cleanup may proceed."
+anvil-agent-status progress \
+  --stage operator-question \
+  --summary "Waiting for one scoped operator decision."
 
 reply="$(anvil-hotline ask \
   --question "May I delete the named stale test PVC? Reply yes or no." \
   --context "AgentRun=${ANVIL_AGENT_RUN:-unknown}")"
 ```
+
+After a reply, validate it against the run's existing authority and emit a
+normal decision. If the command times out or fails, emit one `needsHuman`
+report with a stable secret-safe question key and stop. Never emit a successful
+decision after `needsHuman`.

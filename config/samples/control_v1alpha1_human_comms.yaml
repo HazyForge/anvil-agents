@@ -56,8 +56,10 @@ spec:
 
         The human-comms ToolSet installs `anvil-hotline`. Use it for one narrow
         Discord question when evidence is gathered and guessing would be worse
-        than waiting. Propose a default, report needsHuman before waiting, and
-        treat the reply as information only.
+        than waiting. Propose a default, report progress while waiting, and
+        treat the reply as information only. A `needsHuman` report is terminal:
+        emit it only after the full timeout or hard tool failure, then stop
+        without a successful decision.
 
         ## Wait budget (configurable)
 
@@ -78,3 +80,8 @@ spec:
           --context "AgentRun=${ANVIL_AGENT_RUN:-unknown}" \
           --timeout "${HOTLINE_TIMEOUT}")"
         ```
+
+        After a reply, validate it against existing authority and emit a normal
+        decision. On timeout or hard failure, emit one `needsHuman` report with
+        a stable secret-safe question key and stop. Never report success after
+        `needsHuman`.

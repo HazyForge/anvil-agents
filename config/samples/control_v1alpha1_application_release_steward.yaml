@@ -1,0 +1,69 @@
+apiVersion: control.anvil.hazyforge.io/v1alpha1
+kind: AgentSkillSet
+metadata:
+  name: application-release-steward
+  namespace: agents
+spec:
+  description: Provider-neutral exercise, audit, route, and operator-direction contract for application delivery.
+  skills:
+    - name: application-release-steward
+      description: Turn application delivery evidence into typed proof, deduplicated findings, and bounded human direction.
+      content: |
+        # Application release steward
+
+        The application supplies the delivery CLI, experiment catalog, target
+        and production boundaries, evidence sources, repository routing,
+        cadence, budget, and operator-question policy. This skill supplies the
+        reusable method. PR count and repeated green runs are not objectives.
+
+        Use three least-privilege roles:
+
+        1. Exerciser selects one safe, named, previously unproven delivery
+           hypothesis for an exact revision and artifact. It emits
+           classification `exercised` and action `candidate-proof`,
+           `health-observed`, `gap-observed`, `finding-observed`, or
+           `direction-candidate`.
+        2. Monitor independently reconstructs every unhandled exerciser claim
+           from controller-owned and live target evidence. It emits
+           classification `audited` and action `new-proof`,
+           `confirmed-healthy`, `known-gap`, `new-platform-finding`,
+           `needs-direction`, or `no-op`.
+        3. Proposer/router processes every unhandled monitor result, searches
+           owner systems before writing, and emits classification `routed` with
+           action `opened-pr`, `updated-issue`, `asked-operator`, or `no-op`.
+
+        Every role records the input AgentRun refs it handled and a stable
+        secret-safe proof or blocker fingerprint. A proof fingerprint includes
+        application, exact source revision, artifact digest, target, action or
+        test definition digest, verification mode, and terminal evidence IDs.
+        After three unchanged healthy or known-gap fingerprints, choose another
+        safe experiment, back off cadence, leave the routed issue parked, or
+        record one direction candidate. Never create a change only to make a
+        release or PR happen.
+
+        Route application behavior and configuration defects to the application
+        owner; delivery platform, CLI, controller, worker, adapter, gate, or
+        target-observation defects to the platform owner; and AgentRun runtime,
+        scheduling, chaining, composition, or result defects to the agent-runtime
+        owner. Update an existing finding only with materially new evidence.
+
+        Proposer is the sole product-direction asker. Attach a reviewed human
+        communications skill/tool and credential only to that role. Compute a
+        stable question key from application, experiment, blocker, and exact
+        question; include revision only when the answer is revision-specific.
+        Put the key in Hotline context and in both summary and detail of normal
+        decisions or `needsHuman` reports, inspect prior proposer decisions and
+        reports, and fail closed without posting if that history cannot be read.
+        Ask once with a recommended default, two or
+        three alternatives and consequences, safe timeout behavior, and the
+        exact authority requested. A reply is information, never capability.
+        Report progress while waiting; after a validated reply emit a normal
+        decision. Only after the full timeout or a hard tool failure emit one
+        terminal `needsHuman` report, then stop without success.
+
+        Prefer completion-driven orchestration only when it preserves each
+        step's own application identity, service account, secret scope, pause
+        policy, and repository authority. A rotating schedule is a temporary
+        transport, not status handoff: process every unhandled prior run and
+        keep write-capable schedules suspended until serial role and human-
+        communications canaries prove the boundary.
