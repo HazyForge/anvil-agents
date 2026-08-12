@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -27,10 +28,13 @@ const (
 	agentChainHandoffMax          = 8192
 )
 
+var errAgentChainRunProvenance = errors.New("AgentRun provenance mismatch")
+
 func agentChainClearActive(status *controlv1alpha1.AgentChainStatus) {
 	status.ActiveInstanceID = ""
 	status.ActiveStep = ""
 	status.ActiveRunRef = nil
+	status.ActiveRunUID = ""
 	status.ActiveSourceGeneration = 0
 	status.ActiveWorkflowDigest = ""
 	status.CancelRequestedInstanceID = ""
@@ -62,7 +66,9 @@ func (r *AgentChainReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	if err := validateAgentChainSpec(obj); err != nil {
 		status.Phase = controlv1alpha1.AgentChainPhaseBlocked
 		status.LastError = err.Error()
-		agentChainClearActive(&status)
+		// Invalid desired state must not release Forbid ownership while an
+		// already-created child may still be running. Retain the frozen active
+		// instance until the spec is valid again and the exact child is drained.
 		status.NextStartAt = nil
 		apimeta.SetStatusCondition(&status.Conditions, metav1.Condition{
 			Type:               agentChainReady,
@@ -162,15 +168,14 @@ func (r *AgentChainReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		status.LastCancelToken = cancelToken
 	}
 	if status.ActiveInstanceID != "" && status.CancelRequestedInstanceID == status.ActiveInstanceID {
-		current := agentChainFindStepRun(runs, status.ActiveInstanceID, status.ActiveStep)
-		if current == nil {
+		current, currentErr := r.agentChainActiveRun(ctx, obj, &status)
+		if currentErr != nil {
 			status.Phase = controlv1alpha1.AgentChainPhaseBlocked
-			status.LastError = fmt.Sprintf("missing AgentRun while cancelling instance %s step %s", status.ActiveInstanceID, status.ActiveStep)
+			status.LastError = fmt.Sprintf("cannot resolve exact AgentRun while cancelling instance %s step %s: %v", status.ActiveInstanceID, status.ActiveStep, currentErr)
 			apimeta.SetStatusCondition(&status.Conditions, metav1.Condition{Type: agentChainReady, Status: metav1.ConditionFalse, ObservedGeneration: obj.Generation, LastTransitionTime: now, Reason: "MissingCancellationRun", Message: status.LastError})
 			obj.Status = status
 			return r.patchAgentChainStatus(ctx, original, obj, agentChainPollInterval)
 		}
-		status.ActiveRunRef = &controlv1alpha1.NamespacedObjectReference{Name: current.Name, Namespace: current.Namespace}
 		if !agentRunPhaseTerminal(current.Status.Phase) {
 			status.Phase = controlv1alpha1.AgentChainPhaseCancelling
 			status.LastError = ""
@@ -189,7 +194,7 @@ func (r *AgentChainReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 
 	// If an instance is active, sync step status and maybe advance.
 	if status.ActiveInstanceID != "" {
-		advanced, requeue, err := r.reconcileActiveInstance(ctx, obj, &status, runs, applicationName, now)
+		advanced, requeue, err := r.reconcileActiveInstance(ctx, obj, &status, applicationName, now)
 		if err != nil {
 			return ctrl.Result{}, err
 		}
@@ -326,10 +331,12 @@ func (r *AgentChainReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	status.LastInstanceID = instanceID
 	status.ActiveStep = first.Name
 	status.ActiveRunRef = &controlv1alpha1.NamespacedObjectReference{Name: run.Name, Namespace: run.Namespace}
+	status.ActiveRunUID = string(run.UID)
 	status.StepRuns = []controlv1alpha1.AgentChainStepRunStatus{{
 		InstanceID:       instanceID,
 		Step:             first.Name,
 		RunRef:           &controlv1alpha1.NamespacedObjectReference{Name: run.Name, Namespace: run.Namespace},
+		RunUID:           string(run.UID),
 		Phase:            run.Status.Phase,
 		SourceGeneration: obj.Generation,
 		WorkflowDigest:   workflowDigest,
@@ -372,7 +379,6 @@ func (r *AgentChainReconciler) reconcileActiveInstance(
 	ctx context.Context,
 	chain *controlv1alpha1.AgentChain,
 	status *controlv1alpha1.AgentChainStatus,
-	runs []*controlv1alpha1.AgentRun,
 	applicationName string,
 	now metav1.Time,
 ) (advanced bool, requeueAfter time.Duration, err error) {
@@ -419,45 +425,36 @@ func (r *AgentChainReconciler) reconcileActiveInstance(
 		return false, 0, nil
 	}
 
-	// Find the run for active step/instance.
-	current := agentChainFindStepRun(runs, instanceID, status.ActiveStep)
-	if current == nil {
+	// Resolve the exact status-owned run. Labels are indexes, not authority:
+	// a newer foreign or mislabelled AgentRun must never replace this child.
+	current, currentErr := r.agentChainActiveRun(ctx, chain, status)
+	if currentErr != nil {
 		status.Phase = controlv1alpha1.AgentChainPhaseBlocked
-		status.LastError = fmt.Sprintf("missing AgentRun for active instance %s step %s", instanceID, status.ActiveStep)
+		status.LastError = fmt.Sprintf("cannot resolve exact AgentRun for active instance %s step %s: %v", instanceID, status.ActiveStep, currentErr)
+		reason := "MissingStepRun"
+		if errors.Is(currentErr, errAgentChainRunProvenance) {
+			reason = "StepProvenanceMismatch"
+		}
 		apimeta.SetStatusCondition(&status.Conditions, metav1.Condition{
 			Type:               agentChainReady,
 			Status:             metav1.ConditionFalse,
 			ObservedGeneration: chain.Generation,
 			LastTransitionTime: now,
-			Reason:             "MissingStepRun",
+			Reason:             reason,
 			Message:            status.LastError,
 		})
 		return false, agentChainPollInterval, nil
 	}
 
-	status.ActiveRunRef = &controlv1alpha1.NamespacedObjectReference{Name: current.Name, Namespace: current.Namespace}
 	status.StepRuns = agentChainUpsertStepRun(status.StepRuns, controlv1alpha1.AgentChainStepRunStatus{
 		InstanceID:       instanceID,
 		Step:             status.ActiveStep,
 		RunRef:           &controlv1alpha1.NamespacedObjectReference{Name: current.Name, Namespace: current.Namespace},
+		RunUID:           string(current.UID),
 		Phase:            current.Status.Phase,
 		SourceGeneration: status.ActiveSourceGeneration,
 		WorkflowDigest:   status.ActiveWorkflowDigest,
 	})
-	if current.Spec.SourceGeneration != status.ActiveSourceGeneration || current.Spec.SourceDigest != status.ActiveWorkflowDigest {
-		status.Phase = controlv1alpha1.AgentChainPhaseBlocked
-		status.LastError = fmt.Sprintf("AgentRun %s/%s provenance generation/digest does not match frozen instance %s", current.Namespace, current.Name, instanceID)
-		apimeta.SetStatusCondition(&status.Conditions, metav1.Condition{
-			Type:               agentChainReady,
-			Status:             metav1.ConditionFalse,
-			ObservedGeneration: chain.Generation,
-			LastTransitionTime: now,
-			Reason:             "StepProvenanceMismatch",
-			Message:            status.LastError,
-		})
-		return false, 0, nil
-	}
-
 	if !agentRunPhaseTerminal(current.Status.Phase) {
 		status.Phase = controlv1alpha1.AgentChainPhaseRunning
 		status.LastError = ""
@@ -546,32 +543,23 @@ func (r *AgentChainReconciler) reconcileActiveInstance(
 		return true, agentChainPollInterval, nil
 	}
 
-	// Collect ancestor runs for handoff.
+	// Collect ancestor runs from exact, UID-bound status references. Never
+	// select handoff authority from a label query.
 	priorByStep := map[string]*controlv1alpha1.AgentRun{}
-	for _, run := range runs {
-		if run.Labels[agentRunChainInstLabel] != sanitizeLabelValue(instanceID) {
+	for _, stepRun := range status.StepRuns {
+		if stepRun.InstanceID != instanceID || stepRun.RunRef == nil {
 			continue
 		}
-		stepName := run.Labels[agentRunChainStepLabel]
-		if stepName == "" {
-			continue
+		run, getErr := r.agentChainRunByRef(ctx, chain, status, stepRun.Step, stepRun.RunRef, stepRun.RunUID)
+		if getErr != nil {
+			status.Phase = controlv1alpha1.AgentChainPhaseBlocked
+			status.LastError = fmt.Sprintf("cannot resolve exact handoff AgentRun for instance %s step %s: %v", instanceID, stepRun.Step, getErr)
+			apimeta.SetStatusCondition(&status.Conditions, metav1.Condition{Type: agentChainReady, Status: metav1.ConditionFalse, ObservedGeneration: chain.Generation, LastTransitionTime: now, Reason: "HandoffProvenanceMismatch", Message: status.LastError})
+			return false, 0, nil
 		}
-		// Prefer latest terminal for each step.
-		if existing, ok := priorByStep[stepName]; ok {
-			if run.CreationTimestamp.After(existing.CreationTimestamp.Time) {
-				priorByStep[stepName] = run
-			}
-			continue
-		}
-		priorByStep[stepName] = run
+		priorByStep[stepRun.Step] = run
 	}
-	priorByStep[sanitizeLabelValue(chain.Spec.Steps[stepIndex].Name)] = current
-	// Map sanitized label back: store also by original step names.
-	for _, step := range chain.Spec.Steps {
-		if run, ok := priorByStep[sanitizeLabelValue(step.Name)]; ok {
-			priorByStep[step.Name] = run
-		}
-	}
+	priorByStep[chain.Spec.Steps[stepIndex].Name] = current
 
 	transitionDetectedAt := current.CreationTimestamp
 	if current.Status.CompletedAt != nil && !current.Status.CompletedAt.IsZero() {
@@ -586,10 +574,12 @@ func (r *AgentChainReconciler) reconcileActiveInstance(
 	status.Phase = controlv1alpha1.AgentChainPhaseRunning
 	status.ActiveStep = nextStep.Name
 	status.ActiveRunRef = &controlv1alpha1.NamespacedObjectReference{Name: run.Name, Namespace: run.Namespace}
+	status.ActiveRunUID = string(run.UID)
 	status.StepRuns = agentChainUpsertStepRun(status.StepRuns, controlv1alpha1.AgentChainStepRunStatus{
 		InstanceID:       instanceID,
 		Step:             nextStep.Name,
 		RunRef:           &controlv1alpha1.NamespacedObjectReference{Name: run.Name, Namespace: run.Namespace},
+		RunUID:           string(run.UID),
 		Phase:            run.Status.Phase,
 		SourceGeneration: status.ActiveSourceGeneration,
 		WorkflowDigest:   status.ActiveWorkflowDigest,
@@ -606,18 +596,56 @@ func (r *AgentChainReconciler) reconcileActiveInstance(
 	return true, agentChainPollInterval, nil
 }
 
-func agentChainFindStepRun(runs []*controlv1alpha1.AgentRun, instanceID, step string) *controlv1alpha1.AgentRun {
-	var current *controlv1alpha1.AgentRun
-	for _, run := range runs {
-		if run.Labels[agentRunChainInstLabel] != sanitizeLabelValue(instanceID) ||
-			run.Labels[agentRunChainStepLabel] != sanitizeLabelValue(step) {
-			continue
-		}
-		if current == nil || run.CreationTimestamp.After(current.CreationTimestamp.Time) {
-			current = run
-		}
+func (r *AgentChainReconciler) agentChainActiveRun(
+	ctx context.Context,
+	chain *controlv1alpha1.AgentChain,
+	status *controlv1alpha1.AgentChainStatus,
+) (*controlv1alpha1.AgentRun, error) {
+	if status == nil || status.ActiveRunRef == nil {
+		return nil, fmt.Errorf("status.activeRunRef is missing")
 	}
-	return current
+	return r.agentChainRunByRef(ctx, chain, status, status.ActiveStep, status.ActiveRunRef, status.ActiveRunUID)
+}
+
+func (r *AgentChainReconciler) agentChainRunByRef(
+	ctx context.Context,
+	chain *controlv1alpha1.AgentChain,
+	status *controlv1alpha1.AgentChainStatus,
+	step string,
+	ref *controlv1alpha1.NamespacedObjectReference,
+	expectedUID string,
+) (*controlv1alpha1.AgentRun, error) {
+	if chain == nil || status == nil || ref == nil || strings.TrimSpace(ref.Name) == "" {
+		return nil, fmt.Errorf("run reference is incomplete")
+	}
+	namespace := strings.TrimSpace(ref.Namespace)
+	if namespace == "" {
+		namespace = chain.Namespace
+	}
+	if namespace != chain.Namespace {
+		return nil, fmt.Errorf("run reference namespace %q differs from chain namespace %q", namespace, chain.Namespace)
+	}
+	run := &controlv1alpha1.AgentRun{}
+	if err := r.Get(ctx, client.ObjectKey{Namespace: namespace, Name: ref.Name}, run); err != nil {
+		return nil, err
+	}
+	if expectedUID != "" && string(run.UID) != expectedUID {
+		return nil, fmt.Errorf("%w: AgentRun %s/%s UID %q differs from frozen UID %q", errAgentChainRunProvenance, run.Namespace, run.Name, run.UID, expectedUID)
+	}
+	if run.Spec.SourceRef.APIVersion != controlv1alpha1.GroupVersion.String() ||
+		run.Spec.SourceRef.Kind != "AgentChain" ||
+		run.Spec.SourceRef.Namespace != chain.Namespace ||
+		run.Spec.SourceRef.Name != chain.Name ||
+		run.Spec.SourceUID != string(chain.UID) ||
+		run.Spec.SourceGeneration != status.ActiveSourceGeneration ||
+		run.Spec.SourceDigest != status.ActiveWorkflowDigest ||
+		run.Annotations[agentRunChainDigestAnnotation] != status.ActiveWorkflowDigest ||
+		run.Labels[agentRunChainLabel] != sanitizeLabelValue(chain.Name) ||
+		run.Labels[agentRunChainInstLabel] != sanitizeLabelValue(status.ActiveInstanceID) ||
+		run.Labels[agentRunChainStepLabel] != sanitizeLabelValue(step) {
+		return nil, fmt.Errorf("%w: AgentRun %s/%s identity does not match frozen instance %s step %s", errAgentChainRunProvenance, run.Namespace, run.Name, status.ActiveInstanceID, step)
+	}
+	return run, nil
 }
 
 func (r *AgentChainReconciler) createChainedAgentRun(
@@ -839,6 +867,11 @@ func validateAgentChainSpec(chain *controlv1alpha1.AgentChain) error {
 				return fmt.Errorf("step %q when.onDecisionActions[%d] must not be blank", name, j)
 			}
 		}
+		for j, phase := range step.When.OnPhases {
+			if phase != controlv1alpha1.AgentRunPhaseSucceeded && phase != controlv1alpha1.AgentRunPhaseFailed && phase != controlv1alpha1.AgentRunPhaseNeedsHuman {
+				return fmt.Errorf("step %q when.onPhases[%d]=%q is not a terminal AgentRun phase", name, j, phase)
+			}
+		}
 		prev := strings.TrimSpace(step.When.PreviousStep)
 		if prev != chain.Spec.Steps[i-1].Name {
 			return fmt.Errorf("step %q when.previousStep must be the immediately previous step %q (got %q); v1 is linear only", name, chain.Spec.Steps[i-1].Name, prev)
@@ -947,21 +980,7 @@ func agentChainWhenMatches(when *controlv1alpha1.AgentChainWhenSpec, expectedPre
 }
 
 func agentChainCompletionMatches(completion *controlv1alpha1.AgentChainCompletionSpec, run *controlv1alpha1.AgentRun) bool {
-	if run == nil {
-		return false
-	}
-	phases := []controlv1alpha1.AgentRunPhase{controlv1alpha1.AgentRunPhaseSucceeded}
-	if completion != nil && len(completion.OnPhases) > 0 {
-		phases = completion.OnPhases
-	}
-	matchedPhase := false
-	for _, phase := range phases {
-		if run.Status.Phase == phase {
-			matchedPhase = true
-			break
-		}
-	}
-	if !matchedPhase {
+	if run == nil || run.Status.Phase != controlv1alpha1.AgentRunPhaseSucceeded {
 		return false
 	}
 	if completion == nil || len(completion.OnDecisionActions) == 0 {

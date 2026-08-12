@@ -68,10 +68,16 @@ func freezeActiveChainForTest(chain *controlv1alpha1.AgentChain, status *control
 	workflowDigest := agentChainWorkflowDigest(chain)
 	status.ActiveSourceGeneration = chain.Generation
 	status.ActiveWorkflowDigest = workflowDigest
+	status.ActiveRunRef = &controlv1alpha1.NamespacedObjectReference{Name: run.Name, Namespace: run.Namespace}
+	status.ActiveRunUID = string(run.UID)
 	run.Spec.SourceRef = controlv1alpha1.AgentRunSourceRef{APIVersion: controlv1alpha1.GroupVersion.String(), Kind: "AgentChain", Namespace: chain.Namespace, Name: chain.Name}
 	run.Spec.SourceUID = string(chain.UID)
 	run.Spec.SourceGeneration = chain.Generation
 	run.Spec.SourceDigest = workflowDigest
+	if run.Annotations == nil {
+		run.Annotations = map[string]string{}
+	}
+	run.Annotations[agentRunChainDigestAnnotation] = workflowDigest
 }
 
 func TestAgentChainStartAndAdvance(t *testing.T) {
@@ -443,6 +449,122 @@ func TestAgentChainBlocksActiveInstanceAcrossWorkflowEdit(t *testing.T) {
 	runs := &controlv1alpha1.AgentRunList{}
 	if err := c.List(context.Background(), runs); err != nil || len(runs.Items) != 1 {
 		t.Fatalf("workflow edit must not launch a successor: runs=%d err=%v", len(runs.Items), err)
+	}
+}
+
+func TestAgentChainInvalidSpecRetainsActiveForbidOwnership(t *testing.T) {
+	scheme := newAgentChainScheme(t)
+	chain := baseChain("invalid-retains-active")
+	chain.Annotations = map[string]string{controlv1alpha1.AgentChainStartNowAnnotation: "token-one"}
+	c := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(&controlv1alpha1.AgentChain{}, &controlv1alpha1.AgentRun{}).WithObjects(chain).Build()
+	r := &AgentChainReconciler{Client: c, Scheme: scheme}
+	req := reconcile.Request{NamespacedName: types.NamespacedName{Namespace: chain.Namespace, Name: chain.Name}}
+	if _, err := r.Reconcile(context.Background(), req); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	stored := &controlv1alpha1.AgentChain{}
+	if err := c.Get(context.Background(), client.ObjectKeyFromObject(chain), stored); err != nil {
+		t.Fatalf("get started chain: %v", err)
+	}
+	activeInstance := stored.Status.ActiveInstanceID
+	activeRunName := stored.Status.ActiveRunRef.Name
+	stored.Spec.Steps[1].Name = stored.Spec.Steps[0].Name
+	stored.Generation++
+	if err := c.Update(context.Background(), stored); err != nil {
+		t.Fatalf("make spec invalid: %v", err)
+	}
+	if _, err := r.Reconcile(context.Background(), req); err != nil {
+		t.Fatalf("reconcile invalid spec: %v", err)
+	}
+	if err := c.Get(context.Background(), client.ObjectKeyFromObject(chain), stored); err != nil {
+		t.Fatalf("get blocked chain: %v", err)
+	}
+	if stored.Status.Phase != controlv1alpha1.AgentChainPhaseBlocked || stored.Status.ActiveInstanceID != activeInstance || stored.Status.ActiveRunRef == nil || stored.Status.ActiveRunRef.Name != activeRunName {
+		t.Fatalf("invalid spec released active ownership: %#v", stored.Status)
+	}
+	stored.Spec.Steps[1].Name = "monitor"
+	stored.Spec.Steps[1].When.PreviousStep = "exercise"
+	stored.Annotations[controlv1alpha1.AgentChainStartNowAnnotation] = "token-two"
+	stored.Generation++
+	if err := c.Update(context.Background(), stored); err != nil {
+		t.Fatalf("repair spec: %v", err)
+	}
+	if _, err := r.Reconcile(context.Background(), req); err != nil {
+		t.Fatalf("reconcile repaired spec: %v", err)
+	}
+	runs := &controlv1alpha1.AgentRunList{}
+	if err := c.List(context.Background(), runs); err != nil || len(runs.Items) != 1 {
+		t.Fatalf("repaired spec started overlapping instance: runs=%d err=%v", len(runs.Items), err)
+	}
+}
+
+func TestAgentChainIgnoresNewerForeignRunWithMatchingLabels(t *testing.T) {
+	scheme := newAgentChainScheme(t)
+	chain := baseChain("exact-active-ref")
+	chain.Annotations = map[string]string{controlv1alpha1.AgentChainStartNowAnnotation: "token-exact"}
+	c := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(&controlv1alpha1.AgentChain{}, &controlv1alpha1.AgentRun{}).WithObjects(chain).Build()
+	r := &AgentChainReconciler{Client: c, Scheme: scheme}
+	req := reconcile.Request{NamespacedName: types.NamespacedName{Namespace: chain.Namespace, Name: chain.Name}}
+	if _, err := r.Reconcile(context.Background(), req); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	stored := &controlv1alpha1.AgentChain{}
+	if err := c.Get(context.Background(), client.ObjectKeyFromObject(chain), stored); err != nil {
+		t.Fatalf("get started chain: %v", err)
+	}
+	foreign := &controlv1alpha1.AgentRun{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:              "foreign-newer-run",
+			Namespace:         chain.Namespace,
+			UID:               types.UID("foreign-uid"),
+			CreationTimestamp: metav1.NewTime(time.Now().UTC().Add(time.Minute)),
+			Labels: map[string]string{
+				agentRunChainLabel:     sanitizeLabelValue(chain.Name),
+				agentRunChainInstLabel: sanitizeLabelValue(stored.Status.ActiveInstanceID),
+				agentRunChainStepLabel: sanitizeLabelValue(stored.Status.ActiveStep),
+			},
+			Annotations: map[string]string{agentRunChainDigestAnnotation: stored.Status.ActiveWorkflowDigest},
+		},
+		Spec: controlv1alpha1.AgentRunSpec{
+			Purpose:          controlv1alpha1.AgentRunPurposeChained,
+			SourceRef:        controlv1alpha1.AgentRunSourceRef{APIVersion: controlv1alpha1.GroupVersion.String(), Kind: "AgentChain", Namespace: chain.Namespace, Name: chain.Name},
+			SourceUID:        string(chain.UID),
+			SourceGeneration: stored.Status.ActiveSourceGeneration,
+			SourceDigest:     stored.Status.ActiveWorkflowDigest,
+		},
+		Status: controlv1alpha1.AgentRunStatus{Phase: controlv1alpha1.AgentRunPhaseSucceeded},
+	}
+	if err := c.Create(context.Background(), foreign); err != nil {
+		t.Fatalf("create foreign run: %v", err)
+	}
+	if _, err := r.Reconcile(context.Background(), req); err != nil {
+		t.Fatalf("reconcile with foreign run: %v", err)
+	}
+	if err := c.Get(context.Background(), client.ObjectKeyFromObject(chain), stored); err != nil {
+		t.Fatalf("get chain after foreign run: %v", err)
+	}
+	if stored.Status.Phase != controlv1alpha1.AgentChainPhaseRunning || stored.Status.ActiveStep != "exercise" || stored.Status.ActiveRunRef == nil || stored.Status.ActiveRunRef.Name == foreign.Name {
+		t.Fatalf("foreign run displaced exact active ref: %#v", stored.Status)
+	}
+	stored.Annotations[controlv1alpha1.AgentChainCancelInstanceAnnotation] = stored.Status.ActiveInstanceID
+	if err := c.Update(context.Background(), stored); err != nil {
+		t.Fatalf("request cancellation: %v", err)
+	}
+	if _, err := r.Reconcile(context.Background(), req); err != nil {
+		t.Fatalf("request cancellation reconcile: %v", err)
+	}
+	if _, err := r.Reconcile(context.Background(), req); err != nil {
+		t.Fatalf("wait cancellation reconcile: %v", err)
+	}
+	if err := c.Get(context.Background(), client.ObjectKeyFromObject(chain), stored); err != nil {
+		t.Fatalf("get cancelling chain: %v", err)
+	}
+	if stored.Status.Phase != controlv1alpha1.AgentChainPhaseCancelling || stored.Status.ActiveRunRef == nil || stored.Status.ActiveRunRef.Name == foreign.Name {
+		t.Fatalf("foreign terminal run released cancellation ownership: %#v", stored.Status)
+	}
+	runs := &controlv1alpha1.AgentRunList{}
+	if err := c.List(context.Background(), runs); err != nil || len(runs.Items) != 2 {
+		t.Fatalf("foreign run triggered a successor: runs=%d err=%v", len(runs.Items), err)
 	}
 }
 

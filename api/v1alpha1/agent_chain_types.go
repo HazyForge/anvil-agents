@@ -112,10 +112,6 @@ type AgentChainBackoffSpec struct {
 // AgentChainCompletionSpec defines what counts as a successful terminal chain
 // instance. It is evaluated against the final step's durable AgentRun status.
 type AgentChainCompletionSpec struct {
-	// OnPhases defaults to [Succeeded].
-	// +kubebuilder:validation:MaxItems=8
-	// +optional
-	OnPhases []AgentRunPhase `json:"onPhases,omitempty"`
 	// OnDecisionActions optionally requires the final run's decision.action to
 	// match one of these values (case-insensitive). Empty disables the filter.
 	// +kubebuilder:validation:MaxItems=16
@@ -177,6 +173,9 @@ type AgentChainStepRunStatus struct {
 	Step string `json:"step,omitempty"`
 	// RunRef points at the created AgentRun.
 	RunRef *NamespacedObjectReference `json:"runRef,omitempty"`
+	// RunUID binds RunRef to the exact immutable AgentRun object rather than a
+	// later object created with the same name.
+	RunUID string `json:"runUid,omitempty"`
 	// Phase is the last observed AgentRun phase.
 	Phase AgentRunPhase `json:"phase,omitempty"`
 	// SourceGeneration is the AgentChain generation frozen when the instance
@@ -195,6 +194,8 @@ type AgentChainStatus struct {
 	ActiveInstanceID   string                     `json:"activeInstanceId,omitempty"`
 	ActiveStep         string                     `json:"activeStep,omitempty"`
 	ActiveRunRef       *NamespacedObjectReference `json:"activeRunRef,omitempty"`
+	// ActiveRunUID binds ActiveRunRef to the exact active AgentRun object.
+	ActiveRunUID string `json:"activeRunUid,omitempty"`
 	// ActiveSourceGeneration is frozen when the active instance starts. It is
 	// intentionally not advanced by later operational spec edits.
 	ActiveSourceGeneration int64 `json:"activeSourceGeneration,omitempty"`

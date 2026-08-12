@@ -33,7 +33,6 @@ spec:
   concurrencyPolicy: Forbid
   maxInstancesPerDay: 12
   completion:
-    onPhases: [Succeeded]
     onDecisionActions: [evidence-verified]
   # optional automatic instance starts:
   # startIntervalSeconds: 3600
@@ -79,12 +78,13 @@ when the chain is deleted (controller owner refs are detached).
 1. First step always starts the instance.
 2. Later steps require `when.previousStep` to be the **immediate** prior step
    (linear only; no DAG).
-3. Default `onPhases` is `[Succeeded]`. Failed prior steps stop the instance.
+3. Intermediate `when.onPhases` defaults to `[Succeeded]`. Failed prior steps
+   stop the instance unless an explicit intermediate gate says otherwise.
 4. `NeedsHuman` stops advancement (`WaitingHuman`); it does not auto-skip.
 5. Optional `onDecisionActions` allowlists prior `status.decision.action`.
-6. Optional `spec.completion` applies the same phase/action gate to the final
-   step, so a phase-only `Succeeded` with `no-exact-artifact` cannot be
-   reported as a successful instance.
+6. Final completion always requires `Succeeded`. Optional `spec.completion`
+   may additionally require a reviewed decision action, so a phase-only
+   `Succeeded` with `no-exact-artifact` cannot be reported as successful.
 7. Handoff is **status text only** (decision, reports, PR URL, optional output
    excerpt). Secrets and service accounts are never copied across steps.
 8. Each step’s profile/harness owns its own identity and credentials.

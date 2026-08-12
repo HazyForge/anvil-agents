@@ -97,12 +97,6 @@ spec:
                       type: string
                     maxItems: 16
                     type: array
-                  onPhases:
-                    description: OnPhases defaults to [Succeeded].
-                    items:
-                      type: string
-                    maxItems: 8
-                    type: array
                 type: object
               concurrencyPolicy:
                 description: |-
@@ -3125,6 +3119,10 @@ spec:
                 required:
                 - name
                 type: object
+              activeRunUid:
+                description: ActiveRunUID binds ActiveRunRef to the exact active AgentRun
+                  object.
+                type: string
               activeSourceGeneration:
                 description: |-
                   ActiveSourceGeneration is frozen when the active instance starts. It is
@@ -3247,6 +3245,11 @@ spec:
                       required:
                       - name
                       type: object
+                    runUid:
+                      description: |-
+                        RunUID binds RunRef to the exact immutable AgentRun object rather than a
+                        later object created with the same name.
+                      type: string
                     sourceGeneration:
                       description: |-
                         SourceGeneration is the AgentChain generation frozen when the instance
