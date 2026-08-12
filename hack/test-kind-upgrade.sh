@@ -78,9 +78,10 @@ else
 		--set image.pullPolicy=Never >/dev/null
 	for crd in "${root_dir}"/config/crd/bases/*.yaml; do
 		case "${crd}" in
-		# Keep the pre-composition / pre-AdverseSignal / pre-AuthSession baseline
-		# fixed so the upgrade path still exercises CRD growth.
-			*_agentharnessprofiles.yaml|*_agentskillsets.yaml|*_agenttoolsets.yaml|*_agentcouncils.yaml|*_adversesignals.yaml|*_agentauthsessions.yaml) continue ;;
+		# Keep the pre-composition / pre-AdverseSignal / pre-AuthSession /
+		# pre-AgentChain baseline fixed so the upgrade path still exercises CRD
+		# growth.
+			*_agentharnessprofiles.yaml|*_agentskillsets.yaml|*_agenttoolsets.yaml|*_agentcouncils.yaml|*_adversesignals.yaml|*_agentauthsessions.yaml|*_agentchains.yaml) continue ;;
 		esac
 		resource="$(kubectl --context "${kube_context}" apply --filename "${crd}" --output=name)"
 		kubectl --context "${kube_context}" label "${resource}" \
