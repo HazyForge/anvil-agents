@@ -13,6 +13,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	controlv1alpha1 "github.com/hazyforge/anvil-agents/api/v1alpha1"
 )
@@ -24,6 +25,7 @@ const (
 	agentRunChainInstLabel        = "control.anvil.hazyforge.io/agent-chain-instance"
 	agentRunChainStepLabel        = "control.anvil.hazyforge.io/agent-chain-step"
 	agentRunChainDigestAnnotation = "control.anvil.hazyforge.io/agent-chain-workflow-digest"
+	agentChainDrainFinalizer      = "control.anvil.hazyforge.io/agent-chain-active-drain"
 	agentChainHandoffMax          = 8192
 )
 
@@ -54,7 +56,28 @@ func (r *AgentChainReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 	if !obj.GetDeletionTimestamp().IsZero() {
-		return ctrl.Result{}, nil
+		if !controllerutil.ContainsFinalizer(obj, agentChainDrainFinalizer) {
+			return ctrl.Result{}, nil
+		}
+		activeRuns, err := r.agentChainOwnedNonterminalRuns(ctx, obj)
+		if err != nil {
+			return ctrl.Result{}, err
+		}
+		if len(activeRuns) > 0 {
+			return ctrl.Result{RequeueAfter: agentChainPollInterval}, nil
+		}
+		return r.removeAgentChainDrainFinalizer(ctx, client.ObjectKeyFromObject(obj))
+	}
+	if !controllerutil.ContainsFinalizer(obj, agentChainDrainFinalizer) {
+		original := obj.DeepCopy()
+		controllerutil.AddFinalizer(obj, agentChainDrainFinalizer)
+		if err := r.Patch(ctx, obj, client.MergeFrom(original)); err != nil {
+			if apierrors.IsConflict(err) {
+				return ctrl.Result{Requeue: true}, nil
+			}
+			return ctrl.Result{}, fmt.Errorf("install AgentChain active-drain finalizer: %w", err)
+		}
+		return ctrl.Result{Requeue: true}, nil
 	}
 
 	original := obj.DeepCopy()
@@ -988,6 +1011,25 @@ func (r *AgentChainReconciler) patchAgentChainStatus(ctx context.Context, origin
 	return ctrl.Result{}, nil
 }
 
+func (r *AgentChainReconciler) removeAgentChainDrainFinalizer(ctx context.Context, key client.ObjectKey) (ctrl.Result, error) {
+	chain := &controlv1alpha1.AgentChain{}
+	if err := r.Get(ctx, key, chain); err != nil {
+		return ctrl.Result{}, client.IgnoreNotFound(err)
+	}
+	if !controllerutil.ContainsFinalizer(chain, agentChainDrainFinalizer) {
+		return ctrl.Result{}, nil
+	}
+	original := chain.DeepCopy()
+	controllerutil.RemoveFinalizer(chain, agentChainDrainFinalizer)
+	if err := r.Patch(ctx, chain, client.MergeFrom(original)); err != nil {
+		if apierrors.IsConflict(err) {
+			return ctrl.Result{Requeue: true}, nil
+		}
+		return ctrl.Result{}, fmt.Errorf("remove AgentChain active-drain finalizer: %w", err)
+	}
+	return ctrl.Result{}, nil
+}
+
 func validateAgentChainSpec(chain *controlv1alpha1.AgentChain) error {
 	if chain == nil {
 		return fmt.Errorf("AgentChain is nil")
@@ -1046,7 +1088,7 @@ func validateAgentChainSpec(chain *controlv1alpha1.AgentChain) error {
 			}
 		}
 		for j, phase := range step.When.OnPhases {
-			if phase != controlv1alpha1.AgentRunPhaseSucceeded && phase != controlv1alpha1.AgentRunPhaseFailed && phase != controlv1alpha1.AgentRunPhaseNeedsHuman {
+			if phase != controlv1alpha1.AgentRunPhaseSucceeded && phase != controlv1alpha1.AgentRunPhaseFailed {
 				return fmt.Errorf("step %q when.onPhases[%d]=%q is not a terminal AgentRun phase", name, j, phase)
 			}
 		}

@@ -71,7 +71,10 @@ Each instance gets a stable `status.activeInstanceId`. Child runs are labeled:
 - `control.anvil.hazyforge.io/agent-chain-step`
 
 Purpose is always `chained`. Historical AgentRuns are **not** garbage-collected
-when the chain is deleted (controller owner refs are detached).
+when the chain is deleted (controller owner refs are detached). Deleting a
+chain with a nonterminal child waits on the controller's active-drain finalizer;
+the Job is not killed and deletion completes only after every exact-source child
+is terminal.
 
 ## Advancement rules (v1)
 

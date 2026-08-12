@@ -7,12 +7,14 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	controlv1alpha1 "github.com/hazyforge/anvil-agents/api/v1alpha1"
@@ -35,6 +37,7 @@ func baseChain(name string) *controlv1alpha1.AgentChain {
 			UID:               types.UID("chain-uid-1"),
 			CreationTimestamp: metav1.NewTime(time.Now().UTC().Add(-time.Hour)),
 			Generation:        1,
+			Finalizers:        []string{agentChainDrainFinalizer},
 		},
 		Spec: controlv1alpha1.AgentChainSpec{
 			ApplicationRef: &controlv1alpha1.ApplicationReferenceSpec{Name: "demo-app"},
@@ -241,6 +244,48 @@ func TestValidateAgentChainSpecLinearOnly(t *testing.T) {
 	chain.Spec.Steps[1].When.PreviousStep = "missing"
 	if err := validateAgentChainSpec(chain); err == nil {
 		t.Fatal("expected non-linear previousStep to fail")
+	}
+}
+
+func TestAgentChainDeletionWaitsForExactActiveChildToDrain(t *testing.T) {
+	scheme := newAgentChainScheme(t)
+	chain := baseChain("delete-drains-active")
+	chain.Annotations = map[string]string{controlv1alpha1.AgentChainStartNowAnnotation: "token-delete"}
+	c := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(&controlv1alpha1.AgentChain{}, &controlv1alpha1.AgentRun{}).WithObjects(chain).Build()
+	r := &AgentChainReconciler{Client: c, Scheme: scheme}
+	req := reconcile.Request{NamespacedName: types.NamespacedName{Namespace: chain.Namespace, Name: chain.Name}}
+	if _, err := r.Reconcile(context.Background(), req); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	stored := &controlv1alpha1.AgentChain{}
+	if err := c.Get(context.Background(), client.ObjectKeyFromObject(chain), stored); err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	run := &controlv1alpha1.AgentRun{}
+	if err := c.Get(context.Background(), client.ObjectKey{Namespace: stored.Status.ActiveRunRef.Namespace, Name: stored.Status.ActiveRunRef.Name}, run); err != nil {
+		t.Fatalf("get active child: %v", err)
+	}
+	if err := c.Delete(context.Background(), stored); err != nil {
+		t.Fatalf("delete chain: %v", err)
+	}
+	if _, err := r.Reconcile(context.Background(), req); err != nil {
+		t.Fatalf("deletion drain reconcile: %v", err)
+	}
+	if err := c.Get(context.Background(), client.ObjectKeyFromObject(chain), stored); err != nil {
+		t.Fatalf("chain deleted before active child drained: %v", err)
+	}
+	if !controllerutil.ContainsFinalizer(stored, agentChainDrainFinalizer) {
+		t.Fatal("active-drain finalizer disappeared while child was nonterminal")
+	}
+	run.Status.Phase = controlv1alpha1.AgentRunPhaseSucceeded
+	if err := c.Status().Update(context.Background(), run); err != nil {
+		t.Fatalf("finish child: %v", err)
+	}
+	if _, err := r.Reconcile(context.Background(), req); err != nil {
+		t.Fatalf("terminal drain reconcile: %v", err)
+	}
+	if err := c.Get(context.Background(), client.ObjectKeyFromObject(chain), stored); !apierrors.IsNotFound(err) {
+		t.Fatalf("chain should delete after active child drains, got %v", err)
 	}
 }
 
