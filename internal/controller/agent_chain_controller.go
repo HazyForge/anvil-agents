@@ -7,7 +7,6 @@ import (
 	"strings"
 	"time"
 
-	apiequality "k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -144,6 +143,68 @@ func (r *AgentChainReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		return ctrl.Result{}, err
 	}
 	status.InstancesToday = instancesToday
+
+	// Recover Forbid ownership after a create-success/status-patch-loss window.
+	// A new start token or later interval must never overlap a provenance-valid
+	// nonterminal child merely because status was not persisted.
+	if status.ActiveInstanceID == "" {
+		activeRuns := agentChainOwnedNonterminalRuns(obj, runs)
+		switch len(activeRuns) {
+		case 0:
+		case 1:
+			active := activeRuns[0]
+			if recoverErr := validateAgentChainRecoverableRun(obj, active); recoverErr != nil {
+				status.Phase = controlv1alpha1.AgentChainPhaseBlocked
+				status.LastError = fmt.Sprintf("provenance-valid nonterminal AgentRun %s/%s cannot be safely recovered: %v", active.Namespace, active.Name, recoverErr)
+				apimeta.SetStatusCondition(&status.Conditions, metav1.Condition{Type: agentChainReady, Status: metav1.ConditionFalse, ObservedGeneration: obj.Generation, LastTransitionTime: now, Reason: "UnrecoveredActiveRun", Message: status.LastError})
+				obj.Status = status
+				return r.patchAgentChainStatus(ctx, original, obj, agentChainPollInterval)
+			}
+			instanceID := active.Labels[agentRunChainInstLabel]
+			step := active.Labels[agentRunChainStepLabel]
+			status.Phase = controlv1alpha1.AgentChainPhaseRunning
+			status.ActiveInstanceID = instanceID
+			status.ActiveStep = step
+			status.ActiveRunRef = &controlv1alpha1.NamespacedObjectReference{Name: active.Name, Namespace: active.Namespace}
+			status.ActiveRunUID = string(active.UID)
+			status.ActiveSourceGeneration = active.Spec.SourceGeneration
+			status.ActiveWorkflowDigest = active.Spec.SourceDigest
+			status.LastInstanceID = instanceID
+			status.StepRuns = []controlv1alpha1.AgentChainStepRunStatus{{
+				InstanceID:       instanceID,
+				Step:             step,
+				RunRef:           &controlv1alpha1.NamespacedObjectReference{Name: active.Name, Namespace: active.Namespace},
+				RunUID:           string(active.UID),
+				Phase:            active.Status.Phase,
+				SourceGeneration: active.Spec.SourceGeneration,
+				WorkflowDigest:   active.Spec.SourceDigest,
+			}}
+			status.LastError = ""
+			apimeta.SetStatusCondition(&status.Conditions, metav1.Condition{
+				Type:               agentChainReady,
+				Status:             metav1.ConditionFalse,
+				ObservedGeneration: obj.Generation,
+				LastTransitionTime: now,
+				Reason:             "ActiveRunRecovered",
+				Message:            fmt.Sprintf("Recovered Forbid ownership of nonterminal AgentRun %s/%s for instance %s step %s after missing status.", active.Namespace, active.Name, instanceID, step),
+			})
+			obj.Status = status
+			return r.patchAgentChainStatus(ctx, original, obj, agentChainPollInterval)
+		default:
+			status.Phase = controlv1alpha1.AgentChainPhaseBlocked
+			status.LastError = fmt.Sprintf("found %d provenance-valid nonterminal AgentRuns without one frozen active status reference", len(activeRuns))
+			apimeta.SetStatusCondition(&status.Conditions, metav1.Condition{
+				Type:               agentChainReady,
+				Status:             metav1.ConditionFalse,
+				ObservedGeneration: obj.Generation,
+				LastTransitionTime: now,
+				Reason:             "UnrecoveredActiveRun",
+				Message:            status.LastError,
+			})
+			obj.Status = status
+			return r.patchAgentChainStatus(ctx, original, obj, agentChainPollInterval)
+		}
+	}
 
 	// Cancel advancement if requested, but retain Forbid ownership until the
 	// current child is terminal. The controller never deletes an active Job.
@@ -632,6 +693,11 @@ func (r *AgentChainReconciler) agentChainRunByRef(
 	if expectedUID != "" && string(run.UID) != expectedUID {
 		return nil, fmt.Errorf("%w: AgentRun %s/%s UID %q differs from frozen UID %q", errAgentChainRunProvenance, run.Namespace, run.Name, run.UID, expectedUID)
 	}
+	applicationName, err := resolveAgentChainApplicationName(chain)
+	if err != nil {
+		return nil, err
+	}
+	expectedLabels := agentChainChildLabels(chain, applicationName, status.ActiveInstanceID, step)
 	if run.Spec.SourceRef.APIVersion != controlv1alpha1.GroupVersion.String() ||
 		run.Spec.SourceRef.Kind != "AgentChain" ||
 		run.Spec.SourceRef.Namespace != chain.Namespace ||
@@ -644,6 +710,11 @@ func (r *AgentChainReconciler) agentChainRunByRef(
 		run.Labels[agentRunChainInstLabel] != sanitizeLabelValue(status.ActiveInstanceID) ||
 		run.Labels[agentRunChainStepLabel] != sanitizeLabelValue(step) {
 		return nil, fmt.Errorf("%w: AgentRun %s/%s identity does not match frozen instance %s step %s", errAgentChainRunProvenance, run.Namespace, run.Name, status.ActiveInstanceID, step)
+	}
+	for key, value := range expectedLabels {
+		if run.Labels[key] != value {
+			return nil, fmt.Errorf("%w: AgentRun %s/%s controller label %q does not match frozen instance", errAgentChainRunProvenance, run.Namespace, run.Name, key)
+		}
 	}
 	return run, nil
 }
@@ -697,23 +768,7 @@ func (r *AgentChainReconciler) createChainedAgentRun(
 
 	nameHashInput := strings.Join([]string{string(chain.UID), instanceID, step.Name}, "|")
 	name := agentRunChildName("agentrun", chain.Name, instanceID, step.Name, shortHash(nameHashInput))
-	labels := map[string]string{
-		agentRunChainLabel:     sanitizeLabelValue(chain.Name),
-		agentRunChainInstLabel: sanitizeLabelValue(instanceID),
-		agentRunChainStepLabel: sanitizeLabelValue(step.Name),
-		agentManagedByLabel:    "anvil-agents",
-	}
-	if applicationName != "" {
-		labels[agentApplicationLabel] = sanitizeLabelValue(applicationName)
-	}
-	if chain.Labels != nil {
-		if v := chain.Labels[agentDynamicLabel]; v != "" {
-			labels[agentDynamicLabel] = v
-		}
-		if v := chain.Labels[agentManagerRepositoryLabel]; v != "" {
-			labels[agentManagerRepositoryLabel] = v
-		}
-	}
+	labels := agentChainChildLabels(chain, applicationName, instanceID, step.Name)
 
 	run := &controlv1alpha1.AgentRun{
 		ObjectMeta: metav1.ObjectMeta{
@@ -743,7 +798,8 @@ func (r *AgentChainReconciler) createChainedAgentRun(
 		}
 		if run.Annotations[agentRunChainDigestAnnotation] != workflowDigest ||
 			run.Spec.SourceGeneration != sourceGeneration || run.Spec.SourceDigest != workflowDigest ||
-			!apiequality.Semantic.DeepEqual(run.Spec, expected.Spec) {
+			!agentChainRunSpecsEqual(run.Spec, expected.Spec) ||
+			!agentChainExpectedMetadataMatches(run, expected) {
 			return nil, fmt.Errorf("AgentRun %s/%s already exists with a different immutable chain step spec or provenance", run.Namespace, run.Name)
 		}
 	}
@@ -787,6 +843,92 @@ func (r *AgentChainReconciler) agentChainRuns(ctx context.Context, chain *contro
 		}
 	}
 	return runs, len(instancesToday), nil
+}
+
+func agentChainOwnedNonterminalRuns(chain *controlv1alpha1.AgentChain, runs []*controlv1alpha1.AgentRun) []*controlv1alpha1.AgentRun {
+	if chain == nil {
+		return nil
+	}
+	out := make([]*controlv1alpha1.AgentRun, 0, 1)
+	for _, run := range runs {
+		if run == nil || agentRunPhaseTerminal(run.Status.Phase) ||
+			run.Spec.Purpose != controlv1alpha1.AgentRunPurposeChained ||
+			run.Spec.SourceRef.APIVersion != controlv1alpha1.GroupVersion.String() ||
+			run.Spec.SourceRef.Kind != "AgentChain" ||
+			run.Spec.SourceRef.Namespace != chain.Namespace ||
+			run.Spec.SourceRef.Name != chain.Name ||
+			run.Spec.SourceUID != string(chain.UID) {
+			continue
+		}
+		out = append(out, run)
+	}
+	return out
+}
+
+func validateAgentChainRecoverableRun(chain *controlv1alpha1.AgentChain, run *controlv1alpha1.AgentRun) error {
+	if chain == nil || run == nil {
+		return fmt.Errorf("chain or run is nil")
+	}
+	instanceID := strings.TrimSpace(run.Labels[agentRunChainInstLabel])
+	step := strings.TrimSpace(run.Labels[agentRunChainStepLabel])
+	applicationName := ""
+	if run.Spec.Scope.ApplicationRef != nil {
+		applicationName = strings.TrimSpace(run.Spec.Scope.ApplicationRef.Name)
+	}
+	if run.Spec.SourceGeneration <= 0 || strings.TrimSpace(run.Spec.SourceDigest) == "" ||
+		run.Annotations[agentRunChainDigestAnnotation] != run.Spec.SourceDigest ||
+		run.Labels[agentRunChainLabel] != sanitizeLabelValue(chain.Name) ||
+		instanceID == "" || step == "" ||
+		run.Labels[agentManagedByLabel] != "anvil-agents" || applicationName == "" ||
+		run.Labels[agentApplicationLabel] != sanitizeLabelValue(applicationName) {
+		return fmt.Errorf("immutable source provenance or controller-owned identity metadata is incomplete or inconsistent")
+	}
+	return nil
+}
+
+func agentChainExpectedMetadataMatches(actual, expected *controlv1alpha1.AgentRun) bool {
+	if actual == nil || expected == nil {
+		return false
+	}
+	for key, value := range expected.Labels {
+		if actual.Labels[key] != value {
+			return false
+		}
+	}
+	for key, value := range expected.Annotations {
+		if actual.Annotations[key] != value {
+			return false
+		}
+	}
+	return true
+}
+
+// Compare the CRD wire representation instead of Go nil/empty implementation
+// details. This matches what the API server persists for omitempty fields while
+// retaining exact equality for every authority-bearing value.
+func agentChainRunSpecsEqual(actual, expected controlv1alpha1.AgentRunSpec) bool {
+	return digestJSON(actual) == digestJSON(expected)
+}
+
+func agentChainChildLabels(chain *controlv1alpha1.AgentChain, applicationName, instanceID, step string) map[string]string {
+	labels := map[string]string{
+		agentRunChainLabel:     sanitizeLabelValue(chain.Name),
+		agentRunChainInstLabel: sanitizeLabelValue(instanceID),
+		agentRunChainStepLabel: sanitizeLabelValue(step),
+		agentManagedByLabel:    "anvil-agents",
+	}
+	if applicationName != "" {
+		labels[agentApplicationLabel] = sanitizeLabelValue(applicationName)
+	}
+	if chain.Labels != nil {
+		if v := chain.Labels[agentDynamicLabel]; v != "" {
+			labels[agentDynamicLabel] = v
+		}
+		if v := chain.Labels[agentManagerRepositoryLabel]; v != "" {
+			labels[agentManagerRepositoryLabel] = v
+		}
+	}
+	return labels
 }
 
 func (r *AgentChainReconciler) SetupWithManager(mgr ctrl.Manager) error {
@@ -891,11 +1033,21 @@ func agentChainWorkflowDigest(chain *controlv1alpha1.AgentChain) string {
 	snapshot := struct {
 		ApplicationRef *controlv1alpha1.ApplicationReferenceSpec `json:"applicationRef,omitempty"`
 		Completion     *controlv1alpha1.AgentChainCompletionSpec `json:"completion,omitempty"`
+		PolicyLabels   map[string]string                         `json:"policyLabels,omitempty"`
 		Steps          []controlv1alpha1.AgentChainStepSpec      `json:"steps"`
 	}{
 		ApplicationRef: chain.Spec.ApplicationRef,
 		Completion:     chain.Spec.Completion,
-		Steps:          chain.Spec.Steps,
+		PolicyLabels: map[string]string{
+			agentDynamicLabel:           chain.Labels[agentDynamicLabel],
+			agentManagerRepositoryLabel: chain.Labels[agentManagerRepositoryLabel],
+		},
+		Steps: chain.Spec.Steps,
+	}
+	for key, value := range snapshot.PolicyLabels {
+		if value == "" {
+			delete(snapshot.PolicyLabels, key)
+		}
 	}
 	return digestJSON(snapshot)
 }
@@ -1112,9 +1264,9 @@ func agentChainNextStartTime(chain *controlv1alpha1.AgentChain, status controlv1
 		base = base.Add(time.Duration(chain.Spec.StartInitialDelaySeconds) * time.Second)
 	}
 	if base.Before(now) {
-		// Already due.
-		t := now
-		return &t
+		// Already due. Keep the original cadence boundary so a create-success /
+		// status-patch-loss retry derives the same automatic instance ID.
+		return &base
 	}
 	return &base
 }
