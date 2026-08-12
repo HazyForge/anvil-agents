@@ -929,7 +929,21 @@ func agentChainExpectedMetadataMatches(actual, expected *controlv1alpha1.AgentRu
 // details. This matches what the API server persists for omitempty fields while
 // retaining exact equality for every authority-bearing value.
 func agentChainRunSpecsEqual(actual, expected controlv1alpha1.AgentRunSpec) bool {
-	return digestJSON(actual) == digestJSON(expected)
+	return digestJSON(agentChainCanonicalRunSpec(actual)) == digestJSON(agentChainCanonicalRunSpec(expected))
+}
+
+func agentChainCanonicalRunSpec(spec controlv1alpha1.AgentRunSpec) controlv1alpha1.AgentRunSpec {
+	canonical := spec.DeepCopy()
+	for i := range canonical.Harness.Execution.ExtraEnv {
+		source := canonical.Harness.Execution.ExtraEnv[i].ValueFrom
+		// The CRD inherits this Kubernetes core default. Apply it explicitly to
+		// both the desired and API-read forms before retry comparison.
+		if source != nil && source.FileKeyRef != nil && source.FileKeyRef.Optional == nil {
+			value := false
+			source.FileKeyRef.Optional = &value
+		}
+	}
+	return *canonical
 }
 
 func agentChainChildLabels(chain *controlv1alpha1.AgentChain, applicationName, instanceID, step string) map[string]string {
@@ -1295,9 +1309,13 @@ func agentChainNextStartTime(chain *controlv1alpha1.AgentChain, status controlv1
 		base = base.Add(time.Duration(chain.Spec.StartInitialDelaySeconds) * time.Second)
 	}
 	if base.Before(now) {
-		// Already due. Keep the original cadence boundary so a create-success /
-		// status-patch-loss retry derives the same automatic instance ID.
-		return &base
+		// Start at the latest stable cadence boundary, not the historical first
+		// slot. A chain unsuspended after days must not burst through stale work.
+		interval := time.Duration(chain.Spec.StartIntervalSeconds) * time.Second
+		elapsed := now.Sub(base)
+		period := time.Duration(int64(elapsed / interval))
+		latest := base.Add(period * interval)
+		return &latest
 	}
 	return &base
 }

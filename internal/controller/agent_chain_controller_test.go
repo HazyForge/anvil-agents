@@ -680,6 +680,45 @@ func TestAgentChainLostStatusIntervalRetryKeepsOneChild(t *testing.T) {
 	}
 }
 
+func TestAgentChainOldUnsuspendedCadenceStartsLatestSlotOnly(t *testing.T) {
+	scheme := newAgentChainScheme(t)
+	chain := baseChain("old-unsuspended-cadence")
+	chain.Spec.Steps = chain.Spec.Steps[:1]
+	chain.Spec.StartIntervalSeconds = 60
+	chain.CreationTimestamp = metav1.NewTime(time.Now().UTC().Add(-7 * 24 * time.Hour).Truncate(time.Second))
+	c := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(&controlv1alpha1.AgentChain{}, &controlv1alpha1.AgentRun{}).WithObjects(chain).Build()
+	r := &AgentChainReconciler{Client: c, Scheme: scheme}
+	req := reconcile.Request{NamespacedName: types.NamespacedName{Namespace: chain.Namespace, Name: chain.Name}}
+	if _, err := r.Reconcile(context.Background(), req); err != nil {
+		t.Fatalf("first unsuspended reconcile: %v", err)
+	}
+	stored := &controlv1alpha1.AgentChain{}
+	if err := c.Get(context.Background(), client.ObjectKeyFromObject(chain), stored); err != nil {
+		t.Fatalf("get running chain: %v", err)
+	}
+	if stored.Status.NextStartAt == nil || !stored.Status.NextStartAt.After(time.Now().UTC()) {
+		t.Fatalf("old chain did not advance cadence to future deadline: %#v", stored.Status)
+	}
+	run := &controlv1alpha1.AgentRun{}
+	if err := c.Get(context.Background(), client.ObjectKey{Namespace: stored.Status.ActiveRunRef.Namespace, Name: stored.Status.ActiveRunRef.Name}, run); err != nil {
+		t.Fatalf("get current-slot run: %v", err)
+	}
+	run.Status.Phase = controlv1alpha1.AgentRunPhaseSucceeded
+	if err := c.Status().Update(context.Background(), run); err != nil {
+		t.Fatalf("finish current-slot run: %v", err)
+	}
+	if _, err := r.Reconcile(context.Background(), req); err != nil {
+		t.Fatalf("finish chain: %v", err)
+	}
+	if _, err := r.Reconcile(context.Background(), req); err != nil {
+		t.Fatalf("post-finish reconcile: %v", err)
+	}
+	runs := &controlv1alpha1.AgentRunList{}
+	if err := c.List(context.Background(), runs); err != nil || len(runs.Items) != 1 {
+		t.Fatalf("old chain burst stale cadence slots: runs=%d err=%v", len(runs.Items), err)
+	}
+}
+
 func TestAgentChainForeignLabelledRunWithWrongSourceUIDDoesNotBlockStart(t *testing.T) {
 	scheme := newAgentChainScheme(t)
 	chain := baseChain("foreign-wrong-source")
@@ -949,6 +988,13 @@ func TestAgentChainRunSpecComparisonUsesCRDWireCanonicalization(t *testing.T) {
 	right.Harness.Execution.Resources.Limits = corev1.ResourceList{}
 	if !agentChainRunSpecsEqual(left, right) {
 		t.Fatal("nil and empty omitempty resource maps should compare as the same persisted CRD spec")
+	}
+	left.Harness.Execution.ExtraEnv = []corev1.EnvVar{{Name: "FROM_FILE", ValueFrom: &corev1.EnvVarSource{FileKeyRef: &corev1.FileKeySelector{Key: "value"}}}}
+	optional := false
+	right = *left.DeepCopy()
+	right.Harness.Execution.ExtraEnv[0].ValueFrom.FileKeyRef.Optional = &optional
+	if !agentChainRunSpecsEqual(left, right) {
+		t.Fatal("nil and CRD-defaulted fileKeyRef.optional=false should compare equally")
 	}
 	right.Prompt = "authority-bearing difference"
 	if agentChainRunSpecsEqual(left, right) {
