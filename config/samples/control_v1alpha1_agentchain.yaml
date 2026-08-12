@@ -16,6 +16,9 @@ spec:
   backoff:
     failedSeconds: 3600
     needsHumanSeconds: 7200
+  completion:
+    onPhases: [Succeeded]
+    onDecisionActions: [proposal-ready]
   steps:
     - name: exercise
       runTemplate:

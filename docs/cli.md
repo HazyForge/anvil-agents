@@ -383,10 +383,11 @@ anvil-agentctl chain resume lab-evidence-loop -n anvilhub --reason "resume"
 ```
 
 `chain start` writes a new `control.anvil.hazyforge.io/chain-start-now` token so
-the controller begins one instance at step 0. `chain cancel` stops further step
-advancement for the active instance without deleting Jobs. Step advancement is
-controller authority on terminal phases; runners do not create peer runs, and
-`purpose=chained` is rejected on public `run create`.
+the controller begins one instance at step 0. `chain cancel` resolves `*` to the
+exact current instance, stops further advancement, and retains Forbid ownership
+until the active run becomes terminal without deleting its Job. Step advancement
+is controller authority on terminal phases; runners do not create peer runs,
+and `purpose=chained` is rejected on public `run create`.
 
 ## In-Pod Status Reporting
 

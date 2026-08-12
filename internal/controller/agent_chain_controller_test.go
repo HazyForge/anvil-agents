@@ -64,6 +64,16 @@ func baseChain(name string) *controlv1alpha1.AgentChain {
 	}
 }
 
+func freezeActiveChainForTest(chain *controlv1alpha1.AgentChain, status *controlv1alpha1.AgentChainStatus, run *controlv1alpha1.AgentRun) {
+	workflowDigest := agentChainWorkflowDigest(chain)
+	status.ActiveSourceGeneration = chain.Generation
+	status.ActiveWorkflowDigest = workflowDigest
+	run.Spec.SourceRef = controlv1alpha1.AgentRunSourceRef{APIVersion: controlv1alpha1.GroupVersion.String(), Kind: "AgentChain", Namespace: chain.Namespace, Name: chain.Name}
+	run.Spec.SourceUID = string(chain.UID)
+	run.Spec.SourceGeneration = chain.Generation
+	run.Spec.SourceDigest = workflowDigest
+}
+
 func TestAgentChainStartAndAdvance(t *testing.T) {
 	scheme := newAgentChainScheme(t)
 	chain := baseChain("lab-chain")
@@ -181,6 +191,7 @@ func TestAgentChainStopsOnFailedWhen(t *testing.T) {
 		},
 		Status: controlv1alpha1.AgentRunStatus{Phase: controlv1alpha1.AgentRunPhaseFailed},
 	}
+	freezeActiveChainForTest(chain, &chain.Status, run)
 	c := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(&controlv1alpha1.AgentChain{}).WithObjects(chain, run).Build()
 	r := &AgentChainReconciler{Client: c, Scheme: scheme}
 	if _, err := r.Reconcile(context.Background(), reconcile.Request{NamespacedName: types.NamespacedName{Namespace: chain.Namespace, Name: chain.Name}}); err != nil {
@@ -210,6 +221,53 @@ func TestValidateAgentChainSpecLinearOnly(t *testing.T) {
 	chain.Spec.Steps[1].When.PreviousStep = "missing"
 	if err := validateAgentChainSpec(chain); err == nil {
 		t.Fatal("expected non-linear previousStep to fail")
+	}
+}
+
+func TestValidateAgentChainSpecRejectsBlankDecisionActions(t *testing.T) {
+	chain := baseChain("blank-action")
+	chain.Spec.Steps[1].When.OnDecisionActions = []string{" "}
+	if err := validateAgentChainSpec(chain); err == nil {
+		t.Fatal("expected blank intermediate action to fail")
+	}
+	chain = baseChain("blank-completion")
+	chain.Spec.Completion = &controlv1alpha1.AgentChainCompletionSpec{OnDecisionActions: []string{""}}
+	if err := validateAgentChainSpec(chain); err == nil {
+		t.Fatal("expected blank completion action to fail")
+	}
+}
+
+func TestAgentChainWorkflowDigestBindsExecutionNotCadence(t *testing.T) {
+	chain := baseChain("digest")
+	base := agentChainWorkflowDigest(chain)
+	operational := chain.DeepCopy()
+	operational.Spec.Suspend = true
+	operational.Spec.StartIntervalSeconds = 60
+	operational.Spec.StartInitialDelaySeconds = 5
+	operational.Spec.MaxInstancesPerDay = 2
+	operational.Spec.Backoff = &controlv1alpha1.AgentChainBackoffSpec{FailedSeconds: 10}
+	if got := agentChainWorkflowDigest(operational); got != base {
+		t.Fatalf("operational edit changed workflow digest: %s != %s", got, base)
+	}
+	mutations := []func(*controlv1alpha1.AgentChain){
+		func(value *controlv1alpha1.AgentChain) { value.Spec.ApplicationRef.Name = "other" },
+		func(value *controlv1alpha1.AgentChain) { value.Spec.Steps[0].RunTemplate.Prompt = "new" },
+		func(value *controlv1alpha1.AgentChain) {
+			value.Spec.Steps[1].When.OnDecisionActions = []string{"passed"}
+		},
+		func(value *controlv1alpha1.AgentChain) {
+			value.Spec.Steps[1].Handoff.IncludePullRequestURL = true
+		},
+		func(value *controlv1alpha1.AgentChain) {
+			value.Spec.Completion = &controlv1alpha1.AgentChainCompletionSpec{OnDecisionActions: []string{"passed"}}
+		},
+	}
+	for i, mutate := range mutations {
+		changed := chain.DeepCopy()
+		mutate(changed)
+		if got := agentChainWorkflowDigest(changed); got == base {
+			t.Fatalf("execution mutation %d did not change workflow digest", i)
+		}
 	}
 }
 
@@ -278,6 +336,34 @@ func TestAgentChainStartIdempotentOnRetry(t *testing.T) {
 	}
 }
 
+func TestAgentChainManualStartRetryAfterTimePassesKeepsOneChild(t *testing.T) {
+	scheme := newAgentChainScheme(t)
+	chain := baseChain("manual-delay-idem")
+	chain.Annotations = map[string]string{controlv1alpha1.AgentChainStartNowAnnotation: "opaque-token"}
+	c := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(&controlv1alpha1.AgentChain{}).WithObjects(chain).Build()
+	r := &AgentChainReconciler{Client: c, Scheme: scheme}
+	req := reconcile.Request{NamespacedName: types.NamespacedName{Namespace: chain.Namespace, Name: chain.Name}}
+	if _, err := r.Reconcile(context.Background(), req); err != nil {
+		t.Fatalf("first reconcile: %v", err)
+	}
+	stored := &controlv1alpha1.AgentChain{}
+	if err := c.Get(context.Background(), client.ObjectKeyFromObject(chain), stored); err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	stored.Status = controlv1alpha1.AgentChainStatus{ObservedGeneration: stored.Generation}
+	if err := c.Status().Update(context.Background(), stored); err != nil {
+		t.Fatalf("clear status: %v", err)
+	}
+	time.Sleep(1100 * time.Millisecond)
+	if _, err := r.Reconcile(context.Background(), req); err != nil {
+		t.Fatalf("delayed retry reconcile: %v", err)
+	}
+	runs := &controlv1alpha1.AgentRunList{}
+	if err := c.List(context.Background(), runs); err != nil || len(runs.Items) != 1 {
+		t.Fatalf("expected one child after delayed retry: runs=%d err=%v", len(runs.Items), err)
+	}
+}
+
 func TestAgentChainFinalFailedNotCompleted(t *testing.T) {
 	scheme := newAgentChainScheme(t)
 	chain := baseChain("lab-final-fail")
@@ -302,6 +388,7 @@ func TestAgentChainFinalFailedNotCompleted(t *testing.T) {
 		Spec:   controlv1alpha1.AgentRunSpec{Purpose: controlv1alpha1.AgentRunPurposeChained, SourceUID: string(chain.UID)},
 		Status: controlv1alpha1.AgentRunStatus{Phase: controlv1alpha1.AgentRunPhaseFailed},
 	}
+	freezeActiveChainForTest(chain, &chain.Status, run)
 	c := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(&controlv1alpha1.AgentChain{}).WithObjects(chain, run).Build()
 	r := &AgentChainReconciler{Client: c, Scheme: scheme}
 	if _, err := r.Reconcile(context.Background(), reconcile.Request{NamespacedName: types.NamespacedName{Namespace: chain.Namespace, Name: chain.Name}}); err != nil {
@@ -317,5 +404,191 @@ func TestAgentChainFinalFailedNotCompleted(t *testing.T) {
 	}
 	if stored.Status.ActiveInstanceID != "" {
 		t.Fatalf("active instance should clear, got %q", stored.Status.ActiveInstanceID)
+	}
+}
+
+func TestAgentChainBlocksActiveInstanceAcrossWorkflowEdit(t *testing.T) {
+	scheme := newAgentChainScheme(t)
+	chain := baseChain("workflow-drift")
+	chain.Annotations = map[string]string{controlv1alpha1.AgentChainStartNowAnnotation: "token-drift"}
+	c := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(&controlv1alpha1.AgentChain{}, &controlv1alpha1.AgentRun{}).WithObjects(chain).Build()
+	r := &AgentChainReconciler{Client: c, Scheme: scheme}
+	req := reconcile.Request{NamespacedName: types.NamespacedName{Namespace: chain.Namespace, Name: chain.Name}}
+	if _, err := r.Reconcile(context.Background(), req); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	stored := &controlv1alpha1.AgentChain{}
+	if err := c.Get(context.Background(), client.ObjectKeyFromObject(chain), stored); err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	oldDigest := stored.Status.ActiveWorkflowDigest
+	stored.Spec.Steps[1].RunTemplate.Prompt = "changed verifier authority"
+	stored.Generation++
+	if err := c.Update(context.Background(), stored); err != nil {
+		t.Fatalf("edit chain: %v", err)
+	}
+	if _, err := r.Reconcile(context.Background(), req); err != nil {
+		t.Fatalf("reconcile drift: %v", err)
+	}
+	if err := c.Get(context.Background(), client.ObjectKeyFromObject(chain), stored); err != nil {
+		t.Fatalf("get after drift: %v", err)
+	}
+	if stored.Status.Phase != controlv1alpha1.AgentChainPhaseBlocked || stored.Status.ActiveWorkflowDigest != oldDigest {
+		t.Fatalf("drift status = phase %s digest %q, want Blocked with frozen %q", stored.Status.Phase, stored.Status.ActiveWorkflowDigest, oldDigest)
+	}
+	cond := apimeta.FindStatusCondition(stored.Status.Conditions, agentChainReady)
+	if cond == nil || cond.Reason != "InstanceNeedsRevalidation" {
+		t.Fatalf("condition = %#v, want InstanceNeedsRevalidation", cond)
+	}
+	runs := &controlv1alpha1.AgentRunList{}
+	if err := c.List(context.Background(), runs); err != nil || len(runs.Items) != 1 {
+		t.Fatalf("workflow edit must not launch a successor: runs=%d err=%v", len(runs.Items), err)
+	}
+}
+
+func TestAgentChainRejectsExistingChildWithDifferentImmutableSpec(t *testing.T) {
+	scheme := newAgentChainScheme(t)
+	chain := baseChain("child-collision")
+	workflowDigest := agentChainWorkflowDigest(chain)
+	instanceID := "instance-one"
+	now := metav1.Now()
+	r := &AgentChainReconciler{Scheme: scheme}
+	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(chain).Build()
+	r.Client = c
+	if _, err := r.createChainedAgentRun(context.Background(), chain, "demo-app", instanceID, chain.Generation, workflowDigest, chain.Spec.Steps[0], nil, nil, "AgentChainStart", "stable"); err != nil {
+		t.Fatalf("create expected child: %v", err)
+	}
+	changed := chain.Spec.Steps[0]
+	changed.RunTemplate.Prompt = "different prompt"
+	if _, err := r.createChainedAgentRun(context.Background(), chain, "demo-app", instanceID, chain.Generation, workflowDigest, changed, nil, &now, "AgentChainStart", "stable"); err == nil || !strings.Contains(err.Error(), "different immutable chain step spec") {
+		t.Fatalf("expected immutable collision, got %v", err)
+	}
+}
+
+func TestAgentChainCancellationWaitsForTerminalChild(t *testing.T) {
+	scheme := newAgentChainScheme(t)
+	chain := baseChain("cancel-waits")
+	chain.Annotations = map[string]string{controlv1alpha1.AgentChainStartNowAnnotation: "token-cancel"}
+	c := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(&controlv1alpha1.AgentChain{}, &controlv1alpha1.AgentRun{}).WithObjects(chain).Build()
+	r := &AgentChainReconciler{Client: c, Scheme: scheme}
+	req := reconcile.Request{NamespacedName: types.NamespacedName{Namespace: chain.Namespace, Name: chain.Name}}
+	if _, err := r.Reconcile(context.Background(), req); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	stored := &controlv1alpha1.AgentChain{}
+	if err := c.Get(context.Background(), client.ObjectKeyFromObject(chain), stored); err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	instanceID := stored.Status.ActiveInstanceID
+	if stored.Annotations == nil {
+		stored.Annotations = map[string]string{}
+	}
+	stored.Annotations[controlv1alpha1.AgentChainCancelInstanceAnnotation] = "*"
+	if err := c.Update(context.Background(), stored); err != nil {
+		t.Fatalf("request cancel: %v", err)
+	}
+	if _, err := r.Reconcile(context.Background(), req); err != nil {
+		t.Fatalf("cancel reconcile: %v", err)
+	}
+	if err := c.Get(context.Background(), client.ObjectKeyFromObject(chain), stored); err != nil {
+		t.Fatalf("get cancelling: %v", err)
+	}
+	if stored.Status.Phase != controlv1alpha1.AgentChainPhaseCancelling || stored.Status.ActiveInstanceID != instanceID {
+		t.Fatalf("cancel should retain ownership: phase=%s active=%q", stored.Status.Phase, stored.Status.ActiveInstanceID)
+	}
+	run := &controlv1alpha1.AgentRun{}
+	if err := c.Get(context.Background(), client.ObjectKey{Namespace: stored.Status.ActiveRunRef.Namespace, Name: stored.Status.ActiveRunRef.Name}, run); err != nil {
+		t.Fatalf("get active run: %v", err)
+	}
+	run.Status.Phase = controlv1alpha1.AgentRunPhaseSucceeded
+	if err := c.Status().Update(context.Background(), run); err != nil {
+		t.Fatalf("finish active run: %v", err)
+	}
+	if _, err := r.Reconcile(context.Background(), req); err != nil {
+		t.Fatalf("finish cancellation: %v", err)
+	}
+	if err := c.Get(context.Background(), client.ObjectKeyFromObject(chain), stored); err != nil {
+		t.Fatalf("get cancelled: %v", err)
+	}
+	if stored.Status.ActiveInstanceID != "" || stored.Status.CancelRequestedInstanceID != "" {
+		t.Fatalf("cancelled instance still active: %#v", stored.Status)
+	}
+	runs := &controlv1alpha1.AgentRunList{}
+	if err := c.List(context.Background(), runs); err != nil || len(runs.Items) != 1 {
+		t.Fatalf("cancel must not create a successor: runs=%d err=%v", len(runs.Items), err)
+	}
+}
+
+func TestAgentChainFinalCompletionRequiresDecisionAction(t *testing.T) {
+	scheme := newAgentChainScheme(t)
+	chain := baseChain("completion-action")
+	chain.Spec.Steps = chain.Spec.Steps[:1]
+	chain.Spec.Completion = &controlv1alpha1.AgentChainCompletionSpec{OnDecisionActions: []string{"browser-suite-passed"}}
+	chain.Annotations = map[string]string{controlv1alpha1.AgentChainStartNowAnnotation: "token-complete"}
+	c := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(&controlv1alpha1.AgentChain{}, &controlv1alpha1.AgentRun{}).WithObjects(chain).Build()
+	r := &AgentChainReconciler{Client: c, Scheme: scheme}
+	req := reconcile.Request{NamespacedName: types.NamespacedName{Namespace: chain.Namespace, Name: chain.Name}}
+	if _, err := r.Reconcile(context.Background(), req); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	stored := &controlv1alpha1.AgentChain{}
+	if err := c.Get(context.Background(), client.ObjectKeyFromObject(chain), stored); err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	run := &controlv1alpha1.AgentRun{}
+	if err := c.Get(context.Background(), client.ObjectKey{Namespace: stored.Status.ActiveRunRef.Namespace, Name: stored.Status.ActiveRunRef.Name}, run); err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	run.Status.Phase = controlv1alpha1.AgentRunPhaseSucceeded
+	run.Status.Decision = &controlv1alpha1.AgentRunDecisionStatus{Action: "no-exact-artifact"}
+	if err := c.Status().Update(context.Background(), run); err != nil {
+		t.Fatalf("finish run: %v", err)
+	}
+	if _, err := r.Reconcile(context.Background(), req); err != nil {
+		t.Fatalf("finish chain: %v", err)
+	}
+	if err := c.Get(context.Background(), client.ObjectKeyFromObject(chain), stored); err != nil {
+		t.Fatalf("get finished: %v", err)
+	}
+	cond := apimeta.FindStatusCondition(stored.Status.Conditions, agentChainReady)
+	if cond == nil || cond.Reason != "InstanceCompletionCriteriaUnmet" {
+		t.Fatalf("condition = %#v, want InstanceCompletionCriteriaUnmet", cond)
+	}
+}
+
+func TestAgentChainFinalCompletionAcceptsAllowedDecisionAction(t *testing.T) {
+	scheme := newAgentChainScheme(t)
+	chain := baseChain("completion-passes")
+	chain.Spec.Steps = chain.Spec.Steps[:1]
+	chain.Spec.Completion = &controlv1alpha1.AgentChainCompletionSpec{OnDecisionActions: []string{"browser-suite-passed"}}
+	chain.Annotations = map[string]string{controlv1alpha1.AgentChainStartNowAnnotation: "token-pass"}
+	c := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(&controlv1alpha1.AgentChain{}, &controlv1alpha1.AgentRun{}).WithObjects(chain).Build()
+	r := &AgentChainReconciler{Client: c, Scheme: scheme}
+	req := reconcile.Request{NamespacedName: types.NamespacedName{Namespace: chain.Namespace, Name: chain.Name}}
+	if _, err := r.Reconcile(context.Background(), req); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	stored := &controlv1alpha1.AgentChain{}
+	if err := c.Get(context.Background(), client.ObjectKeyFromObject(chain), stored); err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	run := &controlv1alpha1.AgentRun{}
+	if err := c.Get(context.Background(), client.ObjectKey{Namespace: stored.Status.ActiveRunRef.Namespace, Name: stored.Status.ActiveRunRef.Name}, run); err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	run.Status.Phase = controlv1alpha1.AgentRunPhaseSucceeded
+	run.Status.Decision = &controlv1alpha1.AgentRunDecisionStatus{Action: "Browser-Suite-Passed"}
+	if err := c.Status().Update(context.Background(), run); err != nil {
+		t.Fatalf("finish run: %v", err)
+	}
+	if _, err := r.Reconcile(context.Background(), req); err != nil {
+		t.Fatalf("finish chain: %v", err)
+	}
+	if err := c.Get(context.Background(), client.ObjectKeyFromObject(chain), stored); err != nil {
+		t.Fatalf("get finished: %v", err)
+	}
+	cond := apimeta.FindStatusCondition(stored.Status.Conditions, agentChainReady)
+	if cond == nil || cond.Reason != "InstanceCompleted" {
+		t.Fatalf("condition = %#v, want InstanceCompleted", cond)
 	}
 }

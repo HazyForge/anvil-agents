@@ -32,6 +32,9 @@ spec:
   applicationRef: { name: anvil-release-lab }
   concurrencyPolicy: Forbid
   maxInstancesPerDay: 12
+  completion:
+    onPhases: [Succeeded]
+    onDecisionActions: [evidence-verified]
   # optional automatic instance starts:
   # startIntervalSeconds: 3600
   steps:
@@ -59,7 +62,8 @@ spec:
 - **Interval:** `spec.startIntervalSeconds` (+ optional `startInitialDelaySeconds`)
 - **Suspend:** `anvil-agentctl chain suspend NAME --reason TEXT -n NS`
 - **Cancel advance:** `anvil-agentctl chain cancel NAME -n NS [--instance ID|*]`
-  (stops further steps; does not delete the active Job)
+  (stops further steps, retains Forbid ownership until the active run becomes
+  terminal, and does not delete the active Job)
 
 Each instance gets a stable `status.activeInstanceId`. Child runs are labeled:
 
@@ -78,15 +82,23 @@ when the chain is deleted (controller owner refs are detached).
 3. Default `onPhases` is `[Succeeded]`. Failed prior steps stop the instance.
 4. `NeedsHuman` stops advancement (`WaitingHuman`); it does not auto-skip.
 5. Optional `onDecisionActions` allowlists prior `status.decision.action`.
-6. Handoff is **status text only** (decision, reports, PR URL, optional output
+6. Optional `spec.completion` applies the same phase/action gate to the final
+   step, so a phase-only `Succeeded` with `no-exact-artifact` cannot be
+   reported as a successful instance.
+7. Handoff is **status text only** (decision, reports, PR URL, optional output
    excerpt). Secrets and service accounts are never copied across steps.
-7. Each step’s profile/harness owns its own identity and credentials.
-8. `AgentCouncil` is never launch authority—chains reference profiles.
+8. Each step’s profile/harness owns its own identity and credentials.
+9. `AgentCouncil` is never launch authority—chains reference profiles.
 
 ## Security
 
 - Only the controller creates chained runs.
 - Step profiles are fixed in GitOps; agents cannot pick arbitrary peers.
+- Every active instance freezes one workflow digest and source generation.
+  Authority-bearing edits to application identity, steps, prompts, profiles,
+  gates, handoffs, or completion criteria block the instance before advance.
+- Create retries compare the full immutable expected child spec and exact
+  workflow provenance; a collision never silently reuses a different run.
 - `AgentRunControl` pause for the chain application blocks new launches.
 - `maxInstancesPerDay` bounds start storms.
 
@@ -106,6 +118,7 @@ anvil-agentctl chain resume lab-evidence-loop --reason "resume" -n anvilhub
 - Agent-authored dynamic graphs
 - Council-driven multi-Job conversations
 - External CR event sources (e.g. ApplicationRelease Ready)
+- Typed ApplicationArtifact/TestRun/VerificationRecord handoff or predicates
 - `concurrencyPolicy: Queue` (reserved; use Forbid)
 
 See also `docs/design-roadmap.md` (Workflow Boundary) and the sample

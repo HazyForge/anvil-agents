@@ -83,6 +83,27 @@ spec:
                     minimum: 0
                     type: integer
                 type: object
+              completion:
+                description: |-
+                  Completion prevents a terminal AgentRun phase alone from being reported as
+                  workflow success. Exact workflows should require a reviewed decision action.
+                properties:
+                  onDecisionActions:
+                    description: |-
+                      OnDecisionActions optionally requires the final run's decision.action to
+                      match one of these values (case-insensitive). Empty disables the filter.
+                    items:
+                      minLength: 1
+                      type: string
+                    maxItems: 16
+                    type: array
+                  onPhases:
+                    description: OnPhases defaults to [Succeeded].
+                    items:
+                      type: string
+                    maxItems: 8
+                    type: array
+                type: object
               concurrencyPolicy:
                 description: |-
                   ConcurrencyPolicy controls concurrent instances. Empty defaults to Forbid.
@@ -2957,6 +2978,12 @@ spec:
                               maxItems: 16
                               type: array
                           type: object
+                        sourceDigest:
+                          description: |-
+                            SourceDigest optionally binds the immutable source workflow snapshot that
+                            created this run. AgentChain uses it to prevent one instance from crossing
+                            a GitOps spec edit while retaining the human-readable source reference.
+                          type: string
                         sourceGeneration:
                           format: int64
                           type: integer
@@ -3046,6 +3073,7 @@ spec:
                             OnDecisionActions optionally requires the prior run's status.decision.action
                             to match one of these values (case-insensitive). Empty disables the filter.
                           items:
+                            minLength: 1
                             type: string
                           maxItems: 16
                           type: array
@@ -3097,7 +3125,23 @@ spec:
                 required:
                 - name
                 type: object
+              activeSourceGeneration:
+                description: |-
+                  ActiveSourceGeneration is frozen when the active instance starts. It is
+                  intentionally not advanced by later operational spec edits.
+                format: int64
+                type: integer
               activeStep:
+                type: string
+              activeWorkflowDigest:
+                description: |-
+                  ActiveWorkflowDigest prevents one instance from crossing a GitOps edit to
+                  its ordered steps, gates, handoffs, profiles, or application identity.
+                type: string
+              cancelRequestedInstanceId:
+                description: |-
+                  CancelRequestedInstanceID keeps Forbid ownership until the current child
+                  becomes terminal. Cancellation stops advancement; it does not delete Jobs.
                 type: string
               conditions:
                 items:
@@ -3203,8 +3247,19 @@ spec:
                       required:
                       - name
                       type: object
+                    sourceGeneration:
+                      description: |-
+                        SourceGeneration is the AgentChain generation frozen when the instance
+                        started. Every child in one instance uses the same generation.
+                      format: int64
+                      type: integer
                     step:
                       description: Step is the step name.
+                      type: string
+                    workflowDigest:
+                      description: |-
+                        WorkflowDigest binds the ordered steps, gates, handoffs, profiles, and
+                        application identity used by this instance.
                       type: string
                   type: object
                 type: array

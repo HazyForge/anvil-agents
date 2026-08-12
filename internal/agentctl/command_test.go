@@ -269,6 +269,30 @@ func (backend *fakeBackend) UpdateChain(_ context.Context, chain *agentsv1alpha1
 	return nil
 }
 
+func TestChainCancelResolvesDefaultToActiveInstance(t *testing.T) {
+	backend := &fakeBackend{defaultNamespace: "hazy-trade", chains: []agentsv1alpha1.AgentChain{{
+		ObjectMeta: metav1.ObjectMeta{Name: "charts", Namespace: "hazy-trade"},
+		Status:     agentsv1alpha1.AgentChainStatus{ActiveInstanceID: "instance-2"},
+	}}}
+	var output, errorOutput strings.Builder
+	app := App{Out: &output, Err: &errorOutput, Factory: func(KubeOptions) (Backend, error) { return backend, nil }}
+	if err := app.Run(context.Background(), []string{"chain", "cancel", "charts"}); err != nil {
+		t.Fatalf("cancel: %v", err)
+	}
+	if len(backend.updatedChains) != 1 || backend.updatedChains[0].Annotations[agentsv1alpha1.AgentChainCancelInstanceAnnotation] != "instance-2" {
+		t.Fatalf("updated chain = %#v", backend.updatedChains)
+	}
+}
+
+func TestChainCancelWithoutActiveInstanceFails(t *testing.T) {
+	backend := &fakeBackend{defaultNamespace: "hazy-trade", chains: []agentsv1alpha1.AgentChain{{ObjectMeta: metav1.ObjectMeta{Name: "charts", Namespace: "hazy-trade"}}}}
+	app := App{Out: io.Discard, Err: io.Discard, Factory: func(KubeOptions) (Backend, error) { return backend, nil }}
+	err := app.Run(context.Background(), []string{"chain", "cancel", "charts"})
+	if err == nil || !strings.Contains(err.Error(), "no active instance") {
+		t.Fatalf("error = %v, want no active instance", err)
+	}
+}
+
 func TestRunCreateClientDryRunDoesNotLoadKubernetes(t *testing.T) {
 	var output, errorOutput strings.Builder
 	factoryCalled := false

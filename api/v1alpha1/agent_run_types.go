@@ -845,11 +845,16 @@ type AgentRunSpec struct {
 	// Purpose explains why this run exists.
 	// +kubebuilder:validation:Enum=manual;adverseSituation;scheduledHealthCheck;chained
 	// +optional
-	Purpose          AgentRunPurpose         `json:"purpose,omitempty"`
-	SourceRef        AgentRunSourceRef       `json:"sourceRef,omitempty"`
-	SourceUID        string                  `json:"sourceUID,omitempty"`
-	SourceGeneration int64                   `json:"sourceGeneration,omitempty"`
-	Trigger          AgentRunTriggerSnapshot `json:"trigger,omitempty"`
+	Purpose          AgentRunPurpose   `json:"purpose,omitempty"`
+	SourceRef        AgentRunSourceRef `json:"sourceRef,omitempty"`
+	SourceUID        string            `json:"sourceUID,omitempty"`
+	SourceGeneration int64             `json:"sourceGeneration,omitempty"`
+	// SourceDigest optionally binds the immutable source workflow snapshot that
+	// created this run. AgentChain uses it to prevent one instance from crossing
+	// a GitOps spec edit while retaining the human-readable source reference.
+	// +optional
+	SourceDigest string                  `json:"sourceDigest,omitempty"`
+	Trigger      AgentRunTriggerSnapshot `json:"trigger,omitempty"`
 	// Prompt is the one-off operator request for this AgentRun. Profiles supply
 	// durable standing instructions and defaults; this field supplies what this
 	// run should do now. Empty means the profile, schedule, source, or trigger

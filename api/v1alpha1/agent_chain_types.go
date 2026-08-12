@@ -11,6 +11,7 @@ const (
 	AgentChainPhasePending      AgentChainPhase = "Pending"
 	AgentChainPhaseIdle         AgentChainPhase = "Idle"
 	AgentChainPhaseRunning      AgentChainPhase = "Running"
+	AgentChainPhaseCancelling   AgentChainPhase = "Cancelling"
 	AgentChainPhaseWaitingHuman AgentChainPhase = "WaitingHuman"
 	AgentChainPhaseSuspended    AgentChainPhase = "Suspended"
 	AgentChainPhaseBlocked      AgentChainPhase = "Blocked"
@@ -49,6 +50,7 @@ type AgentChainWhenSpec struct {
 	// OnDecisionActions optionally requires the prior run's status.decision.action
 	// to match one of these values (case-insensitive). Empty disables the filter.
 	// +kubebuilder:validation:MaxItems=16
+	// +kubebuilder:validation:items:MinLength=1
 	// +optional
 	OnDecisionActions []string `json:"onDecisionActions,omitempty"`
 }
@@ -107,6 +109,21 @@ type AgentChainBackoffSpec struct {
 	NeedsHumanSeconds int `json:"needsHumanSeconds,omitempty"`
 }
 
+// AgentChainCompletionSpec defines what counts as a successful terminal chain
+// instance. It is evaluated against the final step's durable AgentRun status.
+type AgentChainCompletionSpec struct {
+	// OnPhases defaults to [Succeeded].
+	// +kubebuilder:validation:MaxItems=8
+	// +optional
+	OnPhases []AgentRunPhase `json:"onPhases,omitempty"`
+	// OnDecisionActions optionally requires the final run's decision.action to
+	// match one of these values (case-insensitive). Empty disables the filter.
+	// +kubebuilder:validation:MaxItems=16
+	// +kubebuilder:validation:items:MinLength=1
+	// +optional
+	OnDecisionActions []string `json:"onDecisionActions,omitempty"`
+}
+
 // AgentChainSpec defines a GitOps-owned linear completion-driven agent workflow.
 // It does not replace AgentSchedule (wall-clock cadence) or AgentCouncil
 // (association-only inventory).
@@ -142,6 +159,10 @@ type AgentChainSpec struct {
 	// Manual chain-start-now bypasses backoff.
 	// +optional
 	Backoff *AgentChainBackoffSpec `json:"backoff,omitempty"`
+	// Completion prevents a terminal AgentRun phase alone from being reported as
+	// workflow success. Exact workflows should require a reviewed decision action.
+	// +optional
+	Completion *AgentChainCompletionSpec `json:"completion,omitempty"`
 	// Steps is the ordered linear sequence. The first step starts each instance.
 	// +kubebuilder:validation:MinItems=1
 	// +kubebuilder:validation:MaxItems=32
@@ -158,6 +179,12 @@ type AgentChainStepRunStatus struct {
 	RunRef *NamespacedObjectReference `json:"runRef,omitempty"`
 	// Phase is the last observed AgentRun phase.
 	Phase AgentRunPhase `json:"phase,omitempty"`
+	// SourceGeneration is the AgentChain generation frozen when the instance
+	// started. Every child in one instance uses the same generation.
+	SourceGeneration int64 `json:"sourceGeneration,omitempty"`
+	// WorkflowDigest binds the ordered steps, gates, handoffs, profiles, and
+	// application identity used by this instance.
+	WorkflowDigest string `json:"workflowDigest,omitempty"`
 }
 
 // AgentChainStatus is the observed state of an AgentChain.
@@ -168,9 +195,18 @@ type AgentChainStatus struct {
 	ActiveInstanceID   string                     `json:"activeInstanceId,omitempty"`
 	ActiveStep         string                     `json:"activeStep,omitempty"`
 	ActiveRunRef       *NamespacedObjectReference `json:"activeRunRef,omitempty"`
-	LastInstanceID     string                     `json:"lastInstanceId,omitempty"`
-	LastStartToken     string                     `json:"lastStartToken,omitempty"`
-	LastCancelToken    string                     `json:"lastCancelToken,omitempty"`
+	// ActiveSourceGeneration is frozen when the active instance starts. It is
+	// intentionally not advanced by later operational spec edits.
+	ActiveSourceGeneration int64 `json:"activeSourceGeneration,omitempty"`
+	// ActiveWorkflowDigest prevents one instance from crossing a GitOps edit to
+	// its ordered steps, gates, handoffs, profiles, or application identity.
+	ActiveWorkflowDigest string `json:"activeWorkflowDigest,omitempty"`
+	// CancelRequestedInstanceID keeps Forbid ownership until the current child
+	// becomes terminal. Cancellation stops advancement; it does not delete Jobs.
+	CancelRequestedInstanceID string `json:"cancelRequestedInstanceId,omitempty"`
+	LastInstanceID            string `json:"lastInstanceId,omitempty"`
+	LastStartToken            string `json:"lastStartToken,omitempty"`
+	LastCancelToken           string `json:"lastCancelToken,omitempty"`
 	// StepRuns lists step runs for the active or most recent instance (newest last).
 	// +optional
 	StepRuns []AgentChainStepRunStatus `json:"stepRuns,omitempty"`

@@ -234,7 +234,13 @@ func (app App) chainCancel(ctx context.Context, kubeOptions KubeOptions, args []
 	}
 	token := strings.TrimSpace(instance)
 	if token == "" {
-		token = "*"
+		token = strings.TrimSpace(chain.Status.ActiveInstanceID)
+	}
+	if token == "*" {
+		token = strings.TrimSpace(chain.Status.ActiveInstanceID)
+	}
+	if token == "" {
+		return fmt.Errorf("AgentChain %s/%s has no active instance to cancel", chain.Namespace, chain.Name)
 	}
 	chain.Annotations[agentsv1alpha1.AgentChainCancelInstanceAnnotation] = token
 	if err := backend.UpdateChain(ctx, chain); err != nil {

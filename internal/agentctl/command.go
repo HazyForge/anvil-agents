@@ -622,8 +622,11 @@ func writeObject(writer io.Writer, object any, format string) error {
 		case *agentsv1alpha1.AgentSchedule:
 			_, err := fmt.Fprintf(writer, "agentschedule.control.anvil.hazyforge.io/%s\n", typed.Name)
 			return err
+		case *agentsv1alpha1.AgentChain:
+			_, err := fmt.Fprintf(writer, "agentchain.control.anvil.hazyforge.io/%s\n", typed.Name)
+			return err
 		default:
-			return &usageError{message: "name output is supported only for one AgentRun, AgentRunControl, or AgentSchedule"}
+			return &usageError{message: "name output is supported only for one AgentRun, AgentRunControl, AgentSchedule, or AgentChain"}
 		}
 	case "json":
 		cleaned, err := cleanObject(object)

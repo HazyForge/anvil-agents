@@ -2894,6 +2894,12 @@ spec:
                         maxItems: 16
                         type: array
                     type: object
+                  sourceDigest:
+                    description: |-
+                      SourceDigest optionally binds the immutable source workflow snapshot that
+                      created this run. AgentChain uses it to prevent one instance from crossing
+                      a GitOps spec edit while retaining the human-readable source reference.
+                    type: string
                   sourceGeneration:
                     format: int64
                     type: integer
@@ -5791,6 +5797,12 @@ spec:
                               maxItems: 16
                               type: array
                           type: object
+                        sourceDigest:
+                          description: |-
+                            SourceDigest optionally binds the immutable source workflow snapshot that
+                            created this run. AgentChain uses it to prevent one instance from crossing
+                            a GitOps spec edit while retaining the human-readable source reference.
+                          type: string
                         sourceGeneration:
                           format: int64
                           type: integer
