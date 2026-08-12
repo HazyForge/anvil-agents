@@ -34,19 +34,41 @@ authorization boundary. Other optional controls include
 Ask a single question that states the blocked decision, material consequence,
 and expected answer form. Validate the reply against the run's intent and
 immutable safety contract before continuing. A reply supplies information; it
-does not broaden Kubernetes or repository authorization.
+does not broaden Kubernetes or repository authorization. Automated callers
+must compute a stable semantic question key, persist it in a progress report
+before posting, inspect prior decisions and reports for an unresolved claim,
+and pass the key through `--idempotency-key`. Application-wide concurrency and
+the durable claim protect workflow recovery; transport deduplication is an
+additional concurrent-retry guard.
 
 ```sh
+QUESTION_KEY="application=example;decision=delete-one-stale-test-pvc"
 anvil-agent-status progress \
-  --stage operator-question \
-  --summary "Waiting for one scoped operator decision."
+  --stage operator-question-claimed \
+  --classification routed \
+  --action asked-operator \
+  --summary "Claimed operator question ${QUESTION_KEY}." \
+  --detail "questionKey=${QUESTION_KEY}"
 
-reply="$(anvil-hotline ask \
+if reply="$(anvil-hotline ask \
   --question "May I delete the named stale test PVC? Reply yes or no." \
-  --context "AgentRun=${ANVIL_AGENT_RUN:-unknown}")"
+  --context "AgentRun=${ANVIL_AGENT_RUN:-unknown}; questionKey=${QUESTION_KEY}" \
+  --idempotency-key "${QUESTION_KEY}")"; then
+  : # validate reply, then emit the normal explicit terminal decision
+else
+  anvil-agent-status needsHuman \
+    --summary "Operator question timed out or Hotline failed." \
+    --detail "questionKey=${QUESTION_KEY}; resume by invoking Hotline with the same key"
+  # Exit zero so the controller consumes the terminal needsHuman report. This
+  # is handled terminal status, not a successful role decision.
+  exit 0
+fi
 ```
 
 After a reply, validate it against the run's existing authority and emit a
 normal decision. If the command times out or fails, emit one `needsHuman`
-report with a stable secret-safe question key and stop. Never emit a successful
-decision after `needsHuman`.
+report with a stable secret-safe question key and exit zero so the controller
+consumes that terminal report; a nonzero Job is classified Failed before the
+report can produce NeedsHuman phase. This zero exit is handled terminal status,
+not a successful role decision. Never emit a successful decision after
+`needsHuman`.

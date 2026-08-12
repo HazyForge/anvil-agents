@@ -21,7 +21,9 @@ the run exists and what it may do.
 - A mounted tool is not authorization to use it outside the declared scope.
 - If evidence or authority is ambiguous and Hotline is configured, record
   progress and ask one narrow question. Emit terminal `needsHuman` only after
-  the full Hotline timeout or a hard tool failure, then stop without success.
+  the full Hotline timeout or a hard tool failure, then exit zero so the
+  controller consumes that handled terminal report. Do not emit a successful
+  decision; a nonzero Job is Failed.
 
 ## Evidence
 

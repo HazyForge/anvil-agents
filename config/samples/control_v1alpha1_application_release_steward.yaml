@@ -1,3 +1,5 @@
+# AgentSkillSet references are namespace-local. Render one copy into every
+# namespace whose AgentRunProfiles consume this method; "agents" is an example.
 apiVersion: control.anvil.hazyforge.io/v1alpha1
 kind: AgentSkillSet
 metadata:
@@ -36,10 +38,34 @@ spec:
         secret-safe proof or blocker fingerprint. A proof fingerprint includes
         application, exact source revision, artifact digest, target, action or
         test definition digest, verification mode, and terminal evidence IDs.
+        When a role batches multiple inputs, emit one `progress` report per
+        input before the terminal decision. Use stage `steward-input-result`,
+        set the input's role classification/action, and include its AgentRun ref
+        and fingerprint in summary and detail. Process at most 80 oldest
+        unhandled inputs per run and leave the remainder for the next run; the
+        runtime retains 100 reports. On normal completion, emit one explicit
+        terminal batch decision. On NeedsHuman, emit only that report and exit zero.
+        Monitor precedence is `needs-direction` >
+        `new-platform-finding` > `new-proof` > `known-gap` >
+        `confirmed-healthy` > `no-op`; proposer precedence is `asked-operator`
+        > `opened-pr` > `updated-issue` > `no-op`. Per-input reports preserve
+        the results hidden by the aggregate action. The terminal decision lists
+        processed count, batch fingerprint, and first/last refs rather than all
+        refs, which may exceed status field limits.
+
+        Proposer emits an input's `steward-input-result` only after completing
+        its durable owner-system update/open, keyed operator-question outcome,
+        or justified no-op. Never acknowledge an input before its side effect.
+        Stop without reporting inputs deferred by a per-round write cap. On a
+        crash after a side effect but before its report, recover through
+        owner-system search and idempotent update rather than duplicating it.
+
         After three unchanged healthy or known-gap fingerprints, choose another
-        safe experiment, back off cadence, leave the routed issue parked, or
-        record one direction candidate. Never create a change only to make a
-        release or PR happen.
+        safe experiment, back off cadence, or leave the routed issue parked.
+        Record a direction candidate only when no valuable safe experiment
+        remains and an actual product, priority, risk, or authority decision
+        blocks progress. Never create a change or manufacture a question only
+        to make a release, PR, or Hotline event happen.
 
         Route application behavior and configuration defects to the application
         owner; delivery platform, CLI, controller, worker, adapter, gate, or
@@ -54,16 +80,30 @@ spec:
         Put the key in Hotline context and in both summary and detail of normal
         decisions or `needsHuman` reports, inspect prior proposer decisions and
         reports, and fail closed without posting if that history cannot be read.
+        Before posting, persist a `progress` report with stage
+        `operator-question-claimed`, classification `routed`, action
+        `asked-operator`, and the key in summary and detail. Invoke
+        `anvil-hotline ask --idempotency-key "$questionKey"`. Reinvoke with the
+        same key after a caller crash: Hotline searches its channel history,
+        resumes the existing prompt and reply when posted, or posts it when the
+        durable claim preceded the original post. Enforce one
+        concurrent proposer per application across scheduled and manual launch
+        paths; Discord nonce enforcement is a second concurrent-retry guard,
+        not the durable claim.
         Ask once with a recommended default, two or
         three alternatives and consequences, safe timeout behavior, and the
         exact authority requested. A reply is information, never capability.
         Report progress while waiting; after a validated reply emit a normal
         decision. Only after the full timeout or a hard tool failure emit one
-        terminal `needsHuman` report, then stop without success.
+        terminal `needsHuman` report, then exit zero so the controller consumes
+        NeedsHuman; a nonzero Job becomes Failed. This is a handled terminal
+        exit, not a successful role decision.
 
         Prefer completion-driven orchestration only when it preserves each
         step's own application identity, service account, secret scope, pause
         policy, and repository authority. A rotating schedule is a temporary
         transport, not status handoff: process every unhandled prior run and
         keep write-capable schedules suspended until serial role and human-
-        communications canaries prove the boundary.
+        communications canaries prove the boundary. Canaries must assert the
+        expected explicit terminal report type, classification, and action;
+        process exit zero alone is not role-result proof.

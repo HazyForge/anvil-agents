@@ -7,12 +7,19 @@ application's delivery commands, safe experiments, evidence sources, target
 policy, repository ownership, and production boundary in local skills and
 profiles.
 
+`AgentSkillSet` references are namespace-local. The sample `agents` namespace
+is illustrative: render a copy into each namespace containing a consuming
+`AgentRunProfile`, then reference that namespace-local instance. A profile in
+`anvilhub`, for example, cannot consume the sample object in `agents`.
+
 The method optimizes for new independently verified proof, unique findings,
 owner-routing latency, verified fixes, and operator-decision latency. It does
 not optimize for a PR or release every day. An unchanged exact artifact that
 still converges can correctly produce `confirmed-healthy`; three repeated
 unchanged fingerprints require a different experiment, backoff, a parked known
-issue, or one direction candidate.
+issue, or—only when no valuable safe experiment remains and a real decision
+blocks progress—one direction candidate. Do not manufacture a product question
+to satisfy a canary or activity metric.
 
 ## Role result contract
 
@@ -22,10 +29,40 @@ issue, or one direction candidate.
 | Monitor | `audited` | `new-proof`, `confirmed-healthy`, `known-gap`, `new-platform-finding`, `needs-direction`, `no-op` |
 | Proposer | `routed` | `opened-pr`, `updated-issue`, `asked-operator`, `no-op` |
 
-Each decision lists all input AgentRun refs processed and the stable proof,
-blocker, or question key. Monitor owns the independently verified evidence
-outcome. Proposer owns deduplicated routing and is the only role that should
-receive a Hotline credential.
+Each terminal decision lists the processed count, batch fingerprint, and first
+and last input refs; the bounded per-input progress reports are authoritative
+for every input ref and proof/blocker key. This avoids truncating the terminal
+summary/detail limits on a large batch. Monitor owns the independently verified
+evidence outcome. Proposer owns deduplicated routing and is the only role that
+should receive a Hotline credential.
+
+For proposer, `steward-input-result` acknowledges durable handling. Emit it only
+after the input has an owner-system update/open, keyed operator-question
+outcome, or justified no-op. Stop without acknowledging inputs deferred by a
+per-round write cap. If a crash occurs after the side effect but before the
+report, owner-system search and idempotent update recover it on the next run.
+
+When one run processes multiple inputs, it emits one `progress` report per
+input with stage `steward-input-result`, that input's typed classification and
+action, AgentRun ref, and fingerprint. It processes at most 80 oldest unhandled
+inputs per run, leaving the rest for a later run; the runtime retains 100
+reports. On normal completion it then emits one explicit terminal batch
+decision. On NeedsHuman it emits only that terminal report. Aggregate monitor precedence is `needs-direction` >
+`new-platform-finding` > `new-proof` > `known-gap` > `confirmed-healthy` >
+`no-op`; proposer precedence is `asked-operator` > `opened-pr` >
+`updated-issue` > `no-op`. This keeps the single terminal decision
+machine-readable without losing mixed per-input results.
+
+Before a proposer posts a question, it persists a progress report with stage
+`operator-question-claimed`, classification `routed`, action `asked-operator`,
+and the stable key in summary and detail, then calls
+`anvil-hotline ask --idempotency-key "$questionKey"`. It searches decisions and
+reports before claiming; reinvoking the same key searches channel history and
+resumes a posted prompt/reply or posts after a pre-post crash. The proposer runs
+under an application-wide concurrency limit of one across scheduled and manual
+launch paths. Transport nonce enforcement protects concurrent retries; the
+AgentRun report is the durable claim, and keyed channel-history recovery resumes
+the existing Discord prompt after a caller restart.
 
 ## Transport and activation
 
@@ -45,7 +82,13 @@ Commit a new write-capable schedule suspended. Prove, serially:
 
 Only then activate the schedule through the owning GitOps repository. Ensure
 the Job timeout leaves explicit headroom beyond the configured Hotline timeout
-for evidence gathering and terminal status reporting.
+for evidence gathering and terminal status reporting. Canary assertions must
+verify the expected explicit terminal report type, classification, and action;
+process exit zero alone is not role-result proof because the current controller
+can synthesize a generic completed decision when no explicit decision exists.
+Timeout/failure handling must write one terminal `needsHuman` report and exit
+zero so the controller consumes it; this is handled terminal status, not a
+successful role decision. A nonzero Job is Failed.
 
 ## Application adoption
 

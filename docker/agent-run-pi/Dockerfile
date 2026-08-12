@@ -10,7 +10,7 @@ ARG TARGETARCH=amd64
 WORKDIR /src
 
 # anvil-hotline is owned by github.com/hazyforge/anvil-hotline (public).
-ARG ANVIL_HOTLINE_VERSION=v0.1.0
+ARG ANVIL_HOTLINE_VERSION=v0.2.0
 RUN --mount=type=cache,target=/go/pkg/mod \
 	--mount=type=cache,target=/root/.cache/go-build \
 	mkdir -p /out \

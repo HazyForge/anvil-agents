@@ -4077,6 +4077,13 @@ func agentRunReportHasDecision(report controlv1alpha1.AgentRunStatusReport) bool
 	if strings.EqualFold(strings.TrimSpace(report.Type), "decision") {
 		return true
 	}
+	// Structured progress may carry a typed intermediate classification/action.
+	// Keep those fields queryable in status.reports without projecting them into
+	// the one terminal status.decision. Legacy reports with no explicit type
+	// retain the old field-based decision fallback.
+	if strings.EqualFold(strings.TrimSpace(report.Type), "progress") {
+		return false
+	}
 	return strings.TrimSpace(report.Classification) != "" ||
 		strings.TrimSpace(report.Action) != "" ||
 		strings.TrimSpace(report.ResidualRisk) != "" ||
@@ -4105,7 +4112,10 @@ func agentRunLatestHumanFollowUp(reports []controlv1alpha1.AgentRunStatusReport)
 }
 
 func agentRunTrimStatusReports(reports []controlv1alpha1.AgentRunStatusReport) []controlv1alpha1.AgentRunStatusReport {
-	const maxReports = 25
+	// A steward batch may report one result for each of 80 inputs plus its
+	// terminal decision. Retain enough structured history for that bounded
+	// batch and ordinary setup progress without making AgentRun status unbounded.
+	const maxReports = 100
 	if len(reports) <= maxReports {
 		return reports
 	}

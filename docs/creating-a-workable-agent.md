@@ -85,7 +85,7 @@ spec:
         mkdir -p "${install_dir}"
         export PATH="${install_dir}:${PATH}"
         GOBIN="${install_dir}" CGO_ENABLED=0 \
-          go install github.com/hazyforge/anvil-hotline/cmd/anvil-hotline@v0.1.0
+          go install github.com/hazyforge/anvil-hotline/cmd/anvil-hotline@v0.2.0
       verifyCommand: [bash, -lc, 'export PATH="$HOME/.local/bin:$PATH"; anvil-hotline --help']
 ```
 
