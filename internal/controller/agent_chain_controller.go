@@ -148,7 +148,10 @@ func (r *AgentChainReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	// A new start token or later interval must never overlap a provenance-valid
 	// nonterminal child merely because status was not persisted.
 	if status.ActiveInstanceID == "" {
-		activeRuns := agentChainOwnedNonterminalRuns(obj, runs)
+		activeRuns, activeListErr := r.agentChainOwnedNonterminalRuns(ctx, obj)
+		if activeListErr != nil {
+			return ctrl.Result{}, activeListErr
+		}
 		switch len(activeRuns) {
 		case 0:
 		case 1:
@@ -170,6 +173,18 @@ func (r *AgentChainReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 			status.ActiveSourceGeneration = active.Spec.SourceGeneration
 			status.ActiveWorkflowDigest = active.Spec.SourceDigest
 			status.LastInstanceID = instanceID
+			startToken := strings.TrimSpace(obj.Annotations[controlv1alpha1.AgentChainStartNowAnnotation])
+			if strings.HasPrefix(instanceID, "m-") && startToken != "" && agentChainInstanceID(obj, true, startToken, now.Time) == instanceID {
+				status.LastStartToken = startToken
+			}
+			if obj.Spec.StartIntervalSeconds > 0 {
+				base := active.CreationTimestamp.Time
+				if strings.HasPrefix(instanceID, "i-") && active.Spec.Trigger.DetectedAt != nil && !active.Spec.Trigger.DetectedAt.IsZero() {
+					base = active.Spec.Trigger.DetectedAt.Time
+				}
+				next := agentChainNextCadenceAfter(base, time.Duration(obj.Spec.StartIntervalSeconds)*time.Second, now.Time)
+				status.NextStartAt = &metav1.Time{Time: next}
+			}
 			status.StepRuns = []controlv1alpha1.AgentChainStepRunStatus{{
 				InstanceID:       instanceID,
 				Step:             step,
@@ -845,12 +860,19 @@ func (r *AgentChainReconciler) agentChainRuns(ctx context.Context, chain *contro
 	return runs, len(instancesToday), nil
 }
 
-func agentChainOwnedNonterminalRuns(chain *controlv1alpha1.AgentChain, runs []*controlv1alpha1.AgentRun) []*controlv1alpha1.AgentRun {
+func (r *AgentChainReconciler) agentChainOwnedNonterminalRuns(ctx context.Context, chain *controlv1alpha1.AgentChain) ([]*controlv1alpha1.AgentRun, error) {
 	if chain == nil {
-		return nil
+		return nil, nil
+	}
+	list := &controlv1alpha1.AgentRunList{}
+	// Intentionally do not use mutable labels for this safety scan. Exact
+	// sourceRef/sourceUID are the overlap boundary after status loss.
+	if err := r.List(ctx, list, client.InNamespace(chain.Namespace)); err != nil {
+		return nil, fmt.Errorf("list AgentRuns for orphan ownership recovery: %w", err)
 	}
 	out := make([]*controlv1alpha1.AgentRun, 0, 1)
-	for _, run := range runs {
+	for i := range list.Items {
+		run := &list.Items[i]
 		if run == nil || agentRunPhaseTerminal(run.Status.Phase) ||
 			run.Spec.Purpose != controlv1alpha1.AgentRunPurposeChained ||
 			run.Spec.SourceRef.APIVersion != controlv1alpha1.GroupVersion.String() ||
@@ -862,7 +884,7 @@ func agentChainOwnedNonterminalRuns(chain *controlv1alpha1.AgentChain, runs []*c
 		}
 		out = append(out, run)
 	}
-	return out
+	return out, nil
 }
 
 func validateAgentChainRecoverableRun(chain *controlv1alpha1.AgentChain, run *controlv1alpha1.AgentRun) error {
@@ -1194,6 +1216,15 @@ func agentChainStartDueAt(chain *controlv1alpha1.AgentChain, manual bool, nextSt
 		return base.Add(time.Duration(period) * interval)
 	}
 	return now.UTC().Truncate(time.Second)
+}
+
+func agentChainNextCadenceAfter(base time.Time, interval time.Duration, now time.Time) time.Time {
+	next := base.Add(interval)
+	if interval <= 0 || next.After(now) {
+		return next
+	}
+	missed := now.Sub(next)/interval + 1
+	return next.Add(missed * interval)
 }
 
 // agentChainApplyTerminalBackoffDeadline sets NextStartAt to terminalAt+delay when

@@ -100,7 +100,7 @@ func TestAgentChainStartAndAdvance(t *testing.T) {
 	chain.Annotations = map[string]string{
 		controlv1alpha1.AgentChainStartNowAnnotation: "token-1",
 	}
-	c := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(&controlv1alpha1.AgentChain{}).WithObjects(chain).Build()
+	c := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(&controlv1alpha1.AgentChain{}, &controlv1alpha1.AgentRun{}).WithObjects(chain).Build()
 	r := &AgentChainReconciler{Client: c, Scheme: scheme}
 
 	if _, err := r.Reconcile(context.Background(), reconcile.Request{NamespacedName: types.NamespacedName{Namespace: chain.Namespace, Name: chain.Name}}); err != nil {
@@ -430,6 +430,109 @@ func TestAgentChainLostStatusAndNewManualTokenRecoversOneChild(t *testing.T) {
 	}
 }
 
+func TestAgentChainRecoveredSameManualTokenIsConsumedAfterTerminal(t *testing.T) {
+	scheme := newAgentChainScheme(t)
+	chain := baseChain("manual-recovery-receipt")
+	chain.Spec.Steps = chain.Spec.Steps[:1]
+	chain.Annotations = map[string]string{controlv1alpha1.AgentChainStartNowAnnotation: "same-token"}
+	c := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(&controlv1alpha1.AgentChain{}, &controlv1alpha1.AgentRun{}).WithObjects(chain).Build()
+	r := &AgentChainReconciler{Client: c, Scheme: scheme}
+	req := reconcile.Request{NamespacedName: types.NamespacedName{Namespace: chain.Namespace, Name: chain.Name}}
+	if _, err := r.Reconcile(context.Background(), req); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	stored := &controlv1alpha1.AgentChain{}
+	if err := c.Get(context.Background(), client.ObjectKeyFromObject(chain), stored); err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	stored.Status = controlv1alpha1.AgentChainStatus{ObservedGeneration: stored.Generation}
+	if err := c.Status().Update(context.Background(), stored); err != nil {
+		t.Fatalf("clear status: %v", err)
+	}
+	if _, err := r.Reconcile(context.Background(), req); err != nil {
+		t.Fatalf("recover: %v", err)
+	}
+	if err := c.Get(context.Background(), client.ObjectKeyFromObject(chain), stored); err != nil {
+		t.Fatalf("get recovered: %v", err)
+	}
+	if stored.Status.LastStartToken != "same-token" {
+		t.Fatalf("recovery did not consume same token: %#v", stored.Status)
+	}
+	run := &controlv1alpha1.AgentRun{}
+	if err := c.Get(context.Background(), client.ObjectKey{Namespace: stored.Status.ActiveRunRef.Namespace, Name: stored.Status.ActiveRunRef.Name}, run); err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	run.Status.Phase = controlv1alpha1.AgentRunPhaseSucceeded
+	if err := c.Status().Update(context.Background(), run); err != nil {
+		t.Fatalf("finish run: %v", err)
+	}
+	if _, err := r.Reconcile(context.Background(), req); err != nil {
+		t.Fatalf("complete recovered: %v", err)
+	}
+	if _, err := r.Reconcile(context.Background(), req); err != nil {
+		t.Fatalf("post-completion reconcile: %v", err)
+	}
+	runs := &controlv1alpha1.AgentRunList{}
+	if err := c.List(context.Background(), runs); err != nil || len(runs.Items) != 1 {
+		t.Fatalf("same token replayed after recovery: runs=%d err=%v", len(runs.Items), err)
+	}
+}
+
+func TestAgentChainRecoveredNewManualTokenStartsOnceAfterTerminal(t *testing.T) {
+	scheme := newAgentChainScheme(t)
+	chain := baseChain("manual-new-token-after-recovery")
+	chain.Spec.Steps = chain.Spec.Steps[:1]
+	chain.Annotations = map[string]string{controlv1alpha1.AgentChainStartNowAnnotation: "token-one"}
+	c := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(&controlv1alpha1.AgentChain{}, &controlv1alpha1.AgentRun{}).WithObjects(chain).Build()
+	r := &AgentChainReconciler{Client: c, Scheme: scheme}
+	req := reconcile.Request{NamespacedName: types.NamespacedName{Namespace: chain.Namespace, Name: chain.Name}}
+	if _, err := r.Reconcile(context.Background(), req); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	stored := &controlv1alpha1.AgentChain{}
+	if err := c.Get(context.Background(), client.ObjectKeyFromObject(chain), stored); err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	stored.Status = controlv1alpha1.AgentChainStatus{ObservedGeneration: stored.Generation}
+	if err := c.Status().Update(context.Background(), stored); err != nil {
+		t.Fatalf("clear status: %v", err)
+	}
+	if err := c.Get(context.Background(), client.ObjectKeyFromObject(chain), stored); err != nil {
+		t.Fatalf("get new token: %v", err)
+	}
+	stored.Annotations[controlv1alpha1.AgentChainStartNowAnnotation] = "token-two"
+	if err := c.Update(context.Background(), stored); err != nil {
+		t.Fatalf("set new token: %v", err)
+	}
+	if _, err := r.Reconcile(context.Background(), req); err != nil {
+		t.Fatalf("recover old child: %v", err)
+	}
+	if err := c.Get(context.Background(), client.ObjectKeyFromObject(chain), stored); err != nil {
+		t.Fatalf("get recovered: %v", err)
+	}
+	run := &controlv1alpha1.AgentRun{}
+	if err := c.Get(context.Background(), client.ObjectKey{Namespace: stored.Status.ActiveRunRef.Namespace, Name: stored.Status.ActiveRunRef.Name}, run); err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	run.Status.Phase = controlv1alpha1.AgentRunPhaseSucceeded
+	if err := c.Status().Update(context.Background(), run); err != nil {
+		t.Fatalf("finish old run: %v", err)
+	}
+	if _, err := r.Reconcile(context.Background(), req); err != nil {
+		t.Fatalf("finish recovered child: %v", err)
+	}
+	if _, err := r.Reconcile(context.Background(), req); err != nil {
+		t.Fatalf("start pending new token: %v", err)
+	}
+	if _, err := r.Reconcile(context.Background(), req); err != nil {
+		t.Fatalf("idempotent new token: %v", err)
+	}
+	runs := &controlv1alpha1.AgentRunList{}
+	if err := c.List(context.Background(), runs); err != nil || len(runs.Items) != 2 {
+		t.Fatalf("new token should start exactly once after terminal: runs=%d err=%v", len(runs.Items), err)
+	}
+}
+
 func TestAgentChainLostStatusAndApplicationEditDoesNotOverlap(t *testing.T) {
 	scheme := newAgentChainScheme(t)
 	chain := baseChain("application-edit-orphan")
@@ -493,7 +596,7 @@ func TestAgentChainMalformedExactSourceOrphanBlocksNewStart(t *testing.T) {
 	if err := c.Get(context.Background(), client.ObjectKey{Namespace: stored.Status.ActiveRunRef.Namespace, Name: stored.Status.ActiveRunRef.Name}, run); err != nil {
 		t.Fatalf("get child: %v", err)
 	}
-	delete(run.Labels, agentManagedByLabel)
+	delete(run.Labels, agentRunChainLabel)
 	if err := c.Update(context.Background(), run); err != nil {
 		t.Fatalf("malform child labels: %v", err)
 	}
@@ -527,9 +630,10 @@ func TestAgentChainMalformedExactSourceOrphanBlocksNewStart(t *testing.T) {
 func TestAgentChainLostStatusIntervalRetryKeepsOneChild(t *testing.T) {
 	scheme := newAgentChainScheme(t)
 	chain := baseChain("interval-orphan")
+	chain.Spec.Steps = chain.Spec.Steps[:1]
 	chain.Spec.StartIntervalSeconds = 60
 	chain.CreationTimestamp = metav1.NewTime(time.Now().UTC().Add(-2 * time.Minute).Truncate(time.Second))
-	c := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(&controlv1alpha1.AgentChain{}).WithObjects(chain).Build()
+	c := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(&controlv1alpha1.AgentChain{}, &controlv1alpha1.AgentRun{}).WithObjects(chain).Build()
 	r := &AgentChainReconciler{Client: c, Scheme: scheme}
 	req := reconcile.Request{NamespacedName: types.NamespacedName{Namespace: chain.Namespace, Name: chain.Name}}
 	if _, err := r.Reconcile(context.Background(), req); err != nil {
@@ -550,6 +654,29 @@ func TestAgentChainLostStatusIntervalRetryKeepsOneChild(t *testing.T) {
 	runs := &controlv1alpha1.AgentRunList{}
 	if err := c.List(context.Background(), runs); err != nil || len(runs.Items) != 1 {
 		t.Fatalf("interval retry overlapped orphan: runs=%d err=%v", len(runs.Items), err)
+	}
+	if err := c.Get(context.Background(), client.ObjectKeyFromObject(chain), stored); err != nil {
+		t.Fatalf("get recovered interval: %v", err)
+	}
+	if stored.Status.NextStartAt == nil || !stored.Status.NextStartAt.After(chain.CreationTimestamp.Time) {
+		t.Fatalf("recovery did not reconstruct interval receipt: %#v", stored.Status)
+	}
+	run := &controlv1alpha1.AgentRun{}
+	if err := c.Get(context.Background(), client.ObjectKey{Namespace: stored.Status.ActiveRunRef.Namespace, Name: stored.Status.ActiveRunRef.Name}, run); err != nil {
+		t.Fatalf("get interval run: %v", err)
+	}
+	run.Status.Phase = controlv1alpha1.AgentRunPhaseSucceeded
+	if err := c.Status().Update(context.Background(), run); err != nil {
+		t.Fatalf("finish interval run: %v", err)
+	}
+	if _, err := r.Reconcile(context.Background(), req); err != nil {
+		t.Fatalf("finish recovered interval: %v", err)
+	}
+	if _, err := r.Reconcile(context.Background(), req); err != nil {
+		t.Fatalf("post-interval completion: %v", err)
+	}
+	if err := c.List(context.Background(), runs); err != nil || len(runs.Items) != 1 {
+		t.Fatalf("recovered interval replayed terminal child: runs=%d err=%v", len(runs.Items), err)
 	}
 }
 
