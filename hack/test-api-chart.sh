@@ -126,7 +126,14 @@ done
 helm template "${release}" "${chart}" "${api_args[@]}" \
   --show-only templates/api-clusterrole.yaml >"${tmp_dir}/rbac.yaml"
 grep -q 'resources: \["pods/log"\]' "${tmp_dir}/rbac.yaml" || fail "API RBAC cannot read pod logs"
-awk '/^rules:/{capture=1} capture' "${tmp_dir}/rbac.yaml" >"${tmp_dir}/rbac-rules.yaml"
+awk '
+  /^rules:/ { capture=1 }
+  capture { lines[++count]=$0 }
+  END {
+    while (count > 0 && lines[count] == "") { count-- }
+    for (i=1; i<=count; i++) { print lines[i] }
+  }
+' "${tmp_dir}/rbac.yaml" >"${tmp_dir}/rbac-rules.yaml"
 cat >"${tmp_dir}/expected-rbac-rules.yaml" <<'EOF'
 rules:
   - apiGroups: ["control.anvil.hazyforge.io"]
