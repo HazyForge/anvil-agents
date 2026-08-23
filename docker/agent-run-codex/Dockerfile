@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 
-ARG GO_VERSION=1.26.5
+ARG GO_VERSION=1.26.6
 FROM golang:${GO_VERSION}-bookworm AS agent-feedback-builder
 
 ARG TARGETOS
@@ -9,7 +9,7 @@ ARG TARGETARCH
 WORKDIR /src
 
 # anvil-hotline is owned by github.com/hazyforge/anvil-hotline (public).
-ARG ANVIL_HOTLINE_VERSION=v0.1.0
+ARG ANVIL_HOTLINE_VERSION=v0.1.1-0.20260823170647-28f84dd1f978
 RUN --mount=type=cache,target=/go/pkg/mod \
 	--mount=type=cache,target=/root/.cache/go-build \
 	mkdir -p /out \

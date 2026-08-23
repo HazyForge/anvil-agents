@@ -19,7 +19,7 @@ concurrency:
 
 env:
   RELEASE_TAG: ${{ inputs.tag }}
-  GO_VERSION: "1.26.5"
+  GO_VERSION: "1.26.6"
   TRIVY_VERSION: v0.63.0
   TRIVY_SEVERITY: HIGH,CRITICAL
 
@@ -116,12 +116,13 @@ jobs:
           test "${#pins[@]}" -eq 1
           ver="${pins[0]}"
           go install golang.org/x/vuln/cmd/govulncheck@latest
-          work="$(mktemp -d)"
-          git clone --depth 1 --branch "${ver}" \
-            https://github.com/HazyForge/anvil-hotline.git "${work}/anvil-hotline"
-          cd "${work}/anvil-hotline"
+          module_json="$(go mod download -json "github.com/hazyforge/anvil-hotline@${ver}")"
+          work="$(jq -r '.Dir // empty' <<<"${module_json}")"
+          test -n "${work}" && test -d "${work}"
+          cd "${work}"
           govulncheck ./...
           go build -trimpath -o /tmp/anvil-hotline ./cmd/anvil-hotline
+          /tmp/anvil-hotline thread --help >/dev/null
           govulncheck -mode=binary /tmp/anvil-hotline
           trivy fs --severity "${TRIVY_SEVERITY}" --ignore-unfixed --exit-code 1 .
 
