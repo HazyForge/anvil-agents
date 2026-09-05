@@ -17,7 +17,7 @@ presence grants no Kubernetes authority.
 | Run create / list / logs / debug | **`anvil-agentctl run`** | kubeconfig + RBAC |
 | Durable-home auth reauth | **`anvil-agentctl auth`** | kubeconfig + RBAC |
 | Manager mutations under Application policy | **Anvil Hub agent-management HTTP API** (private Primaris) | SPIFFE / Hub session |
-| Static `.hazyforge/agents` PR proposals | Hub + `AgentConfigurationChange` | Hub / policy-gated SA |
+| Static `.hazyforge/agents` PR proposals in application repos | Hub + `AgentConfigurationChange` | Hub / policy-gated SA |
 
 There is **no** `anvilctl agent` command on private Primaris `anvilctl`. Product
 managers call Hub; human kube fleet ops use this CLI. Open-source installs

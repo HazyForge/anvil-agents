@@ -20,6 +20,10 @@ documentation.
   reabsorb Hub policy clients into this repository.
 - Avoid running this controller and the former anvil-primaris agent
   reconcilers at the same time.
+- This repository does not ship an in-repo self-development agent fleet under
+  `.hazyforge/agents/` or advertise cluster agent roles. Work on anvil-agents
+  is driven externally. Do not restore Secret or ServiceAccount material for a
+  retired PR-writer path.
 - Keep the optional OIDC-facing AgentRun API in a separate process and
   ServiceAccount from the controller. It may read AgentRuns and their verified
   Job, Pod, and `agent` container logs. When `runs.createEnabled=true` it may

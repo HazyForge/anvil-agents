@@ -185,7 +185,12 @@ Look for:
 
 Objects labeled `control.anvil.hazyforge.io/ownership: gitops` may only be
 mutated by Argo CD in production clusters. Use `ownership: operator` for live
-experiments, then promote complete YAML under `.hazyforge/agents/`.
+experiments, then promote complete YAML under the consuming application's
+`.hazyforge/agents/` tree.
+
+`HazyForge/anvil-agents` itself does not ship an in-repo self-development
+fleet. Cluster agent roles for this operator are operated externally rather
+than advertised from this repository.
 
 ## Safety defaults
 
