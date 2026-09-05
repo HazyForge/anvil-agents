@@ -230,6 +230,8 @@ files are maintainer build and test contracts. The
 deployment with environment-specific identity, credentials, routing, storage,
 placement, and image pins. None of those files is a chart default or runtime
 dependency; other consumers provide their own Helm values or GitOps layer.
+This repository does not advertise cluster agent roles or ship a
+self-development fleet under `.hazyforge/agents/`.
 
 ## Project Status
 
