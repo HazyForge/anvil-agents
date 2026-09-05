@@ -30,7 +30,7 @@ test:
 
 # Local mirrors of the public GitHub Actions security program
 # (.github/workflows/security.yml). Not part of Primaris lifecycle.
-# Prefer the go.mod toolchain (go1.26.5+) so stdlib CVE scans match CI.
+# Prefer the go.mod toolchain (go1.26.6+) so stdlib CVE scans match CI.
 security-govulncheck:
 	@command -v govulncheck >/dev/null || go install golang.org/x/vuln/cmd/govulncheck@latest
 	govulncheck ./...

@@ -130,12 +130,13 @@ extraVolumeMounts:
     readOnly: true
 nodeSelector:
   kubernetes.io/arch: amd64
-affinity:
-  podAffinity:
-    requiredDuringSchedulingIgnoredDuringExecution:
-      - labelSelector:
-          matchLabels:
-            app.kubernetes.io/name: anvilhub
-        namespaces:
-          - anvilhub
-        topologyKey: kubernetes.io/hostname
+# Archive state is PostgreSQL-backed through the cluster Service; the
+# controller no longer needs the retired node-local archive-path colocation.
+# Omitting the control-plane affinity and toleration keeps it on an eligible
+# worker and preserves memory for the single control-plane's static pods.
+resources:
+  requests:
+    cpu: 50m
+    memory: 512Mi
+  limits:
+    memory: 1Gi
