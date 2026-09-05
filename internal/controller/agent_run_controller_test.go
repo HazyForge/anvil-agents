@@ -163,6 +163,47 @@ func TestAgentRunStatusReportsFromOutputAppliesDecision(t *testing.T) {
 	}
 }
 
+func TestAgentRunProgressClassificationDoesNotReplaceDecision(t *testing.T) {
+	t.Parallel()
+
+	reports := agentRunStatusReportsFromOutput(strings.Join([]string{
+		`ANVIL_AGENT_RUN_STATUS_JSON={"type":"progress","stage":"steward-input-result","classification":"audited","action":"new-proof","summary":"Input run audited."}`,
+		`ANVIL_AGENT_RUN_STATUS_JSON={"type":"decision","classification":"routed","action":"updated-issue","summary":"Batch routed."}`,
+	}, "\n"))
+	status := controlv1alpha1.AgentRunStatus{}
+	agentRunApplyStatusReports(&status, reports)
+	if len(status.Reports) != 2 {
+		t.Fatalf("reports = %d, want 2", len(status.Reports))
+	}
+	if got, want := status.Reports[0].Classification, "audited"; got != want {
+		t.Fatalf("progress classification = %q, want %q", got, want)
+	}
+	if status.Decision == nil {
+		t.Fatal("status.Decision is nil")
+	}
+	if got, want := status.Decision.Classification, "routed"; got != want {
+		t.Fatalf("decision classification = %q, want %q", got, want)
+	}
+	if got, want := status.Decision.Action, "updated-issue"; got != want {
+		t.Fatalf("decision action = %q, want %q", got, want)
+	}
+}
+
+func TestAgentRunLegacyUntypedClassificationStillAppliesDecision(t *testing.T) {
+	t.Parallel()
+
+	report := controlv1alpha1.AgentRunStatusReport{
+		Classification: "legacy",
+		Action:         "observe",
+		Summary:        "Legacy untyped report.",
+	}
+	status := controlv1alpha1.AgentRunStatus{}
+	agentRunApplyStatusReports(&status, []controlv1alpha1.AgentRunStatusReport{report})
+	if status.Decision == nil || status.Decision.Classification != "legacy" {
+		t.Fatalf("legacy report decision = %#v, want legacy fallback", status.Decision)
+	}
+}
+
 func TestAgentRunArchivesTerminalRun(t *testing.T) {
 	t.Parallel()
 
@@ -3122,13 +3163,13 @@ func TestAgentRunStatusReportsPreserveDecisionWhenTrimmed(t *testing.T) {
 	lines := []string{
 		`ANVIL_AGENT_RUN_STATUS_JSON={"type":"decision","classification":"missing human input","action":"observe","summary":"Needs credentials.","needsHuman":true,"humanFollowUp":"Attach GitHub credentials."}`,
 	}
-	for i := 0; i < 40; i++ {
+	for i := 0; i < 140; i++ {
 		lines = append(lines, `ANVIL_AGENT_RUN_STATUS_JSON={"type":"progress","stage":"poll","summary":"Still watching."}`)
 	}
 
 	reports := agentRunStatusReportsFromOutput(strings.Join(lines, "\n"))
-	if len(reports) != 25 {
-		t.Fatalf("reports = %d, want 25", len(reports))
+	if len(reports) != 100 {
+		t.Fatalf("reports = %d, want 100", len(reports))
 	}
 	if reports[0].Type != "decision" {
 		t.Fatalf("first trimmed report = %#v, want preserved decision", reports[0])

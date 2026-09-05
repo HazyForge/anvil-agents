@@ -29,6 +29,9 @@ AgentRun that can install tools, follow skills, contact a human, and open PRs.
   - `ANVIL_HOTLINE_TIMEOUT` or `ANVIL_AGENT_FEEDBACK_TIMEOUT` via profile
     `extraEnv` (e.g. `30m`, `1h`)
   - default if unset: `30m`
+- Report progress while waiting. A reply leads to a normal decision after
+  authority validation. Emit terminal `needsHuman` only after timeout or hard
+  failure, then stop without a later success decision.
 
 **Repository / branch scope** (profile or run `spec.scope.repository`)
 
@@ -82,7 +85,7 @@ spec:
         mkdir -p "${install_dir}"
         export PATH="${install_dir}:${PATH}"
         GOBIN="${install_dir}" CGO_ENABLED=0 \
-          go install github.com/hazyforge/anvil-hotline/cmd/anvil-hotline@v0.1.0
+          go install github.com/hazyforge/anvil-hotline/cmd/anvil-hotline@v0.2.0
       verifyCommand: [bash, -lc, 'export PATH="$HOME/.local/bin:$PATH"; anvil-hotline --help']
 ```
 

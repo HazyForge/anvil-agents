@@ -19,8 +19,11 @@ the run exists and what it may do.
   consent, bypass branch protection, move money, delete production data, or
   escalate privileges.
 - A mounted tool is not authorization to use it outside the declared scope.
-- If evidence or authority is ambiguous, record `needsHuman` and ask one narrow
-  question with `anvil-hotline` when it is configured.
+- If evidence or authority is ambiguous and Hotline is configured, record
+  progress and ask one narrow question. Emit terminal `needsHuman` only after
+  the full Hotline timeout or a hard tool failure, then exit zero so the
+  controller consumes that handled terminal report. Do not emit a successful
+  decision; a nonzero Job is Failed.
 
 ## Evidence
 

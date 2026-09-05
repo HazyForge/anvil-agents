@@ -12,6 +12,9 @@ Keeping these layers separate lets the same loop use a Markdown vault, an HTTP
 search service, a vector store, or an internal runbook API without changing the
 controller.
 
+For a reusable multi-role delivery method built from an `AgentSkillSet`, see
+[Application release steward](application-release-steward.md).
+
 ## HTTP Knowledge Service
 
 `examples/knowledge-service/profile.yaml` defines a concrete, provider-neutral

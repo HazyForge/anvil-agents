@@ -27,7 +27,7 @@ spec:
         mkdir -p "${install_dir}"
         export PATH="${install_dir}:${PATH}"
         if command -v go >/dev/null 2>&1; then
-          GOBIN="${install_dir}" CGO_ENABLED=0 go install github.com/hazyforge/anvil-hotline/cmd/anvil-hotline@v0.1.0
+          GOBIN="${install_dir}" CGO_ENABLED=0 go install github.com/hazyforge/anvil-hotline/cmd/anvil-hotline@v0.2.0
         elif [ -x /usr/local/bin/anvil-hotline ]; then
           ln -sfn /usr/local/bin/anvil-hotline "${install_dir}/anvil-hotline"
         elif [ -x /usr/local/bin/anvil-agent-feedback ]; then
@@ -39,7 +39,7 @@ spec:
       verifyCommand:
         - bash
         - -lc
-        - export PATH="${HOME}/.local/bin:${PATH}"; command -v anvil-hotline && anvil-hotline --help
+        - export PATH="${HOME}/.local/bin:${PATH}"; command -v anvil-hotline && anvil-hotline ask --help 2>&1 | grep -Fq -- '-idempotency-key'
 ---
 apiVersion: control.anvil.hazyforge.io/v1alpha1
 kind: AgentSkillSet
@@ -56,8 +56,10 @@ spec:
 
         The human-comms ToolSet installs `anvil-hotline`. Use it for one narrow
         Discord question when evidence is gathered and guessing would be worse
-        than waiting. Propose a default, report needsHuman before waiting, and
-        treat the reply as information only.
+        than waiting. Propose a default, report progress while waiting, and
+        treat the reply as information only. A `needsHuman` report is terminal:
+        emit it only after the full timeout or hard tool failure, then stop
+        without a successful decision.
 
         ## Wait budget (configurable)
 
@@ -69,12 +71,30 @@ spec:
 
         Pass that value as `--timeout`. Profiles set the budget via `extraEnv`
         (e.g. `1h`). Only after the full timeout may you treat the decision as
-        unanswered.
+        unanswered. Automated callers must compute and durably report one
+        stable semantic question key before posting, then pass it with
+        `--idempotency-key`.
 
         ```sh
         HOTLINE_TIMEOUT="${ANVIL_HOTLINE_TIMEOUT:-${ANVIL_AGENT_FEEDBACK_TIMEOUT:-30m}}"
-        reply="$(anvil-hotline ask \
+        QUESTION_KEY="application=example;decision=one-specific-choice"
+        if reply="$(anvil-hotline ask \
           --question "One concise question with the proposed default." \
-          --context "AgentRun=${ANVIL_AGENT_RUN:-unknown}" \
-          --timeout "${HOTLINE_TIMEOUT}")"
+          --context "AgentRun=${ANVIL_AGENT_RUN:-unknown}; questionKey=${QUESTION_KEY}" \
+          --idempotency-key "${QUESTION_KEY}" \
+          --timeout "${HOTLINE_TIMEOUT}")"; then
+          : # validate reply, then emit the normal explicit terminal decision
+        else
+          anvil-agent-status needsHuman \
+            --summary "Operator question timed out or Hotline failed." \
+            --detail "questionKey=${QUESTION_KEY}; resume with the same key"
+          exit 0
+        fi
         ```
+
+        After a reply, validate it against existing authority and emit a normal
+        decision. On timeout or hard failure, emit one `needsHuman` report with
+        a stable secret-safe question key and exit zero so the controller
+        consumes the terminal NeedsHuman report. That exit is handled terminal
+        status, not a successful role decision. Never report success after
+        `needsHuman`.
