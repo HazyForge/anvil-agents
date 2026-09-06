@@ -1,4 +1,6 @@
 {{- if .Values.api.enabled }}
+{{- include "anvil-agents.validateArchive" . }}
+{{- include "anvil-agents.validateChat" . }}
 {{- $issuer := required "api.config.oidc.issuer is required when api.enabled=true" .Values.api.config.oidc.issuer }}
 {{- if not .Values.api.config.oidc.audiences }}
 {{- fail "api.config.oidc.audiences must contain at least one audience when api.enabled=true" }}
@@ -36,8 +38,9 @@
 {{- $runsCreate := dig "runs" "createEnabled" false $.Values.api.config }}
 {{- $controlsRead := dig "controls" "readEnabled" false $.Values.api.config }}
 {{- $controlsWrite := dig "controls" "writeEnabled" false $.Values.api.config }}
+{{- $chatEnabled := dig "chat" "enabled" false $.Values.api.config }}
 {{- range $permission := $binding.permissions }}
-{{- if not (has $permission (list "anvil-agents:runs:read" "anvil-agents:runs:stream" "anvil-agents:runs:create" "anvil-agents:composition:read" "anvil-agents:composition:write" "anvil-agents:controls:read" "anvil-agents:controls:write")) }}
+{{- if not (has $permission (list "anvil-agents:runs:read" "anvil-agents:runs:stream" "anvil-agents:runs:create" "anvil-agents:composition:read" "anvil-agents:composition:write" "anvil-agents:controls:read" "anvil-agents:controls:write" "anvil-agents:chat:read" "anvil-agents:chat:write")) }}
 {{- fail (printf "api.config.authorization binding contains unsupported permission %q" $permission) }}
 {{- end }}
 {{- if and (eq $permission "anvil-agents:composition:read") (not $compositionRead) }}
@@ -54,6 +57,9 @@
 {{- end }}
 {{- if and (eq $permission "anvil-agents:controls:write") (not $controlsWrite) }}
 {{- fail "api.config.authorization grants anvil-agents:controls:write but api.config.controls.writeEnabled is false" }}
+{{- end }}
+{{- if and (or (eq $permission "anvil-agents:chat:read") (eq $permission "anvil-agents:chat:write")) (not $chatEnabled) }}
+{{- fail "api.config.authorization grants a standing-chat permission but api.config.chat.enabled is false" }}
 {{- end }}
 {{- end }}
 {{- if not (or $binding.namespaces $binding.namespacesFromClaim) }}

@@ -202,6 +202,11 @@ adverse context.
 
 PostgreSQL archive credentials stay in Secret references, but archived rows
 can contain prompts, source context, decisions, reports, and bounded output.
+Standing chat, when enabled, shares that Secret/URI pattern and stores thread
+content in schema `anvil_agents_chat`. The API still does not read Secret
+values from the Kubernetes API; it only consumes the mounted URI environment
+variable. Treat chat rows as sensitive conversation data with the same backup
+and access controls as archives.
 Restrict database and Secret access, use encrypted transport and storage where
 appropriate, and define backup and row-retention policy. The standalone chart
 mode is a single-instance convenience database without TLS or backups; use an

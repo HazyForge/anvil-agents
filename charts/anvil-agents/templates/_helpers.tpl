@@ -164,3 +164,42 @@ uri
   {{- $_ := required "archive.cloudnativePG.storage.size is required" .Values.archive.cloudnativePG.storage.size -}}
 {{- end -}}
 {{- end }}
+
+{{- define "anvil-agents.chatSecretName" -}}
+{{- if .Values.api.chatDatabaseURLSecret.name -}}
+  {{- .Values.api.chatDatabaseURLSecret.name -}}
+{{- else -}}
+  {{- include "anvil-agents.archiveSecretName" . -}}
+{{- end -}}
+{{- end }}
+
+{{- define "anvil-agents.chatSecretKey" -}}
+{{- if .Values.api.chatDatabaseURLSecret.name -}}
+  {{- default "url" .Values.api.chatDatabaseURLSecret.key -}}
+{{- else -}}
+  {{- include "anvil-agents.archiveSecretKey" . -}}
+{{- end -}}
+{{- end }}
+
+{{- define "anvil-agents.validateChat" -}}
+{{- $chatEnabled := dig "chat" "enabled" false .Values.api.config -}}
+{{- if and $chatEnabled (not .Values.api.enabled) -}}
+  {{- fail "api.config.chat.enabled requires api.enabled=true" -}}
+{{- end -}}
+{{- if and .Values.api.chatDatabaseURLSecret.name (not $chatEnabled) -}}
+  {{- fail "api.chatDatabaseURLSecret can be configured only when api.config.chat.enabled=true" -}}
+{{- end -}}
+{{- if $chatEnabled -}}
+  {{- $secretName := include "anvil-agents.chatSecretName" . -}}
+  {{- if not $secretName -}}
+    {{- fail "api.config.chat.enabled requires an enabled archive.mode or api.chatDatabaseURLSecret.name" -}}
+  {{- end -}}
+  {{- if or (gt (len $secretName) 253) (not (regexMatch "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$" $secretName)) -}}
+    {{- fail "standing-chat database Secret name must be a valid DNS subdomain" -}}
+  {{- end -}}
+  {{- $secretKey := include "anvil-agents.chatSecretKey" . -}}
+  {{- if or (not $secretKey) (not (regexMatch "^[-._A-Za-z0-9]+$" $secretKey)) -}}
+    {{- fail "standing-chat database Secret key may contain only letters, numbers, dash, underscore, and dot" -}}
+  {{- end -}}
+{{- end -}}
+{{- end }}

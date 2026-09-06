@@ -188,6 +188,12 @@ monitoring, capacity, and row-retention policy outside the controller. The
 standalone API and CLI currently read live Kubernetes AgentRuns, not archived
 rows.
 
+Standing chat can share this same Secret and URI. Enable
+`api.config.chat.enabled` and the API mounts `ANVIL_AGENTS_CHAT_DATABASE_URL`
+from the archive Secret by default, writing to schema `anvil_agents_chat`
+instead of `anvilhub_agent_run_archives`. See
+[Standing Chat Storage](standing-chat.md).
+
 Switching modes does not copy data. Back up, restore or replicate the existing
 database, point the new mode at the migrated data, verify a real archive row,
 and only then enable terminal retention.

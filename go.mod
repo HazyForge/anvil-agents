@@ -8,6 +8,7 @@ require (
 	github.com/coreos/go-oidc/v3 v3.20.0
 	github.com/go-jose/go-jose/v4 v4.1.4
 	github.com/go-logr/logr v1.4.4
+	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.10.0
 	github.com/spf13/pflag v1.0.10
 	github.com/spiffe/go-spiffe/v2 v2.8.1
@@ -33,7 +34,6 @@ require (
 	github.com/google/btree v1.1.3 // indirect
 	github.com/google/gnostic-models v0.7.0 // indirect
 	github.com/google/go-cmp v0.7.0 // indirect
-	github.com/google/uuid v1.6.0 // indirect
 	github.com/jackc/pgpassfile v1.0.0 // indirect
 	github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect
 	github.com/jackc/puddle/v2 v2.2.2 // indirect

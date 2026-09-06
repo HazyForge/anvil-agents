@@ -2,10 +2,11 @@
 
 The optional `anvil-agents-api` process exposes sanitized AgentRun state and a
 live Server-Sent Events (SSE) stream without granting clients Kubernetes
-credentials. It is a read-only resource server: it validates signed JWT OAuth
-access tokens using generic OpenID Connect discovery, but it does not log users
-in, issue tokens, refresh tokens, or create and mutate AgentRuns. Opaque access
-tokens, JWE tokens, and RFC 7662 introspection are not supported.
+credentials. It validates signed JWT OAuth access tokens using generic OpenID
+Connect discovery, but it does not log users in, issue tokens, or refresh
+tokens. AgentRun create remains an opt-in append-only gate. Standing chat, when
+enabled, writes threads and messages to PostgreSQL rather than Kubernetes.
+Opaque access tokens, JWE tokens, and RFC 7662 introspection are not supported.
 
 This gives operators and users one authenticated observation endpoint even
 when heavy runs are spread across many worker nodes. Status and per-run logs
@@ -15,10 +16,12 @@ merge independent runs into a distributed trace or shared conversation.
 The API runs separately from the controller with its own ServiceAccount. Its
 ClusterRole has cluster-wide read access to AgentRuns, Pods, Jobs, and Pod logs;
 application-layer namespace authorization and controller-owner checks narrow
-what each request can expose. It cannot read Secrets or mutate Kubernetes
-objects. A compromised API process could still read cluster-wide workload logs,
-so treat the workload and its ingress as sensitive. Keep create, approval,
-repository mutation, and delivery policy in the existing trusted policy plane.
+what each request can expose. It cannot read Secrets. Mutation of Kubernetes objects is limited to the
+opt-in composition, control, and append-only AgentRun create gates. Standing
+chat mutates PostgreSQL only. A compromised API process could still read
+cluster-wide workload logs, so treat the workload and its ingress as sensitive.
+Keep approval, repository mutation, and delivery policy in the existing trusted
+policy plane.
 
 ## Endpoints
 
@@ -28,6 +31,8 @@ repository mutation, and delivery policy in the existing trusted policy plane.
 | `GET /api/v1/namespaces/{namespace}/agent-runs/{name}` | `anvil-agents:runs:read` | Read one sanitized run summary |
 | `GET /api/v1/namespaces/{namespace}/agent-runs/{name}/events` | `anvil-agents:runs:read` and `anvil-agents:runs:stream` | Stream snapshot, status, log, and terminal SSE events |
 | `GET /healthz` and `GET /readyz` | none | Internal probes |
+| `GET/POST /api/v1/namespaces/{namespace}/chat/threads` | `anvil-agents:chat:read` / `anvil-agents:chat:write` | Optional standing-chat threads; deny-by-default, see [Standing Chat](standing-chat.md) |
+| `GET/POST /api/v1/namespaces/{namespace}/chat/threads/{threadID}/messages` | `anvil-agents:chat:read` / `anvil-agents:chat:write` | Optional standing-chat messages; assistant replies are stubbed until LangGraph |
 
 The API accepts access tokens only through `Authorization: Bearer`. Tokens in
 URLs are rejected. Browser clients must use authenticated `fetch()` and parse
