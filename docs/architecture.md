@@ -62,8 +62,11 @@ machines remain available. See
 
 These runs do not share process memory or a live conversation. `subagents`
 describes personas or delegated passes to the selected harness; it does not
-cause the controller to create child Jobs. Durable coordination requires an
-explicit API, Git repository, message bus, database, or `AgentDataVolume`.
+cause the controller to create child Jobs. Durable operator chat lives in
+PostgreSQL behind the optional standing-chat API
+([Standing Chat](standing-chat.md)), not on the AgentRun object. Other
+coordination still requires an explicit API, Git repository, message bus,
+database, or `AgentDataVolume`.
 
 ## Composition Boundaries
 

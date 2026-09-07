@@ -196,6 +196,11 @@ api:
     # Append-only AgentRun create for console agent cards.
     runs:
       createEnabled: false
+    # Standing-chat threads/messages in PostgreSQL. Disabled until explicitly
+    # enabled. The URI is never a chart/ConfigMap value; the API Pod reads
+    # ANVIL_AGENTS_CHAT_DATABASE_URL from a Secret (archive Secret by default).
+    chat:
+      enabled: false
     # Cluster-scoped AgentRunControl launch gates (pause/resume from the console).
     # GitOps-owned controls remain read-only; operator-created controls are
     # writable when writeEnabled is true.
@@ -219,6 +224,11 @@ api:
     annotations: {}
     parentRefs: []
     hostnames: []
+  # Optional Secret override for standing-chat PostgreSQL URI. Empty name
+  # reuses the archive Secret resolved from archive.mode when chat is enabled.
+  chatDatabaseURLSecret:
+    name: ""
+    key: url
   oidcCA:
     configMapName: ""
     key: ca.crt

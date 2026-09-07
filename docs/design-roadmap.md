@@ -47,6 +47,9 @@ Still out of scope for the first chain cut (and for overloaded AgentRun):
 fan-out, join, routing, approval gates, and external event sources. Those
 belong on later workflow extensions, not schedule or council.
 
+Standing chat is a separate OIDC API + PostgreSQL feature, not a Conversation
+CRD and not a live shared AgentRun session. See `docs/standing-chat.md`.
+
 Horizontal distribution of independent Jobs across worker nodes inside one
 Kubernetes cluster is already implemented and is a primary workload model.
 What is not implemented is cross-cluster dispatch or workflow-level fan-out

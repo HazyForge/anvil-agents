@@ -1,4 +1,5 @@
 {{- if .Values.api.enabled }}
+{{- include "anvil-agents.validateChat" . }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -22,6 +23,10 @@ spec:
         {{ with .Values.api.oidcCA.restartToken }}
         control.anvil.hazyforge.io/oidc-ca-restart: {{ . | quote }}
         {{ end }}
+        {{- $chatEnabled := dig "chat" "enabled" false .Values.api.config }}
+        {{- if and $chatEnabled .Values.archive.restartToken }}
+        control.anvil.hazyforge.io/archive-restart: {{ .Values.archive.restartToken | quote }}
+        {{- end }}
     spec:
       serviceAccountName: {{ include "anvil-agents.apiServiceAccountName" . }}
       securityContext:
@@ -51,6 +56,15 @@ spec:
               port: api
           securityContext:
 {{ toYaml .Values.api.securityContext | indent 12 }}
+          {{- $chatEnabled := dig "chat" "enabled" false .Values.api.config }}
+          {{- if $chatEnabled }}
+          env:
+            - name: ANVIL_AGENTS_CHAT_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "anvil-agents.chatSecretName" . | quote }}
+                  key: {{ include "anvil-agents.chatSecretKey" . | quote }}
+          {{- end }}
           resources:
 {{ toYaml .Values.api.resources | indent 12 }}
           volumeMounts:

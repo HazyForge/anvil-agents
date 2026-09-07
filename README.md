@@ -217,6 +217,7 @@ audience, and explicit namespace authorization bindings are configured. See
 - [Connect any application or Kubernetes API to adverse streams](docs/integrating-adverse-sources.md)
 - [Operations, upgrades, and uninstall](docs/operations.md)
 - [PostgreSQL archive modes and retention](docs/archive.md)
+- [Standing chat storage and API](docs/standing-chat.md)
 - [Design roadmap and known alpha boundaries](docs/design-roadmap.md)
 - [AgentRun API reference](docs/agent-run.md)
 - [Create and diagnose runs with anvil-agentctl](docs/cli.md)

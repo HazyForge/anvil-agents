@@ -9,6 +9,7 @@ interface Props {
   activeNamespace: string;
   compositionRead: boolean;
   controlsRead: boolean;
+  chatEnabled: boolean;
   onSelectNamespace: (namespace: string) => void;
   onAddNamespace: (namespace: string) => void;
   onRemoveNamespace: (namespace: string) => void;
@@ -20,6 +21,9 @@ function leafForPath(pathname: string): TreeLeafId {
   }
   if (pathname.startsWith("/controls")) {
     return "controls";
+  }
+  if (pathname.startsWith("/chat") || /\/ns\/[^/]+\/chat(\/|$)/.test(pathname)) {
+    return "chat";
   }
   if (pathname.startsWith("/profiles") || /\/ns\/[^/]+\/profiles(\/|$)/.test(pathname)) {
     return "profiles";
@@ -43,6 +47,9 @@ function pathForLeaf(namespace: string, leaf: TreeLeafId): string {
   }
   if (leaf === "profiles") {
     return "/profiles";
+  }
+  if (leaf === "chat") {
+    return "/chat";
   }
   return `/ns/${encodeURIComponent(namespace)}/${leaf}`;
 }
@@ -70,6 +77,7 @@ export function NamespaceTree({
   activeNamespace,
   compositionRead,
   controlsRead,
+  chatEnabled,
   onSelectNamespace,
   onAddNamespace,
   onRemoveNamespace,
@@ -204,6 +212,21 @@ export function NamespaceTree({
                             <span className="ns-subfolder-glyph" aria-hidden />
                             <span className="ns-subfolder-label">Library hub</span>
                             <span className="ns-subfolder-kind mono">all CRDs</span>
+                          </Link>
+                        </li>
+                      ) : null}
+                      {chatEnabled ? (
+                        <li>
+                          <Link
+                            className={`ns-subfolder ns-subfolder-link${
+                              isActiveNs && activeLeaf === "chat" ? " active" : ""
+                            }`}
+                            to="/chat"
+                            onClick={() => onSelectNamespace(ns)}
+                          >
+                            <span className="ns-subfolder-glyph" aria-hidden />
+                            <span className="ns-subfolder-label">Standing chat</span>
+                            <span className="ns-subfolder-kind mono">threads</span>
                           </Link>
                         </li>
                       ) : null}

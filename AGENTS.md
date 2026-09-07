@@ -35,8 +35,10 @@ documentation.
   not labeled `control.anvil.hazyforge.io/managed-by=anvil-agents-console` so
   Git remains source of truth for fleet config. The console presents
   `AgentRunProfile` objects as composition cards; other composition kinds live
-  under Library. The API must not acquire Secret access or policy-broker
-  authority.
+  under Library. When `chat.enabled=true` the API may persist standing-chat
+  threads and messages in PostgreSQL using the mounted archive (or override)
+  URI environment variable; this is not a Conversation CRD. The API must not
+  acquire Secret access or policy-broker authority.
 - OIDC configuration must remain provider-neutral and deny by default. Require
   an exact issuer, audience, explicit claim binding, namespace authorization,
   and exact CORS origins. Never accept access tokens in query strings or allow

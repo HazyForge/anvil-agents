@@ -20,6 +20,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	agentsv1alpha1 "github.com/hazyforge/anvil-agents/api/v1alpha1"
+	"github.com/hazyforge/anvil-agents/internal/chat"
 )
 
 type principalContextKey struct{}
@@ -41,6 +42,7 @@ type Server struct {
 	log        logr.Logger
 	httpServer *http.Server
 	limiter    *streamLimiter
+	chatStore  chat.Store
 }
 
 func NewServer(config Config, authenticator AccessTokenAuthenticator, runs client.Reader, logs AgentRunLogSource, log logr.Logger) (*Server, error) {
@@ -112,6 +114,7 @@ func (server *Server) routes() http.Handler {
 	mux.Handle("GET /api/v1/namespaces/{namespace}/agent-runs/{name}/events", server.authenticate(http.HandlerFunc(server.handleRunEvents)))
 	server.registerCompositionRoutes(mux)
 	server.registerControlRoutes(mux)
+	server.registerChatRoutes(mux)
 	// Console SPA at / with client-route fallback. More specific /api and
 	// probe routes take precedence in Go 1.22+ ServeMux.
 	mux.HandleFunc("/", server.handleUI)
@@ -158,6 +161,9 @@ func (server *Server) handleUIConfig(writer http.ResponseWriter, _ *http.Request
 		"runs": map[string]any{
 			"createEnabled": server.config.Runs.CreateEnabled,
 		},
+		"chat": map[string]any{
+			"enabled": server.config.Chat.Enabled,
+		},
 	})
 }
 
@@ -165,10 +171,22 @@ func (server *Server) handleHealth(writer http.ResponseWriter, _ *http.Request) 
 	writeJSON(writer, http.StatusOK, map[string]bool{"ok": true})
 }
 
-func (server *Server) handleReady(writer http.ResponseWriter, _ *http.Request) {
+func (server *Server) handleReady(writer http.ResponseWriter, request *http.Request) {
 	if !server.authenticator.Ready() {
 		writeAPIError(writer, http.StatusServiceUnavailable, "authentication_unavailable", "OIDC verifier is not ready")
 		return
+	}
+	if server.config.Chat.Enabled {
+		if server.chatStore == nil {
+			writeAPIError(writer, http.StatusServiceUnavailable, "chat_unavailable", "standing-chat store is unavailable")
+			return
+		}
+		ctx, cancel := context.WithTimeout(request.Context(), 2*time.Second)
+		defer cancel()
+		if err := server.chatStore.Ping(ctx); err != nil {
+			writeAPIError(writer, http.StatusServiceUnavailable, "chat_unavailable", "standing-chat store is unavailable")
+			return
+		}
 	}
 	writeJSON(writer, http.StatusOK, map[string]bool{"ready": true})
 }

@@ -133,6 +133,10 @@ retained across normal uninstall/prune paths. That protects data; it does not
 provide backups, restores, HA, PostgreSQL upgrades, or SQL row expiry. See
 [PostgreSQL Archive](archive.md) before selecting a mode or enabling retention.
 
+Standing chat, when enabled, shares that archive URI Secret with the API
+process and stores threads in schema `anvil_agents_chat`. See
+[Standing Chat](standing-chat.md).
+
 The controller process writes archive rows; AgentRun worker Pods do not. The
 database hostname, TLS policy, firewall or `pg_hba`, and network policy must
 therefore allow every node eligible to host a controller replica. If database
