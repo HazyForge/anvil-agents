@@ -20,6 +20,9 @@ export type UIConfig = {
   runs: {
     createEnabled: boolean;
   };
+  chat?: {
+    enabled: boolean;
+  };
 };
 
 let cached: UIConfig | null = null;
@@ -47,6 +50,7 @@ export async function loadUIConfig(force = false): Promise<UIConfig> {
     const composition = (body as UIConfig).composition;
     const controls = (body as UIConfig).controls;
     const runs = (body as UIConfig).runs;
+    const chat = (body as UIConfig).chat;
     cached = {
       productTitle: body.productTitle || "Anvil Agents Console",
       defaultNamespaces: Array.isArray(body.defaultNamespaces) ? body.defaultNamespaces : [],
@@ -69,6 +73,9 @@ export async function loadUIConfig(force = false): Promise<UIConfig> {
       },
       runs: {
         createEnabled: Boolean(runs?.createEnabled),
+      },
+      chat: {
+        enabled: Boolean(chat?.enabled),
       },
     };
     return cached;

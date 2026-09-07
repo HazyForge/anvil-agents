@@ -6,9 +6,9 @@ or, later, a fleet/master mode. They persist in PostgreSQL. This repository
 does not add a Conversation CRD.
 
 The first cut stores threads and messages and exposes OIDC-gated HTTP routes on
-`anvil-agents-api`. LLM and tool execution are stubbed. LangGraph, a console
-chat page, agent-to-agent inbox, and injecting chat into live AgentRuns are
-out of scope.
+`anvil-agents-api`. LLM and tool execution are stubbed. The Anvil Agents Console
+includes a standing-chat UI gated by `ui-config` `chat.enabled`. LangGraph tools,
+agent-to-agent inbox, and injecting chat into live AgentRuns remain out of scope.
 
 ## Storage
 
@@ -101,21 +101,28 @@ namespace. Append always stores a `user` message from the caller; the current
 assistant reply is a labeled echo stub (`metadata.stub=true`). Clients cannot
 spoof `assistant`, `system`, or `tool` roles through this API.
 
-`GET /ui-config.json` includes `chat.enabled` so a later console page can hide
-the feature until it is turned on.
+`GET /ui-config.json` includes `chat.enabled`. When true, the console shows a
+**Standing chat** nav entry and routes:
+
+| Route | Purpose |
+| --- | --- |
+| `/chat` | Thread list + create for the active namespace (persona / `AgentRunProfile`) |
+| `/ns/{namespace}/chat` | Same hub scoped to that namespace |
+| `/ns/{namespace}/chat/{threadId}` | Thread detail, message history, and composer |
+
+The console uses the same OIDC bearer session as the rest of the SPA. Stub
+assistant replies (`metadata.stub=true`) render with a stub chip.
 
 ## Non-goals
 
 - No Conversation (or other chat) CRD
 - No Kubernetes Secret byte access from chat code
 - No LangGraph microservice, gRPC worker, or tool allowlist
-- No console chat UI in this change
 - No agent-to-agent inbox
 - No soft-inject of chat history into live AgentRuns
 
-Follow-ups: a LangGraph worker that writes `anvil_agents_chat.checkpoints`, a
-tool allowlist bound to the persona's `AgentToolSet`, and a console thread
-list/detail page that calls these routes.
+Follow-ups: a LangGraph worker that writes `anvil_agents_chat.checkpoints`, and a
+tool allowlist bound to the persona's `AgentToolSet`.
 
 ## Verification
 
