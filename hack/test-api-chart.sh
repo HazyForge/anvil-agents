@@ -75,11 +75,13 @@ grep -q 'maxRunsPerDay:' "${tmp_dir}/disabled.yaml" || fail "AgentSchedule daily
 grep -q 'name: adversesignals.control.anvil.hazyforge.io' "${tmp_dir}/disabled.yaml" || fail "AdverseSignal CRD is missing"
 grep -q 'AdverseSignal spec is immutable' "${tmp_dir}/disabled.yaml" || fail "AdverseSignal immutability validation is missing"
 helm template "${release}" "${chart}" --show-only templates/clusterrole.yaml >"${tmp_dir}/controller-rbac.yaml"
-for resource in agentharnessprofiles agentskillsets agenttoolsets agentcouncils agentexternaltriggers; do
+for resource in agentharnessprofiles agentskillsets agenttoolsets agentcouncils; do
   grep -q "${resource}" "${tmp_dir}/controller-rbac.yaml" || fail "controller RBAC is missing ${resource}"
 done
 grep -q 'adversesignals' "${tmp_dir}/controller-rbac.yaml" || fail "controller RBAC is missing adversesignals"
+grep -q 'agentexternaltriggers' "${tmp_dir}/controller-rbac.yaml" || fail "controller RBAC is missing agentexternaltriggers"
 grep -A1 'resources: \["adversesignals"\]' "${tmp_dir}/controller-rbac.yaml" | grep -q '"patch"' || fail "controller RBAC cannot patch AdverseSignal finalizers"
+grep -A1 'resources: \["agentexternaltriggers"\]' "${tmp_dir}/controller-rbac.yaml" | grep -q '"patch"' || fail "controller RBAC cannot patch AgentExternalTrigger finalizers"
 grep -q 'adversesignals/finalizers' "${tmp_dir}/controller-rbac.yaml" || fail "controller RBAC is missing AdverseSignal finalizer updates"
 grep -q 'agentexternaltriggers/finalizers' "${tmp_dir}/controller-rbac.yaml" || fail "controller RBAC is missing AgentExternalTrigger finalizer updates"
 helm template "${release}" "${chart}" \

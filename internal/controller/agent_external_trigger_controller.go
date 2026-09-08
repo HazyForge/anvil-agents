@@ -26,7 +26,7 @@ const (
 	agentExternalTriggerHTTPRouteFinalizer = "control.anvil.hazyforge.io/external-trigger-httproute"
 )
 
-// +kubebuilder:rbac:groups="control.anvil.hazyforge.io",resources=agentexternaltriggers,verbs=get;list;watch
+// +kubebuilder:rbac:groups="control.anvil.hazyforge.io",resources=agentexternaltriggers,verbs=get;list;patch;watch
 // +kubebuilder:rbac:groups="control.anvil.hazyforge.io",resources=agentexternaltriggers/status,verbs=get;patch;update
 // +kubebuilder:rbac:groups="control.anvil.hazyforge.io",resources=agentexternaltriggers/finalizers,verbs=update
 // +kubebuilder:rbac:groups="gateway.networking.k8s.io",resources=httproutes,verbs=create;delete;get;list;patch;update;watch
