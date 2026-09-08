@@ -1,0 +1,29 @@
+apiVersion: control.anvil.hazyforge.io/v1alpha1
+kind: AgentExternalTrigger
+metadata:
+  name: github-push-operator
+  namespace: agents
+  labels:
+    control.anvil.hazyforge.io/managed-by: anvil-agents-console
+spec:
+  suspend: false
+  source:
+    kind: githubWebhook
+    github:
+      repositories:
+        - HazyForge/anvil-agents
+      events:
+        - push
+        - pull_request
+  secretRef:
+    name: github-webhook
+    # webhookSecretKey defaults to webhookSecret
+  targets:
+    - kind: AgentRunProfile
+      name: operator
+  promptTemplate: |
+    GitHub {{eventType}} on {{repository}} (delivery {{deliveryID}}).
+
+    {{summary}}
+  concurrencyPolicy: Forbid
+  maxDeliveriesPerDay: 48

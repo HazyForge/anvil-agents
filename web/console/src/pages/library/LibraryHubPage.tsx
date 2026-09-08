@@ -5,9 +5,10 @@ import { CRD_AS_CARD_HELP, CRD_AS_CARD_MANTRA } from "../../design/mantra";
 interface Props {
   namespace: string;
   writeEnabled: boolean;
+  externalTriggersEnabled: boolean;
 }
 
-export function LibraryHubPage({ namespace, writeEnabled }: Props) {
+export function LibraryHubPage({ namespace, writeEnabled, externalTriggersEnabled }: Props) {
   if (!namespace) {
     return (
       <div className="panel">
@@ -16,7 +17,15 @@ export function LibraryHubPage({ namespace, writeEnabled }: Props) {
     );
   }
 
-  const kinds = COMPOSITION_KINDS.filter((kind) => kind.route !== "profiles");
+  const kinds = COMPOSITION_KINDS.filter((kind) => {
+    if (kind.route === "profiles") {
+      return false;
+    }
+    if (kind.route === "external-triggers" && !externalTriggersEnabled) {
+      return false;
+    }
+    return true;
+  });
 
   return (
     <div className="library-hub">

@@ -374,6 +374,8 @@ func TestUIConfigExposesPublicOIDCSettings(t *testing.T) {
 		`"issuer":"https://issuer.example"`,
 		`urn:zitadel:iam:org:project:id:anvil-agents:aud`,
 		`"hazy-trade"`,
+		`"externalTriggers"`,
+		`"enabled":false`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("ui-config missing %q in %s", want, body)

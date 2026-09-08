@@ -30,13 +30,17 @@ documentation.
   create append-only AgentRuns (never update existing runs). Opt-in composition
   library endpoints may get/list (and, when `composition.writeEnabled=true`,
   create/update/delete) `AgentRunProfile`, `AgentHarnessProfile`,
-  `AgentSkillSet`, `AgentToolSet`, `AgentCouncil`, `VolumeProfile`, and `AgentDataVolume`
-  objects. Writes are denied for GitOps-owned objects and for any object that is
+  `AgentSkillSet`, `AgentToolSet`, `AgentCouncil`, `AgentExternalTrigger`,
+  `VolumeProfile`, and `AgentDataVolume` objects. Writes are denied for GitOps-owned objects and for any object that is
   not labeled `control.anvil.hazyforge.io/managed-by=anvil-agents-console` so
   Git remains source of truth for fleet config. The console presents
   `AgentRunProfile` objects as composition cards; other composition kinds live
   under Library. The API must not acquire Secret access or policy-broker
-  authority.
+  authority, except the narrow opt-in `api.config.externalTriggers.enabled`
+  path: same-namespace Secret `get` only to verify GitHub webhook HMAC (and
+  optional path tokens). Secret bytes must never appear in status, logs, or
+  console/API JSON. Composition library may also include `AgentExternalTrigger`
+  when that gate is on.
 - OIDC configuration must remain provider-neutral and deny by default. Require
   an exact issuer, audience, explicit claim binding, namespace authorization,
   and exact CORS origins. Never accept access tokens in query strings or allow

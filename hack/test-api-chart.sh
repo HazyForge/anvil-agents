@@ -63,7 +63,7 @@ fi
 expected_crd_count="$(find "${root_dir}/config/crd/bases" -maxdepth 1 -type f -name '*.yaml' | wc -l)"
 [[ "$(grep -c 'helm.sh/resource-policy: keep' "${tmp_dir}/disabled.yaml")" -eq "${expected_crd_count}" ]] || fail "all ${expected_crd_count} CRDs must be retained on Helm uninstall"
 [[ "$(grep -c 'argocd.argoproj.io/sync-options: Prune=false' "${tmp_dir}/disabled.yaml")" -eq "${expected_crd_count}" ]] || fail "all ${expected_crd_count} CRDs must be retained during Argo ownership transfer"
-for crd in agentharnessprofiles agentskillsets agenttoolsets agentcouncils adversesignals; do
+for crd in agentharnessprofiles agentskillsets agenttoolsets agentcouncils adversesignals agentexternaltriggers; do
   grep -Eq "name: ${crd}\.control\.anvil\.hazyforge\.io" "${tmp_dir}/disabled.yaml" || fail "${crd} CRD was not rendered"
 done
 grep -q 'harnessProfileRef:' "${tmp_dir}/disabled.yaml" || fail "composition harnessProfileRef schema is missing"
@@ -75,7 +75,7 @@ grep -q 'maxRunsPerDay:' "${tmp_dir}/disabled.yaml" || fail "AgentSchedule daily
 grep -q 'name: adversesignals.control.anvil.hazyforge.io' "${tmp_dir}/disabled.yaml" || fail "AdverseSignal CRD is missing"
 grep -q 'AdverseSignal spec is immutable' "${tmp_dir}/disabled.yaml" || fail "AdverseSignal immutability validation is missing"
 helm template "${release}" "${chart}" --show-only templates/clusterrole.yaml >"${tmp_dir}/controller-rbac.yaml"
-for resource in agentharnessprofiles agentskillsets agenttoolsets agentcouncils; do
+for resource in agentharnessprofiles agentskillsets agenttoolsets agentcouncils agentexternaltriggers; do
   grep -q "${resource}" "${tmp_dir}/controller-rbac.yaml" || fail "controller RBAC is missing ${resource}"
 done
 grep -q 'adversesignals' "${tmp_dir}/controller-rbac.yaml" || fail "controller RBAC is missing adversesignals"
@@ -167,8 +167,20 @@ if grep -Eq 'verbs:.*create| - create' "${tmp_dir}/rbac-composition-read.yaml"; 
   fail "composition read RBAC must not grant create"
 fi
 if grep -q 'secrets' "${tmp_dir}/rbac-composition-read.yaml"; then
-  fail "API RBAC must never grant secrets"
+  fail "API RBAC must not grant secrets unless externalTriggers.enabled"
 fi
+
+helm template "${release}" "${chart}" "${api_args[@]}" \
+  --set api.config.externalTriggers.enabled=true \
+  --show-only templates/api-clusterrole.yaml >"${tmp_dir}/rbac-external-triggers.yaml"
+grep -q 'agentexternaltriggers' "${tmp_dir}/rbac-external-triggers.yaml" || fail "externalTriggers RBAC missing agentexternaltriggers"
+grep -q 'agentexternaltriggers/status' "${tmp_dir}/rbac-external-triggers.yaml" || fail "externalTriggers RBAC missing status updates"
+grep -q 'resources: \["secrets"\]' "${tmp_dir}/rbac-external-triggers.yaml" || fail "externalTriggers RBAC missing secrets get"
+grep -A6 'resources: \["secrets"\]' "${tmp_dir}/rbac-external-triggers.yaml" | grep -q 'get' || fail "externalTriggers secrets verb must include get"
+if grep -A6 'resources: \["secrets"\]' "${tmp_dir}/rbac-external-triggers.yaml" | grep -Eq 'list|watch|create|update|patch|delete'; then
+  fail "externalTriggers secrets RBAC must be get-only"
+fi
+grep -A8 'resources: \["agentruns"\]' "${tmp_dir}/rbac-external-triggers.yaml" | grep -q 'create' || fail "externalTriggers RBAC must create AgentRuns"
 
 helm template "${release}" "${chart}" "${api_args[@]}" \
   --set api.config.composition.readEnabled=true \

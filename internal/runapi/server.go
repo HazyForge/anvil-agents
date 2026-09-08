@@ -112,6 +112,7 @@ func (server *Server) routes() http.Handler {
 	mux.Handle("GET /api/v1/namespaces/{namespace}/agent-runs/{name}/events", server.authenticate(http.HandlerFunc(server.handleRunEvents)))
 	server.registerCompositionRoutes(mux)
 	server.registerControlRoutes(mux)
+	server.registerExternalTriggerRoutes(mux)
 	// Console SPA at / with client-route fallback. More specific /api and
 	// probe routes take precedence in Go 1.22+ ServeMux.
 	mux.HandleFunc("/", server.handleUI)
@@ -157,6 +158,9 @@ func (server *Server) handleUIConfig(writer http.ResponseWriter, _ *http.Request
 		},
 		"runs": map[string]any{
 			"createEnabled": server.config.Runs.CreateEnabled,
+		},
+		"externalTriggers": map[string]any{
+			"enabled": server.config.ExternalTriggers.Enabled,
 		},
 	})
 }

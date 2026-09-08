@@ -71,6 +71,8 @@ the certified submission contract.
 - `AgentCouncil`: durable workforce inventory and opt-in interaction guidance;
   it does not merge member authority or create runs.
 - `AgentSchedule`: interval and manual run creation across named templates.
+- `AgentExternalTrigger`: signed GitHub webhooks that create or annotate runs
+  ([docs/external-triggers.md](docs/external-triggers.md)).
 - `AgentRunControl`: cluster-wide pause and concurrency policy by scope key.
 - `AgentDataVolume` and `VolumeProfile`: explicit durable PVC-backed state.
 - `AgentAuthSession`: operator-driven durable Codex auth reauth/logout sessions.
@@ -208,6 +210,7 @@ audience, and explicit namespace authorization bindings are configured. See
 - [Blog: Agents as cluster jobs, not chatbots](docs/blog/2026-08-02-agents-as-cluster-jobs-not-chatbots.md)
 - **[Product site and docs](https://anvil-agents.hazyforge.io)** — public marketing site and operator docs
 - [Architecture and multi-harness semantics](docs/architecture.md)
+- [External triggers (GitHub webhooks)](docs/external-triggers.md)
 - [Distributed heavy workloads across machines](docs/distributed-workloads.md)
 - [Composable profiles, harnesses, skill sets, tool sets, councils, and overrides](docs/composition.md)
 - [Getting started](docs/getting-started.md)

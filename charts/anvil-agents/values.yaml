@@ -196,6 +196,11 @@ api:
     # Append-only AgentRun create for console agent cards.
     runs:
       createEnabled: false
+    # Inbound GitHub webhook receivers (AgentExternalTrigger). Disabled by
+    # default. When enabled, the API may read same-namespace Secret values only
+    # to verify HMAC signatures; Secret bytes never appear in status or API JSON.
+    externalTriggers:
+      enabled: false
     # Cluster-scoped AgentRunControl launch gates (pause/resume from the console).
     # GitOps-owned controls remain read-only; operator-created controls are
     # writable when writeEnabled is true.

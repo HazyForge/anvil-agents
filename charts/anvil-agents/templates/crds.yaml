@@ -7900,6 +7900,325 @@ metadata:
     helm.sh/resource-policy: keep
     argocd.argoproj.io/sync-options: Prune=false
     controller-gen.kubebuilder.io/version: v0.19.0
+  name: agentexternaltriggers.control.anvil.hazyforge.io
+spec:
+  group: control.anvil.hazyforge.io
+  names:
+    kind: AgentExternalTrigger
+    listKind: AgentExternalTriggerList
+    plural: agentexternaltriggers
+    shortNames:
+    - agtrig
+    singular: agentexternaltrigger
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .status.phase
+      name: Phase
+      type: string
+    - jsonPath: .status.receiverID
+      name: Receiver
+      type: string
+    - jsonPath: .status.lastEventType
+      name: Last Event
+      type: string
+    - jsonPath: .status.lastDeliveryAt
+      name: Last Delivery
+      type: string
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: |-
+              AgentExternalTriggerSpec declares an inbound external event receiver that can
+              create or annotate AgentRuns the same way a schedule creates work.
+            properties:
+              concurrencyPolicy:
+                description: |-
+                  ConcurrencyPolicy controls whether a new delivery may create runs while
+                  prior trigger-created runs are still active. Empty defaults to Forbid.
+                enum:
+                - Forbid
+                - Allow
+                type: string
+              maxDeliveriesPerDay:
+                description: |-
+                  MaxDeliveriesPerDay caps accepted deliveries for this trigger during a
+                  UTC calendar day. Empty disables the cap. Idempotent retries of a seen
+                  delivery ID do not consume an additional slot.
+                minimum: 0
+                type: integer
+              promptTemplate:
+                description: |-
+                  PromptTemplate optionally renders into created AgentRun prompts. Supported
+                  placeholders use double-brace names eventType, repository, deliveryID, and
+                  summary (documented in docs/external-triggers.md). Avoid raw template
+                  delimiters in this comment so Helm-rendered CRDs stay inert.
+                maxLength: 8192
+                type: string
+              secretRef:
+                description: SecretRef names the Secret that holds the HMAC webhook
+                  secret.
+                properties:
+                  name:
+                    description: Name is the same-namespace Secret that holds webhook
+                      credentials.
+                    minLength: 1
+                    type: string
+                  pathTokenKey:
+                    description: |-
+                      PathTokenKey optionally names a Secret data key whose value must match the
+                      X-Anvil-Trigger-Token request header. Empty disables the extra path token.
+                    maxLength: 253
+                    type: string
+                  webhookSecretKey:
+                    description: |-
+                      WebhookSecretKey is the Secret data key for the GitHub HMAC shared secret.
+                      Empty defaults to webhookSecret.
+                    maxLength: 253
+                    type: string
+                required:
+                - name
+                type: object
+              source:
+                description: Source configures the inbound event family and allowlists.
+                properties:
+                  github:
+                    description: GitHub configures the GitHub webhook allowlist when
+                      kind is githubWebhook.
+                    properties:
+                      events:
+                        description: |-
+                          Events optionally allowlists GitHub event types such as push,
+                          pull_request, issues, and issue_comment. Empty accepts any signed event
+                          that reaches the receiver.
+                        items:
+                          type: string
+                        maxItems: 32
+                        type: array
+                      repositories:
+                        description: Repositories is the owner/name allowlist. At
+                          least one entry is required.
+                        items:
+                          type: string
+                        maxItems: 64
+                        minItems: 1
+                        type: array
+                    required:
+                    - repositories
+                    type: object
+                  kind:
+                    description: |-
+                      Kind identifies the source family. Only githubWebhook is supported in
+                      this API version.
+                    enum:
+                    - githubWebhook
+                    type: string
+                required:
+                - kind
+                type: object
+              suspend:
+                description: |-
+                  Suspend prevents new deliveries from creating or annotating AgentRuns
+                  while retaining status and the public receiver path.
+                type: boolean
+              targets:
+                description: Targets lists one or more same-namespace delivery destinations.
+                items:
+                  description: AgentExternalTriggerTargetSpec names one same-namespace
+                    delivery target.
+                  properties:
+                    councilDelivery:
+                      description: |-
+                        CouncilDelivery selects council members when kind is AgentCouncil.
+                        Empty or allMembers delivers to every member profile. Any other non-empty
+                        value is treated as a coordinatorRole that must match a member role.
+                      maxLength: 128
+                      type: string
+                    kind:
+                      description: Kind selects the target object family.
+                      enum:
+                      - AgentRunProfile
+                      - AgentCouncil
+                      - AgentRun
+                      type: string
+                    name:
+                      description: Name is the same-namespace object name. Cross-namespace
+                        refs are rejected.
+                      maxLength: 253
+                      minLength: 1
+                      type: string
+                  required:
+                  - kind
+                  - name
+                  type: object
+                maxItems: 16
+                minItems: 1
+                type: array
+            required:
+            - secretRef
+            - source
+            - targets
+            type: object
+          status:
+            description: AgentExternalTriggerStatus is the observed state of an inbound
+              receiver.
+            properties:
+              conditions:
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+              deliveriesToday:
+                description: |-
+                  DeliveriesToday counts uniquely accepted deliveries for the UTC day in
+                  DeliveriesTodayDate.
+                type: integer
+              deliveriesTodayDate:
+                description: DeliveriesTodayDate is the UTC calendar day (YYYY-MM-DD)
+                  for DeliveriesToday.
+                type: string
+              deliveryCount:
+                description: DeliveryCount is the number of uniquely accepted deliveries.
+                format: int64
+                type: integer
+              lastDeliveryAt:
+                description: LastDeliveryAt is when the last delivery was accepted.
+                format: date-time
+                type: string
+              lastDeliveryID:
+                description: LastDeliveryID is the most recently accepted GitHub X-GitHub-Delivery.
+                type: string
+              lastError:
+                description: LastError records the most recent non-idempotent delivery
+                  failure.
+                type: string
+              lastEventType:
+                description: LastEventType is the GitHub X-GitHub-Event of the last
+                  accepted delivery.
+                type: string
+              lastRunRefs:
+                description: LastRunRefs lists AgentRuns created or updated by the
+                  last delivery.
+                items:
+                  description: |-
+                    NamespacedObjectReference identifies a Kubernetes object without importing
+                    another API group. Namespace may be omitted where same-namespace resolution
+                    is part of the containing resource contract.
+                  properties:
+                    name:
+                      type: string
+                    namespace:
+                      type: string
+                  required:
+                  - name
+                  type: object
+                type: array
+              observedGeneration:
+                format: int64
+                type: integer
+              phase:
+                type: string
+              receiverID:
+                description: |-
+                  ReceiverID is an opaque public identifier embedded in the webhook URL.
+                  It is not a secret.
+                type: string
+              seenDeliveryIDs:
+                description: |-
+                  SeenDeliveryIDs is a bounded ring of recently accepted GitHub delivery
+                  IDs used for retry idempotency.
+                items:
+                  type: string
+                maxItems: 64
+                type: array
+              webhookPath:
+                description: WebhookPath is the path-only receiver URL (no host, no
+                  secret material).
+                type: string
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    helm.sh/resource-policy: keep
+    argocd.argoproj.io/sync-options: Prune=false
+    controller-gen.kubebuilder.io/version: v0.19.0
   name: agentharnessprofiles.control.anvil.hazyforge.io
 spec:
   group: control.anvil.hazyforge.io

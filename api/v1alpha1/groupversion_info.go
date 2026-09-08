@@ -45,6 +45,8 @@ func addKnownTypes(scheme *runtime.Scheme) error {
 		&AgentToolSetList{},
 		&AgentCouncil{},
 		&AgentCouncilList{},
+		&AgentExternalTrigger{},
+		&AgentExternalTriggerList{},
 		&AgentRun{},
 		&AgentRunList{},
 	)
