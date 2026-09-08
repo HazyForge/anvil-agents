@@ -23,6 +23,9 @@ spec:
     - jsonPath: .status.receiverID
       name: Receiver
       type: string
+    - jsonPath: .status.httpRoute.name
+      name: HTTPRoute
+      type: string
     - jsonPath: .status.lastEventType
       name: Last Event
       type: string
@@ -63,6 +66,19 @@ spec:
                 - Forbid
                 - Allow
                 type: string
+              httpRoute:
+                description: |-
+                  HTTPRoute optionally overrides the install-default public hostname for
+                  the controller-owned Gateway API HTTPRoute.
+                properties:
+                  hostname:
+                    description: |-
+                      Hostname optionally replaces the install-default HTTPRoute hostnames for
+                      this trigger. Must be an exact hostname with no wildcards.
+                    maxLength: 253
+                    pattern: ^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?$
+                    type: string
+                type: object
               maxDeliveriesPerDay:
                 description: |-
                   MaxDeliveriesPerDay caps accepted deliveries for this trigger during a
@@ -142,7 +158,7 @@ spec:
               suspend:
                 description: |-
                   Suspend prevents new deliveries from creating or annotating AgentRuns
-                  while retaining status and the public receiver path.
+                  and detaches the controller-owned public HTTPRoute. receiverID is kept.
                 type: boolean
               targets:
                 description: Targets lists one or more same-namespace delivery destinations.
@@ -255,6 +271,30 @@ spec:
                 description: DeliveryCount is the number of uniquely accepted deliveries.
                 format: int64
                 type: integer
+              httpRoute:
+                description: |-
+                  HTTPRoute is the controller-owned Gateway API HTTPRoute that exposes this
+                  webhook. Cleared when the trigger is suspended, blocked, or deleted.
+                properties:
+                  accepted:
+                    description: Accepted is the Gateway API HTTPRoute parent Accepted
+                      condition when observed.
+                    type: boolean
+                  name:
+                    description: Name is the same-namespace HTTPRoute object owned
+                      by this trigger.
+                    type: string
+                  programmed:
+                    description: |-
+                      Programmed is the Gateway API Programmed condition when a parent reports it.
+                      When Programmed is absent, Accepted and ResolvedRefs together are treated
+                      as programmed.
+                    type: boolean
+                  publicURL:
+                    description: PublicURL is https://{hostname}{webhookPath} with
+                      no secret material.
+                    type: string
+                type: object
               lastDeliveryAt:
                 description: LastDeliveryAt is when the last delivery was accepted.
                 format: date-time

@@ -224,6 +224,18 @@ api:
     annotations: {}
     parentRefs: []
     hostnames: []
+  # Controller-owned Gateway API HTTPRoute per AgentExternalTrigger webhook.
+  # When enabled (or when api.httpRoute.enabled and externalTriggers are on),
+  # empty parentRefs/hostnames inherit api.httpRoute. Never uses wildcards.
+  # The chart does not create Gateway objects.
+  externalTriggerHTTPRoute:
+    enabled: false
+    parentRefs: []
+    hostnames: []
+    # Namespaces whose HTTPRoutes may reference the API Service. Empty falls
+    # back to api.config.ui.defaultNamespaces, then watchNamespaces. The
+    # release namespace is omitted (same-namespace backendRefs need no grant).
+    backendFromNamespaces: []
   oidcCA:
     configMapName: ""
     key: ca.crt

@@ -7,6 +7,10 @@ metadata:
     control.anvil.hazyforge.io/managed-by: anvil-agents-console
 spec:
   suspend: false
+  # Optional exact hostname override for the controller-owned HTTPRoute.
+  # Empty uses api.httpRoute / api.externalTriggerHTTPRoute hostnames.
+  # httpRoute:
+  #   hostname: hooks.example.com
   source:
     kind: githubWebhook
     github:

@@ -164,3 +164,63 @@ uri
   {{- $_ := required "archive.cloudnativePG.storage.size is required" .Values.archive.cloudnativePG.storage.size -}}
 {{- end -}}
 {{- end }}
+
+{{/*
+Controller-owned Gateway API HTTPRoute for AgentExternalTrigger webhooks.
+Enabled when the API, externalTriggers, and either api.httpRoute or a
+dedicated externalTriggerHTTPRoute.enabled flag is on. Empty dedicated
+parentRefs/hostnames inherit api.httpRoute.
+*/}}
+{{- define "anvil-agents.externalTriggerHTTPRouteEnabled" -}}
+{{- $ext := dig "externalTriggers" "enabled" false (.Values.api.config | default dict) -}}
+{{- $dedicated := dig "enabled" false (.Values.api.externalTriggerHTTPRoute | default dict) -}}
+{{- if and .Values.api.enabled $ext (or $dedicated .Values.api.httpRoute.enabled) -}}
+true
+{{- end -}}
+{{- end }}
+
+{{- define "anvil-agents.externalTriggerHTTPRouteConfig" -}}
+{{- $dedicated := .Values.api.externalTriggerHTTPRoute | default dict -}}
+{{- $parents := index $dedicated "parentRefs" | default list -}}
+{{- if not $parents -}}
+{{- $parents = .Values.api.httpRoute.parentRefs | default list -}}
+{{- end -}}
+{{- $hosts := index $dedicated "hostnames" | default list -}}
+{{- if not $hosts -}}
+{{- $hosts = .Values.api.httpRoute.hostnames | default list -}}
+{{- end -}}
+{{- dict
+  "parentRefs" $parents
+  "hostnames" $hosts
+  "backendName" (include "anvil-agents.apiFullname" .)
+  "backendNamespace" .Release.Namespace
+  "backendPort" (.Values.api.service.port | int)
+  | toJson -}}
+{{- end }}
+
+{{- define "anvil-agents.validateExternalTriggerHTTPRoute" -}}
+{{- if eq (include "anvil-agents.externalTriggerHTTPRouteEnabled" . | trim) "true" -}}
+{{- $cfg := include "anvil-agents.externalTriggerHTTPRouteConfig" . | fromJson -}}
+{{- $parents := index $cfg "parentRefs" -}}
+{{- $hosts := index $cfg "hostnames" -}}
+{{- if not $parents -}}
+{{- fail "external trigger HTTPRoute parentRefs must contain at least one Gateway parent (set api.externalTriggerHTTPRoute.parentRefs or inherit api.httpRoute.parentRefs)" -}}
+{{- end -}}
+{{- if not $hosts -}}
+{{- fail "external trigger HTTPRoute hostnames must contain an explicit hostname (set api.externalTriggerHTTPRoute.hostnames or inherit api.httpRoute.hostnames)" -}}
+{{- end -}}
+{{- range $hostname := $hosts -}}
+{{- if or (contains "*" $hostname) (not (regexMatch "^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?$" $hostname)) -}}
+{{- fail "external trigger HTTPRoute hostnames must contain exact hostnames, never wildcards" -}}
+{{- end -}}
+{{- end -}}
+{{- range $parent := $parents -}}
+{{- if not $parent.sectionName -}}
+{{- fail "each external trigger HTTPRoute parentRefs entry must select an explicit HTTPS listener with sectionName" -}}
+{{- end -}}
+{{- if not $parent.name -}}
+{{- fail "each external trigger HTTPRoute parentRefs entry must set name" -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end }}

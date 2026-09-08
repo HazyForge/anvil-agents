@@ -13,6 +13,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 
 	controlv1alpha1 "github.com/hazyforge/anvil-agents/api/v1alpha1"
 )
@@ -23,9 +24,12 @@ const (
 
 // +kubebuilder:rbac:groups="control.anvil.hazyforge.io",resources=agentexternaltriggers,verbs=get;list;watch
 // +kubebuilder:rbac:groups="control.anvil.hazyforge.io",resources=agentexternaltriggers/status,verbs=get;patch;update
+// +kubebuilder:rbac:groups="gateway.networking.k8s.io",resources=httproutes,verbs=create;delete;get;list;patch;update;watch
 type AgentExternalTriggerReconciler struct {
 	client.Client
-	Scheme *runtime.Scheme
+	Scheme                  *runtime.Scheme
+	ExternalTriggersEnabled bool
+	HTTPRoute               ExternalTriggerHTTPRouteConfig
 }
 
 func (r *AgentExternalTriggerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -34,6 +38,11 @@ func (r *AgentExternalTriggerReconciler) Reconcile(ctx context.Context, req ctrl
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 	if !obj.GetDeletionTimestamp().IsZero() {
+		if r.managesHTTPRoutes() {
+			if err := r.deleteOwnedHTTPRoute(ctx, obj); err != nil {
+				return ctrl.Result{}, err
+			}
+		}
 		return ctrl.Result{}, nil
 	}
 
@@ -52,6 +61,7 @@ func (r *AgentExternalTriggerReconciler) Reconcile(ctx context.Context, req ctrl
 	status.WebhookPath = externalTriggerWebhookPath(obj.Namespace, obj.Name, status.ReceiverID)
 
 	blockReason, blockMessage := validateAgentExternalTriggerSpec(obj)
+	exposeRoute := false
 	switch {
 	case blockReason != "":
 		status.Phase = controlv1alpha1.AgentExternalTriggerPhaseBlocked
@@ -78,6 +88,7 @@ func (r *AgentExternalTriggerReconciler) Reconcile(ctx context.Context, req ctrl
 	default:
 		status.Phase = controlv1alpha1.AgentExternalTriggerPhaseReady
 		status.LastError = ""
+		exposeRoute = true
 		apimeta.SetStatusCondition(&status.Conditions, metav1.Condition{
 			Type:               agentExternalTriggerReady,
 			Status:             metav1.ConditionTrue,
@@ -88,11 +99,16 @@ func (r *AgentExternalTriggerReconciler) Reconcile(ctx context.Context, req ctrl
 		})
 	}
 
+	routeResult, err := r.reconcileHTTPRoute(ctx, obj, &status, exposeRoute)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+
 	obj.Status = status
 	if err := r.patchAgentExternalTriggerStatus(ctx, original, obj); err != nil {
 		return ctrl.Result{}, err
 	}
-	return ctrl.Result{}, nil
+	return routeResult, nil
 }
 
 func (r *AgentExternalTriggerReconciler) patchAgentExternalTriggerStatus(ctx context.Context, original, obj *controlv1alpha1.AgentExternalTrigger) error {
@@ -105,9 +121,12 @@ func (r *AgentExternalTriggerReconciler) patchAgentExternalTriggerStatus(ctx con
 }
 
 func (r *AgentExternalTriggerReconciler) SetupWithManager(mgr ctrl.Manager) error {
-	return ctrl.NewControllerManagedBy(mgr).
-		For(&controlv1alpha1.AgentExternalTrigger{}).
-		Complete(r)
+	builder := ctrl.NewControllerManagedBy(mgr).
+		For(&controlv1alpha1.AgentExternalTrigger{})
+	if r.managesHTTPRoutes() {
+		builder = builder.Owns(&gatewayv1.HTTPRoute{})
+	}
+	return builder.Complete(r)
 }
 
 func newExternalTriggerReceiverID() (string, error) {
@@ -155,6 +174,13 @@ func validateAgentExternalTriggerSpec(obj *controlv1alpha1.AgentExternalTrigger)
 			controlv1alpha1.AgentExternalTriggerTargetAgentRun:
 		default:
 			return "InvalidTarget", fmt.Sprintf("spec.targets[%d].kind is unsupported.", i)
+		}
+	}
+	if obj.Spec.HTTPRoute != nil {
+		if host := strings.TrimSpace(obj.Spec.HTTPRoute.Hostname); host != "" {
+			if err := validateExactHostname(host); err != nil {
+				return "InvalidHTTPRouteHostname", "spec.httpRoute.hostname must be an exact hostname, never a wildcard."
+			}
 		}
 	}
 	if obj.Spec.MaxDeliveriesPerDay < 0 {

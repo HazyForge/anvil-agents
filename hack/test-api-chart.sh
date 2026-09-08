@@ -214,6 +214,16 @@ expect_template_failure route-wildcard \
   --set-string 'api.httpRoute.parentRefs[0].name=public' \
   --set-string 'api.httpRoute.parentRefs[0].sectionName=https' \
   --set-string 'api.httpRoute.hostnames[0]=*.example.com'
+expect_template_failure ext-trigger-route-wildcard \
+  --set api.config.externalTriggers.enabled=true \
+  --set api.httpRoute.enabled=true \
+  --set-string 'api.httpRoute.parentRefs[0].name=public' \
+  --set-string 'api.httpRoute.parentRefs[0].sectionName=https' \
+  --set-string 'api.httpRoute.hostnames[0]=agents.example.com' \
+  --set-string 'api.externalTriggerHTTPRoute.hostnames[0]=*.hooks.example.com'
+expect_template_failure ext-trigger-route-missing-parents \
+  --set api.config.externalTriggers.enabled=true \
+  --set api.externalTriggerHTTPRoute.enabled=true
 expect_template_failure route-listener-unspecified \
   --set api.httpRoute.enabled=true \
   --set-string 'api.httpRoute.parentRefs[0].name=public' \
@@ -252,5 +262,62 @@ mapfile -t deployments < <(awk '
 for deployment in "${deployments[@]}"; do
   [[ "${#deployment}" -le 63 ]] || fail "Deployment name exceeds 63 characters: ${deployment}"
 done
+
+helm template "${release}" "${chart}" "${api_args[@]}" \
+  --set api.config.externalTriggers.enabled=true \
+  --show-only templates/deployment.yaml >"${tmp_dir}/controller-ext-triggers-no-route.yaml"
+if grep -q -- '--external-trigger-httproute-enabled=true' "${tmp_dir}/controller-ext-triggers-no-route.yaml"; then
+  fail "HTTPRoute ownership rendered without Gateway parent config"
+fi
+helm template "${release}" "${chart}" "${api_args[@]}" \
+  --set api.config.externalTriggers.enabled=true \
+  --show-only templates/clusterrole.yaml >"${tmp_dir}/controller-rbac-ext-triggers-no-route.yaml"
+if grep -q 'gateway.networking.k8s.io' "${tmp_dir}/controller-rbac-ext-triggers-no-route.yaml"; then
+  fail "HTTPRoute RBAC rendered without Gateway parent config"
+fi
+
+helm template "${release}" "${chart}" "${api_args[@]}" \
+  --set api.config.externalTriggers.enabled=true \
+  --set api.httpRoute.enabled=true \
+  --set-string 'api.httpRoute.parentRefs[0].name=public' \
+  --set-string 'api.httpRoute.parentRefs[0].namespace=gateway-system' \
+  --set-string 'api.httpRoute.parentRefs[0].sectionName=https' \
+  --set-string 'api.httpRoute.hostnames[0]=agents.example.com' \
+  --set-string 'api.config.ui.defaultNamespaces[0]=agents' \
+  --show-only templates/deployment.yaml >"${tmp_dir}/controller-ext-trigger-route.yaml"
+grep -Fq -- '--external-triggers-enabled=true' "${tmp_dir}/controller-ext-trigger-route.yaml" || fail "external trigger gate was not passed to the controller"
+grep -Fq -- '--external-trigger-httproute-enabled=true' "${tmp_dir}/controller-ext-trigger-route.yaml" || fail "HTTPRoute ownership was not enabled on the controller"
+grep -F -- '--external-trigger-httproute-json=' "${tmp_dir}/controller-ext-trigger-route.yaml" | grep -q 'agents.example.com' || fail "inherited HTTPRoute hostname missing from controller flag"
+grep -F -- '--external-trigger-httproute-json=' "${tmp_dir}/controller-ext-trigger-route.yaml" | grep -q 'https' || fail "inherited HTTPRoute sectionName missing from controller flag"
+if grep -F -- '--external-trigger-httproute-json=' "${tmp_dir}/controller-ext-trigger-route.yaml" | grep -q '\*'; then
+  fail "controller HTTPRoute JSON must not contain wildcard hostnames"
+fi
+
+helm template "${release}" "${chart}" "${api_args[@]}" \
+  --set api.config.externalTriggers.enabled=true \
+  --set api.httpRoute.enabled=true \
+  --set-string 'api.httpRoute.parentRefs[0].name=public' \
+  --set-string 'api.httpRoute.parentRefs[0].sectionName=https' \
+  --set-string 'api.httpRoute.hostnames[0]=agents.example.com' \
+  --set-string 'api.config.ui.defaultNamespaces[0]=agents' \
+  --show-only templates/clusterrole.yaml >"${tmp_dir}/controller-rbac-ext-trigger-route.yaml"
+grep -q 'gateway.networking.k8s.io' "${tmp_dir}/controller-rbac-ext-trigger-route.yaml" || fail "controller RBAC missing HTTPRoute apiGroup"
+grep -q 'httproutes' "${tmp_dir}/controller-rbac-ext-trigger-route.yaml" || fail "controller RBAC missing httproutes"
+grep -A6 'resources: \["httproutes"\]' "${tmp_dir}/controller-rbac-ext-trigger-route.yaml" | grep -q 'create' || fail "controller HTTPRoute RBAC missing create"
+grep -A6 'resources: \["httproutes"\]' "${tmp_dir}/controller-rbac-ext-trigger-route.yaml" | grep -q 'delete' || fail "controller HTTPRoute RBAC missing delete"
+
+helm template "${release}" "${chart}" "${api_args[@]}" \
+  --set api.config.externalTriggers.enabled=true \
+  --set api.httpRoute.enabled=true \
+  --set-string 'api.httpRoute.parentRefs[0].name=public' \
+  --set-string 'api.httpRoute.parentRefs[0].sectionName=https' \
+  --set-string 'api.httpRoute.hostnames[0]=agents.example.com' \
+  --set-string 'api.config.ui.defaultNamespaces[0]=agents' \
+  --show-only templates/api-external-trigger-referencegrant.yaml >"${tmp_dir}/ext-trigger-referencegrant.yaml"
+grep -q 'kind: ReferenceGrant' "${tmp_dir}/ext-trigger-referencegrant.yaml" || fail "cross-namespace ReferenceGrant was not rendered"
+grep -q 'namespace: "agents"' "${tmp_dir}/ext-trigger-referencegrant.yaml" || fail "ReferenceGrant missing agents namespace"
+if grep -q '\*' "${tmp_dir}/ext-trigger-referencegrant.yaml"; then
+  fail "ReferenceGrant must list exact namespaces, never wildcards"
+fi
 
 printf 'AgentRun API chart contract passed\n'

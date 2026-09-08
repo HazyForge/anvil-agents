@@ -47,6 +47,11 @@ rules:
   - apiGroups: ["coordination.k8s.io"]
     resources: ["leases"]
     verbs: ["create", "delete", "get", "list", "patch", "update", "watch"]
+  {{- if eq (include "anvil-agents.externalTriggerHTTPRouteEnabled" . | trim) "true" }}
+  - apiGroups: ["gateway.networking.k8s.io"]
+    resources: ["httproutes"]
+    verbs: ["create", "delete", "get", "list", "patch", "update", "watch"]
+  {{- end }}
 {{- range .Values.adverseSources }}
   - apiGroups: [{{ if contains "/" .apiVersion }}{{ (splitList "/" .apiVersion | first) | quote }}{{ else }}""{{ end }}]
     resources: [{{ required "adverseSources[].resource is required for exact RBAC" .resource | quote }}]

@@ -1,0 +1,45 @@
+{{- if eq (include "anvil-agents.externalTriggerHTTPRouteEnabled" . | trim) "true" }}
+{{- $from := list }}
+{{- with .Values.api.externalTriggerHTTPRoute.backendFromNamespaces }}
+{{- $from = . }}
+{{- end }}
+{{- if not $from }}
+{{- $from = dig "ui" "defaultNamespaces" list .Values.api.config }}
+{{- end }}
+{{- if not $from }}
+{{- range $ns := splitList "," .Values.watchNamespaces }}
+{{- $ns = trim $ns }}
+{{- if $ns }}
+{{- $from = append $from $ns }}
+{{- end }}
+{{- end }}
+{{- end }}
+{{- $grantFrom := list }}
+{{- range $ns := $from }}
+{{- $ns = trim $ns }}
+{{- if and $ns (ne $ns $.Release.Namespace) }}
+{{- $grantFrom = append $grantFrom $ns }}
+{{- end }}
+{{- end }}
+{{- if $grantFrom }}
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: ReferenceGrant
+metadata:
+  name: {{ printf "%s-xt" (include "anvil-agents.apiFullname" .) | trunc 63 | trimSuffix "-" }}
+  labels:
+    app.kubernetes.io/name: {{ include "anvil-agents.apiName" . }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: external-trigger-httproute
+spec:
+  from:
+    {{- range $ns := $grantFrom | uniq }}
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      namespace: {{ $ns | quote }}
+    {{- end }}
+  to:
+    - group: ""
+      kind: Service
+      name: {{ include "anvil-agents.apiFullname" . }}
+{{- end }}
+{{- end }}

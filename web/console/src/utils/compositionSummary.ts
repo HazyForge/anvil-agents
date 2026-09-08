@@ -115,6 +115,9 @@ export function compositionCardSummary(doc: CompositionDocument): string {
       const secretRef = asRecord(spec.secretRef);
       const secretName = String(secretRef.name ?? "").trim();
       const secretKey = String(secretRef.webhookSecretKey ?? "").trim();
+      const httpRoute = asRecord(status.httpRoute);
+      const routeName = String(httpRoute.name ?? "").trim();
+      const publicURL = String(httpRoute.publicURL ?? "").trim();
       return (
         [
           `phase:${phase}`,
@@ -123,6 +126,8 @@ export function compositionCardSummary(doc: CompositionDocument): string {
           targets ? `targets:${targets}` : null,
           lastEvent ? `event:${lastEvent}` : null,
           lastAt ? `last:${lastAt}` : null,
+          routeName ? `route:${routeName}` : null,
+          publicURL ? publicURL : null,
           secretName ? `secret:${secretName}` : null,
           secretKey ? `key:${secretKey}` : null,
         ]

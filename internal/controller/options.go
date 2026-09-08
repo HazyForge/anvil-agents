@@ -62,6 +62,8 @@ type Options struct {
 	OpenClawRunnerImage          string
 	GrokBuildRunnerImage         string
 	PiAgentRunnerImage           string
+	ExternalTriggersEnabled      bool
+	ExternalTriggerHTTPRoute     ExternalTriggerHTTPRouteConfig
 }
 
 func DefaultOptions() *Options {

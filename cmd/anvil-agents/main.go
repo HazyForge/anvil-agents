@@ -17,6 +17,7 @@ func main() {
 	var adverseSourceGVKs string
 	var adverseSourcesJSON string
 	var githubAPIAllowedHosts string
+	var externalTriggerHTTPRouteJSON string
 	flag.StringVar(&options.MetricsBindAddress, "metrics-bind-address", options.MetricsBindAddress, "Metrics bind address.")
 	flag.StringVar(&options.HealthProbeBindAddress, "health-probe-bind-address", options.HealthProbeBindAddress, "Health probe bind address.")
 	flag.BoolVar(&options.LeaderElection, "leader-elect", options.LeaderElection, "Enable leader election.")
@@ -38,6 +39,9 @@ func main() {
 	flag.StringVar(&options.OpenClawRunnerImage, "runner-image-openclaw", options.OpenClawRunnerImage, "Default image for OpenClaw AgentRuns that do not set spec.harness.backend.image.")
 	flag.StringVar(&options.GrokBuildRunnerImage, "runner-image-grok-build", options.GrokBuildRunnerImage, "Default image for Grok Build AgentRuns that do not set spec.harness.backend.image.")
 	flag.StringVar(&options.PiAgentRunnerImage, "runner-image-pi-agent", options.PiAgentRunnerImage, "Default image for Pi Agent AgentRuns that do not set spec.harness.backend.image.")
+	flag.BoolVar(&options.ExternalTriggersEnabled, "external-triggers-enabled", options.ExternalTriggersEnabled, "Enable AgentExternalTrigger webhook receivers in this process (must match api.config.externalTriggers.enabled).")
+	flag.BoolVar(&options.ExternalTriggerHTTPRoute.Enabled, "external-trigger-httproute-enabled", options.ExternalTriggerHTTPRoute.Enabled, "Create Gateway API HTTPRoutes for ready AgentExternalTrigger receivers.")
+	flag.StringVar(&externalTriggerHTTPRouteJSON, "external-trigger-httproute-json", "", "JSON object of parentRefs, hostnames, and API Service backend for trigger HTTPRoutes.")
 	zapOptions := zap.Options{Development: false}
 	zapOptions.BindFlags(flag.CommandLine)
 	flag.Parse()
@@ -50,6 +54,13 @@ func main() {
 		os.Exit(2)
 	}
 	options.GitHubAPIAllowedHosts = splitCSV(githubAPIAllowedHosts)
+	routeCfg, err := controller.ParseExternalTriggerHTTPRouteJSON(externalTriggerHTTPRouteJSON)
+	if err != nil {
+		ctrl.Log.Error(err, "invalid external trigger HTTPRoute configuration")
+		os.Exit(2)
+	}
+	routeCfg.Enabled = options.ExternalTriggerHTTPRoute.Enabled
+	options.ExternalTriggerHTTPRoute = routeCfg
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&zapOptions)))
 	ctx := ctrl.SetupSignalHandler()
 	if err := controller.Run(ctx, options); err != nil {

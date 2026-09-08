@@ -28,6 +28,24 @@ function statusString(status: Record<string, unknown> | null | undefined, key: s
   return String(value);
 }
 
+function statusHTTPRoute(status: Record<string, unknown> | null | undefined): Record<string, unknown> {
+  if (!status) {
+    return {};
+  }
+  const value = status.httpRoute;
+  return typeof value === "object" && value ? (value as Record<string, unknown>) : {};
+}
+
+function conditionFlag(value: unknown): string {
+  if (value === true) {
+    return "true";
+  }
+  if (value === false) {
+    return "false";
+  }
+  return "";
+}
+
 export function ExternalTriggerForm({ form, disabled, isCreate, status, onChange }: Props) {
   function updateTarget(index: number, patch: Partial<ExternalTriggerTargetForm>) {
     const next = form.targets.map((entry, i) => (i === index ? { ...entry, ...patch } : entry));
@@ -53,6 +71,11 @@ export function ExternalTriggerForm({ form, disabled, isCreate, status, onChange
   const lastEventType = statusString(status, "lastEventType");
   const lastError = statusString(status, "lastError");
   const deliveryCount = statusString(status, "deliveryCount");
+  const httpRoute = statusHTTPRoute(status);
+  const publicURL = statusString(httpRoute, "publicURL");
+  const routeName = statusString(httpRoute, "name");
+  const routeAccepted = conditionFlag(httpRoute.accepted);
+  const routeProgrammed = conditionFlag(httpRoute.programmed);
 
   return (
     <div className="guided-form">
@@ -65,8 +88,9 @@ export function ExternalTriggerForm({ form, disabled, isCreate, status, onChange
         </p>
         <ul className="explain-list">
           <li>
-            <strong>Path only.</strong> Status exposes <span className="mono">webhookPath</span>{" "}
-            and <span className="mono">receiverID</span> — never the shared secret.
+            <strong>Path and public URL only.</strong> Status exposes{" "}
+            <span className="mono">webhookPath</span>, <span className="mono">receiverID</span>,
+            and the controller-owned HTTPRoute URL — never the shared secret.
           </li>
           <li>
             <strong>Targets</strong> are same-namespace AgentRunProfile, AgentCouncil, or AgentRun
@@ -85,6 +109,22 @@ export function ExternalTriggerForm({ form, disabled, isCreate, status, onChange
               <span className="chip mono">deliveries:{deliveryCount}</span>
             ) : null}
             {lastEventType ? <span className="chip mono">{lastEventType}</span> : null}
+          </div>
+          <label className="field">
+            <span className="label">Public webhook URL</span>
+            <input className="input mono" value={publicURL || "—"} disabled />
+          </label>
+          <label className="field">
+            <span className="label">HTTPRoute name</span>
+            <input className="input mono" value={routeName || "—"} disabled />
+          </label>
+          <div className="chip-row" style={{ marginBottom: "0.75rem" }}>
+            {routeAccepted ? (
+              <span className="chip mono">accepted:{routeAccepted}</span>
+            ) : null}
+            {routeProgrammed ? (
+              <span className="chip mono">programmed:{routeProgrammed}</span>
+            ) : null}
           </div>
           <label className="field">
             <span className="label">Webhook path</span>
@@ -146,7 +186,22 @@ export function ExternalTriggerForm({ form, disabled, isCreate, status, onChange
           </span>
         </span>
         <p className="field-help">
-          Keeps the receiver path and status, but blocks new AgentRun creates/annotations.
+          Detaches the public HTTPRoute and blocks new AgentRun creates/annotations.
+          The receiver ID is kept.
+        </p>
+      </label>
+
+      <label className="field">
+        <span className="label">Public hostname override (optional)</span>
+        <input
+          className="input mono"
+          value={form.hostnameOverride}
+          disabled={disabled}
+          onChange={(event) => onChange("hostnameOverride", event.target.value)}
+          placeholder="hooks.example.com"
+        />
+        <p className="field-help">
+          Exact hostname only — no wildcards. Empty uses the install HTTPRoute hostnames.
         </p>
       </label>
 

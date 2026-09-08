@@ -9,7 +9,7 @@ Anvil Agents uses namespaced resources for reusable configuration:
 | `AgentSkillSet` | backend-neutral skills and optional delegated personas | images, ServiceAccounts, Secrets, storage, or placement |
 | `AgentToolSet` | reusable setup and verification contracts plus optional digest-pinned OCI tool initializers | the external service, credentials, ServiceAccounts, networking, storage, or placement |
 | `AgentCouncil` | durable workforce inventory and optional interaction guidance | Secrets, ServiceAccounts, harnesses, tools, storage, Jobs, or automatic peer injection |
-| `AgentExternalTrigger` | signed inbound GitHub webhook receivers and delivery targets (opt-in API gate) | Secret bytes in status; non-GitHub sources in this slice |
+| `AgentExternalTrigger` | signed inbound GitHub webhook receivers, delivery targets, and the controller-owned Gateway API HTTPRoute for the webhook path (opt-in API gate) | Secret bytes in status; Gateway objects; non-GitHub sources in this slice |
 
 `AgentToolSet` exists because external tools commonly have an independent
 owner and lifecycle from the instructions that use them. It never installs the

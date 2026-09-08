@@ -15,6 +15,7 @@ export interface ExternalTriggerForm {
   secretName: string;
   webhookSecretKey: string;
   pathTokenKey: string;
+  hostnameOverride: string;
   targets: ExternalTriggerTargetForm[];
   promptTemplate: string;
   concurrencyPolicy: "" | "Forbid" | "Allow";
@@ -37,6 +38,7 @@ export function emptyExternalTriggerForm(): ExternalTriggerForm {
     secretName: "",
     webhookSecretKey: DEFAULT_WEBHOOK_SECRET_KEY,
     pathTokenKey: "",
+    hostnameOverride: "",
     targets: [emptyTarget()],
     promptTemplate: "",
     concurrencyPolicy: "",
@@ -81,6 +83,7 @@ export function formFromExternalTriggerSpec(
       councilDelivery: String(item.councilDelivery ?? ""),
     };
   });
+  const httpRoute = asRecord(spec.httpRoute);
   const concurrency = String(spec.concurrencyPolicy ?? "");
   const maxDeliveries =
     typeof spec.maxDeliveriesPerDay === "number" && Number.isFinite(spec.maxDeliveriesPerDay)
@@ -96,6 +99,7 @@ export function formFromExternalTriggerSpec(
     secretName: String(secretRef.name ?? ""),
     webhookSecretKey: String(secretRef.webhookSecretKey ?? "").trim() || DEFAULT_WEBHOOK_SECRET_KEY,
     pathTokenKey: String(secretRef.pathTokenKey ?? ""),
+    hostnameOverride: String(httpRoute.hostname ?? ""),
     targets: targets.length ? targets : [emptyTarget()],
     promptTemplate: String(spec.promptTemplate ?? ""),
     concurrencyPolicy: concurrency === "Allow" || concurrency === "Forbid" ? concurrency : "",
@@ -147,6 +151,9 @@ export function buildExternalTriggerSpec(form: ExternalTriggerForm): Record<stri
   if (form.suspend) {
     spec.suspend = true;
   }
+  if (form.hostnameOverride.trim()) {
+    spec.httpRoute = { hostname: form.hostnameOverride.trim() };
+  }
   if (form.promptTemplate.trim()) {
     spec.promptTemplate = form.promptTemplate;
   }
@@ -175,6 +182,12 @@ export function validateExternalTriggerForm(
   }
   if (!form.secretName.trim()) {
     return "Secret name is required (Secret values are never shown)";
+  }
+  const hostname = form.hostnameOverride.trim();
+  if (hostname) {
+    if (hostname.includes("*") || !/^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?$/.test(hostname)) {
+      return "Public hostname override must be an exact hostname, never a wildcard";
+    }
   }
   const repositories = linesToList(form.repositoriesText);
   if (repositories.length === 0) {
