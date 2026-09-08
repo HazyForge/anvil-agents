@@ -13,17 +13,22 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 
 	controlv1alpha1 "github.com/hazyforge/anvil-agents/api/v1alpha1"
 )
 
 const (
-	agentExternalTriggerReady = "Ready"
+	agentExternalTriggerReady              = "Ready"
+	agentExternalTriggerHTTPRouteFinalizer = "control.anvil.hazyforge.io/external-trigger-httproute"
 )
 
 // +kubebuilder:rbac:groups="control.anvil.hazyforge.io",resources=agentexternaltriggers,verbs=get;list;watch
 // +kubebuilder:rbac:groups="control.anvil.hazyforge.io",resources=agentexternaltriggers/status,verbs=get;patch;update
+// +kubebuilder:rbac:groups="control.anvil.hazyforge.io",resources=agentexternaltriggers/finalizers,verbs=update
 // +kubebuilder:rbac:groups="gateway.networking.k8s.io",resources=httproutes,verbs=create;delete;get;list;patch;update;watch
 type AgentExternalTriggerReconciler struct {
 	client.Client
@@ -38,12 +43,25 @@ func (r *AgentExternalTriggerReconciler) Reconcile(ctx context.Context, req ctrl
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 	if !obj.GetDeletionTimestamp().IsZero() {
-		if r.managesHTTPRoutes() {
-			if err := r.deleteOwnedHTTPRoute(ctx, obj); err != nil {
+		if controllerutil.ContainsFinalizer(obj, agentExternalTriggerHTTPRouteFinalizer) || r.managesHTTPRoutes() {
+			if err := r.deleteManagedHTTPRoutes(ctx, obj); err != nil {
 				return ctrl.Result{}, err
 			}
 		}
+		if controllerutil.ContainsFinalizer(obj, agentExternalTriggerHTTPRouteFinalizer) {
+			return r.removeHTTPRouteFinalizer(ctx, client.ObjectKeyFromObject(obj))
+		}
 		return ctrl.Result{}, nil
+	}
+	if r.managesHTTPRoutes() && !controllerutil.ContainsFinalizer(obj, agentExternalTriggerHTTPRouteFinalizer) {
+		original := obj.DeepCopy()
+		controllerutil.AddFinalizer(obj, agentExternalTriggerHTTPRouteFinalizer)
+		if err := r.Patch(ctx, obj, client.MergeFrom(original)); err != nil {
+			if apierrors.IsConflict(err) {
+				return ctrl.Result{Requeue: true}, nil
+			}
+			return ctrl.Result{}, fmt.Errorf("install AgentExternalTrigger HTTPRoute finalizer: %w", err)
+		}
 	}
 
 	original := obj.DeepCopy()
@@ -124,9 +142,50 @@ func (r *AgentExternalTriggerReconciler) SetupWithManager(mgr ctrl.Manager) erro
 	builder := ctrl.NewControllerManagedBy(mgr).
 		For(&controlv1alpha1.AgentExternalTrigger{})
 	if r.managesHTTPRoutes() {
-		builder = builder.Owns(&gatewayv1.HTTPRoute{})
+		builder = builder.Watches(&gatewayv1.HTTPRoute{}, handler.EnqueueRequestsFromMapFunc(enqueueAgentExternalTriggerForHTTPRoute))
 	}
 	return builder.Complete(r)
+}
+
+func enqueueAgentExternalTriggerForHTTPRoute(_ context.Context, obj client.Object) []reconcile.Request {
+	route, ok := obj.(*gatewayv1.HTTPRoute)
+	if !ok || route == nil {
+		return nil
+	}
+	if route.Labels[agentManagedByLabel] != "anvil-agents" {
+		return nil
+	}
+	if route.Labels["app.kubernetes.io/component"] != agentExternalTriggerHTTPRouteComponent {
+		return nil
+	}
+	name := strings.TrimSpace(route.Labels[controlv1alpha1.AgentExternalTriggerLabel])
+	namespace := strings.TrimSpace(route.Labels[controlv1alpha1.AgentExternalTriggerNamespaceLabel])
+	if namespace == "" {
+		namespace = route.Namespace
+	}
+	if name == "" || namespace == "" {
+		return nil
+	}
+	return []reconcile.Request{{NamespacedName: client.ObjectKey{Namespace: namespace, Name: name}}}
+}
+
+func (r *AgentExternalTriggerReconciler) removeHTTPRouteFinalizer(ctx context.Context, key client.ObjectKey) (ctrl.Result, error) {
+	obj := &controlv1alpha1.AgentExternalTrigger{}
+	if err := r.Get(ctx, key, obj); err != nil {
+		return ctrl.Result{}, client.IgnoreNotFound(err)
+	}
+	if !controllerutil.ContainsFinalizer(obj, agentExternalTriggerHTTPRouteFinalizer) {
+		return ctrl.Result{}, nil
+	}
+	original := obj.DeepCopy()
+	controllerutil.RemoveFinalizer(obj, agentExternalTriggerHTTPRouteFinalizer)
+	if err := r.Patch(ctx, obj, client.MergeFrom(original)); err != nil {
+		if apierrors.IsConflict(err) {
+			return ctrl.Result{Requeue: true}, nil
+		}
+		return ctrl.Result{}, fmt.Errorf("remove AgentExternalTrigger HTTPRoute finalizer: %w", err)
+	}
+	return ctrl.Result{}, nil
 }
 
 func newExternalTriggerReceiverID() (string, error) {

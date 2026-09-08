@@ -227,14 +227,19 @@ api:
   # Controller-owned Gateway API HTTPRoute per AgentExternalTrigger webhook.
   # When enabled (or when api.httpRoute.enabled and externalTriggers are on),
   # empty parentRefs/hostnames inherit api.httpRoute. Never uses wildcards.
-  # The chart does not create Gateway objects.
+  # Routes are created in the controller/API install namespace (this release
+  # namespace) so Gateway listener allowlists do not have to include every
+  # agent namespace. The chart does not create Gateway objects.
   externalTriggerHTTPRoute:
     enabled: false
+    # Namespace for webhook HTTPRoutes. Empty uses the Helm release namespace
+    # (the controller/API install namespace). Do not put routes next to the
+    # trigger unless that namespace is already allowed by the Gateway listener.
+    namespace: ""
     parentRefs: []
     hostnames: []
-    # Namespaces whose HTTPRoutes may reference the API Service. Empty falls
-    # back to api.config.ui.defaultNamespaces, then watchNamespaces. The
-    # release namespace is omitted (same-namespace backendRefs need no grant).
+    # Unused when routes live in the install namespace (the default). Kept so
+    # existing values files remain valid.
     backendFromNamespaces: []
   oidcCA:
     configMapName: ""

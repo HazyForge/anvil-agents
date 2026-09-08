@@ -117,6 +117,8 @@ export function compositionCardSummary(doc: CompositionDocument): string {
       const secretKey = String(secretRef.webhookSecretKey ?? "").trim();
       const httpRoute = asRecord(status.httpRoute);
       const routeName = String(httpRoute.name ?? "").trim();
+      const routeNamespace = String(httpRoute.namespace ?? "").trim();
+      const routeRef = routeNamespace && routeName ? `${routeNamespace}/${routeName}` : routeName;
       const publicURL = String(httpRoute.publicURL ?? "").trim();
       return (
         [
@@ -126,7 +128,7 @@ export function compositionCardSummary(doc: CompositionDocument): string {
           targets ? `targets:${targets}` : null,
           lastEvent ? `event:${lastEvent}` : null,
           lastAt ? `last:${lastAt}` : null,
-          routeName ? `route:${routeName}` : null,
+          routeRef ? `route:${routeRef}` : null,
           publicURL ? publicURL : null,
           secretName ? `secret:${secretName}` : null,
           secretKey ? `key:${secretKey}` : null,

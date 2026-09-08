@@ -16,7 +16,7 @@ rules:
     resources: ["adversesignals"]
     verbs: ["get", "list", "patch", "watch"]
   - apiGroups: ["control.anvil.hazyforge.io"]
-    resources: ["adversesignals/finalizers", "adversesituations/finalizers", "agentauthsessions/finalizers", "agentchains/finalizers", "agentdatavolumes/finalizers", "agentdatavolumecopies/finalizers", "agentruns/finalizers", "agentschedules/finalizers"]
+    resources: ["adversesignals/finalizers", "adversesituations/finalizers", "agentauthsessions/finalizers", "agentchains/finalizers", "agentdatavolumes/finalizers", "agentdatavolumecopies/finalizers", "agentexternaltriggers/finalizers", "agentruns/finalizers", "agentschedules/finalizers"]
     verbs: ["update"]
   - apiGroups: ["batch"]
     resources: ["jobs"]

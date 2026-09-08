@@ -41,7 +41,8 @@ func main() {
 	flag.StringVar(&options.PiAgentRunnerImage, "runner-image-pi-agent", options.PiAgentRunnerImage, "Default image for Pi Agent AgentRuns that do not set spec.harness.backend.image.")
 	flag.BoolVar(&options.ExternalTriggersEnabled, "external-triggers-enabled", options.ExternalTriggersEnabled, "Enable AgentExternalTrigger webhook receivers in this process (must match api.config.externalTriggers.enabled).")
 	flag.BoolVar(&options.ExternalTriggerHTTPRoute.Enabled, "external-trigger-httproute-enabled", options.ExternalTriggerHTTPRoute.Enabled, "Create Gateway API HTTPRoutes for ready AgentExternalTrigger receivers.")
-	flag.StringVar(&externalTriggerHTTPRouteJSON, "external-trigger-httproute-json", "", "JSON object of parentRefs, hostnames, and API Service backend for trigger HTTPRoutes.")
+	flag.StringVar(&externalTriggerHTTPRouteJSON, "external-trigger-httproute-json", "", "JSON object of parentRefs, hostnames, API Service backend, and routeNamespace for trigger HTTPRoutes.")
+	flag.StringVar(&options.ExternalTriggerHTTPRoute.RouteNamespace, "external-trigger-httproute-namespace", options.ExternalTriggerHTTPRoute.RouteNamespace, "Namespace for webhook HTTPRoutes; empty uses JSON routeNamespace or the controller pod namespace.")
 	zapOptions := zap.Options{Development: false}
 	zapOptions.BindFlags(flag.CommandLine)
 	flag.Parse()
@@ -60,6 +61,9 @@ func main() {
 		os.Exit(2)
 	}
 	routeCfg.Enabled = options.ExternalTriggerHTTPRoute.Enabled
+	if strings.TrimSpace(routeCfg.RouteNamespace) == "" {
+		routeCfg.RouteNamespace = strings.TrimSpace(options.ExternalTriggerHTTPRoute.RouteNamespace)
+	}
 	options.ExternalTriggerHTTPRoute = routeCfg
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&zapOptions)))
 	ctx := ctrl.SetupSignalHandler()

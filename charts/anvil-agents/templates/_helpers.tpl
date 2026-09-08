@@ -179,6 +179,16 @@ true
 {{- end -}}
 {{- end }}
 
+{{- define "anvil-agents.externalTriggerHTTPRouteNamespace" -}}
+{{- $dedicated := .Values.api.externalTriggerHTTPRoute | default dict -}}
+{{- $ns := index $dedicated "namespace" | default "" | toString | trim -}}
+{{- if $ns -}}
+{{- $ns -}}
+{{- else -}}
+{{- .Release.Namespace -}}
+{{- end -}}
+{{- end }}
+
 {{- define "anvil-agents.externalTriggerHTTPRouteConfig" -}}
 {{- $dedicated := .Values.api.externalTriggerHTTPRoute | default dict -}}
 {{- $parents := index $dedicated "parentRefs" | default list -}}
@@ -195,6 +205,7 @@ true
   "backendName" (include "anvil-agents.apiFullname" .)
   "backendNamespace" .Release.Namespace
   "backendPort" (.Values.api.service.port | int)
+  "routeNamespace" (include "anvil-agents.externalTriggerHTTPRouteNamespace" .)
   | toJson -}}
 {{- end }}
 
@@ -221,6 +232,10 @@ true
 {{- if not $parent.name -}}
 {{- fail "each external trigger HTTPRoute parentRefs entry must set name" -}}
 {{- end -}}
+{{- end -}}
+{{- $routeNS := include "anvil-agents.externalTriggerHTTPRouteNamespace" . | trim -}}
+{{- if not (regexMatch "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$" $routeNS) -}}
+{{- fail "external trigger HTTPRoute namespace must be a valid DNS label (api.externalTriggerHTTPRoute.namespace or the Helm release namespace)" -}}
 {{- end -}}
 {{- end -}}
 {{- end }}

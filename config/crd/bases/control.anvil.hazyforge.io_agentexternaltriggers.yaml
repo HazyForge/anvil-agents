@@ -281,8 +281,14 @@ spec:
                       condition when observed.
                     type: boolean
                   name:
-                    description: Name is the same-namespace HTTPRoute object owned
-                      by this trigger.
+                    description: Name is the HTTPRoute object that exposes this webhook.
+                    type: string
+                  namespace:
+                    description: |-
+                      Namespace is the HTTPRoute namespace. Routes live in the controller/API
+                      install namespace so Gateway listener allowlists do not have to include
+                      every agent namespace. Recorded when set, including when it differs from
+                      the trigger namespace.
                     type: string
                   programmed:
                     description: |-

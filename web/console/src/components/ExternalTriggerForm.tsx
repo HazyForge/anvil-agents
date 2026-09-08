@@ -74,6 +74,9 @@ export function ExternalTriggerForm({ form, disabled, isCreate, status, onChange
   const httpRoute = statusHTTPRoute(status);
   const publicURL = statusString(httpRoute, "publicURL");
   const routeName = statusString(httpRoute, "name");
+  const routeNamespace = statusString(httpRoute, "namespace");
+  const routeRef =
+    routeNamespace && routeName ? `${routeNamespace}/${routeName}` : routeName;
   const routeAccepted = conditionFlag(httpRoute.accepted);
   const routeProgrammed = conditionFlag(httpRoute.programmed);
 
@@ -115,8 +118,8 @@ export function ExternalTriggerForm({ form, disabled, isCreate, status, onChange
             <input className="input mono" value={publicURL || "—"} disabled />
           </label>
           <label className="field">
-            <span className="label">HTTPRoute name</span>
-            <input className="input mono" value={routeName || "—"} disabled />
+            <span className="label">HTTPRoute</span>
+            <input className="input mono" value={routeRef || "—"} disabled />
           </label>
           <div className="chip-row" style={{ marginBottom: "0.75rem" }}>
             {routeAccepted ? (

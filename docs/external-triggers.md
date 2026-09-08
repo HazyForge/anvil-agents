@@ -45,26 +45,34 @@ https://agents.example.com/api/v1/external-triggers/{namespace}/{name}/{receiver
 Operators should not hand-write an HTTPRoute per trigger. When
 `api.config.externalTriggers.enabled` is true **and** Gateway parent config is
 present, the controller creates one `gateway.networking.k8s.io/v1` HTTPRoute
-in the trigger namespace:
+in the **controller/API install namespace** (the Helm release namespace, or
+`api.externalTriggerHTTPRoute.namespace` when set). That is the namespace the
+controller runs in — on Primaris, `anvil-agents-system` — so Gateway listener
+`allowedRoutes` do not have to include every agent namespace.
 
-- Name: `{trigger}-webhook` (DNS-label truncated via the same child-name helper
-  as Jobs)
-- OwnerReference: the `AgentExternalTrigger` (delete garbage-collects the route)
+Kubernetes OwnerReferences cannot cross namespaces, so the route is **not**
+owned by the trigger object. The controller tracks it with labels (trigger
+namespace + name), a finalizer on the trigger, and reconcile cleanup.
+
+- Name: `{trigger-namespace}-{trigger}-webhook` (DNS-label truncated via the
+  same child-name helper as Jobs)
+- Namespace: install namespace, not the trigger namespace
+- Labels: `control.anvil.hazyforge.io/agent-external-trigger` and
+  `control.anvil.hazyforge.io/agent-external-trigger-namespace`
 - Path match: `Exact` `/api/v1/external-triggers/{namespace}/{name}/{receiverID}`
-- Backend: the `anvil-agents-api` Service
+- Backend: the `anvil-agents-api` Service in the install namespace
 - Parent Gateway refs and hostnames come from install config. Empty
   `api.externalTriggerHTTPRoute.parentRefs` / `hostnames` inherit
   `api.httpRoute`. Each parent must set `sectionName`; hostnames must be exact
   (never wildcards).
 - Optional `spec.httpRoute.hostname` overrides the install hostnames for that
   trigger only, still exact and non-wildcard.
-- Suspended or Blocked triggers detach the HTTPRoute so it is not left as a
-  live public route. The API also rejects those deliveries.
+- Suspended, blocked, or deleted triggers garbage-collect the HTTPRoute so it
+  is not left as a live public route. The API also rejects those deliveries.
 - The chart does not create Gateway objects. HTTPRoute is the owned CRD.
-- Cross-namespace backends (trigger namespace ≠ API Service namespace) get a
-  chart-managed `ReferenceGrant` for namespaces listed in
-  `api.externalTriggerHTTPRoute.backendFromNamespaces`, falling back to
-  `api.config.ui.defaultNamespaces`.
+- Same-namespace backendRefs need no `ReferenceGrant`. A grant is rendered only
+  when `api.externalTriggerHTTPRoute.namespace` is a different namespace from
+  the API Service.
 
 Fail closed: if HTTPRoute ownership is enabled and parentRefs or hostnames are
 missing or contain wildcards, Helm render fails and the controller does not
@@ -92,12 +100,12 @@ api:
     hostnames:
       - agents.example.com
   # Optional dedicated webhook parents/hostnames. Empty inherits api.httpRoute.
+  # Routes are created in the release namespace unless namespace is set.
   externalTriggerHTTPRoute:
     enabled: false
+    namespace: ""
     parentRefs: []
     hostnames: []
-    backendFromNamespaces:
-      - agents
 ```
 
 ### Generated HTTPRoute
@@ -106,18 +114,16 @@ api:
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
 metadata:
-  name: github-push-operator-webhook
-  namespace: agents
+  name: agents-github-push-operator-webhook
+  namespace: anvil-agents-system
   labels:
     app.kubernetes.io/managed-by: anvil-agents
     app.kubernetes.io/name: anvil-agents-external-trigger
     app.kubernetes.io/component: external-trigger-httproute
     control.anvil.hazyforge.io/agent-external-trigger: github-push-operator
-  ownerReferences:
-    - apiVersion: control.anvil.hazyforge.io/v1alpha1
-      kind: AgentExternalTrigger
-      name: github-push-operator
-      controller: true
+    control.anvil.hazyforge.io/agent-external-trigger-namespace: agents
+  annotations:
+    control.anvil.hazyforge.io/agent-external-trigger-uid: "<trigger-uid>"
 spec:
   parentRefs:
     - name: public
@@ -132,12 +138,12 @@ spec:
             value: /api/v1/external-triggers/agents/github-push-operator/a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4
       backendRefs:
         - name: anvil-agents-api
-          namespace: anvil-agents-system
           port: 8082
 ```
 
-Status on the trigger records `httpRoute.name`, `httpRoute.publicURL`, and
-observed `accepted` / `programmed` conditions. Secret bytes never appear.
+Status on the trigger records `httpRoute.name`, `httpRoute.namespace` (the
+install namespace when it differs from the trigger), `httpRoute.publicURL`,
+and observed `accepted` / `programmed` conditions. Secret bytes never appear.
 
 ## Secret handling
 

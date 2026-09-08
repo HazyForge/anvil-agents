@@ -81,6 +81,7 @@ done
 grep -q 'adversesignals' "${tmp_dir}/controller-rbac.yaml" || fail "controller RBAC is missing adversesignals"
 grep -A1 'resources: \["adversesignals"\]' "${tmp_dir}/controller-rbac.yaml" | grep -q '"patch"' || fail "controller RBAC cannot patch AdverseSignal finalizers"
 grep -q 'adversesignals/finalizers' "${tmp_dir}/controller-rbac.yaml" || fail "controller RBAC is missing AdverseSignal finalizer updates"
+grep -q 'agentexternaltriggers/finalizers' "${tmp_dir}/controller-rbac.yaml" || fail "controller RBAC is missing AgentExternalTrigger finalizer updates"
 helm template "${release}" "${chart}" \
   --set-json 'adverseSources=[{"apiVersion":"apps.example.io/v1","kind":"Release","resource":"releases","situationRef":{"name":"release-health"}}]' \
   --show-only templates/clusterrole.yaml >"${tmp_dir}/controller-rbac-adverse-source.yaml"
@@ -289,9 +290,11 @@ grep -Fq -- '--external-triggers-enabled=true' "${tmp_dir}/controller-ext-trigge
 grep -Fq -- '--external-trigger-httproute-enabled=true' "${tmp_dir}/controller-ext-trigger-route.yaml" || fail "HTTPRoute ownership was not enabled on the controller"
 grep -F -- '--external-trigger-httproute-json=' "${tmp_dir}/controller-ext-trigger-route.yaml" | grep -q 'agents.example.com' || fail "inherited HTTPRoute hostname missing from controller flag"
 grep -F -- '--external-trigger-httproute-json=' "${tmp_dir}/controller-ext-trigger-route.yaml" | grep -q 'https' || fail "inherited HTTPRoute sectionName missing from controller flag"
+grep -F -- '--external-trigger-httproute-json=' "${tmp_dir}/controller-ext-trigger-route.yaml" | grep -q 'routeNamespace' || fail "HTTPRoute JSON missing install-namespace routeNamespace"
 if grep -F -- '--external-trigger-httproute-json=' "${tmp_dir}/controller-ext-trigger-route.yaml" | grep -q '\*'; then
   fail "controller HTTPRoute JSON must not contain wildcard hostnames"
 fi
+grep -q 'name: POD_NAMESPACE' "${tmp_dir}/controller-ext-trigger-route.yaml" || fail "controller Deployment missing POD_NAMESPACE"
 
 helm template "${release}" "${chart}" "${api_args[@]}" \
   --set api.config.externalTriggers.enabled=true \
@@ -313,10 +316,33 @@ helm template "${release}" "${chart}" "${api_args[@]}" \
   --set-string 'api.httpRoute.parentRefs[0].sectionName=https' \
   --set-string 'api.httpRoute.hostnames[0]=agents.example.com' \
   --set-string 'api.config.ui.defaultNamespaces[0]=agents' \
-  --show-only templates/api-external-trigger-referencegrant.yaml >"${tmp_dir}/ext-trigger-referencegrant.yaml"
-grep -q 'kind: ReferenceGrant' "${tmp_dir}/ext-trigger-referencegrant.yaml" || fail "cross-namespace ReferenceGrant was not rendered"
-grep -q 'namespace: "agents"' "${tmp_dir}/ext-trigger-referencegrant.yaml" || fail "ReferenceGrant missing agents namespace"
-if grep -q '\*' "${tmp_dir}/ext-trigger-referencegrant.yaml"; then
+  >"${tmp_dir}/ext-trigger-install-ns.yaml"
+if grep -q 'kind: ReferenceGrant' "${tmp_dir}/ext-trigger-install-ns.yaml"; then
+  fail "ReferenceGrant must not render when webhook HTTPRoutes live in the install namespace"
+fi
+
+helm template "${release}" "${chart}" "${api_args[@]}" \
+  --namespace anvil-agents-system \
+  --set api.config.externalTriggers.enabled=true \
+  --set api.httpRoute.enabled=true \
+  --set-string 'api.httpRoute.parentRefs[0].name=public' \
+  --set-string 'api.httpRoute.parentRefs[0].sectionName=https' \
+  --set-string 'api.httpRoute.hostnames[0]=agents.example.com' \
+  --show-only templates/deployment.yaml >"${tmp_dir}/controller-ext-trigger-route-ns.yaml"
+grep -F -- '--external-trigger-httproute-json=' "${tmp_dir}/controller-ext-trigger-route-ns.yaml" | grep -q 'routeNamespace' || fail "HTTPRoute JSON missing routeNamespace"
+grep -F -- '--external-trigger-httproute-json=' "${tmp_dir}/controller-ext-trigger-route-ns.yaml" | grep -q 'anvil-agents-system' || fail "HTTPRoute JSON must use the Helm release namespace"
+
+helm template "${release}" "${chart}" "${api_args[@]}" \
+  --set api.config.externalTriggers.enabled=true \
+  --set api.httpRoute.enabled=true \
+  --set-string 'api.httpRoute.parentRefs[0].name=public' \
+  --set-string 'api.httpRoute.parentRefs[0].sectionName=https' \
+  --set-string 'api.httpRoute.hostnames[0]=agents.example.com' \
+  --set-string api.externalTriggerHTTPRoute.namespace=hooks \
+  --show-only templates/api-external-trigger-referencegrant.yaml >"${tmp_dir}/ext-trigger-referencegrant-custom.yaml"
+grep -q 'kind: ReferenceGrant' "${tmp_dir}/ext-trigger-referencegrant-custom.yaml" || fail "ReferenceGrant missing when HTTPRoute namespace differs from the API Service"
+grep -q 'namespace: "hooks"' "${tmp_dir}/ext-trigger-referencegrant-custom.yaml" || fail "ReferenceGrant missing custom HTTPRoute namespace"
+if grep -q '\*' "${tmp_dir}/ext-trigger-referencegrant-custom.yaml"; then
   fail "ReferenceGrant must list exact namespaces, never wildcards"
 fi
 

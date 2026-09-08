@@ -11,6 +11,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 
 	controlv1alpha1 "github.com/hazyforge/anvil-agents/api/v1alpha1"
@@ -40,6 +41,7 @@ func testHTTPRouteConfig() ExternalTriggerHTTPRouteConfig {
 		BackendName:      "anvil-agents-api",
 		BackendNamespace: "anvil-agents-system",
 		BackendPort:      8082,
+		RouteNamespace:   "anvil-agents-system",
 	}
 }
 
@@ -84,17 +86,29 @@ func testTriggerReconciler(t *testing.T, objects ...client.Object) (*AgentExtern
 	}, kube
 }
 
-func getHTTPRoute(t *testing.T, kube client.Client, name string) *gatewayv1.HTTPRoute {
+func getHTTPRoute(t *testing.T, kube client.Client, namespace, name string) *gatewayv1.HTTPRoute {
 	t.Helper()
 	route := &gatewayv1.HTTPRoute{}
-	if err := kube.Get(context.Background(), types.NamespacedName{Namespace: "agents", Name: name}, route); err != nil {
+	if err := kube.Get(context.Background(), types.NamespacedName{Namespace: namespace, Name: name}, route); err != nil {
 		t.Fatal(err)
 	}
 	return route
 }
 
+func assertNoHTTPRoute(t *testing.T, kube client.Client, namespace, name string) {
+	t.Helper()
+	route := &gatewayv1.HTTPRoute{}
+	err := kube.Get(context.Background(), types.NamespacedName{Namespace: namespace, Name: name}, route)
+	if err == nil {
+		t.Fatalf("HTTPRoute %s/%s still exists", namespace, name)
+	}
+	if client.IgnoreNotFound(err) != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestParseExternalTriggerHTTPRouteJSONFromHelm(t *testing.T) {
-	raw := `{"backendName":"contract-anvil-agents-api","backendNamespace":"default","backendPort":8082,"hostnames":["agents.example.com"],"parentRefs":[{"name":"public","namespace":"gateway-system","sectionName":"https"}]}`
+	raw := `{"backendName":"contract-anvil-agents-api","backendNamespace":"default","backendPort":8082,"hostnames":["agents.example.com"],"parentRefs":[{"name":"public","namespace":"gateway-system","sectionName":"https"}],"routeNamespace":"default"}`
 	cfg, err := ParseExternalTriggerHTTPRouteJSON(raw)
 	if err != nil {
 		t.Fatal(err)
@@ -102,7 +116,7 @@ func TestParseExternalTriggerHTTPRouteJSONFromHelm(t *testing.T) {
 	if err := cfg.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	if cfg.BackendName != "contract-anvil-agents-api" || cfg.BackendPort != 8082 {
+	if cfg.BackendName != "contract-anvil-agents-api" || cfg.BackendPort != 8082 || cfg.RouteNamespace != "default" {
 		t.Fatalf("cfg = %#v", cfg)
 	}
 }
@@ -126,6 +140,18 @@ func TestValidateExactHostnameRejectsWildcards(t *testing.T) {
 	}
 }
 
+func TestResolvedRouteNamespaceFallsBackToPodNamespace(t *testing.T) {
+	t.Setenv(podNamespaceEnv, "from-pod")
+	cfg := ExternalTriggerHTTPRouteConfig{}
+	if got := cfg.resolvedRouteNamespace(); got != "from-pod" {
+		t.Fatalf("resolvedRouteNamespace = %q, want from-pod", got)
+	}
+	cfg.RouteNamespace = "from-flag"
+	if got := cfg.resolvedRouteNamespace(); got != "from-flag" {
+		t.Fatalf("resolvedRouteNamespace = %q, want from-flag", got)
+	}
+}
+
 func TestAgentExternalTriggerHTTPRouteCreatedWhenReceiverReady(t *testing.T) {
 	obj := testExternalTrigger("gh")
 	reconciler, kube := testTriggerReconciler(t, obj)
@@ -136,19 +162,36 @@ func TestAgentExternalTriggerHTTPRouteCreatedWhenReceiverReady(t *testing.T) {
 	if err := kube.Get(context.Background(), types.NamespacedName{Namespace: "agents", Name: "gh"}, fresh); err != nil {
 		t.Fatal(err)
 	}
+	if !controllerutil.ContainsFinalizer(fresh, agentExternalTriggerHTTPRouteFinalizer) {
+		t.Fatal("expected HTTPRoute finalizer on the trigger")
+	}
 	wantName := agentExternalTriggerHTTPRouteName(fresh)
 	if fresh.Status.HTTPRoute == nil || fresh.Status.HTTPRoute.Name != wantName {
 		t.Fatalf("status.httpRoute = %#v, want name %q (phase=%s conditions=%#v)", fresh.Status.HTTPRoute, wantName, fresh.Status.Phase, fresh.Status.Conditions)
+	}
+	if fresh.Status.HTTPRoute.Namespace != "anvil-agents-system" {
+		t.Fatalf("status.httpRoute.namespace = %q, want anvil-agents-system", fresh.Status.HTTPRoute.Namespace)
 	}
 	wantURL := "https://agents.example.com" + fresh.Status.WebhookPath
 	if fresh.Status.HTTPRoute.PublicURL != wantURL {
 		t.Fatalf("publicURL = %q want %q", fresh.Status.HTTPRoute.PublicURL, wantURL)
 	}
 
-	route := getHTTPRoute(t, kube, wantName)
-	if !metav1.IsControlledBy(route, fresh) {
-		t.Fatal("HTTPRoute is not owned by the trigger")
+	route := getHTTPRoute(t, kube, "anvil-agents-system", wantName)
+	if metav1.IsControlledBy(route, fresh) {
+		t.Fatal("HTTPRoute must not use a cross-namespace OwnerReference")
 	}
+	if !httpRouteManagedByTrigger(route, fresh) {
+		t.Fatal("HTTPRoute is not labeled as managed by the trigger")
+	}
+	if route.Labels[controlv1alpha1.AgentExternalTriggerNamespaceLabel] != "agents" {
+		t.Fatalf("trigger namespace label = %q", route.Labels[controlv1alpha1.AgentExternalTriggerNamespaceLabel])
+	}
+	if route.Annotations[agentExternalTriggerUIDAnnotation] != string(fresh.UID) {
+		t.Fatalf("uid annotation = %q", route.Annotations[agentExternalTriggerUIDAnnotation])
+	}
+	assertNoHTTPRoute(t, kube, "agents", wantName)
+	assertNoHTTPRoute(t, kube, "agents", agentExternalTriggerLegacyHTTPRouteName(fresh))
 	if len(route.Spec.Rules) != 1 || len(route.Spec.Rules[0].Matches) != 1 || route.Spec.Rules[0].Matches[0].Path == nil {
 		t.Fatalf("route matches = %#v", route.Spec.Rules)
 	}
@@ -169,8 +212,8 @@ func TestAgentExternalTriggerHTTPRouteCreatedWhenReceiverReady(t *testing.T) {
 	if string(backend.Name) != "anvil-agents-api" {
 		t.Fatalf("backend name = %s", backend.Name)
 	}
-	if backend.Namespace == nil || string(*backend.Namespace) != "anvil-agents-system" {
-		t.Fatalf("backend namespace = %#v", backend.Namespace)
+	if backend.Namespace != nil {
+		t.Fatalf("backend namespace = %#v, want omitted for same-namespace Service", backend.Namespace)
 	}
 	if len(route.Spec.ParentRefs) != 1 || string(route.Spec.ParentRefs[0].Name) != "public" {
 		t.Fatalf("parentRefs = %#v", route.Spec.ParentRefs)
@@ -180,6 +223,83 @@ func TestAgentExternalTriggerHTTPRouteCreatedWhenReceiverReady(t *testing.T) {
 	}
 	if len(route.Spec.Hostnames) != 1 || string(route.Spec.Hostnames[0]) != "agents.example.com" {
 		t.Fatalf("hostnames = %#v", route.Spec.Hostnames)
+	}
+}
+
+func TestAgentExternalTriggerHTTPRouteNotCreatedInTriggerNamespace(t *testing.T) {
+	obj := testExternalTrigger("gh")
+	reconciler, kube := testTriggerReconciler(t, obj)
+	if _, err := reconciler.Reconcile(context.Background(), ctrl.Request{NamespacedName: types.NamespacedName{Namespace: "agents", Name: "gh"}}); err != nil {
+		t.Fatal(err)
+	}
+	routes := &gatewayv1.HTTPRouteList{}
+	if err := kube.List(context.Background(), routes, client.InNamespace("agents")); err != nil {
+		t.Fatal(err)
+	}
+	if len(routes.Items) != 0 {
+		t.Fatalf("created HTTPRoute in trigger namespace: %#v", routes.Items)
+	}
+	install := &gatewayv1.HTTPRouteList{}
+	if err := kube.List(context.Background(), install, client.InNamespace("anvil-agents-system")); err != nil {
+		t.Fatal(err)
+	}
+	if len(install.Items) != 1 {
+		t.Fatalf("install-namespace HTTPRoutes = %#v, want 1", install.Items)
+	}
+}
+
+func TestAgentExternalTriggerHTTPRouteCleansLegacyTriggerNamespaceRoute(t *testing.T) {
+	obj := testExternalTrigger("gh")
+	legacy := &gatewayv1.HTTPRoute{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      agentExternalTriggerLegacyHTTPRouteName(obj),
+			Namespace: obj.Namespace,
+			Labels: map[string]string{
+				agentManagedByLabel:                       "anvil-agents",
+				"app.kubernetes.io/component":             agentExternalTriggerHTTPRouteComponent,
+				controlv1alpha1.AgentExternalTriggerLabel: sanitizeLabelValue(obj.Name),
+			},
+			OwnerReferences: []metav1.OwnerReference{{
+				APIVersion: controlv1alpha1.GroupVersion.String(),
+				Kind:       "AgentExternalTrigger",
+				Name:       obj.Name,
+				UID:        obj.UID,
+				Controller: boolPtr(true),
+			}},
+		},
+	}
+	reconciler, kube := testTriggerReconciler(t, obj, legacy)
+	if _, err := reconciler.Reconcile(context.Background(), ctrl.Request{NamespacedName: types.NamespacedName{Namespace: "agents", Name: "gh"}}); err != nil {
+		t.Fatal(err)
+	}
+	fresh := &controlv1alpha1.AgentExternalTrigger{}
+	if err := kube.Get(context.Background(), types.NamespacedName{Namespace: "agents", Name: "gh"}, fresh); err != nil {
+		t.Fatal(err)
+	}
+	_ = getHTTPRoute(t, kube, "anvil-agents-system", agentExternalTriggerHTTPRouteName(fresh))
+	assertNoHTTPRoute(t, kube, "agents", agentExternalTriggerLegacyHTTPRouteName(fresh))
+}
+
+func TestAgentExternalTriggerHTTPRouteDistinctNamesAcrossTriggerNamespaces(t *testing.T) {
+	first := testExternalTrigger("gh")
+	second := testExternalTrigger("gh")
+	second.Namespace = "other"
+	second.UID = "other-gh-uid"
+	reconciler, kube := testTriggerReconciler(t, first, second)
+	for _, ns := range []string{"agents", "other"} {
+		if _, err := reconciler.Reconcile(context.Background(), ctrl.Request{NamespacedName: types.NamespacedName{Namespace: ns, Name: "gh"}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	routes := &gatewayv1.HTTPRouteList{}
+	if err := kube.List(context.Background(), routes, client.InNamespace("anvil-agents-system")); err != nil {
+		t.Fatal(err)
+	}
+	if len(routes.Items) != 2 {
+		t.Fatalf("install-namespace HTTPRoutes = %#v, want 2", routes.Items)
+	}
+	if routes.Items[0].Name == routes.Items[1].Name {
+		t.Fatalf("HTTPRoute names collided: %s", routes.Items[0].Name)
 	}
 }
 
@@ -194,7 +314,7 @@ func TestAgentExternalTriggerHTTPRouteHostnameOverride(t *testing.T) {
 	if err := kube.Get(context.Background(), types.NamespacedName{Namespace: "agents", Name: "gh"}, fresh); err != nil {
 		t.Fatal(err)
 	}
-	route := getHTTPRoute(t, kube, agentExternalTriggerHTTPRouteName(fresh))
+	route := getHTTPRoute(t, kube, "anvil-agents-system", agentExternalTriggerHTTPRouteName(fresh))
 	if len(route.Spec.Hostnames) != 1 || string(route.Spec.Hostnames[0]) != "hooks.example.com" {
 		t.Fatalf("hostnames = %#v", route.Spec.Hostnames)
 	}
@@ -206,7 +326,7 @@ func TestAgentExternalTriggerHTTPRouteHostnameOverride(t *testing.T) {
 func TestAgentExternalTriggerHTTPRouteSkippedWhenParentsUnset(t *testing.T) {
 	obj := testExternalTrigger("gh")
 	reconciler, kube := testTriggerReconciler(t, obj)
-	reconciler.HTTPRoute = ExternalTriggerHTTPRouteConfig{Enabled: true, BackendName: "api", BackendPort: 8082}
+	reconciler.HTTPRoute = ExternalTriggerHTTPRouteConfig{Enabled: true, BackendName: "api", BackendPort: 8082, RouteNamespace: "anvil-agents-system"}
 	if _, err := reconciler.Reconcile(context.Background(), ctrl.Request{NamespacedName: types.NamespacedName{Namespace: "agents", Name: "gh"}}); err != nil {
 		t.Fatal(err)
 	}
@@ -258,7 +378,7 @@ func TestAgentExternalTriggerHTTPRouteCleanedUpOnSuspend(t *testing.T) {
 		t.Fatal(err)
 	}
 	routeName := agentExternalTriggerHTTPRouteName(fresh)
-	_ = getHTTPRoute(t, kube, routeName)
+	_ = getHTTPRoute(t, kube, "anvil-agents-system", routeName)
 
 	fresh.Spec.Suspend = true
 	if err := kube.Update(context.Background(), fresh); err != nil {
@@ -276,13 +396,10 @@ func TestAgentExternalTriggerHTTPRouteCleanedUpOnSuspend(t *testing.T) {
 	if fresh.Status.HTTPRoute != nil {
 		t.Fatalf("httpRoute status left after suspend: %#v", fresh.Status.HTTPRoute)
 	}
-	route := &gatewayv1.HTTPRoute{}
-	err := kube.Get(context.Background(), types.NamespacedName{Namespace: "agents", Name: routeName}, route)
-	if err == nil {
-		t.Fatal("HTTPRoute still exists after suspend")
-	}
-	if client.IgnoreNotFound(err) != nil {
-		t.Fatal(err)
+	assertNoHTTPRoute(t, kube, "anvil-agents-system", routeName)
+	assertNoHTTPRoute(t, kube, "agents", routeName)
+	if !controllerutil.ContainsFinalizer(fresh, agentExternalTriggerHTTPRouteFinalizer) {
+		t.Fatal("suspend should keep the HTTPRoute finalizer")
 	}
 }
 
@@ -299,16 +416,20 @@ func TestAgentExternalTriggerHTTPRouteCleanedUpOnDelete(t *testing.T) {
 		t.Fatal(err)
 	}
 	routeName := agentExternalTriggerHTTPRouteName(fresh)
+	_ = getHTTPRoute(t, kube, "anvil-agents-system", routeName)
 	if err := kube.Delete(context.Background(), fresh); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := reconciler.Reconcile(context.Background(), req); err != nil {
 		t.Fatal(err)
 	}
-	route := &gatewayv1.HTTPRoute{}
-	err := kube.Get(context.Background(), types.NamespacedName{Namespace: "agents", Name: routeName}, route)
-	if err == nil {
-		t.Fatal("HTTPRoute still exists after trigger deletion")
+	assertNoHTTPRoute(t, kube, "anvil-agents-system", routeName)
+	assertNoHTTPRoute(t, kube, "agents", routeName)
+	if err := kube.Get(context.Background(), req.NamespacedName, fresh); err != nil {
+		t.Fatal(err)
+	}
+	if controllerutil.ContainsFinalizer(fresh, agentExternalTriggerHTTPRouteFinalizer) {
+		t.Fatal("HTTPRoute finalizer should be removed after route cleanup")
 	}
 }
 
@@ -340,10 +461,7 @@ func TestAgentExternalTriggerHTTPRouteCleanedUpWhenBlocked(t *testing.T) {
 	if fresh.Status.HTTPRoute != nil {
 		t.Fatalf("httpRoute status left while blocked: %#v", fresh.Status.HTTPRoute)
 	}
-	route := &gatewayv1.HTTPRoute{}
-	if err := kube.Get(context.Background(), types.NamespacedName{Namespace: "agents", Name: routeName}, route); err == nil {
-		t.Fatal("HTTPRoute still exists while blocked")
-	}
+	assertNoHTTPRoute(t, kube, "anvil-agents-system", routeName)
 }
 
 func TestAgentExternalTriggerWildcardHostnameDoesNotCreateRoute(t *testing.T) {
@@ -373,7 +491,7 @@ func TestBuildAgentExternalTriggerHTTPRouteRejectsWildcardHostnames(t *testing.T
 	obj := testExternalTrigger("gh")
 	obj.Status.WebhookPath = "/api/v1/external-triggers/agents/gh/abcd"
 	cfg := testHTTPRouteConfig()
-	if _, err := buildAgentExternalTriggerHTTPRoute(obj, cfg, []string{"*.example.com"}, obj.Status.WebhookPath); err == nil {
+	if _, err := buildAgentExternalTriggerHTTPRoute(obj, cfg, []string{"*.example.com"}, obj.Status.WebhookPath, "anvil-agents-system"); err == nil {
 		t.Fatal("expected wildcard hostname to be rejected")
 	}
 }
@@ -389,7 +507,7 @@ func TestAgentExternalTriggerHTTPRouteObservesAcceptedAndProgrammed(t *testing.T
 	if err := kube.Get(context.Background(), req.NamespacedName, fresh); err != nil {
 		t.Fatal(err)
 	}
-	route := getHTTPRoute(t, kube, agentExternalTriggerHTTPRouteName(fresh))
+	route := getHTTPRoute(t, kube, "anvil-agents-system", agentExternalTriggerHTTPRouteName(fresh))
 	route.Status.Parents = []gatewayv1.RouteParentStatus{{
 		ControllerName: "gateway.example/controller",
 		Conditions: []metav1.Condition{
@@ -412,5 +530,20 @@ func TestAgentExternalTriggerHTTPRouteObservesAcceptedAndProgrammed(t *testing.T
 	}
 	if fresh.Status.HTTPRoute.Programmed == nil || !*fresh.Status.HTTPRoute.Programmed {
 		t.Fatalf("programmed = %#v", fresh.Status.HTTPRoute)
+	}
+}
+
+func TestEnqueueAgentExternalTriggerForHTTPRoute(t *testing.T) {
+	obj := testExternalTrigger("gh")
+	route := &gatewayv1.HTTPRoute{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      agentExternalTriggerHTTPRouteName(obj),
+			Namespace: "anvil-agents-system",
+			Labels:    agentExternalTriggerHTTPRouteLabels(obj),
+		},
+	}
+	reqs := enqueueAgentExternalTriggerForHTTPRoute(context.Background(), route)
+	if len(reqs) != 1 || reqs[0].Namespace != "agents" || reqs[0].Name != "gh" {
+		t.Fatalf("enqueue = %#v", reqs)
 	}
 }

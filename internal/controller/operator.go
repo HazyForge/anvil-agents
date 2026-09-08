@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"k8s.io/apimachinery/pkg/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
@@ -50,6 +51,15 @@ func Run(ctx context.Context, options *Options) error {
 		managerOptions.Cache = cache.Options{DefaultNamespaces: map[string]cache.Config{}}
 		for _, namespace := range namespaces {
 			managerOptions.Cache.DefaultNamespaces[namespace] = cache.Config{}
+		}
+		if options.ExternalTriggerHTTPRoute.Enabled {
+			routeNS := strings.TrimSpace(options.ExternalTriggerHTTPRoute.RouteNamespace)
+			if routeNS == "" {
+				routeNS = controllerPodNamespace()
+			}
+			if routeNS != "" {
+				managerOptions.Cache.DefaultNamespaces[routeNS] = cache.Config{}
+			}
 		}
 	}
 

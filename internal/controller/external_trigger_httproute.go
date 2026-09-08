@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"os"
 	"regexp"
 	"strings"
 
@@ -14,7 +15,6 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 
 	controlv1alpha1 "github.com/hazyforge/anvil-agents/api/v1alpha1"
@@ -24,6 +24,9 @@ const (
 	agentExternalTriggerHTTPRouteReady     = "HTTPRouteReady"
 	agentExternalTriggerHTTPRouteComponent = "external-trigger-httproute"
 	agentExternalTriggerHTTPRoutePoll      = agentSchedulePollInterval
+	agentExternalTriggerUIDAnnotation      = "control.anvil.hazyforge.io/agent-external-trigger-uid"
+	inClusterNamespacePath                 = "/var/run/secrets/kubernetes.io/serviceaccount/namespace"
+	podNamespaceEnv                        = "POD_NAMESPACE"
 )
 
 var exactHostnamePattern = regexp.MustCompile(`^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?$`)
@@ -47,6 +50,10 @@ type ExternalTriggerHTTPRouteConfig struct {
 	BackendName      string                              `json:"backendName,omitempty"`
 	BackendNamespace string                              `json:"backendNamespace,omitempty"`
 	BackendPort      int32                               `json:"backendPort,omitempty"`
+	// RouteNamespace is the namespace that receives webhook HTTPRoutes.
+	// Empty uses the controller pod namespace (POD_NAMESPACE or the in-cluster
+	// ServiceAccount namespace). Do not hardcode anvil-agents-system.
+	RouteNamespace string `json:"routeNamespace,omitempty"`
 }
 
 func ParseExternalTriggerHTTPRouteJSON(raw string) (ExternalTriggerHTTPRouteConfig, error) {
@@ -91,6 +98,24 @@ func (cfg ExternalTriggerHTTPRouteConfig) Validate() error {
 	return nil
 }
 
+func (cfg ExternalTriggerHTTPRouteConfig) resolvedRouteNamespace() string {
+	if ns := strings.TrimSpace(cfg.RouteNamespace); ns != "" {
+		return ns
+	}
+	return controllerPodNamespace()
+}
+
+func controllerPodNamespace() string {
+	if ns := strings.TrimSpace(os.Getenv(podNamespaceEnv)); ns != "" {
+		return ns
+	}
+	data, err := os.ReadFile(inClusterNamespacePath)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(data))
+}
+
 func validateExactHostname(hostname string) error {
 	hostname = strings.TrimSpace(hostname)
 	if hostname == "" {
@@ -112,7 +137,24 @@ func (r *AgentExternalTriggerReconciler) managesHTTPRoutes() bool {
 	return r != nil && r.ExternalTriggersEnabled && r.HTTPRoute.Enabled
 }
 
+func (r *AgentExternalTriggerReconciler) httpRouteNamespace() (string, error) {
+	ns := ""
+	if r != nil {
+		ns = r.HTTPRoute.resolvedRouteNamespace()
+	} else {
+		ns = controllerPodNamespace()
+	}
+	if ns == "" {
+		return "", fmt.Errorf("webhook HTTPRoute namespace is unset; set api.externalTriggerHTTPRoute.namespace or run in the controller namespace")
+	}
+	return ns, nil
+}
+
 func agentExternalTriggerHTTPRouteName(obj *controlv1alpha1.AgentExternalTrigger) string {
+	return agentRunChildName(obj.Namespace, obj.Name, "webhook")
+}
+
+func agentExternalTriggerLegacyHTTPRouteName(obj *controlv1alpha1.AgentExternalTrigger) string {
 	return agentRunChildName(obj.Name, "webhook")
 }
 
@@ -154,13 +196,17 @@ func agentExternalTriggerRouteHostnames(obj *controlv1alpha1.AgentExternalTrigge
 	return hostnames, nil
 }
 
-func buildAgentExternalTriggerHTTPRoute(obj *controlv1alpha1.AgentExternalTrigger, cfg ExternalTriggerHTTPRouteConfig, hostnames []string, webhookPath string) (*gatewayv1.HTTPRoute, error) {
+func buildAgentExternalTriggerHTTPRoute(obj *controlv1alpha1.AgentExternalTrigger, cfg ExternalTriggerHTTPRouteConfig, hostnames []string, webhookPath, routeNamespace string) (*gatewayv1.HTTPRoute, error) {
 	if obj == nil {
 		return nil, fmt.Errorf("trigger is required")
 	}
 	path := strings.TrimSpace(webhookPath)
 	if path == "" {
 		return nil, fmt.Errorf("webhookPath is required")
+	}
+	routeNamespace = strings.TrimSpace(routeNamespace)
+	if routeNamespace == "" {
+		return nil, fmt.Errorf("route namespace is required")
 	}
 	if err := cfg.Validate(); err != nil {
 		return nil, err
@@ -184,7 +230,7 @@ func buildAgentExternalTriggerHTTPRoute(obj *controlv1alpha1.AgentExternalTrigge
 			},
 		},
 	}
-	if ns := strings.TrimSpace(cfg.BackendNamespace); ns != "" && ns != obj.Namespace {
+	if ns := strings.TrimSpace(cfg.BackendNamespace); ns != "" && ns != routeNamespace {
 		backendNS := gatewayv1.Namespace(ns)
 		backend.Namespace = &backendNS
 	}
@@ -223,9 +269,10 @@ func buildAgentExternalTriggerHTTPRoute(obj *controlv1alpha1.AgentExternalTrigge
 			Kind:       "HTTPRoute",
 		},
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      agentExternalTriggerHTTPRouteName(obj),
-			Namespace: obj.Namespace,
-			Labels:    agentExternalTriggerHTTPRouteLabels(obj),
+			Name:        agentExternalTriggerHTTPRouteName(obj),
+			Namespace:   routeNamespace,
+			Labels:      agentExternalTriggerHTTPRouteLabels(obj),
+			Annotations: agentExternalTriggerHTTPRouteAnnotations(obj),
 		},
 		Spec: gatewayv1.HTTPRouteSpec{
 			CommonRouteSpec: gatewayv1.CommonRouteSpec{ParentRefs: parents},
@@ -244,13 +291,44 @@ func buildAgentExternalTriggerHTTPRoute(obj *controlv1alpha1.AgentExternalTrigge
 }
 
 func agentExternalTriggerHTTPRouteLabels(obj *controlv1alpha1.AgentExternalTrigger) map[string]string {
-	name := sanitizeLabelValue(obj.Name)
 	return map[string]string{
-		agentManagedByLabel:                       "anvil-agents",
-		"app.kubernetes.io/name":                  "anvil-agents-external-trigger",
-		"app.kubernetes.io/component":             agentExternalTriggerHTTPRouteComponent,
-		controlv1alpha1.AgentExternalTriggerLabel: name,
+		agentManagedByLabel:                                "anvil-agents",
+		"app.kubernetes.io/name":                           "anvil-agents-external-trigger",
+		"app.kubernetes.io/component":                      agentExternalTriggerHTTPRouteComponent,
+		controlv1alpha1.AgentExternalTriggerLabel:          sanitizeLabelValue(obj.Name),
+		controlv1alpha1.AgentExternalTriggerNamespaceLabel: sanitizeLabelValue(obj.Namespace),
 	}
+}
+
+func agentExternalTriggerHTTPRouteAnnotations(obj *controlv1alpha1.AgentExternalTrigger) map[string]string {
+	return map[string]string{
+		agentExternalTriggerUIDAnnotation: string(obj.UID),
+	}
+}
+
+func httpRouteManagedByTrigger(route *gatewayv1.HTTPRoute, obj *controlv1alpha1.AgentExternalTrigger) bool {
+	if route == nil || obj == nil {
+		return false
+	}
+	if metav1.IsControlledBy(route, obj) {
+		return true
+	}
+	if route.Labels[agentManagedByLabel] != "anvil-agents" {
+		return false
+	}
+	if route.Labels["app.kubernetes.io/component"] != agentExternalTriggerHTTPRouteComponent {
+		return false
+	}
+	if route.Labels[controlv1alpha1.AgentExternalTriggerLabel] != sanitizeLabelValue(obj.Name) {
+		return false
+	}
+	if ns := route.Labels[controlv1alpha1.AgentExternalTriggerNamespaceLabel]; ns != "" && ns != sanitizeLabelValue(obj.Namespace) {
+		return false
+	}
+	if ns := route.Labels[controlv1alpha1.AgentExternalTriggerNamespaceLabel]; ns == "" && route.Namespace != obj.Namespace {
+		return false
+	}
+	return true
 }
 
 func (r *AgentExternalTriggerReconciler) reconcileHTTPRoute(ctx context.Context, obj *controlv1alpha1.AgentExternalTrigger, status *controlv1alpha1.AgentExternalTriggerStatus, expose bool) (ctrl.Result, error) {
@@ -262,7 +340,7 @@ func (r *AgentExternalTriggerReconciler) reconcileHTTPRoute(ctx context.Context,
 
 	now := metav1.Now()
 	if !expose || strings.TrimSpace(status.WebhookPath) == "" || strings.TrimSpace(status.ReceiverID) == "" {
-		if err := r.deleteOwnedHTTPRoute(ctx, obj); err != nil {
+		if err := r.deleteManagedHTTPRoutes(ctx, obj); err != nil {
 			return ctrl.Result{}, err
 		}
 		status.HTTPRoute = nil
@@ -278,7 +356,7 @@ func (r *AgentExternalTriggerReconciler) reconcileHTTPRoute(ctx context.Context,
 	}
 
 	if err := r.HTTPRoute.Validate(); err != nil {
-		if delErr := r.deleteOwnedHTTPRoute(ctx, obj); delErr != nil {
+		if delErr := r.deleteManagedHTTPRoutes(ctx, obj); delErr != nil {
 			return ctrl.Result{}, delErr
 		}
 		status.HTTPRoute = nil
@@ -293,9 +371,26 @@ func (r *AgentExternalTriggerReconciler) reconcileHTTPRoute(ctx context.Context,
 		return ctrl.Result{}, nil
 	}
 
+	routeNamespace, err := r.httpRouteNamespace()
+	if err != nil {
+		if delErr := r.deleteManagedHTTPRoutes(ctx, obj); delErr != nil {
+			return ctrl.Result{}, delErr
+		}
+		status.HTTPRoute = nil
+		apimeta.SetStatusCondition(&status.Conditions, metav1.Condition{
+			Type:               agentExternalTriggerHTTPRouteReady,
+			Status:             metav1.ConditionFalse,
+			ObservedGeneration: obj.Generation,
+			LastTransitionTime: now,
+			Reason:             "RouteNamespaceUnset",
+			Message:            err.Error(),
+		})
+		return ctrl.Result{}, nil
+	}
+
 	hostnames, err := agentExternalTriggerRouteHostnames(obj, r.HTTPRoute)
 	if err != nil {
-		if delErr := r.deleteOwnedHTTPRoute(ctx, obj); delErr != nil {
+		if delErr := r.deleteManagedHTTPRoutes(ctx, obj); delErr != nil {
 			return ctrl.Result{}, delErr
 		}
 		status.HTTPRoute = nil
@@ -310,9 +405,9 @@ func (r *AgentExternalTriggerReconciler) reconcileHTTPRoute(ctx context.Context,
 		return ctrl.Result{}, nil
 	}
 
-	desired, err := buildAgentExternalTriggerHTTPRoute(obj, r.HTTPRoute, hostnames, status.WebhookPath)
+	desired, err := buildAgentExternalTriggerHTTPRoute(obj, r.HTTPRoute, hostnames, status.WebhookPath, routeNamespace)
 	if err != nil {
-		if delErr := r.deleteOwnedHTTPRoute(ctx, obj); delErr != nil {
+		if delErr := r.deleteManagedHTTPRoutes(ctx, obj); delErr != nil {
 			return ctrl.Result{}, delErr
 		}
 		status.HTTPRoute = nil
@@ -325,9 +420,6 @@ func (r *AgentExternalTriggerReconciler) reconcileHTTPRoute(ctx context.Context,
 			Message:            err.Error(),
 		})
 		return ctrl.Result{}, nil
-	}
-	if err := controllerutil.SetControllerReference(obj, desired, r.Scheme); err != nil {
-		return ctrl.Result{}, fmt.Errorf("set HTTPRoute owner: %w", err)
 	}
 
 	route, err := r.ensureHTTPRoute(ctx, obj, desired)
@@ -343,11 +435,15 @@ func (r *AgentExternalTriggerReconciler) reconcileHTTPRoute(ctx context.Context,
 		})
 		return ctrl.Result{}, err
 	}
+	if err := r.deleteStaleHTTPRoutes(ctx, obj, client.ObjectKeyFromObject(desired)); err != nil {
+		return ctrl.Result{}, err
+	}
 
 	accepted, programmed := observeHTTPRouteParentConditions(route)
 	publicURL := agentExternalTriggerPublicURL(hostnames[0], status.WebhookPath)
 	status.HTTPRoute = &controlv1alpha1.AgentExternalTriggerHTTPRouteStatus{
 		Name:       route.Name,
+		Namespace:  route.Namespace,
 		PublicURL:  publicURL,
 		Accepted:   accepted,
 		Programmed: programmed,
@@ -364,7 +460,7 @@ func (r *AgentExternalTriggerReconciler) reconcileHTTPRoute(ctx context.Context,
 	if ready {
 		condition.Status = metav1.ConditionTrue
 		condition.Reason = "RouteReady"
-		condition.Message = fmt.Sprintf("HTTPRoute %s is accepted at %s.", route.Name, publicURL)
+		condition.Message = fmt.Sprintf("HTTPRoute %s/%s is accepted at %s.", route.Namespace, route.Name, publicURL)
 	}
 	apimeta.SetStatusCondition(&status.Conditions, condition)
 	if !ready {
@@ -395,8 +491,8 @@ func (r *AgentExternalTriggerReconciler) ensureHTTPRoute(ctx context.Context, ob
 		return nil, err
 	}
 
-	if !metav1.IsControlledBy(existing, obj) {
-		return nil, fmt.Errorf("HTTPRoute %s/%s exists and is not owned by AgentExternalTrigger %s", existing.Namespace, existing.Name, obj.Name)
+	if !httpRouteManagedByTrigger(existing, obj) {
+		return nil, fmt.Errorf("HTTPRoute %s/%s exists and is not managed by AgentExternalTrigger %s/%s", existing.Namespace, existing.Name, obj.Namespace, obj.Name)
 	}
 	patch := existing.DeepCopy()
 	if patch.Labels == nil {
@@ -405,6 +501,12 @@ func (r *AgentExternalTriggerReconciler) ensureHTTPRoute(ctx context.Context, ob
 	for key, value := range desired.Labels {
 		patch.Labels[key] = value
 	}
+	if patch.Annotations == nil {
+		patch.Annotations = map[string]string{}
+	}
+	for key, value := range desired.Annotations {
+		patch.Annotations[key] = value
+	}
 	patch.Spec = desired.Spec
 	if err := r.Patch(ctx, patch, client.MergeFrom(existing)); err != nil {
 		return nil, fmt.Errorf("patch HTTPRoute: %w", err)
@@ -412,44 +514,85 @@ func (r *AgentExternalTriggerReconciler) ensureHTTPRoute(ctx context.Context, ob
 	return patch, nil
 }
 
-func (r *AgentExternalTriggerReconciler) deleteOwnedHTTPRoute(ctx context.Context, obj *controlv1alpha1.AgentExternalTrigger) error {
-	route := &gatewayv1.HTTPRoute{}
-	key := types.NamespacedName{Namespace: obj.Namespace, Name: agentExternalTriggerHTTPRouteName(obj)}
-	if err := r.Get(ctx, key, route); err != nil {
-		if apierrors.IsNotFound(err) || apimeta.IsNoMatchError(err) {
-			return r.deleteOwnedHTTPRoutesByLabel(ctx, obj)
-		}
-		return err
-	}
-	if !metav1.IsControlledBy(route, obj) {
-		return r.deleteOwnedHTTPRoutesByLabel(ctx, obj)
-	}
-	if err := r.Delete(ctx, route); err != nil && !apierrors.IsNotFound(err) {
-		return fmt.Errorf("delete HTTPRoute: %w", err)
-	}
-	return r.deleteOwnedHTTPRoutesByLabel(ctx, obj)
+func (r *AgentExternalTriggerReconciler) deleteManagedHTTPRoutes(ctx context.Context, obj *controlv1alpha1.AgentExternalTrigger) error {
+	return r.deleteStaleHTTPRoutes(ctx, obj, types.NamespacedName{})
 }
 
-func (r *AgentExternalTriggerReconciler) deleteOwnedHTTPRoutesByLabel(ctx context.Context, obj *controlv1alpha1.AgentExternalTrigger) error {
-	list := &gatewayv1.HTTPRouteList{}
-	if err := r.List(ctx, list, client.InNamespace(obj.Namespace), client.MatchingLabels{
-		controlv1alpha1.AgentExternalTriggerLabel: sanitizeLabelValue(obj.Name),
-	}); err != nil {
-		if apimeta.IsNoMatchError(err) {
-			return nil
-		}
+func (r *AgentExternalTriggerReconciler) deleteStaleHTTPRoutes(ctx context.Context, obj *controlv1alpha1.AgentExternalTrigger, keep types.NamespacedName) error {
+	routes, err := r.listManagedHTTPRoutes(ctx, obj)
+	if err != nil {
 		return err
 	}
-	for i := range list.Items {
-		route := &list.Items[i]
-		if !metav1.IsControlledBy(route, obj) {
+	for i := range routes {
+		route := &routes[i]
+		if keep.Name != "" && route.Name == keep.Name && route.Namespace == keep.Namespace {
 			continue
 		}
 		if err := r.Delete(ctx, route); err != nil && !apierrors.IsNotFound(err) {
-			return fmt.Errorf("delete HTTPRoute %s: %w", route.Name, err)
+			return fmt.Errorf("delete HTTPRoute %s/%s: %w", route.Namespace, route.Name, err)
 		}
 	}
 	return nil
+}
+
+func (r *AgentExternalTriggerReconciler) listManagedHTTPRoutes(ctx context.Context, obj *controlv1alpha1.AgentExternalTrigger) ([]gatewayv1.HTTPRoute, error) {
+	seen := map[string]struct{}{}
+	var routes []gatewayv1.HTTPRoute
+	add := func(route *gatewayv1.HTTPRoute) {
+		if route == nil || !httpRouteManagedByTrigger(route, obj) {
+			return
+		}
+		key := route.Namespace + "/" + route.Name
+		if _, ok := seen[key]; ok {
+			return
+		}
+		seen[key] = struct{}{}
+		routes = append(routes, *route)
+	}
+
+	labeled := &gatewayv1.HTTPRouteList{}
+	if err := r.List(ctx, labeled, client.MatchingLabels{
+		controlv1alpha1.AgentExternalTriggerLabel:          sanitizeLabelValue(obj.Name),
+		controlv1alpha1.AgentExternalTriggerNamespaceLabel: sanitizeLabelValue(obj.Namespace),
+	}); err != nil && !apimeta.IsNoMatchError(err) {
+		return nil, err
+	} else if err == nil {
+		for i := range labeled.Items {
+			add(&labeled.Items[i])
+		}
+	}
+
+	legacy := &gatewayv1.HTTPRouteList{}
+	if err := r.List(ctx, legacy, client.InNamespace(obj.Namespace), client.MatchingLabels{
+		controlv1alpha1.AgentExternalTriggerLabel: sanitizeLabelValue(obj.Name),
+	}); err != nil && !apimeta.IsNoMatchError(err) {
+		return nil, err
+	} else if err == nil {
+		for i := range legacy.Items {
+			add(&legacy.Items[i])
+		}
+	}
+
+	keys := []types.NamespacedName{
+		{Namespace: obj.Namespace, Name: agentExternalTriggerLegacyHTTPRouteName(obj)},
+	}
+	if routeNS, err := r.httpRouteNamespace(); err == nil {
+		keys = append(keys,
+			types.NamespacedName{Namespace: routeNS, Name: agentExternalTriggerHTTPRouteName(obj)},
+			types.NamespacedName{Namespace: routeNS, Name: agentExternalTriggerLegacyHTTPRouteName(obj)},
+		)
+	}
+	for _, key := range keys {
+		route := &gatewayv1.HTTPRoute{}
+		if err := r.Get(ctx, key, route); err != nil {
+			if apierrors.IsNotFound(err) || apimeta.IsNoMatchError(err) {
+				continue
+			}
+			return nil, err
+		}
+		add(route)
+	}
+	return routes, nil
 }
 
 func observeHTTPRouteParentConditions(route *gatewayv1.HTTPRoute) (accepted, programmed *bool) {

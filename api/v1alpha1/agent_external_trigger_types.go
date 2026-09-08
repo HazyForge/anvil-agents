@@ -123,9 +123,15 @@ type AgentExternalTriggerHTTPRouteSpec struct {
 // AgentExternalTriggerHTTPRouteStatus is the observed public Gateway API route
 // for this trigger. It never includes Secret material.
 type AgentExternalTriggerHTTPRouteStatus struct {
-	// Name is the same-namespace HTTPRoute object owned by this trigger.
+	// Name is the HTTPRoute object that exposes this webhook.
 	// +optional
 	Name string `json:"name,omitempty"`
+	// Namespace is the HTTPRoute namespace. Routes live in the controller/API
+	// install namespace so Gateway listener allowlists do not have to include
+	// every agent namespace. Recorded when set, including when it differs from
+	// the trigger namespace.
+	// +optional
+	Namespace string `json:"namespace,omitempty"`
 	// PublicURL is https://{hostname}{webhookPath} with no secret material.
 	// +optional
 	PublicURL string `json:"publicURL,omitempty"`
@@ -256,8 +262,13 @@ const DefaultWebhookSecretKey = "webhookSecret"
 // delivery on a non-terminal AgentRun (spec is immutable).
 const AgentExternalTriggerDeliveryAnnotation = "control.anvil.hazyforge.io/external-trigger-delivery"
 
-// AgentExternalTriggerLabel marks AgentRuns created by an AgentExternalTrigger.
+// AgentExternalTriggerLabel marks AgentRuns created by an AgentExternalTrigger
+// and HTTPRoutes that expose that trigger.
 const AgentExternalTriggerLabel = "control.anvil.hazyforge.io/agent-external-trigger"
+
+// AgentExternalTriggerNamespaceLabel records the trigger namespace on
+// controller-owned webhook HTTPRoutes that live in the install namespace.
+const AgentExternalTriggerNamespaceLabel = "control.anvil.hazyforge.io/agent-external-trigger-namespace"
 
 // AgentExternalTriggerDeliveryIDLabel stores a truncated delivery id for listing.
 const AgentExternalTriggerDeliveryIDLabel = "control.anvil.hazyforge.io/github-delivery"
