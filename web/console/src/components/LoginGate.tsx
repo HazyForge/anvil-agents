@@ -52,7 +52,7 @@ export function LoginGate({ error = null }: Props) {
       <main className="main">
         <div className="panel token-gate">
           <div className="login-faces" aria-hidden>
-            {["companion", "scout", "forge", "herald"].map((id) => (
+            {["companion", "guardian", "forge", "herald"].map((id) => (
               <AgentFace key={id} faceId={id} className="login-face" />
             ))}
           </div>
