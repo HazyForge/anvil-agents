@@ -257,4 +257,39 @@ a { color: var(--teal); text-decoration: none; }
 .meta dd { margin: 0.15rem 0 0; }
 .mono { font-family: var(--font-mono); }
 .muted { color: var(--text-mute); font-size: 0.78rem; }
-.empty { color: var(--text-mute); padding: 1.25rem 0.25rem; }
+.textarea {
+  resize: vertical;
+  min-height: 7rem;
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  line-height: 1.45;
+}
+.token-gate {
+  max-width: 40rem;
+  margin: 1.5rem auto;
+  padding: 1.1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+.token-gate h1 {
+  margin: 0;
+  font-size: 1.05rem;
+}
+.token-gate p { margin: 0; color: var(--text-dim); }
+.run-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.78rem;
+}
+.run-table th, .run-table td {
+  text-align: left;
+  padding: 0.3rem 0.4rem;
+  border-bottom: 1px solid var(--border);
+}
+.run-table th {
+  font-size: 0.62rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-mute);
+}

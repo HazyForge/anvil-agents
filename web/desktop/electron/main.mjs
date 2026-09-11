@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain } from "electron";
+import { app, BrowserWindow } from "electron";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -23,31 +23,9 @@ function createMainWindow() {
   void window.loadURL(host);
 }
 
-function createConsoleWindow(url) {
-  const window = new BrowserWindow({
-    width: 1280,
-    height: 840,
-    backgroundColor: "#0a0f0d",
-    title: "Anvil Agents Console",
-    autoHideMenuBar: true,
-    webPreferences: {
-      sandbox: true,
-      contextIsolation: true,
-      nodeIntegration: false,
-    },
-  });
-  void window.loadURL(url);
-}
-
 app.setName(productTitle);
 
 app.whenReady().then(() => {
-  ipcMain.handle("open-console", (_event, url) => {
-    if (typeof url !== "string" || !/^https?:\/\//.test(url)) {
-      throw new Error("console URL must be http(s)");
-    }
-    createConsoleWindow(url);
-  });
   createMainWindow();
 });
 

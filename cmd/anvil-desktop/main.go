@@ -23,12 +23,12 @@ func run(ctx context.Context, args []string) int {
 	flags := pflag.NewFlagSet("anvil-desktop", pflag.ContinueOnError)
 	listen := flags.String("listen", "127.0.0.1:1738", "Loopback address for Anvil Agents Desktop.")
 	uiDir := flags.String("ui-dir", "", "Directory of built web/desktop assets. Defaults to the embedded stub.")
-	kubeconfig := flags.String("kubeconfig", "", "Kubeconfig path; defaults to the caller's normal loading rules.")
+	apiOrigin := flags.String("api-origin", "", "anvil-agents OIDC API origin (http or https). Not a kube-apiserver.")
 	configDir := flags.String("config-dir", "", "Directory for desktop prefs. Defaults to the user config dir.")
 	openWindow := flags.Bool("open", false, "Open a desktop window (Chrome app mode when available).")
-	snapshotOnly := flags.Bool("snapshot", false, "Print the local harness and cluster snapshot as JSON and exit.")
+	snapshotOnly := flags.Bool("snapshot", false, "Print the local harness and API snapshot as JSON and exit.")
 	flags.Usage = func() {
-		fmt.Fprintln(os.Stderr, "Usage: anvil-desktop [--listen 127.0.0.1:1738] [--ui-dir PATH] [--kubeconfig PATH] [--config-dir PATH] [--open]")
+		fmt.Fprintln(os.Stderr, "Usage: anvil-desktop [--listen 127.0.0.1:1738] [--ui-dir PATH] [--api-origin URL] [--config-dir PATH] [--open]")
 		fmt.Fprintln(os.Stderr, "       anvil-desktop --snapshot")
 		flags.PrintDefaults()
 	}
@@ -41,10 +41,10 @@ func run(ctx context.Context, args []string) int {
 	}
 
 	opts := desktop.Options{
-		Listen:     *listen,
-		UIDir:      *uiDir,
-		Kubeconfig: *kubeconfig,
-		ConfigDir:  *configDir,
+		Listen:    *listen,
+		UIDir:     *uiDir,
+		APIOrigin: *apiOrigin,
+		ConfigDir: *configDir,
 		OnListen: func(addr string) {
 			fmt.Fprintf(os.Stderr, "anvil-desktop listening on http://%s\n", addr)
 			if *openWindow {

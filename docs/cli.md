@@ -405,6 +405,6 @@ log lines. It never patches `AgentRun/status`. The historical
 
 ## Anvil Agents Desktop
 
-**Anvil Agents Desktop** (`anvil-desktop`) discovers workstation harness CLIs and
-selects a kubecontext for this CLI. It does not replace `anvil-agentctl`. See
-[Anvil Agents Desktop](desktop.md).
+**Anvil Agents Desktop** (`anvil-desktop`) is an OIDC client of the
+anvil-agents API plus local harness delegation. It does not use kubeconfig and
+does not replace `anvil-agentctl`. See [Anvil Agents Desktop](desktop.md).

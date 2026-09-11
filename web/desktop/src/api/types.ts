@@ -1,4 +1,4 @@
-export type ToolKind = "harness" | "controlPlane" | "cluster" | "workstation";
+export type ToolKind = "harness" | "workstation";
 
 export interface Discovered {
   id: string;
@@ -11,51 +11,28 @@ export interface Discovered {
   version?: string;
   versionError?: string;
   authFileHint?: string;
-  clusterHint?: string;
+  delegatable?: boolean;
   notes?: string;
 }
 
-export interface ContextInfo {
-  name: string;
-  cluster?: string;
-  user?: string;
-  namespace?: string;
-  current: boolean;
-}
-
-export interface OperatorStatus {
-  reachable: boolean;
-  apiGroupPresent: boolean;
-  groupVersion?: string;
-  message?: string;
-}
-
-export interface ConsoleStatus {
-  url?: string;
-  reachable: boolean;
-  message?: string;
-}
-
 export interface Prefs {
-  kubeconfig?: string;
-  kubeContext?: string;
-  consoleURL?: string;
+  apiOrigin?: string;
 }
 
-export interface ClusterSnapshot {
-  kubeconfig?: string;
-  currentContext?: string;
-  selectedContext?: string;
-  namespace?: string;
-  contexts: ContextInfo[];
-  operator: OperatorStatus;
-  console: ConsoleStatus;
+export interface APIStatus {
+  origin?: string;
+  reachable: boolean;
   message?: string;
 }
 
-export interface ChatView {
-  standingChatPath: string;
-  councilChat: string;
+export interface WrapperTool {
+  id: string;
+  displayName: string;
+  notes: string;
+}
+
+export interface WrapperInfo {
+  tools: WrapperTool[];
   message: string;
 }
 
@@ -63,7 +40,16 @@ export interface Snapshot {
   productTitle: string;
   listenAddr?: string;
   prefs: Prefs;
+  api: APIStatus;
   harnesses: Discovered[];
-  cluster: ClusterSnapshot;
-  chat: ChatView;
+  wrapper: WrapperInfo;
+}
+
+export interface DelegateResult {
+  harness: string;
+  path?: string;
+  exitCode: number;
+  stdout: string;
+  stderr: string;
+  timedOut: boolean;
 }

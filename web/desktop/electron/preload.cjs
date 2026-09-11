@@ -1,7 +1,1 @@
-const { contextBridge, ipcRenderer } = require("electron");
-
-contextBridge.exposeInMainWorld("anvilDesktop", {
-  openConsole(url) {
-    return ipcRenderer.invoke("open-console", url);
-  },
-});
+// No privileged APIs. The renderer talks to the loopback OIDC API proxy over fetch.

@@ -11,35 +11,46 @@ import (
 	"os"
 	"path"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/hazyforge/anvil-agents/internal/desktop/uifs"
 )
 
 const (
-	defaultListen = "127.0.0.1:1738"
-	maxPrefsBytes = 16 << 10
-	uiIndexFile   = "index.html"
-	uiDistRoot    = "dist"
+	defaultListen   = "127.0.0.1:1738"
+	maxPrefsBytes   = 16 << 10
+	maxDelegateJSON = maxPromptBytes + 8<<10
+	uiIndexFile     = "index.html"
+	uiDistRoot      = "dist"
 )
 
 // Options configure the local desktop host.
 type Options struct {
-	Listen       string
-	UIDir        string
-	Kubeconfig   string
-	ConfigDir    string
-	Discoverer   Discoverer
-	ClusterProbe ClusterProbe
-	ConsoleProbe ConsoleProbe
-	OnListen     func(addr string)
+	Listen     string
+	UIDir      string
+	APIOrigin  string
+	ConfigDir  string
+	Discoverer Discoverer
+	HTTPClient *http.Client
+	Transport  http.RoundTripper
+	OnListen   func(addr string)
+}
+
+type issuerCache struct {
+	apiOrigin string
+	connect   string
+	at        time.Time
 }
 
 // Server is the loopback desktop host.
 type Server struct {
-	opts  Options
-	prefs Prefs
-	mux   http.Handler
+	opts       Options
+	mu         sync.Mutex
+	prefs      Prefs
+	issuer     issuerCache
+	httpClient *http.Client
+	mux        http.Handler
 }
 
 func NewServer(opts Options) (*Server, error) {
@@ -53,16 +64,43 @@ func NewServer(opts Options) (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
-	if strings.TrimSpace(prefs.Kubeconfig) == "" {
-		prefs.Kubeconfig = strings.TrimSpace(opts.Kubeconfig)
+	if origin := strings.TrimSpace(opts.APIOrigin); origin != "" {
+		parsed, err := ParseAPIOrigin(origin)
+		if err != nil {
+			return nil, err
+		}
+		prefs.APIOrigin = parsed
 	}
-	server := &Server{opts: opts, prefs: prefs}
+	client := opts.HTTPClient
+	if client == nil {
+		client = &http.Client{
+			Timeout: 5 * time.Second,
+			CheckRedirect: func(req *http.Request, via []*http.Request) error {
+				if len(via) >= 5 {
+					return fmt.Errorf("too many redirects")
+				}
+				if len(via) == 0 {
+					return nil
+				}
+				orig := via[0].URL
+				if req.URL.Scheme != orig.Scheme || req.URL.Host != orig.Host {
+					return fmt.Errorf("redirect to a different origin is not allowed")
+				}
+				return nil
+			},
+		}
+	}
+	server := &Server{opts: opts, prefs: prefs, httpClient: client}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", server.handleHealthz)
 	mux.HandleFunc("GET /local/v1/snapshot", server.handleSnapshot)
+	mux.HandleFunc("GET /local/v1/api-health", server.handleAPIHealth)
 	mux.HandleFunc("POST /local/v1/prefs", server.handlePrefs)
+	mux.HandleFunc("POST /local/v1/delegate", server.handleDelegate)
+	mux.HandleFunc("/ui-config.json", server.handleAPIProxy)
+	mux.HandleFunc("/api/", server.handleAPIProxy)
 	mux.HandleFunc("/", server.handleUI)
-	server.mux = securityHeaders(mux)
+	server.mux = server.securityHeaders(rejectTokenQuery(mux))
 	return server, nil
 }
 
@@ -78,14 +116,28 @@ func (s *Server) Snapshot(ctx context.Context) Snapshot {
 	return s.snapshot(ctx)
 }
 
+func (s *Server) currentPrefs() Prefs {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.prefs
+}
+
+func (s *Server) setPrefs(prefs Prefs) {
+	s.mu.Lock()
+	s.prefs = prefs
+	s.issuer = issuerCache{}
+	s.mu.Unlock()
+}
+
 func (s *Server) Start(ctx context.Context) error {
 	httpServer := &http.Server{
 		Addr:              s.opts.Listen,
 		Handler:           s.mux,
 		ReadHeaderTimeout: 5 * time.Second,
-		ReadTimeout:       15 * time.Second,
-		WriteTimeout:      30 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      6 * time.Minute,
 		IdleTimeout:       60 * time.Second,
+		MaxHeaderBytes:    1 << 16,
 		BaseContext:       func(net.Listener) context.Context { return ctx },
 	}
 	listener, err := net.Listen("tcp", s.opts.Listen)
@@ -114,12 +166,16 @@ func (s *Server) Start(ctx context.Context) error {
 	}
 }
 
-func (s *Server) handleHealthz(writer http.ResponseWriter, request *http.Request) {
+func (s *Server) handleHealthz(writer http.ResponseWriter, _ *http.Request) {
 	writeJSON(writer, http.StatusOK, map[string]string{"status": "ok"})
 }
 
 func (s *Server) handleSnapshot(writer http.ResponseWriter, request *http.Request) {
 	writeJSON(writer, http.StatusOK, s.snapshot(request.Context()))
+}
+
+func (s *Server) handleAPIHealth(writer http.ResponseWriter, request *http.Request) {
+	writeJSON(writer, http.StatusOK, s.probeAPI(request.Context(), s.currentPrefs().APIOrigin))
 }
 
 func (s *Server) handlePrefs(writer http.ResponseWriter, request *http.Request) {
@@ -139,16 +195,56 @@ func (s *Server) handlePrefs(writer http.ResponseWriter, request *http.Request) 
 		writeError(writer, http.StatusBadRequest, "invalid_json", "prefs must be JSON")
 		return
 	}
-	if err := validatePrefs(next); err != nil {
+	normalized, err := normalizePrefs(next)
+	if err != nil {
 		writeError(writer, http.StatusBadRequest, "invalid_prefs", err.Error())
 		return
 	}
-	if err := savePrefs(s.opts.ConfigDir, next); err != nil {
+	if err := savePrefs(s.opts.ConfigDir, normalized); err != nil {
 		writeError(writer, http.StatusBadRequest, "invalid_prefs", err.Error())
 		return
 	}
-	s.prefs = next
+	s.setPrefs(normalized)
 	writeJSON(writer, http.StatusOK, s.snapshot(request.Context()))
+}
+
+func (s *Server) handleDelegate(writer http.ResponseWriter, request *http.Request) {
+	defer request.Body.Close()
+	limited := io.LimitReader(request.Body, maxDelegateJSON+1)
+	raw, err := io.ReadAll(limited)
+	if err != nil {
+		writeError(writer, http.StatusBadRequest, "invalid_body", "unable to read delegate request")
+		return
+	}
+	if len(raw) > maxDelegateJSON {
+		writeError(writer, http.StatusRequestEntityTooLarge, "too_large", "delegate payload is too large")
+		return
+	}
+	var body DelegateRequest
+	if err := json.Unmarshal(raw, &body); err != nil {
+		writeError(writer, http.StatusBadRequest, "invalid_json", "delegate request must be JSON")
+		return
+	}
+	prompt := body.Prompt
+	if strings.TrimSpace(prompt) == "" {
+		writeError(writer, http.StatusBadRequest, "invalid_prompt", "prompt is required")
+		return
+	}
+	if len(prompt) > maxPromptBytes {
+		writeError(writer, http.StatusRequestEntityTooLarge, "too_large", "prompt exceeds 64KiB")
+		return
+	}
+	tool, bin, err := s.resolveDelegate(body.Harness)
+	if err != nil {
+		writeError(writer, http.StatusBadRequest, "invalid_harness", err.Error())
+		return
+	}
+	result, err := runDelegate(request.Context(), tool, bin, prompt, delegateTimeout(body.TimeoutSeconds))
+	if err != nil {
+		writeError(writer, http.StatusBadRequest, "delegate_failed", err.Error())
+		return
+	}
+	writeJSON(writer, http.StatusOK, result)
 }
 
 func (s *Server) handleUI(writer http.ResponseWriter, request *http.Request) {
@@ -239,15 +335,30 @@ func requireLoopback(addr string) error {
 	return nil
 }
 
-func securityHeaders(next http.Handler) http.Handler {
+func rejectTokenQuery(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if hasTokenQuery(request) {
+			writeError(writer, http.StatusBadRequest, "token_in_query", "access tokens must not be placed in query strings")
+			return
+		}
+		next.ServeHTTP(writer, request)
+	})
+}
+
+func (s *Server) securityHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		writer.Header().Set("Cache-Control", "no-store")
 		writer.Header().Set("Referrer-Policy", "no-referrer")
 		writer.Header().Set("X-Content-Type-Options", "nosniff")
 		writer.Header().Set("X-Frame-Options", "DENY")
-		if strings.HasPrefix(path.Clean(request.URL.Path), "/local/") || path.Clean(request.URL.Path) == "/healthz" {
+		cleaned := path.Clean(request.URL.Path)
+		if strings.HasPrefix(cleaned, "/local/") || cleaned == "/healthz" || strings.HasPrefix(cleaned, "/api/") || cleaned == "/ui-config.json" {
 			writer.Header().Set("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'")
 		} else {
+			connect := "'self'"
+			if issuer := s.refreshIssuerCache(request.Context(), s.currentPrefs().APIOrigin); issuer != "" {
+				connect += " " + issuer
+			}
 			writer.Header().Set("Content-Security-Policy", strings.Join([]string{
 				"default-src 'self'",
 				"base-uri 'self'",
@@ -257,7 +368,7 @@ func securityHeaders(next http.Handler) http.Handler {
 				"style-src 'self' 'unsafe-inline'",
 				"font-src 'self'",
 				"script-src 'self'",
-				"connect-src 'self'",
+				"connect-src " + connect,
 			}, "; "))
 		}
 		next.ServeHTTP(writer, request)

@@ -1,55 +1,72 @@
 # Anvil Agents Desktop
 
-**Anvil Agents Desktop** is the local operator surface for workstation harness
-CLIs already on a machine and for connecting those clients to a Kubernetes
-kubecontext that runs the anvil-agents operator. The process binary is
+**Anvil Agents Desktop** is a local wrapper agent for the anvil-agents OIDC
+API and for harness CLIs already on the machine. The process binary is
 `anvil-desktop`. The product is Anvil Agents Desktop — not Anvil Desktop, Anvil
 Hub, or Anvil Primaris.
 
-It is **not** a second Anvil Agents Console. Cluster observation, composition
-library, standing chat, and future per-council chat stay in `web/console`
-and are opened as a top-level window. The API's
-`Content-Security-Policy: frame-ancestors 'none'` is preserved.
+It has **nothing to do with Kubernetes**. There is no kubeconfig, kubectl, or
+cluster context picker. Sign in with OIDC, then call the same AgentRun API the
+browser console uses.
+
+It is **not** a second Anvil Agents Console (no run board clone, no operator
+UI). Cluster observation, composition library editing, and standing chat
+remain console surfaces. Desktop exposes two tools:
+
+1. **anvil-api** — list/get AgentRuns, list composition when enabled, append-only
+   create when `runs.createEnabled=true`, chat when `chat.enabled` is present
+2. **local-harness** — delegate a prompt to Codex, Grok, OpenClaw, OpenCode, or
+   another catalog CLI on PATH
 
 ## Why Anvil Agents Desktop
 
-The console is served by `anvil-agents-api` over OIDC. It cannot see the
-operator's laptop PATH or kubeconfig. Anvil Agents Desktop does work that the
-cluster SPA cannot:
-
-- Discover Codex, xAI/Grok, OpenClaw, OpenCode, Hermes, Pi, and similar CLIs
-- Show which kubecontexts exist and whether `control.anvil.hazyforge.io/v1alpha1` is installed
-- Point `anvil-agentctl` at that context for append-only runs and durable-home auth
-- Wrap the existing console without duplicating its screens
+The optional OIDC AgentRun API (`anvil-agents-api`) is a separate process from
+the controller. The console SPA cannot see laptop PATH. Desktop does the work
+the cluster SPA cannot: discover local CLIs and wrap them with an API client
+that reuses the console's OIDC session pattern.
 
 Local CLIs are **not** the cluster harness. AgentRuns still use runner images
-selected by `AgentHarnessProfile`. Anvil Agents Desktop maps a workstation
-binary to a backend kind so an operator can diagnose auth
-(`anvil-agentctl auth codex|grok`) and then watch the run in the console.
+selected by `AgentHarnessProfile`. The wrapper never copies the OIDC token into
+a CLI argv, environment, or prompt file. Those CLIs keep their own local auth
+files (`~/.codex/auth.json`, and so on).
+
+## OIDC session (same as the console)
+
+Desktop loads `{apiOrigin}/ui-config.json` (unauthenticated) for issuer, client
+id, audiences, scopes, and feature flags. Login is Authorization Code + PKCE
+(S256). `state` / `nonce` / verifier live in `sessionStorage` under
+`anvil-agents-desktop.*` keys, then are removed. The access token stays in
+memory/`sessionStorage`. Redirect is `{origin}/auth/callback`; after exchange
+the app strips `code` and `state` from the address bar.
+
+The loopback host reverse-proxies `/api/` and `/ui-config.json` to the
+configured API origin so the SPA is same-origin. Register
+`http://127.0.0.1:1738/auth/callback` on the OIDC client. Vite dev
+(`http://127.0.0.1:5174/auth/callback`) needs the same if you sign in there.
+Prefer `anvil-desktop --ui-dir` for real login.
+
+AGENTS.md still applies: deny by default, exact issuer/audience/claim binding
+and namespace authorization on the API, no Secret access, AgentRuns are
+append-only, tokens are never accepted in query strings.
 
 ## Layout
 
 | Path | Role |
 | --- | --- |
-| `cmd/anvil-desktop` | Anvil Agents Desktop host + optional Chrome `--app` window |
-| `internal/desktop` | Catalog, PATH discovery, kubeconfig, prefs, HTTP |
-| `web/desktop` | Vite + React shell (same visual language as the console) |
-| `web/desktop/electron` | Optional Electron wrapper that loads the host and opens the console in a second window |
-
-## Chat alignment
-
-- Standing chat is a console + API feature (`/chat` when enabled). The Anvil
-  Agents Desktop Chat page deep-links there once a console origin is saved.
-- Per-council chat remains a later design. Anvil Agents Desktop does not block
-  on it and does not invent a Conversation CRD.
+| `cmd/anvil-desktop` | Loopback host + optional Chrome `--app` window |
+| `internal/desktop` | Catalog, PATH discovery, API origin prefs, reverse-proxy, local delegate |
+| `web/desktop` | Vite + React shell (OIDC login, local inventory, two-tool wrapper) |
+| `web/desktop/electron` | Optional single-window Electron wrap of the desktop SPA |
 
 ## Security
 
 - Listen address must be loopback.
-- Prefs store kubecontext name and console origin only. No bearer tokens, no
-  kube user credentials.
-- Console URLs cannot include userinfo, query strings, or fragments.
-- Version probes run only catalog binaries resolved on PATH, with constant
-  argument lists and a two-second timeout.
+- Prefs store `apiOrigin` only. No bearer tokens, no kube user credentials.
+- API origin must be http(s) with a host and without userinfo, path, query, or fragment.
+- The host does not persist tokens and does not log `Authorization`.
+- `/api/` proxy is allowlisted to `/ui-config.json` and `/api/v1/namespaces/…`.
+- Requests with `access_token` / `id_token` / `refresh_token` query params are rejected.
+- Version probes and delegates run only catalog binaries resolved on PATH, with constant argument lists.
+- Delegate prompts are capped at 64KiB; prompt files are 0600 temp files and deleted.
 
 See `web/desktop/README.md` for run commands.

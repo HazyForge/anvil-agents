@@ -415,6 +415,7 @@ core observation loop works.
 
 ## Related: Anvil Agents Desktop
 
-PATH discovery and kubeconfig selection cannot live in the OIDC console. See
-[Anvil Agents Desktop](desktop.md) for the `anvil-desktop` binary, which wraps
-this SPA instead of forking its screens.
+PATH discovery and local harness delegation cannot live in the OIDC console.
+See [Anvil Agents Desktop](desktop.md) for the `anvil-desktop` binary, which
+signs in to this API as a wrapper agent instead of forking console screens or
+talking to Kubernetes.

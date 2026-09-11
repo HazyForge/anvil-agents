@@ -83,11 +83,10 @@ the certified submission contract.
   schedules (`schedule list|suspend|resume|run-now`), durable-home auth, volume
   copy, and in-pod status reporting. Private Primaris `anvilctl` has no
   `agent` subcommand; managers use the Hub HTTP API.
-- `anvil-desktop`: **Anvil Agents Desktop**, a local loopback host that
-  discovers workstation harness CLIs, selects a kubecontext, and wraps the
-  existing Anvil Agents Console (see `web/desktop/` and
-  [Anvil Agents Desktop](docs/desktop.md)). The binary name is `anvil-desktop`;
-  the product is not Anvil Desktop, Anvil Hub, or Anvil Primaris.
+- `anvil-desktop`: **Anvil Agents Desktop**, a local loopback wrapper agent that
+  signs in to the anvil-agents OIDC API and delegates work to workstation
+  harness CLIs (see `web/desktop/` and
+  [Anvil Agents Desktop](docs/desktop.md)).
 - Collector-neutral Job and Pod labels for external log and telemetry
   pipelines.
 

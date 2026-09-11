@@ -2,20 +2,9 @@
 
 interface ImportMetaEnv {
   readonly VITE_DESKTOP_HOST?: string;
+  readonly VITE_API_BASE?: string;
 }
 
 interface ImportMeta {
   readonly env: ImportMetaEnv;
-}
-
-interface AnvilDesktopBridge {
-  openConsole?: (url: string) => Promise<void> | void;
-}
-
-export {};
-
-declare global {
-  interface Window {
-    anvilDesktop?: AnvilDesktopBridge;
-  }
 }

@@ -1,16 +1,23 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { NavLink, Navigate, Route, Routes } from "react-router-dom";
 import { fetchSnapshot, savePrefs } from "./api/client";
-import type { Prefs, Snapshot } from "./api/types";
-import { ChatPage } from "./pages/ChatPage";
-import { ClusterPage } from "./pages/ClusterPage";
+import type { Snapshot } from "./api/types";
+import { clearUIConfigCache, loadUIConfig, type UIConfig } from "./auth/config";
+import { ensureAccessToken, logout } from "./auth/oidc";
+import { clearLegacyToken, loadSession } from "./auth/session";
+import { LoginGate } from "./components/LoginGate";
+import { AuthCallbackPage } from "./pages/AuthCallbackPage";
 import { HarnessesPage } from "./pages/HarnessesPage";
+import { WrapperPage } from "./pages/WrapperPage";
 import { PRODUCT_TITLE } from "./product";
 
 export default function App() {
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [token, setToken] = useState(() => loadSession()?.accessToken ?? "");
+  const [config, setConfig] = useState<UIConfig | null>(null);
+  const [configError, setConfigError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     setBusy(true);
@@ -18,6 +25,20 @@ export default function App() {
       const next = await fetchSnapshot();
       setSnapshot(next);
       setError(null);
+      if (next.prefs.apiOrigin) {
+        try {
+          const ui = await loadUIConfig(true);
+          setConfig(ui);
+          setConfigError(null);
+        } catch (err) {
+          setConfig(null);
+          setConfigError(err instanceof Error ? err.message : String(err));
+        }
+      } else {
+        clearUIConfigCache();
+        setConfig(null);
+        setConfigError(null);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -25,7 +46,8 @@ export default function App() {
     }
   }, []);
 
-	useEffect(() => {
+  useEffect(() => {
+    clearLegacyToken();
     void refresh();
   }, [refresh]);
 
@@ -33,29 +55,81 @@ export default function App() {
     document.title = snapshot?.productTitle ?? PRODUCT_TITLE;
   }, [snapshot]);
 
-  const persist = useCallback(
-    async (prefs: Prefs) => {
-      setBusy(true);
-      try {
-        const next = await savePrefs(prefs);
-        setSnapshot(next);
-        setError(null);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : String(err));
-      } finally {
-        setBusy(false);
+  useEffect(() => {
+    if (!token) {
+      return;
+    }
+    const id = window.setInterval(() => {
+      void ensureAccessToken().then((access) => {
+        if (!access) {
+          setToken("");
+          return;
+        }
+        setToken(access);
+      });
+    }, 60_000);
+    return () => window.clearInterval(id);
+  }, [token]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void ensureAccessToken().then((access) => {
+      if (!cancelled) {
+        setToken(access ?? "");
       }
-    },
-    [],
-  );
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const persistOrigin = useCallback(async (origin: string) => {
+    setBusy(true);
+    try {
+      clearUIConfigCache();
+      const next = await savePrefs({ apiOrigin: origin.trim() });
+      setSnapshot(next);
+      setError(null);
+      if (next.prefs.apiOrigin) {
+        const ui = await loadUIConfig(true);
+        setConfig(ui);
+        setConfigError(null);
+      } else {
+        setConfig(null);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  }, []);
+
+  const handleAuthenticated = useCallback((accessToken: string) => {
+    setToken(accessToken);
+    setError(null);
+  }, []);
 
   const presentCount = useMemo(
     () => snapshot?.harnesses.filter((item) => item.present).length ?? 0,
     [snapshot],
   );
 
-  const contextLabel = snapshot?.cluster.selectedContext || snapshot?.cluster.currentContext || "no context";
-  const operatorOk = snapshot?.cluster.operator.apiGroupPresent;
+  const originHost = snapshot?.api.origin?.replace(/^https?:\/\//, "") || "no API";
+  const signedIn = Boolean(token);
+
+  const login = snapshot ? (
+    <LoginGate
+      apiOrigin={snapshot.prefs.apiOrigin || ""}
+      apiMessage={snapshot.api.message}
+      apiReachable={snapshot.api.reachable}
+      issuer={config?.oidc.issuer}
+      error={configError}
+      busy={busy}
+      onSaveOrigin={persistOrigin}
+    />
+  ) : (
+    <div className="empty">Loading local harnesses…</div>
+  );
 
   return (
     <div className="desktop-shell">
@@ -67,10 +141,16 @@ export default function App() {
         </div>
         <div className="titlebar-title">{snapshot?.productTitle ?? PRODUCT_TITLE}</div>
         <div className="titlebar-meta">
-          <span className={`pill ${operatorOk ? "pill-ok" : "pill-mute"}`}>{contextLabel}</span>
+          <span className={`pill ${snapshot?.api.reachable ? "pill-ok" : "pill-mute"}`}>{originHost}</span>
+          <span className={`pill ${signedIn ? "pill-ok" : "pill-mute"}`}>{signedIn ? "signed in" : "signed out"}</span>
           <button type="button" className="btn btn-ghost" onClick={() => void refresh()} disabled={busy}>
             {busy ? "Refreshing" : "Refresh"}
           </button>
+          {signedIn ? (
+            <button type="button" className="btn btn-ghost" onClick={() => void logout()}>
+              Sign out
+            </button>
+          ) : null}
         </div>
       </div>
       <nav className="rail">
@@ -78,25 +158,32 @@ export default function App() {
           Local
           <span className="rail-count">{presentCount}</span>
         </NavLink>
-        <NavLink to="/cluster" className={({ isActive }) => (isActive ? "rail-link active" : "rail-link")}>
-          Cluster
-        </NavLink>
-        <NavLink to="/chat" className={({ isActive }) => (isActive ? "rail-link active" : "rail-link")}>
-          Chat
+        <NavLink to="/wrapper" className={({ isActive }) => (isActive ? "rail-link active" : "rail-link")}>
+          Wrapper
         </NavLink>
       </nav>
       <main className="desktop-main">
         {error ? <div className="banner banner-error">{error}</div> : null}
-        {snapshot ? (
-          <Routes>
-            <Route path="/" element={<HarnessesPage snapshot={snapshot} />} />
-            <Route path="/cluster" element={<ClusterPage snapshot={snapshot} onSave={persist} busy={busy} />} />
-            <Route path="/chat" element={<ChatPage snapshot={snapshot} />} />
-            <Route path="*" element={<Navigate to="/" replace />} />
-          </Routes>
-        ) : (
-          <div className="empty">Loading local harnesses and kubecontexts…</div>
-        )}
+        <Routes>
+          <Route path="/auth/callback" element={<AuthCallbackPage onAuthenticated={handleAuthenticated} />} />
+          <Route
+            path="/"
+            element={
+              snapshot && signedIn && config ? <HarnessesPage snapshot={snapshot} /> : login
+            }
+          />
+          <Route
+            path="/wrapper"
+            element={
+              snapshot && signedIn && config ? (
+                <WrapperPage snapshot={snapshot} token={token} config={config} />
+              ) : (
+                login
+              )
+            }
+          />
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
       </main>
     </div>
   );

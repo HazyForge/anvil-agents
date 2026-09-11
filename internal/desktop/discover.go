@@ -43,7 +43,7 @@ type Discovered struct {
 	Version      string   `json:"version,omitempty"`
 	VersionError string   `json:"versionError,omitempty"`
 	AuthFileHint string   `json:"authFileHint,omitempty"`
-	ClusterHint  string   `json:"clusterHint,omitempty"`
+	Delegatable  bool     `json:"delegatable"`
 	Notes        string   `json:"notes,omitempty"`
 }
 
@@ -160,7 +160,7 @@ func (d Discoverer) Discover(ctx context.Context) []Discovered {
 			Backend:      tool.Backend,
 			Binaries:     append([]string(nil), tool.Binaries...),
 			AuthFileHint: tool.AuthFileHint,
-			ClusterHint:  tool.ClusterHint,
+			Delegatable:  tool.Delegatable(),
 			Notes:        tool.Notes,
 		}
 		for _, name := range tool.Binaries {

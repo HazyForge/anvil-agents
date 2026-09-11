@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -14,9 +13,12 @@ const prefsFileName = "config.json"
 
 // Prefs are operator-local desktop settings. They never store tokens.
 type Prefs struct {
-	Kubeconfig string `json:"kubeconfig,omitempty"`
-	Context    string `json:"kubeContext,omitempty"`
-	ConsoleURL string `json:"consoleURL,omitempty"`
+	APIOrigin string `json:"apiOrigin,omitempty"`
+}
+
+type prefsFile struct {
+	APIOrigin  string `json:"apiOrigin"`
+	ConsoleURL string `json:"consoleURL"` // legacy field from the kube-wrap scaffold
 }
 
 func prefsPath(configDir string) (string, error) {
@@ -43,11 +45,25 @@ func loadPrefs(configDir string) (Prefs, error) {
 		}
 		return Prefs{}, err
 	}
-	var prefs Prefs
-	if err := json.Unmarshal(raw, &prefs); err != nil {
+	var wire prefsFile
+	if err := json.Unmarshal(raw, &wire); err != nil {
 		return Prefs{}, fmt.Errorf("parse %s: %w", path, err)
 	}
-	return prefs, nil
+	origin := strings.TrimSpace(wire.APIOrigin)
+	if origin == "" {
+		origin = strings.TrimSpace(wire.ConsoleURL)
+	}
+	if origin == "" {
+		return Prefs{}, nil
+	}
+	parsed, err := ParseAPIOrigin(origin)
+	if err != nil {
+		if strings.TrimSpace(wire.APIOrigin) != "" {
+			return Prefs{}, fmt.Errorf("parse %s: %w", path, err)
+		}
+		return Prefs{}, nil
+	}
+	return Prefs{APIOrigin: parsed}, nil
 }
 
 func savePrefs(configDir string, prefs Prefs) error {
@@ -69,25 +85,21 @@ func savePrefs(configDir string, prefs Prefs) error {
 }
 
 func validatePrefs(prefs Prefs) error {
-	if path := strings.TrimSpace(prefs.Kubeconfig); path != "" {
-		if strings.Contains(path, "\x00") || !filepath.IsAbs(path) {
-			return fmt.Errorf("kubeconfig path must be an absolute path")
-		}
+	if strings.TrimSpace(prefs.APIOrigin) == "" {
+		return nil
 	}
-	if origin := strings.TrimSpace(prefs.ConsoleURL); origin != "" {
-		parsed, err := url.Parse(origin)
-		if err != nil || parsed.Host == "" {
-			return fmt.Errorf("console URL must be an absolute http(s) origin")
-		}
-		if parsed.Scheme != "http" && parsed.Scheme != "https" {
-			return fmt.Errorf("console URL must be http or https")
-		}
-		if parsed.User != nil {
-			return fmt.Errorf("console URL must not include credentials")
-		}
-		if parsed.RawQuery != "" || parsed.Fragment != "" {
-			return fmt.Errorf("console URL must not include a query or fragment")
-		}
+	_, err := ParseAPIOrigin(prefs.APIOrigin)
+	return err
+}
+
+func normalizePrefs(prefs Prefs) (Prefs, error) {
+	origin := strings.TrimSpace(prefs.APIOrigin)
+	if origin == "" {
+		return Prefs{}, nil
 	}
-	return nil
+	parsed, err := ParseAPIOrigin(origin)
+	if err != nil {
+		return Prefs{}, err
+	}
+	return Prefs{APIOrigin: parsed}, nil
 }

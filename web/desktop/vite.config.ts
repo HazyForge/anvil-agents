@@ -12,6 +12,8 @@ export default defineConfig(({ mode }) => {
       proxy: {
         "/local": { target: proxyTarget, changeOrigin: true },
         "/healthz": { target: proxyTarget, changeOrigin: true },
+        "/api": { target: proxyTarget, changeOrigin: true },
+        "/ui-config.json": { target: proxyTarget, changeOrigin: true },
       },
     },
     build: {
