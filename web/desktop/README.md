@@ -49,7 +49,8 @@ loopback client at production Zitadel unless that client explicitly lists
 ./hack/run-anvil-desktop.sh --open --detach --api-origin http://127.0.0.1:18080
 ```
 
-`--open` uses Chrome/Chromium `--app=` when available. Optional Electron wrap
+`--open` uses a dedicated Chrome user-data-dir so a previous SPA on
+`:1738` is not reused from the shared browser cache. Optional Electron wrap
 (window title **Anvil Agents Desktop**):
 
 ```bash
