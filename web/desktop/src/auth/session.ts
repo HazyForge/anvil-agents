@@ -61,3 +61,13 @@ const LEGACY_TOKEN_KEY = "anvil-agents-desktop.bearerToken";
 export function clearLegacyToken(): void {
   write(LEGACY_TOKEN_KEY, "");
 }
+
+export function saveStubSession(): Session {
+  const session: Session = {
+    accessToken: "anvil-desktop-stub",
+    refreshToken: "",
+    expiresAt: Date.now() + 24 * 60 * 60 * 1000,
+  };
+  saveSession(session);
+  return session;
+}

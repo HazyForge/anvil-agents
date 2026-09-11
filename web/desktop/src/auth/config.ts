@@ -25,6 +25,13 @@ export type UIConfig = {
     enabled: boolean;
     path?: string;
   };
+  desktop?: {
+    wrapper?: boolean;
+    kubernetes?: boolean;
+    productName?: string;
+    stubSession?: boolean;
+    oidcRedirectPath?: string;
+  };
 };
 
 let cached: UIConfig | null = null;
@@ -58,6 +65,7 @@ export async function loadUIConfig(force = false): Promise<UIConfig> {
     const controls = body.controls;
     const runs = body.runs;
     const chat = body.chat;
+    const desktop = (body as UIConfig).desktop;
     cached = {
       productTitle: PRODUCT_TITLE,
       defaultNamespaces: Array.isArray(body.defaultNamespaces) ? body.defaultNamespaces : [],
@@ -84,6 +92,16 @@ export async function loadUIConfig(force = false): Promise<UIConfig> {
       chat: {
         enabled: Boolean(chat?.enabled),
         path: chat?.path,
+      },
+      desktop: {
+        wrapper: Boolean(desktop?.wrapper),
+        kubernetes: Boolean(desktop?.kubernetes),
+        productName: typeof desktop?.productName === "string" ? desktop.productName : PRODUCT_TITLE,
+        stubSession: Boolean(desktop?.stubSession),
+        oidcRedirectPath:
+          typeof desktop?.oidcRedirectPath === "string" && desktop.oidcRedirectPath.startsWith("/")
+            ? desktop.oidcRedirectPath
+            : undefined,
       },
     };
     return cached;

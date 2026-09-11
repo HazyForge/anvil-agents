@@ -9,14 +9,17 @@ It has **nothing to do with Kubernetes**. There is no kubeconfig, kubectl, or
 cluster context picker. Sign in with OIDC, then call the same AgentRun API the
 browser console uses.
 
-It is **not** a second Anvil Agents Console (no run board clone, no operator
-UI). Cluster observation, composition library editing, and standing chat
-remain console surfaces. Desktop exposes two tools:
+It exposes three tools:
 
-1. **anvil-api** — list/get AgentRuns, list composition when enabled, append-only
-   create when `runs.createEnabled=true`, chat when `chat.enabled` is present
-2. **local-harness** — delegate a prompt to Codex, Grok, OpenClaw, OpenCode, or
+1. **create_agent** — `POST /api/v1/namespaces/{namespace}/agent-run-profiles`
+   (minimal AgentRunProfile; the API stamps `managed-by=anvil-agents-console`)
+2. **anvil-api** — standing-chat threads/messages (PR 168) plus list/get AgentRuns
+3. **local-harness** — delegate a prompt to Codex, Grok, OpenClaw, OpenCode, or
    another catalog CLI on PATH
+
+The **wrapper** is the entity in Desktop chat: it can spawn more profiles when
+asked. The PR 168 echo stub is not the wrapper reply. Cluster observation and
+the console library remain console surfaces.
 
 ## Why Anvil Agents Desktop
 

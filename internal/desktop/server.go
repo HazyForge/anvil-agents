@@ -27,14 +27,16 @@ const (
 
 // Options configure the local desktop host.
 type Options struct {
-	Listen     string
-	UIDir      string
-	APIOrigin  string
-	ConfigDir  string
-	Discoverer Discoverer
-	HTTPClient *http.Client
-	Transport  http.RoundTripper
-	OnListen   func(addr string)
+	Listen           string
+	UIDir            string
+	APIOrigin        string
+	ConfigDir        string
+	OIDCClientID     string
+	OIDCRedirectPath string
+	Discoverer       Discoverer
+	HTTPClient       *http.Client
+	Transport        http.RoundTripper
+	OnListen         func(addr string)
 }
 
 type issuerCache struct {

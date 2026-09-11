@@ -1,7 +1,8 @@
+import { Link } from "react-router-dom";
 import { useMemo, useState } from "react";
 import {
-  callChat,
   createAgentRun,
+  createAgentRunProfile,
   delegateHarness,
   getAgentRun,
   listAgentRuns,
@@ -100,9 +101,22 @@ export function WrapperPage({ snapshot, token, config }: Props) {
     );
   }
 
-  async function onChat() {
-    const path = config.chat?.path || "/chat";
-    await runAPI("chat", () => callChat(token, namespace, path));
+  async function onCreateProfile() {
+    const name = profileName.trim();
+    if (!name) {
+      setError("enter an AgentRunProfile name to create");
+      return;
+    }
+    if (!config.composition.writeEnabled) {
+      setError("composition write is disabled on this API");
+      return;
+    }
+    await runAPI("create profile", () =>
+      createAgentRunProfile(token, namespace, {
+        name,
+        description: "desktop-created entity",
+      }),
+    );
   }
 
   async function onDelegate(extraPrompt?: string) {
@@ -221,6 +235,18 @@ export function WrapperPage({ snapshot, token, config }: Props) {
                   List profiles
                 </button>
               ) : null}
+              {config.composition.writeEnabled ? (
+                <button
+                  type="button"
+                  className="btn"
+                  disabled={busy || !namespace || !profileName.trim()}
+                  onClick={() => void onCreateProfile()}
+                >
+                  Create profile
+                </button>
+              ) : (
+                <span className="muted">composition write is disabled; cannot POST AgentRunProfiles.</span>
+              )}
               {config.runs.createEnabled ? (
                 <button
                   type="button"
@@ -230,42 +256,28 @@ export function WrapperPage({ snapshot, token, config }: Props) {
                 >
                   Create run
                 </button>
-              ) : (
-                <span className="muted">Append-only create is disabled on this API.</span>
-              )}
-              {config.chat?.enabled ? (
-                <button type="button" className="btn" disabled={busy || !namespace} onClick={() => void onChat()}>
-                  Chat
-                </button>
-              ) : (
-                <span className="muted">Chat is not enabled on this API.</span>
-              )}
+              ) : null}
+              <Link to="/chat" className="btn">
+                Entity chat
+              </Link>
             </div>
             <label className="field">
               <span className="label">AgentRun name (get)</span>
               <input className="input" value={runName} onChange={(event) => setRunName(event.target.value)} />
             </label>
-            {config.runs.createEnabled ? (
-              <label className="field">
-                <span className="label">Profile name (create)</span>
-                {profiles.length > 0 ? (
-                  <select className="select" value={profileName} onChange={(event) => setProfileName(event.target.value)}>
-                    <option value="">select a profile</option>
-                    {profiles.map((item) => (
-                      <option key={item.metadata.name} value={item.metadata.name}>
-                        {item.metadata.name}
-                      </option>
-                    ))}
-                  </select>
-                ) : (
-                  <input
-                    className="input"
-                    value={profileName}
-                    onChange={(event) => setProfileName(event.target.value)}
-                    placeholder="AgentRunProfile name"
-                  />
-                )}
-              </label>
+            <label className="field">
+              <span className="label">AgentRunProfile name (create)</span>
+              <input
+                className="input"
+                value={profileName}
+                onChange={(event) => setProfileName(event.target.value)}
+                placeholder="herald"
+              />
+            </label>
+            {profiles.length > 0 ? (
+              <p className="muted">
+                Profiles: {profiles.map((item) => item.metadata.name).join(", ")}
+              </p>
             ) : null}
             {runs.length > 0 ? (
               <table className="run-table">

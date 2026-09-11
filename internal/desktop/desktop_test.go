@@ -169,8 +169,17 @@ func TestSnapshotAndPrefsHTTP(t *testing.T) {
 	if snap.API.Origin != "" {
 		t.Fatalf("expected empty API origin, got %#v", snap.API)
 	}
-	if len(snap.Wrapper.Tools) != 2 {
+	if len(snap.Wrapper.Tools) != 3 {
 		t.Fatalf("wrapper tools = %#v", snap.Wrapper.Tools)
+	}
+	ids := map[string]struct{}{}
+	for _, tool := range snap.Wrapper.Tools {
+		ids[tool.ID] = struct{}{}
+	}
+	for _, id := range []string{"create_agent", "anvil-api", "local-harness"} {
+		if _, ok := ids[id]; !ok {
+			t.Fatalf("missing wrapper tool %q in %#v", id, snap.Wrapper.Tools)
+		}
 	}
 
 	body := strings.NewReader(`{"apiOrigin":"` + upstream.URL + `"}`)
@@ -234,6 +243,18 @@ func TestHealthzAndSPAFallback(t *testing.T) {
 	if rec.Code != 200 || !strings.Contains(rec.Body.String(), "desktop") {
 		t.Fatalf("auth callback spa: %d %s", rec.Code, rec.Body.String())
 	}
+	req = httptest.NewRequest(http.MethodGet, "/callback", nil)
+	rec = httptest.NewRecorder()
+	server.Handler().ServeHTTP(rec, req)
+	if rec.Code != 200 || !strings.Contains(rec.Body.String(), "desktop") {
+		t.Fatalf("callback spa: %d %s", rec.Code, rec.Body.String())
+	}
+	req = httptest.NewRequest(http.MethodGet, "/chat", nil)
+	rec = httptest.NewRecorder()
+	server.Handler().ServeHTTP(rec, req)
+	if rec.Code != 200 || !strings.Contains(rec.Body.String(), "desktop") {
+		t.Fatalf("chat spa: %d %s", rec.Code, rec.Body.String())
+	}
 }
 
 func TestAPIProxyAllowlistAndTokenQuery(t *testing.T) {
@@ -250,6 +271,7 @@ func TestAPIProxyAllowlistAndTokenQuery(t *testing.T) {
 			writeJSON(writer, http.StatusOK, map[string]any{
 				"productTitle": "Anvil Agents Console",
 				"oidc":         map[string]string{"issuer": "https://auth.example.com", "clientId": "desktop"},
+				"desktop":      map[string]any{"stubSession": true},
 			})
 		case "/api/v1/namespaces/hazy-trade/agent-runs":
 			writeJSON(writer, http.StatusOK, map[string]any{"items": []any{}})
@@ -282,6 +304,9 @@ func TestAPIProxyAllowlistAndTokenQuery(t *testing.T) {
 	}
 	if strings.Contains(rec.Body.String(), `"kubernetes":true`) {
 		t.Fatalf("desktop ui-config must not advertise kubernetes: %s", rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `"stubSession":true`) {
+		t.Fatalf("expected stubSession to survive ui-config rewrite: %s", rec.Body.String())
 	}
 
 	req = httptest.NewRequest(http.MethodGet, "/api/v1/namespaces/hazy-trade/agent-runs?limit=20", nil)
@@ -444,6 +469,15 @@ func writeExec(t *testing.T, path, script string) {
 func TestProxyPathAllowed(t *testing.T) {
 	if !proxyPathAllowed(http.MethodGet, "/api/v1/namespaces/ns/agent-runs") {
 		t.Fatal("expected runs list allowed")
+	}
+	if !proxyPathAllowed(http.MethodPost, "/api/v1/namespaces/ns/agent-run-profiles") {
+		t.Fatal("expected profile create POST allowed")
+	}
+	if !proxyPathAllowed(http.MethodPost, "/api/v1/namespaces/ns/chat/threads") {
+		t.Fatal("expected chat thread POST allowed")
+	}
+	if !proxyPathAllowed(http.MethodGet, "/api/v1/namespaces/ns/chat/threads/abc/messages") {
+		t.Fatal("expected chat messages GET allowed")
 	}
 	if proxyPathAllowed(http.MethodGet, "/api/v1/secrets") {
 		t.Fatal("secrets path must be denied")

@@ -7,6 +7,7 @@ import { ensureAccessToken, logout } from "./auth/oidc";
 import { clearLegacyToken, loadSession } from "./auth/session";
 import { LoginGate } from "./components/LoginGate";
 import { AuthCallbackPage } from "./pages/AuthCallbackPage";
+import { EntityChatPage } from "./pages/EntityChatPage";
 import { HarnessesPage } from "./pages/HarnessesPage";
 import { WrapperPage } from "./pages/WrapperPage";
 import { PRODUCT_TITLE } from "./product";
@@ -123,9 +124,11 @@ export default function App() {
       apiMessage={snapshot.api.message}
       apiReachable={snapshot.api.reachable}
       issuer={config?.oidc.issuer}
+      stubSession={Boolean(config?.desktop?.stubSession)}
       error={configError}
       busy={busy}
       onSaveOrigin={persistOrigin}
+      onAuthenticated={handleAuthenticated}
     />
   ) : (
     <div className="empty">Loading local harnesses…</div>
@@ -162,6 +165,9 @@ export default function App() {
           Local
           <span className="rail-count">{presentCount}</span>
         </NavLink>
+        <NavLink to="/chat" className={({ isActive }) => (isActive ? "rail-link active" : "rail-link")}>
+          Chat
+        </NavLink>
         <NavLink to="/wrapper" className={({ isActive }) => (isActive ? "rail-link active" : "rail-link")}>
           Wrapper
         </NavLink>
@@ -170,9 +176,20 @@ export default function App() {
         {error ? <div className="banner banner-error">{error}</div> : null}
         <Routes>
           <Route path="/auth/callback" element={<AuthCallbackPage onAuthenticated={handleAuthenticated} />} />
+          <Route path="/callback" element={<AuthCallbackPage onAuthenticated={handleAuthenticated} />} />
           <Route
             path="/"
             element={snapshot ? <HarnessesPage snapshot={snapshot} /> : <div className="empty">Loading local harnesses…</div>}
+          />
+          <Route
+            path="/chat"
+            element={
+              snapshot && signedIn && config ? (
+                <EntityChatPage snapshot={snapshot} token={token} config={config} />
+              ) : (
+                login
+              )
+            }
           />
           <Route
             path="/wrapper"

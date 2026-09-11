@@ -10,6 +10,10 @@ export class APIError extends Error {
     this.status = status;
     this.code = code;
   }
+
+  static async fromResponse(response: Response): Promise<APIError> {
+    return readAPIError(response);
+  }
 }
 
 /** Empty string = same-origin relative paths through the desktop host proxy. */
@@ -107,8 +111,23 @@ export type AgentRunView = {
 };
 
 export type CompositionDocument = {
+  apiVersion?: string;
   kind: string;
-  metadata: { name: string; namespace: string };
+  metadata: {
+    name: string;
+    namespace: string;
+    labels?: Record<string, string>;
+    annotations?: Record<string, string>;
+  };
+  spec?: Record<string, unknown>;
+  management?: { writable?: boolean; reason?: string; managedBy?: string };
+};
+
+export type CreateAgentRunProfileRequest = {
+  name: string;
+  description?: string;
+  systemPrompt?: string;
+  intent?: string;
 };
 
 export async function listAgentRuns(
@@ -183,16 +202,69 @@ export async function listRunProfiles(
   return body.items ?? [];
 }
 
-export async function callChat(
+export async function getRunProfile(
   token: string,
   namespace: string,
-  path: string,
-  init: RequestInit = {},
-): Promise<unknown> {
-  const normalized = path.startsWith("/") ? path : `/${path}`;
-  const response = await apiFetch(`/api/v1/namespaces/${encodeURIComponent(namespace)}${normalized}`, token, init);
+  name: string,
+  signal?: AbortSignal,
+): Promise<CompositionDocument> {
+  const response = await apiFetch(
+    `/api/v1/namespaces/${encodeURIComponent(namespace)}/agent-run-profiles/${encodeURIComponent(name)}`,
+    token,
+    { signal },
+  );
   if (!response.ok) {
     throw await readAPIError(response);
   }
-  return response.json() as Promise<unknown>;
+  return (await response.json()) as CompositionDocument;
+}
+
+export async function createAgentRunProfile(
+  token: string,
+  namespace: string,
+  body: CreateAgentRunProfileRequest,
+): Promise<CompositionDocument> {
+  const name = body.name.trim();
+  const spec: Record<string, unknown> = {
+    description: body.description?.trim() || "desktop-created entity",
+  };
+  const harness: Record<string, unknown> = {};
+  if (body.intent?.trim()) {
+    harness.intent = body.intent.trim();
+  }
+  if (body.systemPrompt?.trim()) {
+    harness.systemPrompt = body.systemPrompt.trim();
+  }
+  if (Object.keys(harness).length > 0) {
+    spec.harness = harness;
+  }
+  const response = await apiFetch(`/api/v1/namespaces/${encodeURIComponent(namespace)}/agent-run-profiles`, token, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      apiVersion: "control.anvil.hazyforge.io/v1alpha1",
+      kind: "AgentRunProfile",
+      metadata: { name, namespace },
+      spec,
+    }),
+  });
+  if (!response.ok) {
+    throw await readAPIError(response);
+  }
+  return (await response.json()) as CompositionDocument;
+}
+
+export async function ensureAgentRunProfile(
+  token: string,
+  namespace: string,
+  body: CreateAgentRunProfileRequest,
+): Promise<CompositionDocument> {
+  try {
+    return await createAgentRunProfile(token, namespace, body);
+  } catch (err) {
+    if (err instanceof APIError && err.status === 409) {
+      return getRunProfile(token, namespace, body.name.trim());
+    }
+    throw err;
+  }
 }

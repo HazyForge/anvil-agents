@@ -10,3 +10,4 @@
 /web/desktop/node_modules/
 /web/desktop/dist/
 /web/desktop/*.tsbuildinfo
+**/__pycache__/

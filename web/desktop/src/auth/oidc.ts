@@ -109,8 +109,16 @@ async function discover(issuer: string): Promise<Discovery> {
   return doc;
 }
 
-function redirectUri(): string {
-  return `${window.location.origin}/auth/callback`;
+function redirectPath(config: UIConfig): string {
+  const path = config.desktop?.oidcRedirectPath?.trim() ?? "";
+  if (path.startsWith("/") && !path.startsWith("//") && !path.includes("://")) {
+    return path;
+  }
+  return "/auth/callback";
+}
+
+function redirectUri(config: UIConfig): string {
+  return `${window.location.origin}${redirectPath(config)}`;
 }
 
 export async function beginLogin(returnTo = "/"): Promise<void> {
@@ -123,7 +131,7 @@ export async function beginLogin(returnTo = "/"): Promise<void> {
   const challenge = await sha256(verifier);
   const state = randomString(16);
   const nonce = randomString(16);
-  const redirect = redirectUri();
+  const redirect = redirectUri(config);
   storePKCE({ state, verifier, nonce, redirectUri: redirect });
   setReturnPath(returnTo);
 

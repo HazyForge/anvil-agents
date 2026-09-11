@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { beginLogin } from "../auth/oidc";
+import { saveStubSession } from "../auth/session";
 import { PRODUCT_TITLE } from "../product";
 
 interface Props {
@@ -7,9 +8,16 @@ interface Props {
   apiMessage?: string;
   apiReachable?: boolean;
   issuer?: string;
+  stubSession?: boolean;
   error?: string | null;
   busy?: boolean;
   onSaveOrigin: (origin: string) => Promise<void> | void;
+  onAuthenticated?: (accessToken: string) => void;
+}
+
+function isLoopbackHost(): boolean {
+  const host = window.location.hostname;
+  return host === "127.0.0.1" || host === "localhost" || host === "[::1]";
 }
 
 export function LoginGate({
@@ -17,9 +25,11 @@ export function LoginGate({
   apiMessage,
   apiReachable = false,
   issuer,
+  stubSession = false,
   error = null,
   busy = false,
   onSaveOrigin,
+  onAuthenticated,
 }: Props) {
   const [originDraft, setOriginDraft] = useState(apiOrigin);
   const [signInBusy, setSignInBusy] = useState(false);
@@ -38,6 +48,13 @@ export function LoginGate({
       setSignInBusy(false);
     }
   }
+
+  function handleStubSession() {
+    const session = saveStubSession();
+    onAuthenticated?.(session.accessToken);
+  }
+
+  const allowStub = stubSession && isLoopbackHost();
 
   return (
     <div className="panel token-gate">
@@ -86,7 +103,18 @@ export function LoginGate({
         >
           {signInBusy ? "Redirecting…" : "Sign in with OIDC"}
         </button>
+        {allowStub ? (
+          <button type="button" className="btn" onClick={handleStubSession}>
+            Open stub session
+          </button>
+        ) : null}
       </div>
+      {allowStub ? (
+        <p className="muted">
+          Loopback stub API only. Kind and Zitadel still use Sign in with OIDC. The stub token is not an
+          IdP credential.
+        </p>
+      ) : null}
     </div>
   );
 }

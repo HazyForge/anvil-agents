@@ -71,14 +71,14 @@ func (s *Server) handleAPIProxy(writer http.ResponseWriter, request *http.Reques
 	proxy.ModifyResponse = func(resp *http.Response) error {
 		resp.Header.Del("Set-Cookie")
 		if path.Clean(request.URL.Path) == "/ui-config.json" && resp.StatusCode == http.StatusOK {
-			return rewriteUIConfig(resp)
+			return s.rewriteUIConfig(resp)
 		}
 		return nil
 	}
 	proxy.ServeHTTP(writer, request)
 }
 
-func rewriteUIConfig(resp *http.Response) error {
+func (s *Server) rewriteUIConfig(resp *http.Response) error {
 	if strings.TrimSpace(resp.Header.Get("Content-Encoding")) != "" {
 		return nil
 	}
@@ -95,10 +95,24 @@ func rewriteUIConfig(resp *http.Response) error {
 		return nil
 	}
 	body["productTitle"] = ProductTitle
-	body["desktop"] = map[string]any{
-		"wrapper":     true,
-		"kubernetes":  false,
-		"productName": ProductTitle,
+	desktop, _ := body["desktop"].(map[string]any)
+	if desktop == nil {
+		desktop = map[string]any{}
+	}
+	desktop["wrapper"] = true
+	desktop["kubernetes"] = false
+	desktop["productName"] = ProductTitle
+	if path := strings.TrimSpace(s.opts.OIDCRedirectPath); path != "" {
+		desktop["oidcRedirectPath"] = path
+	}
+	body["desktop"] = desktop
+	if clientID := strings.TrimSpace(s.opts.OIDCClientID); clientID != "" {
+		oidc, _ := body["oidc"].(map[string]any)
+		if oidc == nil {
+			oidc = map[string]any{}
+			body["oidc"] = oidc
+		}
+		oidc["clientId"] = clientID
 	}
 	rewritten, err := json.Marshal(body)
 	if err != nil {

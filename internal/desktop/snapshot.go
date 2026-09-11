@@ -48,9 +48,14 @@ func defaultWrapper() WrapperInfo {
 	return WrapperInfo{
 		Tools: []WrapperTool{
 			{
+				ID:          "create_agent",
+				DisplayName: "create agent",
+				Notes:       "POST /api/v1/namespaces/{ns}/agent-run-profiles when composition.writeEnabled. That is how Desktop creates agents. The wrapper entity can spawn more profiles when asked in chat. GitOps-owned objects stay read-only; the API stamps managed-by=anvil-agents-console.",
+			},
+			{
 				ID:          "anvil-api",
 				DisplayName: "anvil-agents API",
-				Notes:       "Call the remote OIDC AgentRun API the same way the browser console does: Bearer in Authorization, never in a query string. Runs are append-only. The host never stores the access token.",
+				Notes:       "Standing-chat threads and messages (PR 168 paths) plus list/get AgentRuns. Bearer in Authorization, never in a query string. The PR 168 echo stub is not the wrapper's reply — the wrapper continues and can spawn. The host never stores the access token.",
 			},
 			{
 				ID:          "local-harness",
@@ -58,7 +63,7 @@ func defaultWrapper() WrapperInfo {
 				Notes:       "Delegate a prompt to a catalog CLI already on this machine. The CLI uses its own local auth files. The OIDC token is not copied into argv, env, or the prompt file.",
 			},
 		},
-		Message: "Anvil Agents Desktop is a wrapper agent with those two tools. It is not a Kubernetes operator UI and not a second Anvil Agents Console.",
+		Message: "Anvil Agents Desktop is a wrapper agent: create_agent, standing chat, and local-harness. The wrapper is the entity that can spawn more AgentRunProfiles. It is not a Kubernetes operator UI and not a second Anvil Agents Console.",
 	}
 }
 

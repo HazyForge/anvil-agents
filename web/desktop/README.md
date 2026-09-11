@@ -11,7 +11,8 @@ Anvil Agents Desktop listens on loopback only (`127.0.0.1`):
 - Discovers Codex, Grok, OpenClaw, OpenCode, Hermes, Pi, and similar CLIs on PATH
 - Reverse-proxies `/api/` and `/ui-config.json` to a configured OIDC API origin
 - Signs in with Authorization Code + PKCE (tokens in `sessionStorage`, never query strings)
-- Wraps two tools: `anvil-api` and `local-harness`
+- Wraps three tools: `create_agent`, `anvil-api` (standing chat), and `local-harness`
+- Entity chat (`/chat`): the wrapper can POST AgentRunProfiles and spawn more when asked
 
 Register `http://127.0.0.1:1738/auth/callback` on the API's OIDC client. The
 API must already have exact issuer, audience, claim binding, namespace
