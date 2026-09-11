@@ -41,8 +41,9 @@ type Server struct {
 	logs       AgentRunLogSource
 	log        logr.Logger
 	httpServer *http.Server
-	limiter    *streamLimiter
-	chatStore  chat.Store
+	limiter      *streamLimiter
+	chatStore    chat.Store
+	chatPlanner  chatReplyPlanner
 }
 
 func NewServer(config Config, authenticator AccessTokenAuthenticator, runs client.Reader, logs AgentRunLogSource, log logr.Logger) (*Server, error) {
@@ -162,7 +163,8 @@ func (server *Server) handleUIConfig(writer http.ResponseWriter, _ *http.Request
 			"createEnabled": server.config.Runs.CreateEnabled,
 		},
 		"chat": map[string]any{
-			"enabled": server.config.Chat.Enabled,
+			"enabled":          server.config.Chat.Enabled,
+			"liveReplyEnabled": server.liveEntityReplyEnabled(),
 		},
 	})
 }

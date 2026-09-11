@@ -42,9 +42,11 @@ type ChatThreadDetailResponse struct {
 }
 
 type ChatAppendResponse struct {
-	Thread    chat.Thread  `json:"thread"`
-	User      chat.Message `json:"user"`
-	Assistant chat.Message `json:"assistant"`
+	Thread    chat.Thread    `json:"thread"`
+	User      chat.Message   `json:"user"`
+	Assistant chat.Message   `json:"assistant"`
+	Replies   []chat.Message `json:"replies,omitempty"`
+	Spawned   []string       `json:"spawned,omitempty"`
 }
 
 func (server *Server) registerChatRoutes(mux *http.ServeMux) {
@@ -170,17 +172,27 @@ func (server *Server) handleAppendChatMessage(writer http.ResponseWriter, reques
 		Content:  body.Content,
 		Metadata: body.Metadata,
 	}
-	assistant := chat.Message{
-		Role:     chat.RoleAssistant,
-		Content:  stubAssistantContent(body.Content),
-		Metadata: json.RawMessage(`{"stub":true,"engine":"echo"}`),
+	threadID := request.PathValue("threadID")
+	profileName := ""
+	if current, err := server.chatStore.GetThread(request.Context(), namespace, threadID); err == nil {
+		profileName = current.ProfileName
 	}
-	stored, thread, err := server.chatStore.AppendMessages(request.Context(), namespace, request.PathValue("threadID"), []chat.Message{user, assistant})
+	outgoing := []chat.Message{user}
+	if server.liveEntityReplyEnabled() {
+		outgoing = append(outgoing, server.buildLiveReplies(request.Context(), namespace, threadID, profileName, body.Content)...)
+	} else {
+		outgoing = append(outgoing, chat.Message{
+			Role:     chat.RoleAssistant,
+			Content:  stubAssistantContent(body.Content),
+			Metadata: json.RawMessage(`{"stub":true,"engine":"echo"}`),
+		})
+	}
+	stored, thread, err := server.chatStore.AppendMessages(request.Context(), namespace, threadID, outgoing)
 	if err != nil {
 		server.writeChatStoreError(writer, err, principal, namespace)
 		return
 	}
-	if len(stored) != 2 {
+	if len(stored) < 2 {
 		writeAPIError(writer, http.StatusInternalServerError, "chat_unavailable", "standing-chat append returned an unexpected result")
 		return
 	}
@@ -189,12 +201,38 @@ func (server *Server) handleAppendChatMessage(writer http.ResponseWriter, reques
 		"namespace", namespace,
 		"thread", thread.ID,
 		"sequence", stored[0].Sequence,
+		"replies", len(stored)-1,
+		"live", server.liveEntityReplyEnabled(),
 	)
 	writeJSON(writer, http.StatusCreated, ChatAppendResponse{
 		Thread:    thread,
 		User:      stored[0],
 		Assistant: stored[1],
+		Replies:   stored[1:],
+		Spawned:   spawnedNames(stored[1:]),
 	})
+}
+
+func spawnedNames(replies []chat.Message) []string {
+	var names []string
+	seen := map[string]bool{}
+	for _, reply := range replies {
+		var meta struct {
+			Spawned []string `json:"spawned"`
+		}
+		if json.Unmarshal(reply.Metadata, &meta) != nil {
+			continue
+		}
+		for _, name := range meta.Spawned {
+			name = strings.TrimSpace(name)
+			if name == "" || seen[name] {
+				continue
+			}
+			seen[name] = true
+			names = append(names, name)
+		}
+	}
+	return names
 }
 
 func (server *Server) authorizeChat(writer http.ResponseWriter, request *http.Request, permission string) (string, Principal, bool) {
