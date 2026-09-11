@@ -9,7 +9,7 @@ RELEASE_REPO ?= HazyForge/anvil-agents
 RELEASE_DEPLOY_VALUES ?= .hazyforge/clusters/anvil-primaris/namespace/anvil-agents-system/deploy.yaml
 RELEASE_IMAGE_LOCK ?= $(RELEASE_OUTPUT)/images-$(VERSION).lock.tsv
 
-.PHONY: generate manifests test verify verify-runner-contract security security-govulncheck security-gosec security-trivy security-all build console-build console-typecheck console-embed console-embed-restore docker-build images image-checks helm-lint archive-postgres-integration chart-package release-tag release-tag-push release-local release-publish release-github release-local-all release-pin-deploy release-primaris release-primaris-fast release-primaris-hot deploy-primaris judge-prerequisites judge-kind-e2e kind-upgrade-e2e kind-e2e
+.PHONY: generate manifests test verify verify-runner-contract security security-govulncheck security-gosec security-trivy security-all build console-build console-typecheck console-embed console-embed-restore desktop-build desktop-typecheck desktop-embed desktop-embed-restore docker-build images image-checks helm-lint archive-postgres-integration chart-package release-tag release-tag-push release-local release-publish release-github release-local-all release-pin-deploy release-primaris release-primaris-fast release-primaris-hot deploy-primaris judge-prerequisites judge-kind-e2e kind-upgrade-e2e kind-e2e
 
 generate:
 	$(CONTROLLER_GEN) object paths=./api/...
@@ -63,7 +63,7 @@ security-trivy:
 security-all: security security-trivy
 
 build:
-	go build ./cmd/anvil-agents ./cmd/anvil-agents-api ./cmd/anvil-agentctl
+	go build ./cmd/anvil-agents ./cmd/anvil-agents-api ./cmd/anvil-agentctl ./cmd/anvil-desktop
 
 # Build the Anvil Agents Console SPA into web/console/dist.
 console-build:
@@ -86,6 +86,26 @@ console-embed-restore:
 	rm -rf internal/runapi/consolefs/dist
 	mkdir -p internal/runapi/consolefs/dist
 	cp -a internal/runapi/consolefs/stub/. internal/runapi/consolefs/dist/
+
+# Build the Anvil Agents Desktop SPA into web/desktop/dist.
+desktop-build:
+	cd web/desktop && npm ci && npm run build
+
+desktop-typecheck:
+	cd web/desktop && npm ci && npm run typecheck
+
+# Copy built desktop assets into the go:embed tree used by anvil-desktop.
+# WARNING: replaces committed stub files under internal/desktop/uifs/dist.
+# Restore the stub before committing with `make desktop-embed-restore`.
+desktop-embed: desktop-build
+	rm -rf internal/desktop/uifs/dist
+	mkdir -p internal/desktop/uifs/dist
+	cp -a web/desktop/dist/. internal/desktop/uifs/dist/
+
+desktop-embed-restore:
+	rm -rf internal/desktop/uifs/dist
+	mkdir -p internal/desktop/uifs/dist
+	cp -a internal/desktop/uifs/stub/. internal/desktop/uifs/dist/
 
 docker-build:
 	ANVIL_AGENTS_IMAGE_PREFIX="$(IMAGE_PREFIX)" ANVIL_AGENTS_IMAGE_TAG="$(IMAGE_TAG)" \
@@ -288,5 +308,5 @@ verify-runner-contract:
 		rg -q 'openssl' "$$dockerfile"; \
 	done
 
-verify: manifests test build helm-lint verify-runner-contract console-typecheck
+verify: manifests test build helm-lint verify-runner-contract console-typecheck desktop-typecheck
 	@test -z "$$(rg -l 'github.com/hazyforge/anvil-primaris|github.com/hazyforge/anvil-primaris/lib/go/anvilhub' --glob '*.go' .)"

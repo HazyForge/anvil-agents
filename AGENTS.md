@@ -18,6 +18,10 @@ documentation.
   pause/resume, schedules, auth, volumes. Private Primaris `anvilctl` has no
   `agent` subcommand; managers use the Hub agent-management HTTP API. Do not
   reabsorb Hub policy clients into this repository.
+- `anvil-desktop` is a local loopback host for PATH harness discovery and
+  kubecontext selection. It wraps `web/console` instead of forking cluster
+  UI, must not gain Secret access or policy-broker authority, and is not the
+  OIDC API process.
 - Avoid running this controller and the former anvil-primaris agent
   reconcilers at the same time.
 - This repository does not ship an in-repo self-development agent fleet under
