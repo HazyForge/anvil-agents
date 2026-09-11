@@ -20,11 +20,12 @@ documentation.
   reabsorb Hub policy clients into this repository.
 - `anvil-desktop` (Anvil Agents Desktop) is a local loopback wrapper agent: OIDC
   sign-in to the optional anvil-agents AgentRun API (same session pattern as
-  `web/console`) plus PATH harness discovery and prompt delegation. It is not a
-  Kubernetes UI, not a second console, must not gain Secret access or
-  policy-broker authority, and is not the OIDC API process. The user-visible
-  product name is Anvil Agents Desktop, not Anvil Desktop, Anvil Hub, or
-  Anvil Primaris.
+  `web/console`) plus PATH harness discovery and prompt delegation. Production
+  IdP is Zitadel; tests may use a Kind-local issuer. Switching IdPs is
+  issuer/audience/client id only. It is not a Kubernetes UI, not a second
+  console, must not gain Secret access or policy-broker authority, and is not
+  the OIDC API process. The user-visible product name is Anvil Agents Desktop,
+  not Anvil Desktop, Anvil Hub, or Anvil Primaris.
 - Avoid running this controller and the former anvil-primaris agent
   reconcilers at the same time.
 - This repository does not ship an in-repo self-development agent fleet under

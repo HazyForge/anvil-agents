@@ -34,14 +34,20 @@ files (`~/.codex/auth.json`, and so on).
 
 Desktop loads `{apiOrigin}/ui-config.json` (unauthenticated) for issuer, client
 id, audiences, scopes, and feature flags. Login is Authorization Code + PKCE
-(S256). `state` / `nonce` / verifier live in `sessionStorage` under
-`anvil-agents-desktop.*` keys, then are removed. The access token stays in
-memory/`sessionStorage`. Redirect is `{origin}/auth/callback`; after exchange
-the app strips `code` and `state` from the address bar.
+(S256), the same provider-neutral flow as `web/console`. `state` / `nonce` /
+verifier live in `sessionStorage` under `anvil-agents-desktop.*` keys, then are
+removed. The access token stays in memory/`sessionStorage`. Redirect is
+`{origin}/auth/callback`; after exchange the app strips `code` and `state` from
+the address bar.
+
+Production IdP is **Zitadel**. Tests use a **local Kind issuer**, not production
+Zitadel. The desktop does not embed Zitadel APIs; switching IdPs is
+`ui-config` issuer, audience, and client id only.
 
 The loopback host reverse-proxies `/api/` and `/ui-config.json` to the
 configured API origin so the SPA is same-origin. Register
-`http://127.0.0.1:1738/auth/callback` on the OIDC client. Vite dev
+`http://127.0.0.1:1738/auth/callback` on the OIDC client (Kind client for
+tests; Zitadel client in production). Vite dev
 (`http://127.0.0.1:5174/auth/callback`) needs the same if you sign in there.
 Prefer `anvil-desktop --ui-dir` for real login.
 
@@ -69,4 +75,9 @@ append-only, tokens are never accepted in query strings.
 - Version probes and delegates run only catalog binaries resolved on PATH, with constant argument lists.
 - Delegate prompts are capped at 64KiB; prompt files are 0600 temp files and deleted.
 
-See `web/desktop/README.md` for run commands.
+See `web/desktop/README.md` for run commands. On a display VM:
+
+```bash
+make desktop-run
+# or: ./hack/run-anvil-desktop.sh --open --detach --api-origin http://127.0.0.1:18080
+```

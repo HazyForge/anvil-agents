@@ -1,5 +1,7 @@
 /**
  * OIDC Authorization Code + PKCE (public SPA client).
+ * Provider-neutral: issuer, audience, and client id come from ui-config.
+ * Production IdP is Zitadel; Kind tests use a local issuer.
  * Tokens stay in sessionStorage; never placed in query strings after callback cleanup.
  */
 

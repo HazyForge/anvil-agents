@@ -150,7 +150,11 @@ export default function App() {
             <button type="button" className="btn btn-ghost" onClick={() => void logout()}>
               Sign out
             </button>
-          ) : null}
+          ) : (
+            <NavLink to="/wrapper" className="btn btn-ghost">
+              Sign in
+            </NavLink>
+          )}
         </div>
       </div>
       <nav className="rail">
@@ -168,9 +172,7 @@ export default function App() {
           <Route path="/auth/callback" element={<AuthCallbackPage onAuthenticated={handleAuthenticated} />} />
           <Route
             path="/"
-            element={
-              snapshot && signedIn && config ? <HarnessesPage snapshot={snapshot} /> : login
-            }
+            element={snapshot ? <HarnessesPage snapshot={snapshot} /> : <div className="empty">Loading local harnesses…</div>}
           />
           <Route
             path="/wrapper"

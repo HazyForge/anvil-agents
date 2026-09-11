@@ -17,11 +17,15 @@ Register `http://127.0.0.1:1738/auth/callback` on the API's OIDC client. The
 API must already have exact issuer, audience, claim binding, namespace
 authorization, and CORS origins; Desktop does not loosen those rules.
 
+The client is standard OIDC (Authorization Code + PKCE), the same pattern as
+`web/console`. Production IdP is **Zitadel**. Kind tests use a local issuer.
+Switching is issuer / audience / client id in `ui-config.json` only.
+
 ## Run
 
 ```bash
 # terminal 1 — local host + (optional) stub UI
-go run ./cmd/anvil-desktop --listen 127.0.0.1:1738 --api-origin https://agents.example.com
+go run ./cmd/anvil-desktop --listen 127.0.0.1:1738 --api-origin http://127.0.0.1:18080
 
 # terminal 2 — Vite UI with /local, /api, and /ui-config.json proxied
 cd web/desktop
@@ -34,7 +38,15 @@ the built SPA from the Go host so the redirect URI is `http://127.0.0.1:1738/aut
 
 ```bash
 make desktop-build
-go run ./cmd/anvil-desktop --ui-dir web/desktop/dist --open --api-origin https://agents.example.com
+go run ./cmd/anvil-desktop --ui-dir web/desktop/dist --open --api-origin http://127.0.0.1:18080
+```
+
+Kind-local anvil-agents API is the default test origin. Do not point this
+loopback client at production Zitadel unless that client explicitly lists
+`http://127.0.0.1:1738/auth/callback`.
+
+```bash
+./hack/run-anvil-desktop.sh --open --detach --api-origin http://127.0.0.1:18080
 ```
 
 `--open` uses Chrome/Chromium `--app=` when available. Optional Electron wrap

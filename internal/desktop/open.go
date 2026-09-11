@@ -14,7 +14,14 @@ func OpenWindow(target string) error {
 		return fmt.Errorf("open URL is empty")
 	}
 	if chrome := firstLookPath("google-chrome", "google-chrome-stable", "chromium", "chromium-browser", "chrome"); chrome != "" {
-		cmd := exec.Command(chrome, "--app="+target, "--new-window") // #nosec G204 -- chrome is LookPath of a known browser; URL is the loopback host
+		args := []string{"--app=" + target, "--new-window"}
+		if os.Getenv("ANVIL_DESKTOP_CHROME_NO_SANDBOX") == "1" {
+			args = append([]string{"--no-sandbox", "--disable-dev-shm-usage"}, args...)
+		}
+		if dir := strings.TrimSpace(os.Getenv("ANVIL_DESKTOP_CHROME_USER_DATA_DIR")); dir != "" {
+			args = append(args, "--user-data-dir="+dir)
+		}
+		cmd := exec.Command(chrome, args...) // #nosec G204 -- chrome is LookPath of a known browser; URL is the loopback host; extra flags are env-controlled constants
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		return cmd.Start()
