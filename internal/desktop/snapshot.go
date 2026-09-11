@@ -27,7 +27,7 @@ func defaultChatView() ChatView {
 	return ChatView{
 		StandingChatPath: "/chat",
 		CouncilChat:      "future",
-		Message:          "Standing chat lands in the cluster console (/chat). Per-council chat is a later design. This desktop app wraps those surfaces instead of forking a second chat UI.",
+		Message:          "Standing chat lands in the cluster console (/chat). Per-council chat is a later design. Anvil Agents Desktop wraps those surfaces instead of forking a second chat UI.",
 	}
 }
 
@@ -81,7 +81,7 @@ func (s *Server) snapshot(ctx context.Context) Snapshot {
 	cluster.Console = consoleProbe(ctx, prefs.ConsoleURL)
 
 	return Snapshot{
-		ProductTitle: "Anvil Agents Desktop",
+		ProductTitle: ProductTitle,
 		ListenAddr:   s.opts.Listen,
 		Prefs:        prefs,
 		Harnesses:    s.opts.Discoverer.Discover(ctx),

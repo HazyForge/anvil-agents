@@ -9,8 +9,9 @@ export function HarnessesPage({ snapshot }: { snapshot: Snapshot }) {
         <div>
           <h1 className="page-title">Local harnesses</h1>
           <p className="page-sub">
-            Discover CLIs already on this machine. Cluster AgentRuns still use runner images; this
-            inventory is how operators connect those workstation clients to a kubecontext.
+            Anvil Agents Desktop discovers CLIs already on this machine. Cluster AgentRuns still
+            use runner images; this inventory is how operators connect those workstation clients to
+            a kubecontext.
           </p>
         </div>
       </div>

@@ -9,7 +9,7 @@ export function ChatPage({ snapshot }: { snapshot: Snapshot }) {
       <div className="page-header">
         <div>
           <h1 className="page-title">Standing chat</h1>
-          <p className="page-sub">Aligned with the cluster console. This desktop app does not wait on chat designs to manage harnesses and kubecontexts.</p>
+          <p className="page-sub">Aligned with the cluster console. Anvil Agents Desktop does not wait on chat designs to manage harnesses and kubecontexts.</p>
         </div>
       </div>
       <div className="split">
@@ -40,7 +40,7 @@ export function ChatPage({ snapshot }: { snapshot: Snapshot }) {
           <div className="panel-body">
             <p>
               AgentCouncil objects remain workforce inventory. A later per-council conversation
-              surface can hang off the same console wrap without changing this host.
+              surface can hang off the same console wrap without changing Anvil Agents Desktop.
             </p>
             <p className="muted">Status: {snapshot.chat.councilChat}. Do not block local harness or kubecontext work on that design.</p>
           </div>

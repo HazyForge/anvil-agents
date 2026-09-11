@@ -122,7 +122,7 @@ func Catalog() []Tool {
 			Kind:        KindCluster,
 			Binaries:    []string{"kubectl"},
 			VersionArgs: [][]string{{"version", "--client", "--short"}, {"version", "--client"}, {"version"}},
-			Notes:       "Cluster client used to resolve kubecontexts. The desktop host also reads kubeconfig directly.",
+			Notes:       "Cluster client used to resolve kubecontexts. Anvil Agents Desktop also reads kubeconfig directly.",
 		},
 	}
 }

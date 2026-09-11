@@ -403,7 +403,8 @@ This writes the existing JSONL status file and `ANVIL_AGENT_RUN_STATUS_JSON=`
 log lines. It never patches `AgentRun/status`. The historical
 `anvil-agent-status` shell wrapper remains for compatibility.
 
-## Desktop Host
+## Anvil Agents Desktop
 
-`anvil-desktop` discovers workstation harness CLIs and selects a kubecontext
-for this CLI. It does not replace `anvil-agentctl`. See [Desktop](desktop.md).
+**Anvil Agents Desktop** (`anvil-desktop`) discovers workstation harness CLIs and
+selects a kubecontext for this CLI. It does not replace `anvil-agentctl`. See
+[Anvil Agents Desktop](desktop.md).

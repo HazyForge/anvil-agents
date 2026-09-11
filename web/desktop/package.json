@@ -1,5 +1,6 @@
 {
   "name": "anvil-agents-desktop",
+  "productName": "Anvil Agents Desktop",
   "private": true,
   "version": "0.1.0",
   "type": "module",

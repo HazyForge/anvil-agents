@@ -5,6 +5,7 @@ import type { Prefs, Snapshot } from "./api/types";
 import { ChatPage } from "./pages/ChatPage";
 import { ClusterPage } from "./pages/ClusterPage";
 import { HarnessesPage } from "./pages/HarnessesPage";
+import { PRODUCT_TITLE } from "./product";
 
 export default function App() {
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
@@ -24,9 +25,13 @@ export default function App() {
     }
   }, []);
 
-  useEffect(() => {
+	useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  useEffect(() => {
+    document.title = snapshot?.productTitle ?? PRODUCT_TITLE;
+  }, [snapshot]);
 
   const persist = useCallback(
     async (prefs: Prefs) => {
@@ -60,7 +65,7 @@ export default function App() {
           <span />
           <span />
         </div>
-        <div className="titlebar-title">{snapshot?.productTitle ?? "Anvil Agents Desktop"}</div>
+        <div className="titlebar-title">{snapshot?.productTitle ?? PRODUCT_TITLE}</div>
         <div className="titlebar-meta">
           <span className={`pill ${operatorOk ? "pill-ok" : "pill-mute"}`}>{contextLabel}</span>
           <button type="button" className="btn btn-ghost" onClick={() => void refresh()} disabled={busy}>

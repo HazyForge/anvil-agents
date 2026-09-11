@@ -413,8 +413,8 @@ client-side filters. Verify until operators can observe `hazy-trade` AgentRuns
 without `kubectl`. Add the Failed-first attention queue and OIDC PKCE after the
 core observation loop works.
 
-## Related: desktop host
+## Related: Anvil Agents Desktop
 
 PATH discovery and kubeconfig selection cannot live in the OIDC console. See
-[Desktop](desktop.md) for `anvil-desktop`, which wraps this SPA instead of
-forking its screens.
+[Anvil Agents Desktop](desktop.md) for the `anvil-desktop` binary, which wraps
+this SPA instead of forking its screens.

@@ -107,6 +107,9 @@ func TestNewServerRejectsNonLoopback(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected non-loopback listen to fail")
 	}
+	if !strings.Contains(err.Error(), ProductTitle) {
+		t.Fatalf("loopback error missing product title: %v", err)
+	}
 }
 
 func TestSnapshotAndPrefsHTTP(t *testing.T) {
@@ -140,7 +143,7 @@ func TestSnapshotAndPrefsHTTP(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &snap); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if snap.ProductTitle != "Anvil Agents Desktop" {
+	if snap.ProductTitle != ProductTitle {
 		t.Fatalf("title = %q", snap.ProductTitle)
 	}
 	if snap.Cluster.CurrentContext != "kind-anvil" {

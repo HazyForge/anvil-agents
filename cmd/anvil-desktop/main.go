@@ -21,7 +21,7 @@ func main() {
 
 func run(ctx context.Context, args []string) int {
 	flags := pflag.NewFlagSet("anvil-desktop", pflag.ContinueOnError)
-	listen := flags.String("listen", "127.0.0.1:1738", "Loopback address for the desktop host.")
+	listen := flags.String("listen", "127.0.0.1:1738", "Loopback address for Anvil Agents Desktop.")
 	uiDir := flags.String("ui-dir", "", "Directory of built web/desktop assets. Defaults to the embedded stub.")
 	kubeconfig := flags.String("kubeconfig", "", "Kubeconfig path; defaults to the caller's normal loading rules.")
 	configDir := flags.String("config-dir", "", "Directory for desktop prefs. Defaults to the user config dir.")

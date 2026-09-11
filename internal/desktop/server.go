@@ -234,7 +234,7 @@ func requireLoopback(addr string) error {
 	}
 	ip := net.ParseIP(host)
 	if ip == nil || !ip.IsLoopback() {
-		return fmt.Errorf("anvil-desktop listens on loopback only (got %s)", addr)
+		return fmt.Errorf("Anvil Agents Desktop listens on loopback only (got %s)", addr)
 	}
 	return nil
 }

@@ -97,8 +97,8 @@ export function ClusterPage({ snapshot, onSave, busy }: Props) {
               {cluster.console.message || "Save an origin to wrap the existing SPA."}
             </div>
             <p className="muted">
-              Standing chat and future per-council chat live in that console. This desktop host does
-              not fork a second UI.
+              Standing chat and future per-council chat live in that console. Anvil Agents Desktop
+              does not fork a second UI.
             </p>
             <div className="btn-row">
               <button
