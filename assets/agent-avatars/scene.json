@@ -1,0 +1,124 @@
+{
+  "version": 1,
+  "product": "Anvil Agents",
+  "viewBox": "0 0 64 64",
+  "face": {
+    "cx": 32,
+    "cy": 32,
+    "r": 29,
+    "fill": "#0c1210",
+    "stroke": "#2a3d34",
+    "strokeWidth": 1.5
+  },
+  "faces": [
+    {
+      "id": "herald",
+      "label": "Herald",
+      "legacy": ["robot-01", "robot-01.jpg", "/avatars/robot-01.jpg"],
+      "eyes": [
+        { "id": "eye-left", "shape": "ellipse", "x": -8.2, "y": -1, "rx": 4.4, "ry": 12.5, "fill": "#3dffa8" },
+        { "id": "eye-right", "shape": "ellipse", "x": 8.2, "y": -1, "rx": 4.4, "ry": 12.5, "fill": "#3dffa8" }
+      ]
+    },
+    {
+      "id": "archivist",
+      "label": "Archivist",
+      "legacy": ["robot-02", "robot-02.jpg", "/avatars/robot-02.jpg"],
+      "eyes": [
+        { "id": "eye-left", "shape": "ring", "x": -9.2, "y": 0, "rx": 7.2, "ry": 7.2, "fill": "#3de0c5", "ring": 2.15, "pupil": true },
+        { "id": "eye-right", "shape": "ring", "x": 9.2, "y": 0, "rx": 7.2, "ry": 7.2, "fill": "#3de0c5", "ring": 2.15, "pupil": true }
+      ]
+    },
+    {
+      "id": "probe",
+      "label": "Probe",
+      "legacy": ["robot-03", "robot-03.jpg", "/avatars/robot-03.jpg"],
+      "eyes": [
+        { "id": "eye-center", "shape": "ellipse", "x": 0, "y": -9.2, "rx": 3.5, "ry": 3.5, "fill": "#7cf0ff", "pupil": true },
+        { "id": "eye-left", "shape": "ellipse", "x": -8.4, "y": 5.2, "rx": 3.5, "ry": 3.5, "fill": "#7cf0ff", "pupil": true },
+        { "id": "eye-right", "shape": "ellipse", "x": 8.4, "y": 5.2, "rx": 3.5, "ry": 3.5, "fill": "#7cf0ff", "pupil": true }
+      ]
+    },
+    {
+      "id": "courier",
+      "label": "Courier",
+      "legacy": ["robot-04", "robot-04.jpg", "/avatars/robot-04.jpg"],
+      "eyes": [
+        { "id": "eye-left", "shape": "crescent", "x": -8.6, "y": -1.5, "rx": 7.2, "ry": 6.2, "fill": "#3dffa8" },
+        { "id": "eye-right", "shape": "crescent", "x": 8.6, "y": -1.5, "rx": 7.2, "ry": 6.2, "fill": "#3dffa8" }
+      ]
+    },
+    {
+      "id": "sentinel",
+      "label": "Sentinel",
+      "legacy": ["robot-05", "robot-05.jpg", "/avatars/robot-05.jpg"],
+      "eyes": [
+        { "id": "eye-left", "shape": "ellipse", "x": -8.0, "y": 0.4, "rx": 9.0, "ry": 2.35, "fill": "#ff5c5c", "rotate": -14 },
+        { "id": "eye-right", "shape": "ellipse", "x": 8.0, "y": 0.4, "rx": 9.0, "ry": 2.35, "fill": "#ff5c5c", "rotate": 14 }
+      ]
+    },
+    {
+      "id": "guardian",
+      "label": "Guardian",
+      "legacy": ["robot-06", "robot-06.jpg", "/avatars/robot-06.jpg"],
+      "eyes": [
+        { "id": "eye-left", "shape": "ellipse", "x": -8.4, "y": 0, "rx": 7.6, "ry": 7.6, "fill": "#f0b429", "pupil": true },
+        { "id": "eye-right", "shape": "ellipse", "x": 8.4, "y": 0, "rx": 7.6, "ry": 7.6, "fill": "#f0b429", "pupil": true }
+      ]
+    },
+    {
+      "id": "ghost",
+      "label": "Ghost",
+      "legacy": ["robot-07", "robot-07.jpg", "/avatars/robot-07.jpg"],
+      "eyes": [
+        { "id": "eye-left", "shape": "ellipse", "x": -9.0, "y": -1, "rx": 3.1, "ry": 10.5, "fill": "#b8ffe0", "opacity": 0.5 },
+        { "id": "eye-right", "shape": "ellipse", "x": 9.0, "y": -1, "rx": 3.1, "ry": 10.5, "fill": "#b8ffe0", "opacity": 0.5 }
+      ]
+    },
+    {
+      "id": "scout",
+      "label": "Scout",
+      "legacy": ["robot-08", "robot-08.jpg", "/avatars/robot-08.jpg"],
+      "eyes": [
+        { "id": "eye-left", "shape": "ellipse", "x": -12.2, "y": -2.2, "rx": 3.15, "ry": 3.15, "fill": "#c6ff57", "pupil": true },
+        { "id": "eye-right", "shape": "ellipse", "x": 12.2, "y": -2.2, "rx": 3.15, "ry": 3.15, "fill": "#c6ff57", "pupil": true }
+      ]
+    },
+    {
+      "id": "researcher",
+      "label": "Researcher",
+      "legacy": ["robot-09", "robot-09.jpg", "/avatars/robot-09.jpg"],
+      "eyes": [
+        { "id": "eye-left", "shape": "round-rect", "x": -9.6, "y": -0.6, "rx": 7.1, "ry": 5.0, "radius": 2.2, "fill": "#6aa9ff", "pupil": true },
+        { "id": "eye-right", "shape": "round-rect", "x": 9.6, "y": -0.6, "rx": 7.1, "ry": 5.0, "radius": 2.2, "fill": "#6aa9ff", "pupil": true }
+      ]
+    },
+    {
+      "id": "engineer",
+      "label": "Engineer",
+      "legacy": ["robot-10", "robot-10.jpg", "/avatars/robot-10.jpg"],
+      "eyes": [
+        { "id": "eye-left", "shape": "round-rect", "x": -9.0, "y": 0, "rx": 5.6, "ry": 5.6, "radius": 1.7, "fill": "#3de0c5", "pupil": true },
+        { "id": "eye-right", "shape": "round-rect", "x": 9.0, "y": 0, "rx": 5.6, "ry": 5.6, "radius": 1.7, "fill": "#3de0c5", "pupil": true }
+      ]
+    },
+    {
+      "id": "companion",
+      "label": "Companion",
+      "legacy": ["robot-11", "robot-11.jpg", "/avatars/robot-11.jpg"],
+      "eyes": [
+        { "id": "eye-left", "shape": "ellipse", "x": -8.0, "y": -1, "rx": 4.8, "ry": 11.0, "fill": "#e8f4ee" },
+        { "id": "eye-right", "shape": "ellipse", "x": 8.0, "y": -1, "rx": 4.8, "ry": 11.0, "fill": "#e8f4ee" }
+      ]
+    },
+    {
+      "id": "forge",
+      "label": "Forge",
+      "legacy": ["robot-12", "robot-12.jpg", "/avatars/robot-12.jpg"],
+      "eyes": [
+        { "id": "eye-left", "shape": "ellipse", "x": -8.8, "y": -1, "rx": 5.1, "ry": 12.0, "fill": "#3dffa8" },
+        { "id": "eye-right", "shape": "ellipse", "x": 8.8, "y": -1, "rx": 5.1, "ry": 12.0, "fill": "#3dffa8" }
+      ]
+    }
+  ]
+}

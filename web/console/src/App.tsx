@@ -11,6 +11,7 @@ import { CompositionEditorPage } from "./pages/library/CompositionEditorPage";
 import { ControlsPage } from "./pages/ControlsPage";
 import { ProfileCardsPage } from "./pages/profiles/ProfileCardsPage";
 import { ProfileEditorPage } from "./pages/profiles/ProfileEditorPage";
+import { AvatarPreviewPage } from "./avatars/AvatarPreviewPage";
 import { loadUIConfig } from "./auth/config";
 import { ensureAccessToken, logout } from "./auth/oidc";
 import { clearLegacyToken, loadSession } from "./auth/session";
@@ -150,6 +151,9 @@ export default function App() {
   return (
     <Routes>
       <Route path="/auth/callback" element={<AuthCallbackPage onAuthenticated={handleAuthenticated} />} />
+      {import.meta.env.DEV ? (
+        <Route path="/dev/avatars" element={<AvatarPreviewPage />} />
+      ) : null}
       <Route
         path="*"
         element={

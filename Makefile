@@ -268,6 +268,8 @@ verify-runner-contract:
 	@hack/test-runner-github-auth.sh
 	@hack/test-opencode-runner.sh
 	@hack/stream-agent-run.sh --help >/dev/null
+	@bash -n hack/test-agent-avatars.sh
+	@hack/test-agent-avatars.sh
 	@if ANVIL_AGENTS_ACCESS_TOKEN=dummy hack/stream-agent-run.sh \
 		--endpoint https://agents.example.com@127.0.0.1 \
 		--namespace agents --run run-1 >/dev/null 2>&1; then \

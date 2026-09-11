@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { AgentFace } from "../avatars/AgentFace";
 import { loadUIConfig } from "../auth/config";
 import { beginLogin } from "../auth/oidc";
 
@@ -50,6 +51,11 @@ export function LoginGate({ error = null }: Props) {
       </header>
       <main className="main">
         <div className="panel token-gate">
+          <div className="login-faces" aria-hidden>
+            {["companion", "scout", "forge", "herald"].map((id) => (
+              <AgentFace key={id} faceId={id} className="login-face" />
+            ))}
+          </div>
           <h1>Sign in</h1>
           <p>
             Use your Hazy Forge account via OIDC Authorization Code + PKCE. Access tokens stay in{" "}

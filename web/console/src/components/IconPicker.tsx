@@ -1,6 +1,8 @@
 import { useMemo, useState } from "react";
+import { AgentFace } from "../avatars/AgentFace";
 import {
   BUILTIN_AVATARS,
+  resolveIcon,
   resolveIconSrc,
   type BuiltInAvatar,
 } from "../utils/icons";
@@ -13,13 +15,13 @@ interface Props {
   disabled?: boolean;
   onIconChange: (next: string) => void;
   onScreenshotChange: (next: string) => void;
-  /** Optional pack override (defaults to robot avatars). */
+  /** Optional pack override (defaults to Anvil Agents faces). */
   avatars?: BuiltInAvatar[];
 }
 
 export function IconPicker({
   label = "Avatar / icon",
-  help = "Pick a built-in robot avatar, or paste any image URL (https / data / console path).",
+  help = "Pick an Anvil Agents face, or paste any image URL. The face id is stored on the CR and is portable to desktop and later native clients.",
   icon,
   screenshot,
   disabled,
@@ -27,22 +29,17 @@ export function IconPicker({
   onScreenshotChange,
   avatars = BUILTIN_AVATARS,
 }: Props) {
-  const [showCustom, setShowCustom] = useState(() => {
-    const resolved = resolveIconSrc(icon);
-    if (!resolved) {
-      return false;
-    }
-    return !avatars.some((a) => a.src === resolved || a.id === icon);
-  });
+  const resolved = useMemo(() => resolveIcon(icon), [icon]);
+  const [showCustom, setShowCustom] = useState(() => resolved?.kind === "url");
 
-  const preview = useMemo(() => resolveIconSrc(icon), [icon]);
+  const preview = resolved;
   const shotPreview = useMemo(() => resolveIconSrc(screenshot), [screenshot]);
 
   function selectBuiltin(avatar: BuiltInAvatar) {
     if (disabled) {
       return;
     }
-    onIconChange(avatar.src);
+    onIconChange(avatar.id);
     setShowCustom(false);
   }
 
@@ -53,6 +50,13 @@ export function IconPicker({
     onIconChange("");
   }
 
+  function isSelected(avatar: BuiltInAvatar): boolean {
+    if (resolved?.kind === "face") {
+      return resolved.id === avatar.id;
+    }
+    return icon === avatar.src || icon === avatar.id;
+  }
+
   return (
     <div className="field icon-picker">
       <span className="label">{label}</span>
@@ -60,8 +64,10 @@ export function IconPicker({
 
       <div className="icon-picker-preview-row">
         <div className="icon-preview-tile" aria-hidden={!preview}>
-          {preview ? (
-            <img src={preview} alt="" className="icon-preview-img" />
+          {preview?.kind === "face" ? (
+            <AgentFace faceId={preview.id} className="icon-preview-face" />
+          ) : preview ? (
+            <img src={preview.src} alt="" className="icon-preview-img" />
           ) : (
             <span className="icon-preview-placeholder">No icon</span>
           )}
@@ -91,9 +97,9 @@ export function IconPicker({
         </div>
       </div>
 
-      <div className="avatar-pick-grid" role="listbox" aria-label="Built-in avatars">
+      <div className="avatar-pick-grid" role="listbox" aria-label="Anvil Agents faces">
         {avatars.map((avatar) => {
-          const selected = icon === avatar.src || icon === avatar.id;
+          const selected = isSelected(avatar);
           return (
             <button
               key={avatar.id}
@@ -107,7 +113,7 @@ export function IconPicker({
               title={avatar.label}
               onClick={() => selectBuiltin(avatar)}
             >
-              <img src={avatar.src} alt={avatar.label} className="avatar-pick-img" />
+              <AgentFace faceId={avatar.id} className="avatar-pick-face" />
               <span className="avatar-pick-label">{avatar.label}</span>
             </button>
           );
@@ -122,7 +128,7 @@ export function IconPicker({
             value={icon}
             disabled={disabled}
             onChange={(event) => onIconChange(event.target.value)}
-            placeholder="https://… or /avatars/robot-01.jpg or data:image/…"
+            placeholder="https://… or forge or /avatars/forge.svg or data:image/…"
             autoComplete="off"
           />
         </label>
@@ -161,10 +167,13 @@ export function CompositionAvatar({
   name: string;
   size?: "sm" | "md" | "lg";
 }) {
-  const src = resolveIconSrc(icon);
+  const resolved = resolveIcon(icon);
   const cls = `composition-avatar composition-avatar-${size}`;
-  if (src) {
-    return <img src={src} alt="" className={cls} />;
+  if (resolved?.kind === "face") {
+    return <AgentFace faceId={resolved.id} className={cls} title={name} />;
+  }
+  if (resolved) {
+    return <img src={resolved.src} alt="" className={cls} />;
   }
   const initial = name
     .trim()

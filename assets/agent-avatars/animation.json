@@ -1,0 +1,52 @@
+{
+  "version": 1,
+  "product": "Anvil Agents",
+  "honorReducedMotion": true,
+  "parts": {
+    "eye": {
+      "selector": "[data-part='eye']",
+      "requiredIds": ["eye-left", "eye-right"],
+      "optionalIds": ["eye-center"],
+      "transformOrigin": "group-local-0-0",
+      "baseTransformAttribute": "data-base-transform"
+    },
+    "pupil": {
+      "selector": "[data-part='pupil']",
+      "optionalIds": ["pupil-left", "pupil-right", "pupil-center"],
+      "baseTransformAttribute": "data-base-transform"
+    }
+  },
+  "clips": {
+    "blink": {
+      "targets": "eye",
+      "property": "scaleY",
+      "durationMs": 140,
+      "keyframes": [
+        { "t": 0, "v": 1 },
+        { "t": 0.42, "v": 0.08 },
+        { "t": 1, "v": 1 }
+      ]
+    },
+    "glance": {
+      "targets": "pupil",
+      "property": "translateX",
+      "durationMs": 980,
+      "keyframes": [
+        { "t": 0, "v": 0 },
+        { "t": 0.22, "v": 1.5 },
+        { "t": 0.55, "v": -1.25 },
+        { "t": 1, "v": 0 }
+      ]
+    }
+  },
+  "idle": {
+    "blinkEveryMs": [2600, 6400],
+    "glanceEveryMs": [9000, 17000],
+    "doubleBlinkChance": 0.2,
+    "doubleBlinkGapMs": 130
+  },
+  "native": {
+    "swift": "Parse each SVG (or scene.json). Group ids eye-left/eye-right are CALayer/UIView children. Blink is CGAffineTransform(scaleX: 1, y: sy) composed after the group's data-base-transform translate/rotate. Honor UIAccessibility.isReduceMotionEnabled by skipping idle.",
+    "android": "Same named groups in VectorDrawable or an SVG library. ObjectAnimator.ofFloat on scaleY, pivot at the group origin (0,0 after translate). Skip idle when Settings.Global.TRANSITION_ANIMATION_SCALE is 0."
+  }
+}

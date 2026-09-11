@@ -1,0 +1,151 @@
+{
+  "version": 1,
+  "product": "Anvil Agents",
+  "viewBox": "0 0 64 64",
+  "faces": [
+    {
+      "id": "herald",
+      "label": "Herald",
+      "file": "faces/herald.svg",
+      "publicPath": "/avatars/herald.svg",
+      "storedValue": "herald",
+      "legacy": [
+        "robot-01",
+        "robot-01.jpg",
+        "/avatars/robot-01.jpg"
+      ]
+    },
+    {
+      "id": "archivist",
+      "label": "Archivist",
+      "file": "faces/archivist.svg",
+      "publicPath": "/avatars/archivist.svg",
+      "storedValue": "archivist",
+      "legacy": [
+        "robot-02",
+        "robot-02.jpg",
+        "/avatars/robot-02.jpg"
+      ]
+    },
+    {
+      "id": "probe",
+      "label": "Probe",
+      "file": "faces/probe.svg",
+      "publicPath": "/avatars/probe.svg",
+      "storedValue": "probe",
+      "legacy": [
+        "robot-03",
+        "robot-03.jpg",
+        "/avatars/robot-03.jpg"
+      ]
+    },
+    {
+      "id": "courier",
+      "label": "Courier",
+      "file": "faces/courier.svg",
+      "publicPath": "/avatars/courier.svg",
+      "storedValue": "courier",
+      "legacy": [
+        "robot-04",
+        "robot-04.jpg",
+        "/avatars/robot-04.jpg"
+      ]
+    },
+    {
+      "id": "sentinel",
+      "label": "Sentinel",
+      "file": "faces/sentinel.svg",
+      "publicPath": "/avatars/sentinel.svg",
+      "storedValue": "sentinel",
+      "legacy": [
+        "robot-05",
+        "robot-05.jpg",
+        "/avatars/robot-05.jpg"
+      ]
+    },
+    {
+      "id": "guardian",
+      "label": "Guardian",
+      "file": "faces/guardian.svg",
+      "publicPath": "/avatars/guardian.svg",
+      "storedValue": "guardian",
+      "legacy": [
+        "robot-06",
+        "robot-06.jpg",
+        "/avatars/robot-06.jpg"
+      ]
+    },
+    {
+      "id": "ghost",
+      "label": "Ghost",
+      "file": "faces/ghost.svg",
+      "publicPath": "/avatars/ghost.svg",
+      "storedValue": "ghost",
+      "legacy": [
+        "robot-07",
+        "robot-07.jpg",
+        "/avatars/robot-07.jpg"
+      ]
+    },
+    {
+      "id": "scout",
+      "label": "Scout",
+      "file": "faces/scout.svg",
+      "publicPath": "/avatars/scout.svg",
+      "storedValue": "scout",
+      "legacy": [
+        "robot-08",
+        "robot-08.jpg",
+        "/avatars/robot-08.jpg"
+      ]
+    },
+    {
+      "id": "researcher",
+      "label": "Researcher",
+      "file": "faces/researcher.svg",
+      "publicPath": "/avatars/researcher.svg",
+      "storedValue": "researcher",
+      "legacy": [
+        "robot-09",
+        "robot-09.jpg",
+        "/avatars/robot-09.jpg"
+      ]
+    },
+    {
+      "id": "engineer",
+      "label": "Engineer",
+      "file": "faces/engineer.svg",
+      "publicPath": "/avatars/engineer.svg",
+      "storedValue": "engineer",
+      "legacy": [
+        "robot-10",
+        "robot-10.jpg",
+        "/avatars/robot-10.jpg"
+      ]
+    },
+    {
+      "id": "companion",
+      "label": "Companion",
+      "file": "faces/companion.svg",
+      "publicPath": "/avatars/companion.svg",
+      "storedValue": "companion",
+      "legacy": [
+        "robot-11",
+        "robot-11.jpg",
+        "/avatars/robot-11.jpg"
+      ]
+    },
+    {
+      "id": "forge",
+      "label": "Forge",
+      "file": "faces/forge.svg",
+      "publicPath": "/avatars/forge.svg",
+      "storedValue": "forge",
+      "legacy": [
+        "robot-12",
+        "robot-12.jpg",
+        "/avatars/robot-12.jpg"
+      ]
+    }
+  ]
+}

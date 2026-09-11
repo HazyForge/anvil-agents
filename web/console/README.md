@@ -37,6 +37,16 @@ Optional:
 - `VITE_DEV_API_PROXY=http://127.0.0.1:8082` — Vite proxy target (default above)
 - `VITE_API_BASE=https://agents.example.com` — absolute API origin instead of relative `/api`
 
+## Agent faces
+
+Built-in avatars are the shared **Anvil Agents** SVG eye pack in
+`assets/agent-avatars/` (not the old JPEG portraits). Composition CRs store a
+portable face id on `ui.anvil.hazyforge.io/icon` (`forge`, `herald`, …). Legacy
+`/avatars/robot-01.jpg` values still resolve. Blink/idle is the documented
+hook in `assets/agent-avatars/animation.json` — not CSS keyframes.
+
+Local gallery (Vite only, no OIDC): http://127.0.0.1:5173/dev/avatars
+
 ## Production build
 
 ```bash

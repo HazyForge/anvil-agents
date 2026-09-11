@@ -489,7 +489,7 @@ export function ProfileEditorPage({ token, namespace: activeNamespace, writeEnab
 
             <IconPicker
               label="Profile avatar / icon"
-              help="Assign a robot avatar or any image URL. Stored on the CR as ui.anvil.hazyforge.io/icon (screenshot banner optional)."
+              help="Assign an Anvil Agents face or any image URL. Stored on the CR as ui.anvil.hazyforge.io/icon (face id is portable; screenshot banner optional)."
               icon={form.icon}
               screenshot={form.screenshot}
               disabled={!writable}

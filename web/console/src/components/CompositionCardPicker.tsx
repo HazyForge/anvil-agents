@@ -1,5 +1,6 @@
 import type { CompositionDocument } from "../api/types.composition";
-import { getIconUrl, resolveIconSrc } from "../utils/icons";
+import { AgentFace } from "../avatars/AgentFace";
+import { getIconUrl, resolveIcon } from "../utils/icons";
 
 export interface CompositionOption {
   name: string;
@@ -174,7 +175,7 @@ export function CompositionCardPicker(props: Props) {
           {orderedOptions.map((opt) => {
             const isSelected = selectedSet.has(opt.name);
             const order = isSelected ? selected.indexOf(opt.name) + 1 : 0;
-            const iconSrc = resolveIconSrc(opt.icon);
+            const icon = resolveIcon(opt.icon);
             return (
               <button
                 key={opt.name}
@@ -196,7 +197,11 @@ export function CompositionCardPicker(props: Props) {
                   ) : (
                     <span className="compose-pick-badge compose-pick-badge-off">+</span>
                   )}
-                  {iconSrc ? <img src={iconSrc} alt="" className="compose-pick-icon" /> : null}
+                  {icon?.kind === "face" ? (
+                    <AgentFace faceId={icon.id} className="compose-pick-icon" />
+                  ) : icon ? (
+                    <img src={icon.src} alt="" className="compose-pick-icon" />
+                  ) : null}
                   <span className="compose-pick-name mono">{opt.name}</span>
                   {opt.global ? (
                     <span

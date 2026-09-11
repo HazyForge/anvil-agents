@@ -6,4 +6,5 @@
 /.vscode/
 /web/console/node_modules/
 /web/console/dist/
+/web/console/public/avatars/
 /web/console/*.tsbuildinfo

@@ -21,5 +21,9 @@
     "resolveJsonModule": true,
     "isolatedModules": true
   },
-  "include": ["src"]
+  "include": [
+    "src",
+    "../../assets/agent-avatars/*.json",
+    "../../assets/agent-avatars/*.d.ts"
+  ]
 }

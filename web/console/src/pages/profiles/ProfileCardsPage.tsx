@@ -94,7 +94,7 @@ export function ProfileCardsPage({ token, namespace, writeEnabled }: Props) {
 
       <div className="banner banner-info">
         <strong>{CRD_AS_CARD_MANTRA}</strong> {CRD_AS_CARD_HELP} Assign avatars via{" "}
-        <span className="mono">ui.anvil.hazyforge.io/icon</span>. GitOps-owned profiles stay
+        <span className="mono">ui.anvil.hazyforge.io/icon</span> (Anvil Agents face id). GitOps-owned profiles stay
         read-only.
       </div>
 

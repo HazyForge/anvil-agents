@@ -1604,6 +1604,77 @@ table.data-table tr.click-row:hover td {
   white-space: nowrap;
 }
 
+.agent-face {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  border-radius: 50%;
+  background: #0c1210;
+  flex: 0 0 auto;
+}
+
+.agent-face svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.icon-preview-face,
+.avatar-pick-face {
+  width: 100%;
+  aspect-ratio: 1;
+  height: auto;
+}
+
+.login-faces {
+  display: flex;
+  gap: 0.55rem;
+  margin-bottom: 0.9rem;
+}
+
+.login-face {
+  width: 2.75rem;
+  height: 2.75rem;
+  border: 1px solid var(--border);
+}
+
+.avatar-preview-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(7rem, 1fr));
+  gap: 0.65rem;
+  margin: 1rem 0;
+}
+
+.avatar-preview-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.5rem;
+  border: 1px solid var(--border);
+  background: var(--bg-panel-2);
+  border-radius: var(--radius);
+  color: var(--text-dim);
+  cursor: pointer;
+}
+
+.avatar-preview-face {
+  width: 4.5rem;
+  height: 4.5rem;
+}
+
+.compose-pick-icon.agent-face {
+  width: 1.5rem;
+  height: 1.5rem;
+  border: 1px solid var(--border);
+}
+
+.composition-avatar.agent-face {
+  object-fit: unset;
+  border-radius: 50%;
+}
+
 .screenshot-preview {
   margin-top: 0.45rem;
   border: 1px solid var(--border);

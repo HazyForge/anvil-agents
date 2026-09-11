@@ -1,32 +1,18 @@
 /** Console UI presentation annotations on composition objects. */
+import { AVATAR_FACES, avatarScene, resolveFaceId } from "../avatars/pack";
+
 export const ICON_ANNOTATION = "ui.anvil.hazyforge.io/icon";
 export const SCREENSHOT_ANNOTATION = "ui.anvil.hazyforge.io/screenshot";
 
 export interface BuiltInAvatar {
   id: string;
   label: string;
-  /** Public path served by the console SPA. */
+  /** Public path of the static SVG (still image). Prefer storing `id`. */
   src: string;
 }
 
-/** Built-in robot avatar pack shipped with the console. */
-export const BUILTIN_AVATARS: BuiltInAvatar[] = [
-  { id: "robot-01", label: "Herald", src: "/avatars/robot-01.jpg" },
-  { id: "robot-02", label: "Archivist", src: "/avatars/robot-02.jpg" },
-  { id: "robot-03", label: "Probe", src: "/avatars/robot-03.jpg" },
-  { id: "robot-04", label: "Courier", src: "/avatars/robot-04.jpg" },
-  { id: "robot-05", label: "Sentinel", src: "/avatars/robot-05.jpg" },
-  { id: "robot-06", label: "Guardian", src: "/avatars/robot-06.jpg" },
-  { id: "robot-07", label: "Ghost", src: "/avatars/robot-07.jpg" },
-  { id: "robot-08", label: "Scout", src: "/avatars/robot-08.jpg" },
-  { id: "robot-09", label: "Researcher", src: "/avatars/robot-09.jpg" },
-  { id: "robot-10", label: "Engineer", src: "/avatars/robot-10.jpg" },
-  { id: "robot-11", label: "Companion", src: "/avatars/robot-11.jpg" },
-  { id: "robot-12", label: "Forge", src: "/avatars/robot-12.jpg" },
-];
-
-const builtinBySrc = new Map(BUILTIN_AVATARS.map((a) => [a.src, a]));
-const builtinById = new Map(BUILTIN_AVATARS.map((a) => [a.id, a]));
+/** Built-in Anvil Agents face pack. Source of truth: assets/agent-avatars. */
+export const BUILTIN_AVATARS: BuiltInAvatar[] = AVATAR_FACES;
 
 export function annotationValue(
   annotations: Record<string, string> | undefined,
@@ -46,32 +32,34 @@ export function getScreenshotUrl(annotations: Record<string, string> | undefined
   return annotationValue(annotations, SCREENSHOT_ANNOTATION);
 }
 
-/** Resolve a stored icon value (builtin id, path, or absolute URL) to a usable src. */
-export function resolveIconSrc(value: string | undefined | null): string | undefined {
+export type ResolvedIcon =
+  | { kind: "face"; id: string; src: string }
+  | { kind: "url"; src: string };
+
+/** Resolve a stored icon value (face id, legacy JPEG path, or URL) to a usable icon. */
+export function resolveIcon(value: string | undefined | null): ResolvedIcon | undefined {
   const raw = String(value ?? "").trim();
   if (!raw) {
     return undefined;
   }
-  if (builtinById.has(raw)) {
-    return builtinById.get(raw)!.src;
+  const faceId = resolveFaceId(avatarScene, raw);
+  if (faceId) {
+    return { kind: "face", id: faceId, src: `/avatars/${faceId}.svg` };
   }
-  if (builtinBySrc.has(raw)) {
-    return raw;
-  }
-  // Allow relative console paths and absolute http(s)/data URLs.
   if (
     raw.startsWith("/") ||
     raw.startsWith("http://") ||
     raw.startsWith("https://") ||
     raw.startsWith("data:image/")
   ) {
-    return raw;
+    return { kind: "url", src: raw };
   }
-  // Bare avatar filename
-  if (/^robot-\d{2}\.jpe?g$/i.test(raw)) {
-    return `/avatars/${raw}`;
-  }
-  return raw;
+  return { kind: "url", src: raw };
+}
+
+/** Resolve a stored icon value to a usable src (static SVG or URL). */
+export function resolveIconSrc(value: string | undefined | null): string | undefined {
+  return resolveIcon(value)?.src;
 }
 
 export function mergePresentationAnnotations(
@@ -83,7 +71,8 @@ export function mergePresentationAnnotations(
   const iconTrim = icon.trim();
   const shotTrim = screenshot.trim();
   if (iconTrim) {
-    next[ICON_ANNOTATION] = iconTrim;
+    const face = resolveIcon(iconTrim);
+    next[ICON_ANNOTATION] = face?.kind === "face" ? face.id : iconTrim;
   } else {
     delete next[ICON_ANNOTATION];
   }
