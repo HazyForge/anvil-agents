@@ -82,6 +82,13 @@ export function visibleFromChat(messages: ChatMessage[]): VisibleMessage[] {
         content: message.content,
         createdAt: message.createdAt,
       });
+    } else if (message.role === "assistant") {
+      out.push({
+        id: message.id || `assistant-${message.sequence}`,
+        author: "wrapper",
+        content: message.content,
+        createdAt: message.createdAt,
+      });
     }
   }
   return out;
@@ -111,12 +118,25 @@ async function ensureThread(
   });
 }
 
-function entityLine(name: string, peer: string): string {
-  return `Hello ${peer} — ${name} here. The desktop wrapper just spawned me on Primaris.`;
-}
-
-function speak(name: string, peer: string): { line: string } {
-  return { line: entityLine(name, peer) };
+async function personaGreeting(
+  token: string,
+  namespace: string,
+  author: string,
+  peer: string,
+): Promise<EntityLine> {
+  const threads = await listChatThreads(token, namespace, { mode: "persona", profileName: author, limit: 20 });
+  const thread = threads.find((item) => item.profileName === author);
+  if (!thread) {
+    throw new APIError(404, "thread_not_found", `no standing-chat thread for persona ${author}`);
+  }
+  const posted = await appendChatMessage(token, namespace, thread.id, {
+    content: `Greet ${peer} briefly in one or two sentences.`,
+  });
+  return {
+    author,
+    content: posted.assistant.content,
+    threadId: posted.thread.id,
+  };
 }
 
 export async function runWrapperTurn(opts: {
@@ -136,10 +156,20 @@ export async function runWrapperTurn(opts: {
     throw new Error("composition write is disabled on this API — Desktop cannot create AgentRunProfiles");
   }
 
-  const wrapperProfile = await ensureAgentRunProfile(opts.token, opts.namespace, {
+  const intent = parseWrapperIntent(text, opts.existingProfileNames);
+  if (intent.talk && !opts.chatEnabled) {
+    throw new APIError(
+      503,
+      "chat_disabled",
+      "standing chat is disabled or unavailable on this API — cannot have personas talk",
+    );
+  }
+
+  await ensureAgentRunProfile(opts.token, opts.namespace, {
     name: WRAPPER_PROFILE_NAME,
     description: "Anvil Agents Desktop wrapper entity. Spawns more AgentRunProfiles when asked.",
-    systemPrompt: "You are the Anvil Agents Desktop wrapper. When asked to create agents, POST more AgentRunProfiles. You can introduce spawned personas to each other.",
+    systemPrompt:
+      "You are the Anvil Agents Desktop wrapper. When asked to create agents, POST more AgentRunProfiles. You can introduce spawned personas to each other.",
     intent: "observe",
   });
 
@@ -161,10 +191,8 @@ export async function runWrapperTurn(opts: {
         wrapper: true,
       });
     }
-    await appendChatMessage(opts.token, opts.namespace, wrapperThread.id, { content: text });
   }
 
-  const intent = parseWrapperIntent(text, opts.existingProfileNames);
   const spawned: CompositionDocument[] = [];
   const namesToCreate = intent.spawn ? intent.names : [];
   for (const name of namesToCreate) {
@@ -190,63 +218,33 @@ export async function runWrapperTurn(opts: {
   const room: EntityLine[] = [];
   const shouldTalk = roster.length >= 2 && (intent.talk || spawned.length >= 2);
   if (shouldTalk) {
+    if (!opts.chatEnabled) {
+      throw new APIError(
+        503,
+        "chat_disabled",
+        "standing chat is disabled or unavailable on this API — cannot have personas talk",
+      );
+    }
     const a = roster[0];
     const b = roster[1];
-    const first = speak(a, b);
-    const second = speak(b, a);
-    room.push({ author: a, content: first.line });
-    room.push({ author: b, content: second.line });
-    if (opts.chatEnabled) {
-      const threads = await listChatThreads(opts.token, opts.namespace, { mode: "persona", limit: 100 });
-      const threadA = threads.find((thread) => thread.profileName === a);
-      const threadB = threads.find((thread) => thread.profileName === b);
-      if (threadA) {
-        const posted = await appendChatMessage(opts.token, opts.namespace, threadA.id, {
-          content: first.line,
-          metadata: { entity: true, authorProfile: a, wrapper: false },
-        });
-        room[0].threadId = posted.thread.id;
-      }
-      if (threadB) {
-        const posted = await appendChatMessage(opts.token, opts.namespace, threadB.id, {
-          content: second.line,
-          metadata: { entity: true, authorProfile: b },
-        });
-        room[1].threadId = posted.thread.id;
-      }
-    }
+    room.push(await personaGreeting(opts.token, opts.namespace, a, b));
+    room.push(await personaGreeting(opts.token, opts.namespace, b, a));
   }
 
-  const wrapperReply = composeWrapperReply({
-    wrapperProfile: wrapperProfile.metadata.name,
-    spawned,
-    room,
-    talk: shouldTalk,
-    chatEnabled: opts.chatEnabled,
-  });
-
+  let wrapperReply = "";
   const history: VisibleMessage[] = [];
   if (opts.chatEnabled && wrapperThread) {
-    const posted = await appendChatMessage(opts.token, opts.namespace, wrapperThread.id, {
-      content: wrapperReply,
-      metadata: {
-        wrapper: true,
-        spawned: spawned.map((doc) => doc.metadata.name),
-      },
-    });
+    const posted = await appendChatMessage(opts.token, opts.namespace, wrapperThread.id, { content: text });
     wrapperThread = posted.thread;
+    wrapperReply = posted.assistant.content.trim();
+    if (!wrapperReply) {
+      throw new APIError(502, "empty_assistant", "standing chat returned an empty assistant reply");
+    }
     history.push({
-      id: posted.user.id,
+      id: posted.assistant.id,
       author: "wrapper",
       content: wrapperReply,
-      createdAt: posted.user.createdAt,
-    });
-  } else {
-    history.push({
-      id: `local-wrapper-${Date.now()}`,
-      author: "wrapper",
-      content: wrapperReply,
-      createdAt: new Date().toISOString(),
+      createdAt: posted.assistant.createdAt,
     });
   }
 
@@ -265,37 +263,6 @@ function uniqueNames(names: string[]): string[] {
     out.push(name);
   }
   return out;
-}
-
-function composeWrapperReply(opts: {
-  wrapperProfile: string;
-  spawned: CompositionDocument[];
-  room: EntityLine[];
-  talk: boolean;
-  chatEnabled: boolean;
-}): string {
-  const lines: string[] = [];
-  if (opts.spawned.length > 0) {
-    lines.push(
-      `Created AgentRunProfiles ${opts.spawned.map((doc) => doc.metadata.name).join(", ")} via POST .../agent-run-profiles (console-managed).`,
-    );
-  } else {
-    lines.push(`I am ${opts.wrapperProfile}. Ask me to create agents (AgentRunProfiles) or to have existing ones talk.`);
-  }
-  if (opts.room.length > 0) {
-    lines.push("They exchanged messages:");
-    for (const line of opts.room) {
-      lines.push(`- ${line.author}: ${line.content}`);
-    }
-  } else if (opts.talk) {
-    lines.push("Need at least two personas before they can talk.");
-  }
-  if (!opts.chatEnabled) {
-    lines.push("Standing chat is off on this API; profile create still went through composition write. The echo stub was not used as the reply.");
-  } else {
-    lines.push("PR 168 echo stubs are hidden here. This wrapper turn is the reply.");
-  }
-  return lines.join("\n");
 }
 
 export function formatTurnError(err: unknown): string {

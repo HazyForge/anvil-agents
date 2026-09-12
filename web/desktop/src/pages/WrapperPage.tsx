@@ -1,5 +1,5 @@
 import { Link } from "react-router-dom";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   createAgentRun,
   createAgentRunProfile,
@@ -11,8 +11,10 @@ import {
 } from "../api/client";
 import type { Snapshot } from "../api/types";
 import type { UIConfig } from "../auth/config";
+import { CollaborationMonitor } from "../components/CollaborationMonitor";
 import { personaLabel } from "../names";
 import { loadNamespace, saveNamespace } from "../state/namespace";
+import { startStaggeredPairedObjective } from "../wrapper/collaboration";
 
 interface Props {
   snapshot: Snapshot;
@@ -24,13 +26,18 @@ export function WrapperPage({ snapshot, token, config }: Props) {
   const fallbackNs = config.defaultNamespaces[0] || "";
   const [namespace, setNamespace] = useState(() => loadNamespace(fallbackNs));
   const [prompt, setPrompt] = useState("");
+  const [objective, setObjective] = useState(
+    "Draft a one-paragraph Primaris desktop collab note; coordinate with the peer grok run so only one build happens.",
+  );
   const [profileName, setProfileName] = useState("");
   const [runName, setRunName] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [collabStatus, setCollabStatus] = useState<string | null>(null);
   const [apiOutput, setApiOutput] = useState("");
   const [runs, setRuns] = useState<AgentRunView[]>([]);
   const [profiles, setProfiles] = useState<CompositionDocument[]>([]);
+  const [pairedRuns, setPairedRuns] = useState<{ runA: string; runB: string; objective: string } | null>(null);
 
   const apiTools = snapshot.wrapper.tools.filter((tool) => tool.id !== "local-harness");
   const localTool = snapshot.wrapper.tools.find((tool) => tool.id === "local-harness");
@@ -39,6 +46,33 @@ export function WrapperPage({ snapshot, token, config }: Props) {
     setNamespace(next);
     saveNamespace(next);
   }
+
+  async function refreshRuns(silent = false) {
+    if (!namespace) {
+      return;
+    }
+    try {
+      const items = await listAgentRuns(token, namespace, 50);
+      setRuns(items);
+      if (!silent) {
+        setError(null);
+      }
+    } catch (err) {
+      if (!silent) {
+        setError(`list runs: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+  }
+
+  useEffect(() => {
+    if (!namespace || !token || !pairedRuns) {
+      return;
+    }
+    const id = window.setInterval(() => {
+      void refreshRuns(true);
+    }, 4000);
+    return () => window.clearInterval(id);
+  }, [namespace, token, pairedRuns]);
 
   async function runAPI(label: string, fn: () => Promise<unknown>) {
     setBusy(true);
@@ -57,9 +91,12 @@ export function WrapperPage({ snapshot, token, config }: Props) {
   }
 
   async function onListRuns() {
-    const items = (await runAPI("list runs", () => listAgentRuns(token, namespace, 50))) as AgentRunView[] | null;
-    if (items) {
-      setRuns(items);
+    setBusy(true);
+    setError(null);
+    try {
+      await refreshRuns();
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -93,6 +130,34 @@ export function WrapperPage({ snapshot, token, config }: Props) {
         profileName: profileName.trim(),
       }),
     );
+    await refreshRuns(true);
+  }
+
+  async function onStartPairedObjective() {
+    if (!config.runs.createEnabled) {
+      setError("AgentRun create is disabled on this API");
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    setCollabStatus(null);
+    setPairedRuns(null);
+    try {
+      const result = await startStaggeredPairedObjective({
+        token,
+        namespace,
+        profileName: profileName.trim(),
+        objective: objective.trim(),
+        onStatus: (message) => setCollabStatus(message),
+      });
+      setPairedRuns({ ...result, objective: objective.trim() });
+      setApiOutput(JSON.stringify(result, null, 2));
+      await refreshRuns(true);
+    } catch (err) {
+      setError(`paired objective: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function onCreateProfile() {
@@ -171,15 +236,60 @@ export function WrapperPage({ snapshot, token, config }: Props) {
             </p>
           ) : null}
           <label className="field">
-            <span className="label">Prompt</span>
+            <span className="label">Prompt (single run)</span>
             <textarea
               className="input textarea"
-              rows={4}
+              rows={3}
               value={prompt}
               onChange={(event) => setPrompt(event.target.value)}
               placeholder="Prompt for a new AgentRun on Primaris. The OIDC token is never appended."
             />
           </label>
+        </div>
+      </section>
+
+      <section className="panel" style={{ marginTop: "0.75rem" }}>
+        <div className="panel-header">
+          <h2 className="panel-title">Paired grok objective</h2>
+          <span className="chip">staggered overlap</span>
+        </div>
+        <div className="panel-body">
+          <p className="muted">
+            Starts worker A, waits until it is <strong>Running</strong>, then starts worker B on the same
+            objective so conferral or interrupt can happen while both are in flight. Proof is live phases plus
+            stream/report peer signals — not two jobs at one click.
+          </p>
+          <label className="field">
+            <span className="label">Shared objective</span>
+            <textarea
+              className="input textarea"
+              rows={3}
+              value={objective}
+              onChange={(event) => setObjective(event.target.value)}
+            />
+          </label>
+          <label className="field">
+            <span className="label">grok AgentRunProfile</span>
+            <input
+              className="input"
+              value={profileName}
+              onChange={(event) => setProfileName(event.target.value)}
+              placeholder="list profiles first"
+            />
+          </label>
+          {config.runs.createEnabled ? (
+            <button
+              type="button"
+              className="btn btn-primary"
+              disabled={busy || !namespace || !profileName.trim() || !objective.trim()}
+              onClick={() => void onStartPairedObjective()}
+            >
+              {busy ? "Starting paired objective…" : "Start paired grok objective"}
+            </button>
+          ) : (
+            <span className="muted">AgentRun create is disabled on this API.</span>
+          )}
+          {collabStatus ? <p className="muted">{collabStatus}</p> : null}
         </div>
       </section>
 
@@ -210,9 +320,7 @@ export function WrapperPage({ snapshot, token, config }: Props) {
               >
                 Create profile
               </button>
-            ) : (
-              <span className="muted">composition write is disabled; cannot POST AgentRunProfiles.</span>
-            )}
+            ) : null}
             {config.runs.createEnabled ? (
               <button
                 type="button"
@@ -230,15 +338,6 @@ export function WrapperPage({ snapshot, token, config }: Props) {
           <label className="field">
             <span className="label">AgentRun name (get)</span>
             <input className="input" value={runName} onChange={(event) => setRunName(event.target.value)} />
-          </label>
-          <label className="field">
-            <span className="label">AgentRunProfile name (create)</span>
-            <input
-              className="input"
-              value={profileName}
-              onChange={(event) => setProfileName(event.target.value)}
-              placeholder="herald"
-            />
           </label>
           {profiles.length > 0 ? (
             <p className="muted">
@@ -271,6 +370,17 @@ export function WrapperPage({ snapshot, token, config }: Props) {
           {apiOutput ? <pre className="hint">{apiOutput}</pre> : null}
         </div>
       </section>
+
+      {pairedRuns ? (
+        <CollaborationMonitor
+          token={token}
+          namespace={namespace}
+          runA={pairedRuns.runA}
+          runB={pairedRuns.runB}
+          objective={pairedRuns.objective}
+        />
+      ) : null}
+
       {error ? (
         <div className="banner banner-error" style={{ marginTop: "0.75rem" }}>
           {error}

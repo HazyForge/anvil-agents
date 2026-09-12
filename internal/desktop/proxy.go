@@ -68,6 +68,11 @@ func (s *Server) handleAPIProxy(writer http.ResponseWriter, request *http.Reques
 		req.URL.Scheme = target.Scheme
 		req.URL.Host = target.Host
 		req.Host = target.Host
+		// Browser fetches same-origin through the desktop host but send
+		// Origin: http://127.0.0.1:<port>. Primaris denies that origin; the
+		// proxy is server-side and must not forward browser Origin/Referer.
+		req.Header.Del("Origin")
+		req.Header.Del("Referer")
 		req.Header.Del("Forwarded")
 		req.Header.Del("X-Forwarded-Host")
 		req.Header.Set("X-Forwarded-Proto", target.Scheme)

@@ -429,3 +429,86 @@ a { color: var(--teal); text-decoration: none; }
   gap: 0.4rem;
 }
 .empty { color: var(--text-mute); padding: 1rem 0.2rem; }
+
+.stream-dual {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+  margin-top: 0.75rem;
+}
+@media (max-width: 1100px) {
+  .stream-dual { grid-template-columns: 1fr; }
+}
+.stream-panel {
+  border: 1px solid var(--border);
+  background: var(--bg-panel);
+  display: flex;
+  flex-direction: column;
+  min-height: 12rem;
+  max-height: 22rem;
+}
+.stream-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.45rem 0.6rem;
+  border-bottom: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+.stream-status {
+  font-size: 0.65rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-mute);
+}
+.stream-status.live { color: var(--emerald); }
+.stream-status.error { color: var(--red); }
+.stream-log {
+  flex: 1;
+  overflow: auto;
+  padding: 0.45rem 0.55rem;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+}
+.stream-line {
+  display: grid;
+  grid-template-columns: 4.5rem 4.5rem minmax(0, 1fr);
+  gap: 0.35rem;
+  padding: 0.12rem 0;
+  border-bottom: 1px solid rgba(28, 42, 36, 0.55);
+}
+.stream-line .ts { color: var(--text-mute); }
+.stream-line .kind { color: var(--teal); text-transform: uppercase; font-size: 0.62rem; }
+.stream-line .body { white-space: pre-wrap; word-break: break-word; }
+.stream-line-peer {
+  background: rgba(240, 180, 41, 0.12);
+  border-left: 2px solid var(--amber);
+  padding-left: 0.35rem;
+}
+.run-table tr.watch-selected td { background: rgba(61, 255, 168, 0.08); }
+.collab-run-cards {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.5rem;
+  margin: 0.5rem 0 0.75rem;
+}
+.collab-run-card {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.5rem;
+  border: 1px solid var(--border);
+  padding: 0.45rem 0.55rem;
+  background: var(--bg-input);
+}
+.collab-run-card-running {
+  border-color: rgba(61, 255, 168, 0.45);
+  box-shadow: inset 0 0 0 1px rgba(61, 255, 168, 0.12);
+}
+.collab-peer-notes {
+  margin: 0 0 0.75rem;
+  padding-left: 1.1rem;
+  color: var(--amber);
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+}

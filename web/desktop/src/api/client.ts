@@ -101,6 +101,14 @@ export async function delegateHarness(harness: string, prompt: string, timeoutSe
   return (await response.json()) as DelegateResult;
 }
 
+export type AgentRunReport = {
+  type?: string;
+  summary?: string;
+  detail?: string;
+  classification?: string;
+  action?: string;
+};
+
 export type AgentRunView = {
   name: string;
   namespace: string;
@@ -108,6 +116,8 @@ export type AgentRunView = {
   backend?: string;
   intent?: string;
   error?: string;
+  decision?: { action?: string; summary?: string };
+  reports?: AgentRunReport[];
 };
 
 export type CompositionDocument = {
