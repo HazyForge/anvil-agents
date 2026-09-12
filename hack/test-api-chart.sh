@@ -238,7 +238,25 @@ mapfile -t deployments < <(awk '
 [[ "${#deployments[@]}" -eq 2 ]] || fail "expected two Deployments for long fullname"
 [[ "${deployments[0]}" != "${deployments[1]}" ]] || fail "controller and API Deployment names collided"
 for deployment in "${deployments[@]}"; do
-  [[ "${#deployment}" -le 63 ]] || fail "Deployment name exceeds 63 characters: ${deployment}"
+	[[ "${#deployment}" -le 63 ]] || fail "Deployment name exceeds 63 characters: ${deployment}"
 done
+
+# Primaris GitOps overlay: Zitadel issuer/audience/console client + Desktop CORS.
+primaris_values="${root_dir}/.hazyforge/clusters/anvil-primaris/namespace/anvil-agents-system/deploy.yaml"
+helm template anvil-agents-system-chart "${chart}" \
+	--values "${primaris_values}" \
+	--set fullnameOverride=anvil-agents \
+	>"${tmp_dir}/primaris.yaml"
+grep -Fq 'issuer: https://hazyforge1-azsbgb.us1.zitadel.cloud' "${tmp_dir}/primaris.yaml" || fail "Primaris overlay lost the Zitadel issuer"
+grep -Fq 'clientId: "383499920822362966"' "${tmp_dir}/primaris.yaml" || fail "Primaris overlay lost the console PKCE client id"
+grep -Fq '376124473528572432' "${tmp_dir}/primaris.yaml" || fail "Primaris overlay lost the project audience"
+grep -Fq 'http://127.0.0.1:1738' "${tmp_dir}/primaris.yaml" || fail "Primaris overlay lost Desktop loopback CORS"
+grep -Fq 'http://127.0.0.1:8400' "${tmp_dir}/primaris.yaml" || fail "Primaris overlay lost Kind-contract Desktop CORS"
+if grep -F 'anvil-agents-council-llm' "${tmp_dir}/primaris.yaml"; then
+	fail "Primaris overlay must not install the Kind council-llm stub"
+fi
+if grep -qi 'keycloak' "${tmp_dir}/primaris.yaml"; then
+	fail "Primaris overlay must not install Kind Keycloak"
+fi
 
 printf 'AgentRun API chart contract passed\n'
