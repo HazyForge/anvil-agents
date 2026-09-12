@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -25,7 +26,9 @@ const (
 	councilImplementerProfile = "council-implementer"
 	councilResearchHarness    = "council-research"
 	councilGrokHarness        = "council-grok"
-	gitOpsResearchHarness     = "demo-runtime"
+	councilLLMHarness         = "council-llm"
+	councilLLMSecretName      = "council-llm"
+	councilLLMImage           = "anvil-agents-council-llm:dev"
 	councilDemoImage          = "anvil-agents-demo:dev"
 	councilRunnerSA           = "agent-runner"
 )
@@ -36,6 +39,7 @@ type CouncilConnectRequest struct {
 
 type CouncilTurnRequest struct {
 	Content string `json:"content"`
+	To      string `json:"to,omitempty"`
 }
 
 type CouncilMemberView struct {
@@ -53,6 +57,7 @@ type CouncilMessageView struct {
 	AuthorRole    string `json:"authorRole,omitempty"`
 	DisplayName   string `json:"displayName,omitempty"`
 	WaitingOn     string `json:"waitingOn,omitempty"`
+	AddressedTo   string `json:"addressedTo,omitempty"`
 	Kind          string `json:"kind,omitempty"`
 }
 
@@ -64,27 +69,29 @@ type CouncilDelegatedRun struct {
 	Backend            string `json:"backend"`
 	Role               string `json:"role"`
 	Application        string `json:"application,omitempty"`
+	Kind               string `json:"kind,omitempty"`
 }
 
 type CouncilState struct {
-	Name            string                 `json:"name"`
-	Namespace       string                 `json:"namespace"`
-	Controller      string                 `json:"controller"`
-	Connected       bool                   `json:"connected"`
-	Members         []CouncilMemberView    `json:"members"`
-	Thread          chat.Thread            `json:"thread"`
-	Messages        []CouncilMessageView   `json:"messages"`
-	Knowledge       []chat.KnowledgeEntry  `json:"knowledge"`
-	Memory          []chat.MemoryEntry     `json:"memory"`
-	DelegatedRuns   []CouncilDelegatedRun  `json:"delegatedRuns,omitempty"`
-	Interrupts      []CouncilMessageView   `json:"interrupts,omitempty"`
+	Name          string                `json:"name"`
+	Namespace     string                `json:"namespace"`
+	Controller    string                `json:"controller"`
+	Connected     bool                  `json:"connected"`
+	Members       []CouncilMemberView   `json:"members"`
+	Thread        chat.Thread           `json:"thread"`
+	Messages      []CouncilMessageView  `json:"messages"`
+	Knowledge     []chat.KnowledgeEntry `json:"knowledge"`
+	Memory        []chat.MemoryEntry    `json:"memory"`
+	DelegatedRuns []CouncilDelegatedRun `json:"delegatedRuns,omitempty"`
+	Interrupts    []CouncilMessageView  `json:"interrupts,omitempty"`
 }
 
 type CouncilTurnResponse struct {
 	CouncilState
-	User      CouncilMessageView  `json:"user"`
+	User      CouncilMessageView   `json:"user"`
 	Confer    []CouncilMessageView `json:"confer"`
-	Interrupt *CouncilMessageView `json:"interrupt,omitempty"`
+	Interrupt *CouncilMessageView  `json:"interrupt,omitempty"`
+	To        string               `json:"to,omitempty"`
 }
 
 func (server *Server) registerCouncilRoutes(mux *http.ServeMux) {
@@ -171,7 +178,9 @@ func (server *Server) handleAnvilCouncilTurn(writer http.ResponseWriter, request
 		writeAPIError(writer, http.StatusServiceUnavailable, "council_unavailable", "failed to connect Anvil council")
 		return
 	}
-	response, err := server.runAnvilCouncilTurn(request.Context(), namespace, principal.Subject, content)
+	workCtx, cancel := context.WithTimeout(context.WithoutCancel(request.Context()), councilHarnessWait+time.Minute)
+	defer cancel()
+	response, err := server.runAnvilCouncilTurn(workCtx, namespace, principal.Subject, content, body.To)
 	if err != nil {
 		server.log.Error(err, "anvil council turn", "subject", principal.Subject, "namespace", namespace)
 		writeAPIError(writer, http.StatusServiceUnavailable, "council_unavailable", err.Error())
@@ -180,141 +189,174 @@ func (server *Server) handleAnvilCouncilTurn(writer http.ResponseWriter, request
 	writeJSON(writer, http.StatusCreated, response)
 }
 
-func (server *Server) runAnvilCouncilTurn(ctx context.Context, namespace, subject, content string) (CouncilTurnResponse, error) {
+func (server *Server) runAnvilCouncilTurn(ctx context.Context, namespace, subject, content, to string) (CouncilTurnResponse, error) {
 	state, err := server.loadCouncilState(ctx, namespace, subject, true)
 	if err != nil {
 		return CouncilTurnResponse{}, err
+	}
+	addressee := canonicalCouncilProfile(firstNonEmpty(to, anvilAgentProfileName))
+	if !councilMemberSet(state)[addressee] {
+		return CouncilTurnResponse{}, fmt.Errorf("cannot message %q; that profile is not in the council", addressee)
 	}
 	user := councilMessage(chat.RoleUser, content, map[string]any{
 		"authorKind":    "human",
 		"authorSubject": subject,
 		"displayName":   "You",
 		"kind":          "utterance",
-		"audience":      "all",
+		"addressedTo":   addressee,
+		"audience":      addressee,
 	})
-	overlap := councilWorkOverlaps(content)
-	researchHarness := state.memberHarness(councilResearcherProfile)
-	implementHarness := state.memberHarness(councilImplementerProfile)
-	anvilLine := fmt.Sprintf(
-		"Council Researcher — take the inventory of %s on %s and write the map into shared memory. Council Implementer — do not start that same inventory. Wait on Researcher's map, then implement on %s. Knowledge base stays attached while we are connected.",
-		namespace, researchHarness, implementHarness,
-	)
-	if overlap {
-		anvilLine += " You both reached for the same inventory claim; Implementer, stop that and wait."
-	}
-	controller := councilMessage(chat.RoleAssistant, anvilLine, memberMeta(anvilAgentProfileName, "controller", "utterance", ""))
-	researcher := councilMessage(chat.RoleAssistant,
-		fmt.Sprintf("Taking the inventory claim on %s. Implementer, wait on me — I will post the map to shared memory before you start. I am not implementing.", researchHarness),
-		memberMeta(councilResearcherProfile, "researcher", "utterance", councilImplementerProfile),
-	)
-	implementerContent := fmt.Sprintf("Waiting on Researcher's inventory in shared memory. I will not duplicate that claim. Once the map is in, I implement on %s.", implementHarness)
-	implementerKind := "utterance"
-	if overlap {
-		implementerContent = fmt.Sprintf("Stopping — I was about to inventory the same namespace. Still waiting on Researcher's map, then I implement on %s. I will not copy that work.", implementHarness)
-		implementerKind = "interrupt"
-	}
-	implementer := councilMessage(chat.RoleAssistant, implementerContent, memberMeta(councilImplementerProfile, "implementer", implementerKind, councilResearcherProfile))
-
-	stored, _, err := server.chatStore.AppendMessages(ctx, namespace, state.Thread.ID, []chat.Message{user, controller, researcher, implementer})
+	storedUser, _, err := server.chatStore.AppendMessages(ctx, namespace, state.Thread.ID, []chat.Message{user})
 	if err != nil {
 		return CouncilTurnResponse{}, err
 	}
-	if len(stored) != 4 {
-		return CouncilTurnResponse{}, fmt.Errorf("unexpected council append count %d", len(stored))
+	if len(storedUser) != 1 {
+		return CouncilTurnResponse{}, fmt.Errorf("unexpected user append count %d", len(storedUser))
 	}
 
-	if _, err := server.chatStore.UpsertMemory(ctx, chat.MemoryEntry{
-		Namespace:   namespace,
-		CouncilName: anvilCouncilName,
-		Key:         "claim:inventory",
-		Value:       councilResearcherProfile,
-	}); err != nil {
-		return CouncilTurnResponse{}, err
-	}
-	if _, err := server.chatStore.UpsertMemory(ctx, chat.MemoryEntry{
-		Namespace:   namespace,
-		CouncilName: anvilCouncilName,
-		Key:         "claim:implement",
-		Value:       councilImplementerProfile,
-	}); err != nil {
-		return CouncilTurnResponse{}, err
-	}
-	if _, err := server.chatStore.UpsertMemory(ctx, chat.MemoryEntry{
-		Namespace:   namespace,
-		CouncilName: anvilCouncilName,
-		Key:         "waiting-on",
-		Value:       councilResearcherProfile,
-	}); err != nil {
-		return CouncilTurnResponse{}, err
-	}
-	if _, err := server.chatStore.UpsertMemory(ctx, chat.MemoryEntry{
-		Namespace:   namespace,
-		CouncilName: anvilCouncilName,
-		Key:         "last-turn",
-		Value:       titleFromPrompt(content),
-	}); err != nil {
-		return CouncilTurnResponse{}, err
-	}
-
-	researcherHarness := state.memberHarness(councilResearcherProfile)
-	implementerHarness := state.memberHarness(councilImplementerProfile)
-	runs, err := server.delegateCouncilRuns(ctx, namespace, content, researcherHarness, implementerHarness)
+	prompt := buildCouncilHarnessPrompt(state, addressee, content)
+	conversation, err := server.startCouncilHarnessRun(ctx, namespace, addressee, prompt)
 	if err != nil {
 		return CouncilTurnResponse{}, err
 	}
+	output, err := server.waitCouncilHarnessOutput(ctx, namespace, conversation.Name)
+	if err != nil {
+		_, _, _ = server.chatStore.AppendMessages(ctx, namespace, state.Thread.ID, []chat.Message{
+			councilMessage(chat.RoleAssistant, "Harness did not produce a decision: "+err.Error(), memberMeta(addressee, councilRoleFor(state, addressee), "status", "", "")),
+		})
+		return CouncilTurnResponse{}, fmt.Errorf("council harness: %w", err)
+	}
+	parsed, err := parseCouncilHarnessDecision(output)
+	if err != nil {
+		_, _, _ = server.chatStore.AppendMessages(ctx, namespace, state.Thread.ID, []chat.Message{
+			councilMessage(chat.RoleAssistant, "Harness output was not a council decision: "+err.Error(), memberMeta(addressee, councilRoleFor(state, addressee), "status", "", "")),
+		})
+		return CouncilTurnResponse{}, fmt.Errorf("council harness: %w", err)
+	}
+	decision, err := normalizeCouncilDecision(state, addressee, parsed)
+	if err != nil {
+		_, _, _ = server.chatStore.AppendMessages(ctx, namespace, state.Thread.ID, []chat.Message{
+			councilMessage(chat.RoleAssistant, "Harness decision was invalid: "+err.Error(), memberMeta(addressee, councilRoleFor(state, addressee), "status", "", "")),
+		})
+		return CouncilTurnResponse{}, fmt.Errorf("council harness: %w", err)
+	}
+
+	conferMessages := make([]chat.Message, 0, len(decision.Utterances))
+	for _, utterance := range decision.Utterances {
+		meta := memberMeta(utterance.Profile, utterance.Role, utterance.Kind, utterance.WaitingOn, utterance.AddressedTo)
+		conferMessages = append(conferMessages, councilMessage(chat.RoleAssistant, utterance.Content, meta))
+	}
+	storedConfer, _, err := server.chatStore.AppendMessages(ctx, namespace, state.Thread.ID, conferMessages)
+	if err != nil {
+		return CouncilTurnResponse{}, err
+	}
+
+	if err := server.applyCouncilMemory(ctx, namespace, content, addressee, decision); err != nil {
+		return CouncilTurnResponse{}, err
+	}
+
+	workRuns, err := server.delegateCouncilDecision(ctx, namespace, decision)
+	if err != nil {
+		return CouncilTurnResponse{}, err
+	}
+	runs := append([]CouncilDelegatedRun{conversation}, workRuns...)
 
 	next, err := server.loadCouncilState(ctx, namespace, subject, false)
 	if err != nil {
 		return CouncilTurnResponse{}, err
 	}
 	next.DelegatedRuns = runs
-	views := make([]CouncilMessageView, 0, len(stored))
-	for _, message := range stored {
-		views = append(views, viewCouncilMessage(message))
-	}
+	userView := viewCouncilMessage(storedUser[0])
+	conferViews := make([]CouncilMessageView, 0, len(storedConfer))
 	var interrupt *CouncilMessageView
-	if overlap {
-		msg := views[3]
-		interrupt = &msg
-		next.Interrupts = []CouncilMessageView{msg}
+	for _, message := range storedConfer {
+		view := viewCouncilMessage(message)
+		conferViews = append(conferViews, view)
+		if view.Kind == "interrupt" && interrupt == nil {
+			copyView := view
+			interrupt = &copyView
+		}
 	}
 	return CouncilTurnResponse{
 		CouncilState: next,
-		User:         views[0],
-		Confer:       views[1:],
+		User:         userView,
+		Confer:       conferViews,
 		Interrupt:    interrupt,
+		To:           addressee,
 	}, nil
 }
 
-func (server *Server) delegateCouncilRuns(ctx context.Context, namespace, content, researcherHarness, implementerHarness string) ([]CouncilDelegatedRun, error) {
-	type job struct {
-		role    string
-		profile string
-		harness string
-		backend string
-		prompt  string
-		intent  string
-		app     string
+func (server *Server) applyCouncilMemory(ctx context.Context, namespace, content, addressee string, decision councilHarnessDecision) error {
+	if _, err := server.chatStore.UpsertMemory(ctx, chat.MemoryEntry{
+		Namespace:   namespace,
+		CouncilName: anvilCouncilName,
+		Key:         "last-turn",
+		Value:       titleFromPrompt(content),
+	}); err != nil {
+		return err
 	}
-	jobs := []job{
-		{
-			role:    "researcher",
-			profile: councilResearcherProfile,
-			harness: researcherHarness,
-			backend: "custom",
-			prompt:  "Council research (do not implement): inventory namespace " + namespace + " for the Anvil council. Operator said:\n" + content,
-			intent:  string(agentsv1alpha1.AgentRunIntentObserve),
-			app:     councilApplicationKey(namespace, "researcher"),
-		},
-		{
-			role:    "implementer",
-			profile: councilImplementerProfile,
-			harness: implementerHarness,
-			backend: "grokBuild",
-			prompt:  "Council implement (do not redo inventory): execute the mixed-harness proof on your own harness. Operator said:\n" + content,
-			intent:  string(agentsv1alpha1.AgentRunIntentProposeChange),
-			app:     councilApplicationKey(namespace, "implementer"),
-		},
+	if _, err := server.chatStore.UpsertMemory(ctx, chat.MemoryEntry{
+		Namespace:   namespace,
+		CouncilName: anvilCouncilName,
+		Key:         "last-addressee",
+		Value:       firstNonEmpty(addressee, decision.Speaker, anvilAgentProfileName),
+	}); err != nil {
+		return err
+	}
+	for _, entry := range decision.Memory {
+		if _, err := server.chatStore.UpsertMemory(ctx, chat.MemoryEntry{
+			Namespace:   namespace,
+			CouncilName: anvilCouncilName,
+			Key:         entry.Key,
+			Value:       entry.Value,
+		}); err != nil {
+			return err
+		}
+	}
+	for _, delegate := range decision.Delegates {
+		if delegate.Skip || delegate.Claim == "" {
+			continue
+		}
+		if _, err := server.chatStore.UpsertMemory(ctx, chat.MemoryEntry{
+			Namespace:   namespace,
+			CouncilName: anvilCouncilName,
+			Key:         "claim:" + delegate.Claim,
+			Value:       delegate.Profile,
+		}); err != nil {
+			return err
+		}
+	}
+	for _, utterance := range decision.Utterances {
+		if utterance.WaitingOn == "" {
+			continue
+		}
+		if _, err := server.chatStore.UpsertMemory(ctx, chat.MemoryEntry{
+			Namespace:   namespace,
+			CouncilName: anvilCouncilName,
+			Key:         "waiting-on",
+			Value:       utterance.WaitingOn,
+		}); err != nil {
+			return err
+		}
+		break
+	}
+	return nil
+}
+
+func (server *Server) delegateCouncilDecision(ctx context.Context, namespace string, decision councilHarnessDecision) ([]CouncilDelegatedRun, error) {
+	type job struct {
+		delegate councilHarnessDelegate
+		app      string
+	}
+	jobs := make([]job, 0, len(decision.Delegates))
+	for _, item := range decision.Delegates {
+		if item.Skip || item.Profile == "" {
+			continue
+		}
+		jobs = append(jobs, job{delegate: item, app: councilApplicationKey(namespace, firstNonEmpty(item.Role, "member"))})
+	}
+	if len(jobs) == 0 {
+		return nil, nil
 	}
 	out := make([]CouncilDelegatedRun, len(jobs))
 	errs := make([]error, len(jobs))
@@ -324,11 +366,11 @@ func (server *Server) delegateCouncilRuns(ctx context.Context, namespace, conten
 		go func(i int, item job) {
 			defer wg.Done()
 			run, err := buildAgentRunFromCreateRequest(namespace, CreateAgentRunRequest{
-				GenerateName:       "council-" + item.role + "-",
-				Prompt:             item.prompt,
-				ProfileName:        item.profile,
-				HarnessProfileName: item.harness,
-				Intent:             item.intent,
+				Name:               newCouncilRunName(item.delegate.Role),
+				Prompt:             item.delegate.Prompt,
+				ProfileName:        item.delegate.Profile,
+				HarnessProfileName: item.delegate.Harness,
+				Intent:             item.delegate.Intent,
 				Purpose:            string(agentsv1alpha1.AgentRunPurposeManual),
 				SourceKind:         "AgentCouncil",
 				SourceName:         anvilCouncilName,
@@ -343,7 +385,8 @@ func (server *Server) delegateCouncilRuns(ctx context.Context, namespace, conten
 				run.Labels = map[string]string{}
 			}
 			run.Labels["control.anvil.hazyforge.io/council"] = anvilCouncilName
-			run.Labels["control.anvil.hazyforge.io/council-role"] = item.role
+			run.Labels["control.anvil.hazyforge.io/council-role"] = item.delegate.Role
+			run.Labels["control.anvil.hazyforge.io/council-kind"] = "delegate"
 			if err := server.writes.Create(ctx, run); err != nil {
 				errs[i] = err
 				return
@@ -351,16 +394,17 @@ func (server *Server) delegateCouncilRuns(ctx context.Context, namespace, conten
 			view := NewAgentRunView(run, false)
 			backend := strings.TrimSpace(view.Backend)
 			if backend == "" {
-				backend = item.backend
+				backend = item.delegate.Backend
 			}
 			out[i] = CouncilDelegatedRun{
 				Name:               run.Name,
 				Namespace:          run.Namespace,
-				ProfileName:        item.profile,
-				HarnessProfileName: item.harness,
+				ProfileName:        item.delegate.Profile,
+				HarnessProfileName: item.delegate.Harness,
 				Backend:            backend,
-				Role:               item.role,
+				Role:               item.delegate.Role,
 				Application:        item.app,
+				Kind:               "delegate",
 			}
 		}(i, item)
 	}
@@ -434,13 +478,13 @@ func (server *Server) attachCouncilLedger(ctx context.Context, namespace string)
 			Namespace:   namespace,
 			CouncilName: anvilCouncilName,
 			Title:       "Anvil council charter",
-			Body:        "Anvil agent controls this council. Members speak as themselves in the room and wait on each other. They share one knowledge base and one memory while connected. If two claim the same work, the duplicate is interrupted. Parallel delegate uses a distinct AgentRun and harness per member.",
+			Body:        "Anvil agent controls this council. Talk to Anvil agent and its harness decides who confers and what to delegate. You can also talk to a member directly; that member replies as itself and may message Anvil or peers. Members share one knowledge base and one memory. If two claim the same work, the duplicate is interrupted.",
 		},
 		{
 			Namespace:   namespace,
 			CouncilName: anvilCouncilName,
 			Title:       "Harness mix",
-			Body:        "council-researcher uses a custom demo harness. council-implementer uses council-grok (grokBuild). Do not share demo-state across both Jobs.",
+			Body:        "Conversation turns use council-llm. Work delegates mix council-research (custom) and council-grok (grokBuild). Do not share demo-state across Jobs.",
 		},
 	}); err != nil {
 		return err
@@ -522,6 +566,7 @@ func (server *Server) listCouncilDelegatedRuns(ctx context.Context, namespace st
 			Backend:            backend,
 			Role:               run.Labels["control.anvil.hazyforge.io/council-role"],
 			Application:        view.Application,
+			Kind:               run.Labels["control.anvil.hazyforge.io/council-kind"],
 		})
 	}
 	return out
@@ -531,72 +576,91 @@ func (server *Server) ensureAnvilCouncilObjects(ctx context.Context, namespace s
 	if server.writes == nil {
 		return fmt.Errorf("composition write client is not configured")
 	}
-	researcherHarness, err := server.ensureResearchHarness(ctx, namespace)
-	if err != nil {
+	if err := server.ensureConsoleOwned(ctx, councilLLMHarnessObject(namespace)); err != nil {
 		return err
 	}
-	if err := server.ensureObject(ctx, server.implementerHarness(namespace)); err != nil {
+	if err := server.ensureConsoleOwned(ctx, researchHarness(namespace)); err != nil {
 		return err
 	}
-	if err := server.ensureObject(ctx, anvilAgentProfile(namespace)); err != nil {
+	if err := server.ensureConsoleOwned(ctx, server.implementerHarness(namespace)); err != nil {
 		return err
 	}
-	if err := server.ensureObject(ctx, councilMemberProfile(namespace, councilResearcherProfile, "researcher", researcherHarness, "chat:"+namespace+"/"+anvilCouncilName+"/researcher", agentsv1alpha1.AgentRunIntentObserve)); err != nil {
+	if err := server.ensureConsoleOwned(ctx, anvilAgentProfile(namespace)); err != nil {
 		return err
 	}
-	if err := server.ensureObject(ctx, councilMemberProfile(namespace, councilImplementerProfile, "implementer", councilGrokHarness, "chat:"+namespace+"/"+anvilCouncilName+"/implementer", agentsv1alpha1.AgentRunIntentProposeChange)); err != nil {
+	if err := server.ensureConsoleOwned(ctx, councilMemberProfile(namespace, councilResearcherProfile, "researcher", councilResearchHarness, "chat:"+namespace+"/"+anvilCouncilName+"/researcher", agentsv1alpha1.AgentRunIntentObserve)); err != nil {
 		return err
 	}
-	return server.ensureObject(ctx, anvilCouncilObject(namespace))
+	if err := server.ensureConsoleOwned(ctx, councilMemberProfile(namespace, councilImplementerProfile, "implementer", councilGrokHarness, "chat:"+namespace+"/"+anvilCouncilName+"/implementer", agentsv1alpha1.AgentRunIntentProposeChange)); err != nil {
+		return err
+	}
+	return server.ensureConsoleOwned(ctx, anvilCouncilObject(namespace))
 }
 
-func (server *Server) ensureResearchHarness(ctx context.Context, namespace string) (string, error) {
-	existing := &agentsv1alpha1.AgentHarnessProfile{}
-	if err := server.runs.Get(ctx, types.NamespacedName{Namespace: namespace, Name: gitOpsResearchHarness}, existing); err == nil {
-		return gitOpsResearchHarness, nil
-	} else if !apierrors.IsNotFound(err) {
-		return "", err
-	}
-	if err := server.ensureObject(ctx, researchHarness(namespace)); err != nil {
-		return "", err
-	}
-	return councilResearchHarness, nil
-}
-
-func (server *Server) ensureObject(ctx context.Context, obj client.Object) error {
-	stampConsoleManaged(obj)
-	current := obj.DeepCopyObject().(client.Object)
-	if err := server.runs.Get(ctx, types.NamespacedName{Namespace: obj.GetNamespace(), Name: obj.GetName()}, current); err != nil {
+func (server *Server) ensureConsoleOwned(ctx context.Context, desired client.Object) error {
+	stampConsoleManaged(desired)
+	current := desired.DeepCopyObject().(client.Object)
+	if err := server.runs.Get(ctx, types.NamespacedName{Namespace: desired.GetNamespace(), Name: desired.GetName()}, current); err != nil {
 		if apierrors.IsNotFound(err) {
-			if err := server.writes.Create(ctx, obj); err != nil && !apierrors.IsAlreadyExists(err) {
+			if err := server.writes.Create(ctx, desired); err != nil && !apierrors.IsAlreadyExists(err) {
 				return err
 			}
 			return nil
 		}
 		return err
 	}
-	if evaluateCompositionManagement(current).Reason == managementReasonGitOpsProtected {
+	reason := evaluateCompositionManagement(current).Reason
+	if reason == managementReasonGitOpsProtected {
 		return nil
 	}
-	return nil
+	if reason != managementReasonConsoleManaged {
+		return nil
+	}
+	switch want := desired.(type) {
+	case *agentsv1alpha1.AgentRunProfile:
+		have := current.(*agentsv1alpha1.AgentRunProfile)
+		have.Spec = want.Spec
+		return server.writes.Update(ctx, have)
+	case *agentsv1alpha1.AgentHarnessProfile:
+		have := current.(*agentsv1alpha1.AgentHarnessProfile)
+		have.Spec = want.Spec
+		return server.writes.Update(ctx, have)
+	case *agentsv1alpha1.AgentCouncil:
+		have := current.(*agentsv1alpha1.AgentCouncil)
+		have.Spec = want.Spec
+		return server.writes.Update(ctx, have)
+	default:
+		return nil
+	}
 }
 
 func (state CouncilState) memberHarness(profile string) string {
+	return state.memberWorkHarness(profile)
+}
+
+func (state CouncilState) memberWorkHarness(profile string) string {
 	for _, member := range state.Members {
+		if member.ProfileName == profile && member.Harness != "" && member.Harness != councilLLMHarness {
+			return member.Harness
+		}
 		if member.ProfileName == profile && member.Harness != "" {
 			return member.Harness
 		}
 	}
-	if profile == councilImplementerProfile {
+	switch profile {
+	case councilImplementerProfile:
 		return councilGrokHarness
+	case anvilAgentProfileName:
+		return councilLLMHarness
+	default:
+		return councilResearchHarness
 	}
-	return gitOpsResearchHarness
 }
 
 func defaultCouncilMembers() []CouncilMemberView {
 	return []CouncilMemberView{
-		{Role: "controller", ProfileName: anvilAgentProfileName, Description: "Main chat agent in charge of the council"},
-		{Role: "researcher", ProfileName: councilResearcherProfile, Harness: gitOpsResearchHarness, Backend: "custom"},
+		{Role: "controller", ProfileName: anvilAgentProfileName, Harness: councilLLMHarness, Backend: "custom", Description: "Main chat agent in charge of the council"},
+		{Role: "researcher", ProfileName: councilResearcherProfile, Harness: councilResearchHarness, Backend: "custom"},
 		{Role: "implementer", ProfileName: councilImplementerProfile, Harness: councilGrokHarness, Backend: "grokBuild"},
 	}
 }
@@ -614,7 +678,9 @@ func anvilAgentProfile(namespace string) *agentsv1alpha1.AgentRunProfile {
 				Summary:        "Coordinate the Anvil council, shared memory, and parallel mixed-harness delegate.",
 				ApplicationRef: &agentsv1alpha1.ApplicationReferenceSpec{Name: councilApplicationKey(namespace, "controller")},
 			},
-			CouncilRef: &agentsv1alpha1.NamespacedObjectReference{Name: anvilCouncilName},
+			Harness:           agentsv1alpha1.AgentRunHarnessSpec{Intent: agentsv1alpha1.AgentRunIntentObserve},
+			HarnessProfileRef: &agentsv1alpha1.NamespacedObjectReference{Name: councilLLMHarness},
+			CouncilRef:        &agentsv1alpha1.NamespacedObjectReference{Name: anvilCouncilName},
 		},
 	}
 	return profile
@@ -635,6 +701,32 @@ func councilMemberProfile(namespace, name, role, harness, application string, in
 			Harness:           agentsv1alpha1.AgentRunHarnessSpec{Intent: intent},
 			HarnessProfileRef: &agentsv1alpha1.NamespacedObjectReference{Name: harness},
 			CouncilRef:        &agentsv1alpha1.NamespacedObjectReference{Name: anvilCouncilName},
+		},
+	}
+}
+
+func councilLLMHarnessObject(namespace string) *agentsv1alpha1.AgentHarnessProfile {
+	return &agentsv1alpha1.AgentHarnessProfile{
+		TypeMeta: metav1.TypeMeta{APIVersion: agentsv1alpha1.GroupVersion.String(), Kind: "AgentHarnessProfile"},
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      councilLLMHarness,
+			Namespace: namespace,
+		},
+		Spec: agentsv1alpha1.AgentHarnessProfileSpec{
+			Description: "Non-deterministic council conversation harness. Reads DEEPSEEK_API_KEY from Secret council-llm; the API never mounts that Secret.",
+			Backend: agentsv1alpha1.AgentRunHarnessBackendSpec{
+				Kind:            agentsv1alpha1.AgentRunHarnessBackendCustom,
+				Image:           councilLLMImage,
+				ImagePullPolicy: corev1.PullIfNotPresent,
+			},
+			Execution: agentsv1alpha1.AgentRunHarnessExecutionSpec{
+				ServiceAccountName: councilRunnerSA,
+				TimeoutSeconds:     180,
+				EnvSecretRefs:      []agentsv1alpha1.NamespacedObjectReference{{Name: councilLLMSecretName}},
+				ExtraEnv: []corev1.EnvVar{
+					{Name: "DEEPSEEK_MODEL", Value: "deepseek-chat"},
+				},
+			},
 		},
 	}
 }
@@ -691,8 +783,8 @@ func anvilCouncilObject(namespace string) *agentsv1alpha1.AgentCouncil {
 			Namespace: namespace,
 		},
 		Spec: agentsv1alpha1.AgentCouncilSpec{
-			Description: "Anvil agent council: shared knowledge and memory, confer, interrupt duplicates, parallel mixed-harness runs.",
-			CouncilPrompt: "Anvil agent is in charge. Confer as distinct members. Interrupt if two claim the same work. Delegate in parallel on each member's own harness. Use the attached knowledge base and unified memory while connected.",
+			Description:   "Anvil agent council: talk to Anvil or a member. Anvil's harness decides delegation. Members reply as themselves and may message peers.",
+			CouncilPrompt: "Anvil agent is in charge. A message to Anvil goes through the council-llm harness, which decides conferral and delegation. A message to a member is a conversation with that agent; they may address Anvil or peers. Interrupt duplicate work. Mix harnesses on parallel delegates.",
 			Members: []agentsv1alpha1.AgentCouncilMemberSpec{
 				{Role: "controller", ProfileRef: agentsv1alpha1.NamespacedObjectReference{Name: anvilAgentProfileName}, Description: "Anvil agent"},
 				{Role: "researcher", ProfileRef: agentsv1alpha1.NamespacedObjectReference{Name: councilResearcherProfile}, Description: "Inventory on a custom harness"},
@@ -710,17 +802,20 @@ func councilMessage(role, content string, metadata map[string]any) chat.Message 
 	return chat.Message{Role: role, Content: content, Metadata: raw}
 }
 
-func memberMeta(profile, role, kind, waitingOn string) map[string]any {
+func memberMeta(profile, role, kind, waitingOn, addressedTo string) map[string]any {
 	meta := map[string]any{
 		"authorKind":    "member",
 		"authorProfile": profile,
 		"authorRole":    role,
 		"displayName":   councilDisplayName(profile),
 		"kind":          kind,
-		"audience":      "all",
+		"audience":      firstNonEmpty(addressedTo, "all"),
 	}
 	if waitingOn != "" {
 		meta["waitingOn"] = waitingOn
+	}
+	if addressedTo != "" {
+		meta["addressedTo"] = addressedTo
 	}
 	return meta
 }
@@ -736,6 +831,7 @@ func viewCouncilMessage(message chat.Message) CouncilMessageView {
 	view.AuthorRole, _ = meta["authorRole"].(string)
 	view.DisplayName, _ = meta["displayName"].(string)
 	view.WaitingOn, _ = meta["waitingOn"].(string)
+	view.AddressedTo, _ = meta["addressedTo"].(string)
 	if kind, ok := meta["kind"].(string); ok && kind != "" {
 		view.Kind = kind
 	}
@@ -762,27 +858,6 @@ func councilDisplayName(profile string) string {
 	default:
 		return profile
 	}
-}
-
-func councilWorkOverlaps(content string) bool {
-	lower := strings.ToLower(content)
-	markers := []string{
-		"both of you",
-		"both start",
-		"same work",
-		"same task",
-		"same namespace",
-		"duplicate",
-		"both research",
-		"both implement",
-		"both inventory",
-	}
-	for _, marker := range markers {
-		if strings.Contains(lower, marker) {
-			return true
-		}
-	}
-	return false
 }
 
 func councilApplicationKey(namespace, role string) string {

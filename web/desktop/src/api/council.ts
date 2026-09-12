@@ -20,6 +20,7 @@ export type CouncilMessage = {
   authorRole?: string;
   displayName?: string;
   waitingOn?: string;
+  addressedTo?: string;
   kind?: string;
 };
 
@@ -43,6 +44,7 @@ export type DelegatedRun = {
   backend: string;
   role: string;
   application?: string;
+  kind?: string;
 };
 
 export type CouncilState = {
@@ -63,6 +65,7 @@ export type CouncilTurnResponse = CouncilState & {
   user: CouncilMessage;
   confer: CouncilMessage[];
   interrupt?: CouncilMessage;
+  to?: string;
 };
 
 export async function getAnvilCouncil(token: string, namespace: string): Promise<CouncilState> {
@@ -89,14 +92,22 @@ export async function turnAnvilCouncil(
   token: string,
   namespace: string,
   content: string,
+  to?: string,
 ): Promise<CouncilTurnResponse> {
-  const response = await apiFetch(`/api/v1/namespaces/${encodeURIComponent(namespace)}/anvil-council/turns`, token, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ content }),
-  });
-  if (!response.ok) {
-    throw await APIError.fromResponse(response);
+  const controller = new AbortController();
+  const timer = window.setTimeout(() => controller.abort(), 4 * 60 * 1000);
+  try {
+    const response = await apiFetch(`/api/v1/namespaces/${encodeURIComponent(namespace)}/anvil-council/turns`, token, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ content, to }),
+      signal: controller.signal,
+    });
+    if (!response.ok) {
+      throw await APIError.fromResponse(response);
+    }
+    return (await response.json()) as CouncilTurnResponse;
+  } finally {
+    window.clearTimeout(timer);
   }
-  return (await response.json()) as CouncilTurnResponse;
 }

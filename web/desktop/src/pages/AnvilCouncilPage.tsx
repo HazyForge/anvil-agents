@@ -3,6 +3,7 @@ import {
   connectAnvilCouncil,
   getAnvilCouncil,
   turnAnvilCouncil,
+  type CouncilMember,
   type CouncilMessage,
   type CouncilState,
 } from "../api/council";
@@ -17,13 +18,15 @@ interface Props {
   config: UIConfig;
 }
 
-const DEMO_PROMPT =
-  "Both of you start by inventorying the same namespace, then implement the mixed-harness proof in parallel.";
+const SAMPLE_ANVIL_PROMPT =
+  "Map agents-quickstart, then implement the mixed-harness proof. Do not let two members inventory the same namespace.";
+const SAMPLE_MEMBER_PROMPT = "Tell Anvil you have the inventory claim, and tell Implementer to wait on your map.";
 
 export function AnvilCouncilPage({ token, config }: Props) {
   const fallbackNs = config.defaultNamespaces[0] || "agents-quickstart";
   const [namespace, setNamespace] = useState(() => loadNamespace(fallbackNs));
   const [draft, setDraft] = useState("");
+  const [to, setTo] = useState("anvil-agent");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [state, setState] = useState<CouncilState | null>(null);
@@ -32,10 +35,8 @@ export function AnvilCouncilPage({ token, config }: Props) {
   const chatEnabled = Boolean(config.chat?.enabled);
   const writeEnabled = Boolean(config.composition.writeEnabled);
   const runsEnabled = Boolean(config.runs.createEnabled);
-  const controllerName = displayName({
-    displayName: "Anvil agent",
-    authorProfile: state?.controller || "anvil-agent",
-  } as CouncilMessage);
+  const members = state?.members?.length ? state.members : defaultMembers();
+  const addresseeName = memberLabel(to, "");
 
   function setNs(next: string) {
     setNamespace(next);
@@ -64,7 +65,7 @@ export function AnvilCouncilPage({ token, config }: Props) {
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ block: "end" });
-  }, [state?.messages]);
+  }, [state?.messages, busy]);
 
   async function onConnect() {
     setBusy(true);
@@ -78,7 +79,7 @@ export function AnvilCouncilPage({ token, config }: Props) {
     }
   }
 
-  async function runTurn(text: string) {
+  async function runTurn(text: string, addressee = to) {
     const content = text.trim();
     if (!content || busy) {
       return;
@@ -86,13 +87,31 @@ export function AnvilCouncilPage({ token, config }: Props) {
     setBusy(true);
     setError(null);
     setDraft("");
+    const optimistic: CouncilMessage = {
+      id: `local-${Date.now()}`,
+      role: "user",
+      content,
+      createdAt: new Date().toISOString(),
+      authorKind: "human",
+      displayName: "You",
+      addressedTo: addressee,
+      kind: "utterance",
+    };
+    setState((current) =>
+      current ? { ...current, messages: [...current.messages, optimistic] } : current,
+    );
     try {
       if (!state?.connected) {
         await connectAnvilCouncil(token, namespace);
       }
-      setState(await turnAnvilCouncil(token, namespace, content));
+      setState(await turnAnvilCouncil(token, namespace, content, addressee));
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
+      try {
+        setState(await getAnvilCouncil(token, namespace));
+      } catch {
+        // keep optimistic thread if refresh also fails
+      }
     } finally {
       setBusy(false);
     }
@@ -100,7 +119,7 @@ export function AnvilCouncilPage({ token, config }: Props) {
 
   async function onSubmit(event?: FormEvent) {
     event?.preventDefault();
-    await runTurn(draft);
+    await runTurn(draft, to);
   }
 
   function onComposerKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
@@ -112,6 +131,7 @@ export function AnvilCouncilPage({ token, config }: Props) {
 
   const messages = state?.messages ?? [];
   const runs = state?.delegatedRuns ?? [];
+  const talkingToAnvil = to === "anvil-agent";
 
   return (
     <div>
@@ -119,8 +139,8 @@ export function AnvilCouncilPage({ token, config }: Props) {
         <div>
           <h1 className="page-title">Anvil council</h1>
           <p className="page-sub">
-            Talk to <span className="mono">Anvil agent</span>. Members post in this room as themselves, wait on each
-            other, share memory, interrupt duplicate work, and run in parallel on mixed harnesses.
+            Message <span className="mono">Anvil agent</span> and its LLM harness decides who confers and what to
+            delegate. You can also talk to a member; they reply as themselves and may message Anvil or peers.
           </p>
         </div>
         <div className="chip-row">
@@ -160,24 +180,38 @@ export function AnvilCouncilPage({ token, config }: Props) {
           <header className="thread-header">
             <span className="thread-avatar" aria-hidden="true" />
             <div>
-              <h2 className="thread-title">{controllerName}</h2>
-              <p className="thread-sub">Controller · council room is shared in this namespace</p>
+              <h2 className="thread-title">{addresseeName}</h2>
+              <p className="thread-sub">
+                {talkingToAnvil
+                  ? "Controller · send a message and the council-llm harness decides conferral and delegation"
+                  : `Member · a real conversation with ${addresseeName}, who can message Anvil or peers`}
+              </p>
             </div>
           </header>
           <div className="thread-messages" aria-live="polite">
             {messages.length === 0 ? (
-              <div className="empty">Connect, then ask Anvil agent. Members will answer in their own voices.</div>
+              <div className="empty">
+                Connect, then send to Anvil agent or pick a member. Conferral is not a button — it comes from the
+                harness.
+              </div>
             ) : null}
             {messages.map((message, index) => {
               const name = displayName(message);
               const outgoing = message.role === "user" || message.authorKind === "human";
               const showFrom =
-                !outgoing && (index === 0 || displayName(messages[index - 1]) !== name || messages[index - 1].role === "user");
+                !outgoing &&
+                (index === 0 ||
+                  displayName(messages[index - 1]) !== name ||
+                  messages[index - 1].addressedTo !== message.addressedTo ||
+                  messages[index - 1].role === "user");
               return (
                 <div key={message.id} className={outgoing ? "thread-row thread-row-out" : "thread-row"}>
-                  {showFrom ? (
+                  {outgoing ? (
+                    <p className="thread-from">You → {memberLabel(message.addressedTo || "anvil-agent", "")}</p>
+                  ) : showFrom ? (
                     <p className="thread-from">
                       Message from {name}
+                      {message.addressedTo ? ` → ${addressLabel(message.addressedTo)}` : ""}
                       {message.waitingOn ? ` · waiting on ${waitingLabel(message.waitingOn)}` : ""}
                     </p>
                   ) : null}
@@ -188,24 +222,47 @@ export function AnvilCouncilPage({ token, config }: Props) {
                 </div>
               );
             })}
+            {busy ? (
+              <p className="thread-thinking">
+                {addresseeName} is running its harness…
+              </p>
+            ) : null}
             <div ref={endRef} />
           </div>
           <form className="thread-composer" onSubmit={(event) => void onSubmit(event)}>
+            <div className="recipient-row" role="group" aria-label="Message recipient">
+              {members.map((member) => (
+                <button
+                  key={member.profileName}
+                  type="button"
+                  className={`recipient-chip ${to === member.profileName ? "recipient-chip-active" : ""}`}
+                  disabled={busy}
+                  onClick={() => setTo(member.profileName)}
+                >
+                  {memberLabel(member.profileName, member.role)}
+                </button>
+              ))}
+            </div>
             <label className="field">
-              <span className="label">Ask {controllerName}</span>
+              <span className="label">{talkingToAnvil ? `Ask ${addresseeName}` : `Message ${addresseeName}`}</span>
               <textarea
                 className="textarea chat-composer-input"
                 rows={3}
                 value={draft}
                 onChange={(event) => setDraft(event.target.value)}
                 onKeyDown={onComposerKeyDown}
-                placeholder={DEMO_PROMPT}
+                placeholder={talkingToAnvil ? SAMPLE_ANVIL_PROMPT : SAMPLE_MEMBER_PROMPT}
                 disabled={busy || !writeEnabled}
               />
             </label>
             <div className="chat-composer-actions">
-              <button type="button" className="btn" disabled={busy || !writeEnabled} onClick={() => void runTurn(DEMO_PROMPT)}>
-                Confer and delegate
+              <button
+                type="button"
+                className="btn btn-ghost btn-optional"
+                disabled={busy || !writeEnabled}
+                onClick={() => setDraft(talkingToAnvil ? SAMPLE_ANVIL_PROMPT : SAMPLE_MEMBER_PROMPT)}
+              >
+                Sample prompt
               </button>
               <button type="submit" className="btn btn-primary" disabled={busy || !draft.trim() || !writeEnabled}>
                 {busy ? "Working…" : "Send"}
@@ -218,25 +275,21 @@ export function AnvilCouncilPage({ token, config }: Props) {
           <div className="panel">
             <div className="panel-header">
               <h2 className="panel-title">In the room</h2>
-              <span className="muted">{state?.members.length ?? 0}</span>
+              <span className="muted">{members.length}</span>
             </div>
             <div className="panel-body">
-              {(state?.members ?? []).length === 0 ? (
-                <p className="muted">Connect to bring Anvil agent, Researcher, and Implementer into the room.</p>
-              ) : (
-                <ul className="entity-list">
-                  {(state?.members ?? []).map((member) => (
-                    <li key={member.profileName} className="entity-item">
-                      <span>{memberLabel(member.profileName, member.role)}</span>
-                      <span className="muted">
-                        {member.role}
-                        {member.harness ? ` · ${member.harness}` : ""}
-                        {member.backend ? ` · ${member.backend}` : ""}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              )}
+              <ul className="entity-list">
+                {members.map((member) => (
+                  <li key={member.profileName} className="entity-item">
+                    <span>{memberLabel(member.profileName, member.role)}</span>
+                    <span className="muted">
+                      {member.role}
+                      {member.harness ? ` · ${member.harness}` : ""}
+                      {member.backend ? ` · ${member.backend}` : ""}
+                    </span>
+                  </li>
+                ))}
+              </ul>
             </div>
           </div>
           <div className="panel">
@@ -279,18 +332,19 @@ export function AnvilCouncilPage({ token, config }: Props) {
           </div>
           <div className="panel">
             <div className="panel-header">
-              <h2 className="panel-title">Parallel runs</h2>
+              <h2 className="panel-title">Runs</h2>
               <span className="muted">{runs.length}</span>
             </div>
             <div className="panel-body">
               {runs.length === 0 ? (
-                <p className="muted">A turn creates two append-only AgentRuns on different harnesses.</p>
+                <p className="muted">Send to Anvil agent. Its harness starts a conversation run and may delegate work on mixed harnesses.</p>
               ) : (
                 <ul className="entity-list">
                   {runs.map((run) => (
                     <li key={run.name} className="entity-item run-card">
                       <span className="mono">{run.name}</span>
                       <span>
+                        {run.kind ? `${run.kind} · ` : ""}
                         {run.role} · {run.profileName}
                       </span>
                       <span className="muted">
@@ -306,6 +360,14 @@ export function AnvilCouncilPage({ token, config }: Props) {
       </div>
     </div>
   );
+}
+
+function defaultMembers(): CouncilMember[] {
+  return [
+    { role: "controller", profileName: "anvil-agent" },
+    { role: "researcher", profileName: "council-researcher" },
+    { role: "implementer", profileName: "council-implementer" },
+  ];
 }
 
 function displayName(message: CouncilMessage): string {
@@ -326,9 +388,15 @@ function memberLabel(profile: string, role: string): string {
       return "Council Researcher";
     case "council-implementer":
       return "Council Implementer";
+    case "user":
+      return "You";
     default:
       return profile || role || "member";
   }
+}
+
+function addressLabel(profile: string): string {
+  return memberLabel(profile, "");
 }
 
 function waitingLabel(profile: string): string {

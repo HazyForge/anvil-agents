@@ -458,8 +458,40 @@ a { color: var(--teal); text-decoration: none; }
 .chat-composer-input { min-height: 4.5rem; }
 .chat-composer-actions {
   display: flex;
-  justify-content: flex-end;
+  justify-content: space-between;
+  align-items: center;
   flex-wrap: wrap;
   gap: 0.4rem;
+}
+.btn-optional {
+  text-transform: none;
+  letter-spacing: 0;
+  font-weight: 500;
+  font-size: 0.72rem;
+  color: var(--text-mute);
+}
+.recipient-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+.recipient-chip {
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-dim);
+  border-radius: 999px;
+  padding: 0.2rem 0.55rem;
+  font-size: 0.72rem;
+}
+.recipient-chip-active {
+  border-color: var(--emerald-dim);
+  color: var(--emerald);
+  background: rgba(26, 158, 104, 0.12);
+}
+.thread-thinking {
+  color: var(--text-mute);
+  font-style: italic;
+  font-size: 0.78rem;
+  padding: 0.15rem 0.2rem 0.35rem;
 }
 .empty { color: var(--text-mute); padding: 1rem 0.2rem; }

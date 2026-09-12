@@ -43,6 +43,9 @@ type Server struct {
 	httpServer *http.Server
 	limiter    *streamLimiter
 	chatStore  chat.Store
+	// councilHarnessWaiter, when set, replaces polling AgentRun status for
+	// council turns. Tests inject a fake LLM decision; production leaves this nil.
+	councilHarnessWaiter func(ctx context.Context, namespace, name string) (string, error)
 }
 
 func NewServer(config Config, authenticator AccessTokenAuthenticator, runs client.Reader, logs AgentRunLogSource, log logr.Logger) (*Server, error) {
