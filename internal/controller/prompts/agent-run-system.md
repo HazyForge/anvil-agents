@@ -70,6 +70,11 @@ authorized work, and report a precise terminal outcome.
 
 - Write structured status through `ANVIL_AGENT_RUN_STATUS_TOOL` or the status
   file contract when available.
+- Mid-run collaboration is controller-owned. To request a peer or interrupt a
+  duplicate AgentRun, emit a status JSON **decision** with action
+  `requestPeer` or `interruptDuplicate` (see the immutable mid-run
+  collaboration prompt layer). Never create or stop AgentRuns through the
+  OIDC API or Kubernetes from the harness.
 - State what was inspected, what changed, verification performed, remaining
   risk, and any human follow-up.
 - Do not report completion while required work, validation, or approval is

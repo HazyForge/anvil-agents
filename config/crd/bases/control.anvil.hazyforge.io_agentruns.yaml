@@ -2925,6 +2925,54 @@ spec:
                 type: object
               backend:
                 type: string
+              collaboration:
+                description: Collaboration records honored mid-run peer and duplicate-interrupt
+                  requests.
+                properties:
+                  requests:
+                    items:
+                      description: |-
+                        AgentRunCollaborationRequestStatus records one honored mid-run collaboration
+                        decision emitted through harness status JSON.
+                      properties:
+                        action:
+                          type: string
+                        error:
+                          type: string
+                        interruptedRunRef:
+                          description: InterruptedRunRef is set when action is interruptDuplicate.
+                          properties:
+                            name:
+                              type: string
+                            namespace:
+                              type: string
+                          required:
+                          - name
+                          type: object
+                        key:
+                          description: Key deduplicates honored requests from status
+                            reports.
+                          type: string
+                        observedAt:
+                          format: date-time
+                          type: string
+                        peerRunRef:
+                          description: PeerRunRef is set when action is requestPeer.
+                          properties:
+                            name:
+                              type: string
+                            namespace:
+                              type: string
+                          required:
+                          - name
+                          type: object
+                        summary:
+                          description: Summary copies the harness report summary for
+                            audit.
+                          type: string
+                      type: object
+                    type: array
+                type: object
               completedAt:
                 format: date-time
                 type: string
@@ -3113,6 +3161,11 @@ spec:
                       type: string
                     detail:
                       type: string
+                    duplicateRunName:
+                      description: |-
+                        DuplicateRunName names another AgentRun in the same namespace to interrupt
+                        when action is interruptDuplicate.
+                      type: string
                     humanFollowUp:
                       type: string
                     level:
@@ -3121,6 +3174,15 @@ spec:
                       type: boolean
                     observedAt:
                       format: date-time
+                      type: string
+                    peerProfileName:
+                      description: |-
+                        PeerProfileName selects the AgentRunProfile for a controller-honored
+                        requestPeer action. When empty, the requesting run's profileRef is used.
+                      type: string
+                    peerPrompt:
+                      description: PeerPrompt is the operator request for a controller-created
+                        peer AgentRun.
                       type: string
                     pullRequestURL:
                       type: string

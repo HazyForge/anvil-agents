@@ -928,6 +928,39 @@ type AgentRunStatusReport struct {
 	ResidualRisk   string       `json:"residualRisk,omitempty"`
 	NeedsHuman     bool         `json:"needsHuman,omitempty"`
 	HumanFollowUp  string       `json:"humanFollowUp,omitempty"`
+	// PeerProfileName selects the AgentRunProfile for a controller-honored
+	// requestPeer action. When empty, the requesting run's profileRef is used.
+	// +optional
+	PeerProfileName string `json:"peerProfileName,omitempty"`
+	// PeerPrompt is the operator request for a controller-created peer AgentRun.
+	// +optional
+	PeerPrompt string `json:"peerPrompt,omitempty"`
+	// DuplicateRunName names another AgentRun in the same namespace to interrupt
+	// when action is interruptDuplicate.
+	// +optional
+	DuplicateRunName string `json:"duplicateRunName,omitempty"`
+}
+
+// AgentRunCollaborationRequestStatus records one honored mid-run collaboration
+// decision emitted through harness status JSON.
+type AgentRunCollaborationRequestStatus struct {
+	Action string `json:"action,omitempty"`
+	// Key deduplicates honored requests from status reports.
+	Key string `json:"key,omitempty"`
+	// Summary copies the harness report summary for audit.
+	Summary string `json:"summary,omitempty"`
+	// PeerRunRef is set when action is requestPeer.
+	PeerRunRef *NamespacedObjectReference `json:"peerRunRef,omitempty"`
+	// InterruptedRunRef is set when action is interruptDuplicate.
+	InterruptedRunRef *NamespacedObjectReference `json:"interruptedRunRef,omitempty"`
+	ObservedAt        *metav1.Time               `json:"observedAt,omitempty"`
+	Error             string                     `json:"error,omitempty"`
+}
+
+// AgentRunCollaborationStatus records controller-owned outcomes for mid-run
+// collaboration requests. Harnesses emit intent only through status JSON.
+type AgentRunCollaborationStatus struct {
+	Requests []AgentRunCollaborationRequestStatus `json:"requests,omitempty"`
 }
 
 type AgentRunDataVolumeStatus struct {
@@ -1041,6 +1074,9 @@ type AgentRunStatus struct {
 	Output                  string                                `json:"output,omitempty"`
 	PullRequestURL          string                                `json:"pullRequestURL,omitempty"`
 	Error                   string                                `json:"error,omitempty"`
+	// Collaboration records honored mid-run peer and duplicate-interrupt requests.
+	// +optional
+	Collaboration *AgentRunCollaborationStatus `json:"collaboration,omitempty"`
 }
 
 // +kubebuilder:object:root=true

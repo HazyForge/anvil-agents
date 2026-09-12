@@ -42,6 +42,7 @@ func (app App) selfReport(args []string) error {
 	}
 
 	var level, stage, classification, action, summary, detail, pullRequestURL, residualRisk, humanFollowUp string
+	var peerProfileName, peerPrompt, duplicateRunName string
 	var needsHuman bool
 	flags := newCommandFlags("self report", app.Err)
 	flags.StringVar(&reportType, "type", reportType, "Report type: progress, decision, or needsHuman.")
@@ -55,6 +56,9 @@ func (app App) selfReport(args []string) error {
 	flags.StringVar(&pullRequestURL, "pr-url", pullRequestURL, "Alias for --pull-request-url.")
 	flags.StringVar(&residualRisk, "residual-risk", "", "Optional residual risk.")
 	flags.StringVar(&humanFollowUp, "human-follow-up", "", "Optional human follow-up guidance.")
+	flags.StringVar(&peerProfileName, "peer-profile-name", "", "AgentRunProfile for a requestPeer decision.")
+	flags.StringVar(&peerPrompt, "peer-prompt", "", "Prompt for a controller-created peer AgentRun.")
+	flags.StringVar(&duplicateRunName, "duplicate-run-name", "", "Target AgentRun name for interruptDuplicate.")
 	flags.BoolVar(&needsHuman, "needs-human", false, "Mark the report as needing human follow-up.")
 	if err := flags.Parse(args); err != nil {
 		return err
@@ -98,6 +102,9 @@ func (app App) selfReport(args []string) error {
 	setIf("pullRequestURL", pullRequestURL)
 	setIf("residualRisk", residualRisk)
 	setIf("humanFollowUp", humanFollowUp)
+	setIf("peerProfileName", peerProfileName)
+	setIf("peerPrompt", peerPrompt)
+	setIf("duplicateRunName", duplicateRunName)
 	if needsHuman {
 		payload["needsHuman"] = true
 	}

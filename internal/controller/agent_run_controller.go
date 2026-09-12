@@ -523,6 +523,12 @@ func (r *AgentRunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		}
 	}
 
+	if job != nil && !agentRunJobComplete(job) && !agentRunJobFailed(job) {
+		if err := r.reconcileAgentRunCollaboration(ctx, obj, &status); err != nil {
+			return ctrl.Result{}, err
+		}
+	}
+
 	if message := agentRunPodLaunchFailureMessage(runnerPod); message != "" {
 		if err := r.deleteAgentRunJobAfterLaunchFailure(ctx, job); err != nil {
 			return ctrl.Result{}, err
@@ -4067,7 +4073,10 @@ func agentRunNormalizeStatusReport(report controlv1alpha1.AgentRunStatusReport) 
 	report.PullRequestURL = agentRunLimitString(strings.TrimSpace(report.PullRequestURL), 500)
 	report.ResidualRisk = agentRunLimitString(strings.TrimSpace(report.ResidualRisk), 1000)
 	report.HumanFollowUp = agentRunLimitString(strings.TrimSpace(report.HumanFollowUp), 1000)
-	if report.Type == "" && report.Level == "" && report.Stage == "" && report.Classification == "" && report.Action == "" && report.Summary == "" && report.Detail == "" && report.PullRequestURL == "" && report.ResidualRisk == "" && report.HumanFollowUp == "" && !report.NeedsHuman {
+	report.PeerProfileName = agentRunLimitString(strings.TrimSpace(report.PeerProfileName), 253)
+	report.PeerPrompt = agentRunLimitString(strings.TrimSpace(report.PeerPrompt), 1024*1024)
+	report.DuplicateRunName = agentRunLimitString(strings.TrimSpace(report.DuplicateRunName), 253)
+	if report.Type == "" && report.Level == "" && report.Stage == "" && report.Classification == "" && report.Action == "" && report.Summary == "" && report.Detail == "" && report.PullRequestURL == "" && report.ResidualRisk == "" && report.HumanFollowUp == "" && report.PeerProfileName == "" && report.PeerPrompt == "" && report.DuplicateRunName == "" && !report.NeedsHuman {
 		return controlv1alpha1.AgentRunStatusReport{}
 	}
 	return report
