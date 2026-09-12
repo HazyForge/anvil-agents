@@ -1,6 +1,25 @@
 package runapi
 
-import "testing"
+import (
+	"testing"
+
+	corev1 "k8s.io/api/core/v1"
+)
+
+func TestMergeHarnessExtraEnvKeepsOperatorBaseURL(t *testing.T) {
+	t.Parallel()
+	merged := mergeHarnessExtraEnv(
+		[]corev1.EnvVar{{Name: "DEEPSEEK_BASE_URL", Value: "http://172.18.0.1:8787"}, {Name: "DEEPSEEK_MODEL", Value: "old"}},
+		[]corev1.EnvVar{{Name: "DEEPSEEK_MODEL", Value: "deepseek-chat"}},
+	)
+	got := map[string]string{}
+	for _, item := range merged {
+		got[item.Name] = item.Value
+	}
+	if got["DEEPSEEK_MODEL"] != "deepseek-chat" || got["DEEPSEEK_BASE_URL"] != "http://172.18.0.1:8787" {
+		t.Fatalf("merged = %#v", merged)
+	}
+}
 
 func TestParseCouncilHarnessDecisionFromPrefixAndFences(t *testing.T) {
 	t.Parallel()

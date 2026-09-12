@@ -623,6 +623,7 @@ func (server *Server) ensureConsoleOwned(ctx context.Context, desired client.Obj
 		return server.writes.Update(ctx, have)
 	case *agentsv1alpha1.AgentHarnessProfile:
 		have := current.(*agentsv1alpha1.AgentHarnessProfile)
+		want.Spec.Execution.ExtraEnv = mergeHarnessExtraEnv(have.Spec.Execution.ExtraEnv, want.Spec.Execution.ExtraEnv)
 		have.Spec = want.Spec
 		return server.writes.Update(ctx, have)
 	case *agentsv1alpha1.AgentCouncil:
@@ -858,6 +859,28 @@ func councilDisplayName(profile string) string {
 	default:
 		return profile
 	}
+}
+
+func mergeHarnessExtraEnv(existing, desired []corev1.EnvVar) []corev1.EnvVar {
+	out := append([]corev1.EnvVar(nil), desired...)
+	seen := map[string]struct{}{}
+	for _, item := range out {
+		if name := strings.TrimSpace(item.Name); name != "" {
+			seen[name] = struct{}{}
+		}
+	}
+	for _, item := range existing {
+		name := strings.TrimSpace(item.Name)
+		if name == "" {
+			continue
+		}
+		if _, ok := seen[name]; ok {
+			continue
+		}
+		out = append(out, item)
+		seen[name] = struct{}{}
+	}
+	return out
 }
 
 func councilApplicationKey(namespace, role string) string {
