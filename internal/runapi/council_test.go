@@ -81,8 +81,20 @@ func TestAnvilCouncilConnectConferInterruptAndParallelRuns(t *testing.T) {
 	if turned.Interrupt == nil || turned.Interrupt.AuthorProfile != councilImplementerProfile || turned.Interrupt.Kind != "interrupt" {
 		t.Fatalf("interrupt = %#v", turned.Interrupt)
 	}
-	if strings.Contains(turned.Confer[0].Content, turned.Confer[1].Content) && turned.Confer[0].AuthorProfile == turned.Confer[1].AuthorProfile {
-		t.Fatalf("expected distinct member lines, got %#v", turned.Confer)
+	if turned.Confer[0].Content == turned.Confer[1].Content || turned.Confer[1].Content == turned.Confer[2].Content {
+		t.Fatalf("expected distinct member voices, got %#v", turned.Confer)
+	}
+	if !strings.Contains(profiles[anvilAgentProfileName], "Council Researcher") || !strings.Contains(profiles[anvilAgentProfileName], "Wait") {
+		t.Fatalf("Anvil agent should address members and tell them to wait: %q", profiles[anvilAgentProfileName])
+	}
+	if !strings.Contains(profiles[councilResearcherProfile], "Implementer, wait") {
+		t.Fatalf("researcher should ask implementer to wait: %q", profiles[councilResearcherProfile])
+	}
+	if !strings.Contains(strings.ToLower(profiles[councilImplementerProfile]), "waiting on") {
+		t.Fatalf("implementer should wait on researcher: %q", profiles[councilImplementerProfile])
+	}
+	if turned.Confer[1].DisplayName != "Council Researcher" || turned.Confer[2].DisplayName != "Council Implementer" {
+		t.Fatalf("display names = %#v", turned.Confer)
 	}
 	if len(turned.DelegatedRuns) != 2 {
 		t.Fatalf("delegated runs = %#v", turned.DelegatedRuns)

@@ -32,6 +32,10 @@ export function AnvilCouncilPage({ token, config }: Props) {
   const chatEnabled = Boolean(config.chat?.enabled);
   const writeEnabled = Boolean(config.composition.writeEnabled);
   const runsEnabled = Boolean(config.runs.createEnabled);
+  const controllerName = displayName({
+    displayName: "Anvil agent",
+    authorProfile: state?.controller || "anvil-agent",
+  } as CouncilMessage);
 
   function setNs(next: string) {
     setNamespace(next);
@@ -107,7 +111,6 @@ export function AnvilCouncilPage({ token, config }: Props) {
   }
 
   const messages = state?.messages ?? [];
-  const interrupts = state?.interrupts ?? [];
   const runs = state?.delegatedRuns ?? [];
 
   return (
@@ -116,8 +119,8 @@ export function AnvilCouncilPage({ token, config }: Props) {
         <div>
           <h1 className="page-title">Anvil council</h1>
           <p className="page-sub">
-            <span className="mono">anvil-agent</span> is in charge. Members share one knowledge base and unified
-            memory, confer as distinct voices, interrupt duplicate work, and delegate in parallel on mixed harnesses.
+            Talk to <span className="mono">Anvil agent</span>. Members post in this room as themselves, wait on each
+            other, share memory, interrupt duplicate work, and run in parallel on mixed harnesses.
           </p>
         </div>
         <div className="chip-row">
@@ -152,89 +155,44 @@ export function AnvilCouncilPage({ token, config }: Props) {
         </div>
       ) : null}
 
-      <div className="council-layout">
-        <aside className="panel">
-          <div className="panel-header">
-            <h2 className="panel-title">Roster</h2>
-            <span className="muted">{state?.members.length ?? 0}</span>
-          </div>
-          <div className="panel-body">
-            {(state?.members ?? []).length === 0 ? (
-              <p className="muted">Connect to attach Anvil agent, researcher, and implementer.</p>
-            ) : (
-              <ul className="entity-list">
-                {(state?.members ?? []).map((member) => (
-                  <li key={member.profileName} className="entity-item">
-                    <span className="mono">{member.profileName}</span>
-                    <span className="muted">
-                      {member.role}
-                      {member.harness ? ` · ${member.harness}` : ""}
-                      {member.backend ? ` · ${member.backend}` : ""}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
-          <div className="panel-header">
-            <h2 className="panel-title">Knowledge</h2>
-          </div>
-          <div className="panel-body">
-            {(state?.knowledge ?? []).length === 0 ? (
-              <p className="muted">Auto-attached when the council connects.</p>
-            ) : (
-              <ul className="entity-list">
-                {(state?.knowledge ?? []).map((entry) => (
-                  <li key={entry.id} className="entity-item">
-                    <span className="mono">{entry.title}</span>
-                    <span>{entry.body}</span>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
-          <div className="panel-header">
-            <h2 className="panel-title">Shared memory</h2>
-          </div>
-          <div className="panel-body">
-            {(state?.memory ?? []).length === 0 ? (
-              <p className="muted">Unified memory is empty until connect/turn.</p>
-            ) : (
-              <ul className="entity-list">
-                {(state?.memory ?? []).map((entry) => (
-                  <li key={entry.id} className="entity-item">
-                    <span className="mono">{entry.key}</span>
-                    <span>{entry.value}</span>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
-        </aside>
-
-        <section className="panel entity-chat-main">
-          <div className="panel-header">
-            <h2 className="panel-title">Anvil agent</h2>
-            <span className="chip mono">{state?.controller || "anvil-agent"}</span>
-          </div>
-          <div className="chat-messages" aria-live="polite">
+      <div className="council-room">
+        <section className="thread-shell" aria-label="Council room">
+          <header className="thread-header">
+            <span className="thread-avatar" aria-hidden="true" />
+            <div>
+              <h2 className="thread-title">{controllerName}</h2>
+              <p className="thread-sub">Controller · council room is shared in this namespace</p>
+            </div>
+          </header>
+          <div className="thread-messages" aria-live="polite">
             {messages.length === 0 ? (
-              <div className="empty">Connect, then send the demo prompt so members confer and delegate.</div>
+              <div className="empty">Connect, then ask Anvil agent. Members will answer in their own voices.</div>
             ) : null}
-            {messages.map((message) => (
-              <article key={message.id} className={`chat-bubble ${bubbleClass(message)}`}>
-                <header className="chat-bubble-header">
-                  <span className="chat-bubble-role">{message.authorProfile || message.authorKind || message.role}</span>
-                  {message.kind === "interrupt" ? <span className="chip chip-warn">interrupt</span> : null}
-                </header>
-                <pre className="chat-bubble-body">{message.content}</pre>
-              </article>
-            ))}
+            {messages.map((message, index) => {
+              const name = displayName(message);
+              const outgoing = message.role === "user" || message.authorKind === "human";
+              const showFrom =
+                !outgoing && (index === 0 || displayName(messages[index - 1]) !== name || messages[index - 1].role === "user");
+              return (
+                <div key={message.id} className={outgoing ? "thread-row thread-row-out" : "thread-row"}>
+                  {showFrom ? (
+                    <p className="thread-from">
+                      Message from {name}
+                      {message.waitingOn ? ` · waiting on ${waitingLabel(message.waitingOn)}` : ""}
+                    </p>
+                  ) : null}
+                  <article className={`thread-bubble ${bubbleClass(message)}`}>
+                    {message.kind === "interrupt" ? <span className="chip chip-warn">interrupt</span> : null}
+                    <pre className="chat-bubble-body">{message.content}</pre>
+                  </article>
+                </div>
+              );
+            })}
             <div ref={endRef} />
           </div>
-          <form className="chat-composer" onSubmit={(event) => void onSubmit(event)}>
+          <form className="thread-composer" onSubmit={(event) => void onSubmit(event)}>
             <label className="field">
-              <span className="label">Message to Anvil agent</span>
+              <span className="label">Ask {controllerName}</span>
               <textarea
                 className="textarea chat-composer-input"
                 rows={3}
@@ -256,48 +214,93 @@ export function AnvilCouncilPage({ token, config }: Props) {
           </form>
         </section>
 
-        <aside className="panel">
-          <div className="panel-header">
-            <h2 className="panel-title">Interrupts</h2>
-            <span className="muted">{interrupts.length}</span>
+        <aside className="thread-rail">
+          <div className="panel">
+            <div className="panel-header">
+              <h2 className="panel-title">In the room</h2>
+              <span className="muted">{state?.members.length ?? 0}</span>
+            </div>
+            <div className="panel-body">
+              {(state?.members ?? []).length === 0 ? (
+                <p className="muted">Connect to bring Anvil agent, Researcher, and Implementer into the room.</p>
+              ) : (
+                <ul className="entity-list">
+                  {(state?.members ?? []).map((member) => (
+                    <li key={member.profileName} className="entity-item">
+                      <span>{memberLabel(member.profileName, member.role)}</span>
+                      <span className="muted">
+                        {member.role}
+                        {member.harness ? ` · ${member.harness}` : ""}
+                        {member.backend ? ` · ${member.backend}` : ""}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
           </div>
-          <div className="panel-body">
-            {interrupts.length === 0 ? (
-              <p className="muted">If two members claim the same work, Anvil agent interrupts the duplicate.</p>
-            ) : (
-              <ul className="entity-list">
-                {interrupts.map((line) => (
-                  <li key={line.id} className="entity-item">
-                    <span className="chip chip-warn">interrupt</span>
-                    <span className="mono">{line.authorProfile}</span>
-                    <span>{line.content}</span>
-                  </li>
-                ))}
-              </ul>
-            )}
+          <div className="panel">
+            <div className="panel-header">
+              <h2 className="panel-title">Knowledge</h2>
+            </div>
+            <div className="panel-body">
+              {(state?.knowledge ?? []).length === 0 ? (
+                <p className="muted">Auto-attached when the council connects.</p>
+              ) : (
+                <ul className="entity-list">
+                  {(state?.knowledge ?? []).map((entry) => (
+                    <li key={entry.id} className="entity-item">
+                      <span>{entry.title}</span>
+                      <span className="muted">{entry.body}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
           </div>
-          <div className="panel-header">
-            <h2 className="panel-title">Parallel runs</h2>
-            <span className="muted">{runs.length}</span>
+          <div className="panel">
+            <div className="panel-header">
+              <h2 className="panel-title">Shared memory</h2>
+            </div>
+            <div className="panel-body">
+              {(state?.memory ?? []).length === 0 ? (
+                <p className="muted">Unified memory is empty until connect/turn.</p>
+              ) : (
+                <ul className="entity-list">
+                  {(state?.memory ?? []).map((entry) => (
+                    <li key={entry.id} className="entity-item">
+                      <span className="mono">{entry.key}</span>
+                      <span>{entry.value}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
           </div>
-          <div className="panel-body">
-            {runs.length === 0 ? (
-              <p className="muted">A turn creates two append-only AgentRuns on different harnesses.</p>
-            ) : (
-              <ul className="entity-list">
-                {runs.map((run) => (
-                  <li key={run.name} className="entity-item run-card">
-                    <span className="mono">{run.name}</span>
-                    <span>
-                      {run.role} · {run.profileName}
-                    </span>
-                    <span className="muted">
-                      harness {run.harnessProfileName} · backend {run.backend}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            )}
+          <div className="panel">
+            <div className="panel-header">
+              <h2 className="panel-title">Parallel runs</h2>
+              <span className="muted">{runs.length}</span>
+            </div>
+            <div className="panel-body">
+              {runs.length === 0 ? (
+                <p className="muted">A turn creates two append-only AgentRuns on different harnesses.</p>
+              ) : (
+                <ul className="entity-list">
+                  {runs.map((run) => (
+                    <li key={run.name} className="entity-item run-card">
+                      <span className="mono">{run.name}</span>
+                      <span>
+                        {run.role} · {run.profileName}
+                      </span>
+                      <span className="muted">
+                        harness {run.harnessProfileName} · backend {run.backend}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
           </div>
         </aside>
       </div>
@@ -305,15 +308,42 @@ export function AnvilCouncilPage({ token, config }: Props) {
   );
 }
 
+function displayName(message: CouncilMessage): string {
+  if (message.displayName) {
+    return message.displayName;
+  }
+  if (message.role === "user" || message.authorKind === "human") {
+    return "You";
+  }
+  return memberLabel(message.authorProfile || "", message.authorRole || message.role);
+}
+
+function memberLabel(profile: string, role: string): string {
+  switch (profile) {
+    case "anvil-agent":
+      return "Anvil agent";
+    case "council-researcher":
+      return "Council Researcher";
+    case "council-implementer":
+      return "Council Implementer";
+    default:
+      return profile || role || "member";
+  }
+}
+
+function waitingLabel(profile: string): string {
+  return memberLabel(profile, "");
+}
+
 function bubbleClass(message: CouncilMessage): string {
   if (message.kind === "interrupt") {
-    return "chat-bubble-interrupt";
+    return "thread-bubble-interrupt";
+  }
+  if (message.role === "user" || message.authorKind === "human") {
+    return "thread-bubble-user";
   }
   if (message.authorProfile === "anvil-agent" || message.authorRole === "controller") {
-    return "chat-bubble-wrapper";
+    return "thread-bubble-anvil";
   }
-  if (message.role === "user") {
-    return "chat-bubble-user";
-  }
-  return "chat-bubble-entity";
+  return "thread-bubble-member";
 }

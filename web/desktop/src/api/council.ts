@@ -18,6 +18,8 @@ export type CouncilMessage = {
   authorKind?: string;
   authorProfile?: string;
   authorRole?: string;
+  displayName?: string;
+  waitingOn?: string;
   kind?: string;
 };
 

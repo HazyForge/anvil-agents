@@ -51,6 +51,8 @@ type CouncilMessageView struct {
 	AuthorKind    string `json:"authorKind,omitempty"`
 	AuthorProfile string `json:"authorProfile,omitempty"`
 	AuthorRole    string `json:"authorRole,omitempty"`
+	DisplayName   string `json:"displayName,omitempty"`
+	WaitingOn     string `json:"waitingOn,omitempty"`
 	Kind          string `json:"kind,omitempty"`
 }
 
@@ -186,30 +188,32 @@ func (server *Server) runAnvilCouncilTurn(ctx context.Context, namespace, subjec
 	user := councilMessage(chat.RoleUser, content, map[string]any{
 		"authorKind":    "human",
 		"authorSubject": subject,
+		"displayName":   "You",
 		"kind":          "utterance",
 		"audience":      "all",
 	})
 	overlap := councilWorkOverlaps(content)
+	researchHarness := state.memberHarness(councilResearcherProfile)
+	implementHarness := state.memberHarness(councilImplementerProfile)
 	anvilLine := fmt.Sprintf(
-		"Anvil agent is in charge of council %s. Researcher maps inventory on harness %s; implementer executes on harness %s. Shared memory and the knowledge base stay attached while we are connected.",
-		anvilCouncilName, state.memberHarness(councilResearcherProfile), state.memberHarness(councilImplementerProfile),
+		"Council Researcher — take the inventory of %s on %s and write the map into shared memory. Council Implementer — do not start that same inventory. Wait on Researcher's map, then implement on %s. Knowledge base stays attached while we are connected.",
+		namespace, researchHarness, implementHarness,
 	)
 	if overlap {
-		anvilLine += " Both members started the same inventory claim — I am interrupting the duplicate so they do not copy each other."
-	} else {
-		anvilLine += " Work is split: research versus implement. Confer, then delegate in parallel."
+		anvilLine += " You both reached for the same inventory claim; Implementer, stop that and wait."
 	}
-	controller := councilMessage(chat.RoleAssistant, anvilLine, memberMeta(anvilAgentProfileName, "controller", "utterance"))
+	controller := councilMessage(chat.RoleAssistant, anvilLine, memberMeta(anvilAgentProfileName, "controller", "utterance", ""))
 	researcher := councilMessage(chat.RoleAssistant,
-		"I will inventory the Kind namespace and write findings into shared memory. I will not implement.",
-		memberMeta(councilResearcherProfile, "researcher", "utterance"))
-	implementerContent := "I will implement the council proof on my own harness while the researcher inventories."
+		fmt.Sprintf("Taking the inventory claim on %s. Implementer, wait on me — I will post the map to shared memory before you start. I am not implementing.", researchHarness),
+		memberMeta(councilResearcherProfile, "researcher", "utterance", councilImplementerProfile),
+	)
+	implementerContent := fmt.Sprintf("Waiting on Researcher's inventory in shared memory. I will not duplicate that claim. Once the map is in, I implement on %s.", implementHarness)
 	implementerKind := "utterance"
 	if overlap {
-		implementerContent = "Stopping: Anvil agent interrupted my inventory claim. I am switching to implement-only on my own harness so we do not duplicate that work."
+		implementerContent = fmt.Sprintf("Stopping — I was about to inventory the same namespace. Still waiting on Researcher's map, then I implement on %s. I will not copy that work.", implementHarness)
 		implementerKind = "interrupt"
 	}
-	implementer := councilMessage(chat.RoleAssistant, implementerContent, memberMeta(councilImplementerProfile, "implementer", implementerKind))
+	implementer := councilMessage(chat.RoleAssistant, implementerContent, memberMeta(councilImplementerProfile, "implementer", implementerKind, councilResearcherProfile))
 
 	stored, _, err := server.chatStore.AppendMessages(ctx, namespace, state.Thread.ID, []chat.Message{user, controller, researcher, implementer})
 	if err != nil {
@@ -232,6 +236,14 @@ func (server *Server) runAnvilCouncilTurn(ctx context.Context, namespace, subjec
 		CouncilName: anvilCouncilName,
 		Key:         "claim:implement",
 		Value:       councilImplementerProfile,
+	}); err != nil {
+		return CouncilTurnResponse{}, err
+	}
+	if _, err := server.chatStore.UpsertMemory(ctx, chat.MemoryEntry{
+		Namespace:   namespace,
+		CouncilName: anvilCouncilName,
+		Key:         "waiting-on",
+		Value:       councilResearcherProfile,
 	}); err != nil {
 		return CouncilTurnResponse{}, err
 	}
@@ -422,7 +434,7 @@ func (server *Server) attachCouncilLedger(ctx context.Context, namespace string)
 			Namespace:   namespace,
 			CouncilName: anvilCouncilName,
 			Title:       "Anvil council charter",
-			Body:        "Anvil agent controls this council. Members share one knowledge base and one memory while connected. They confer as distinct voices. If two claim the same work, Anvil interrupts the duplicate. Parallel delegate uses a distinct AgentRun and harness per member.",
+			Body:        "Anvil agent controls this council. Members speak as themselves in the room and wait on each other. They share one knowledge base and one memory while connected. If two claim the same work, the duplicate is interrupted. Parallel delegate uses a distinct AgentRun and harness per member.",
 		},
 		{
 			Namespace:   namespace,
@@ -698,14 +710,19 @@ func councilMessage(role, content string, metadata map[string]any) chat.Message 
 	return chat.Message{Role: role, Content: content, Metadata: raw}
 }
 
-func memberMeta(profile, role, kind string) map[string]any {
-	return map[string]any{
+func memberMeta(profile, role, kind, waitingOn string) map[string]any {
+	meta := map[string]any{
 		"authorKind":    "member",
 		"authorProfile": profile,
 		"authorRole":    role,
+		"displayName":   councilDisplayName(profile),
 		"kind":          kind,
 		"audience":      "all",
 	}
+	if waitingOn != "" {
+		meta["waitingOn"] = waitingOn
+	}
+	return meta
 }
 
 func viewCouncilMessage(message chat.Message) CouncilMessageView {
@@ -717,10 +734,34 @@ func viewCouncilMessage(message chat.Message) CouncilMessageView {
 	view.AuthorKind, _ = meta["authorKind"].(string)
 	view.AuthorProfile, _ = meta["authorProfile"].(string)
 	view.AuthorRole, _ = meta["authorRole"].(string)
+	view.DisplayName, _ = meta["displayName"].(string)
+	view.WaitingOn, _ = meta["waitingOn"].(string)
 	if kind, ok := meta["kind"].(string); ok && kind != "" {
 		view.Kind = kind
 	}
+	if view.DisplayName == "" {
+		if view.AuthorKind == "human" {
+			view.DisplayName = "You"
+		} else {
+			view.DisplayName = councilDisplayName(view.AuthorProfile)
+		}
+	}
 	return view
+}
+
+func councilDisplayName(profile string) string {
+	switch strings.TrimSpace(profile) {
+	case anvilAgentProfileName:
+		return "Anvil agent"
+	case councilResearcherProfile:
+		return "Council Researcher"
+	case councilImplementerProfile:
+		return "Council Implementer"
+	case "":
+		return ""
+	default:
+		return profile
+	}
 }
 
 func councilWorkOverlaps(content string) bool {
