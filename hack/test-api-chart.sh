@@ -241,4 +241,47 @@ for deployment in "${deployments[@]}"; do
   [[ "${#deployment}" -le 63 ]] || fail "Deployment name exceeds 63 characters: ${deployment}"
 done
 
+if grep -q 'ANVIL_AGENTS_CHAT_DATABASE_URL' "${tmp_dir}/enabled.yaml"; then
+  fail "chat database env rendered while api.config.chat.enabled=false"
+fi
+
+expect_template_failure chat-without-archive \
+  --set api.config.chat.enabled=true
+expect_template_failure chat-permission-without-flag \
+  --set-string 'api.config.authorization.bindings[0].permissions[2]=anvil-agents:chat:read'
+expect_template_failure chat-secret-without-enabled \
+  --set-string api.chatDatabaseURLSecret.name=chat-only
+
+helm template "${release}" "${chart}" "${api_args[@]}" \
+  --set api.config.chat.enabled=true \
+  --set archive.mode=external \
+  --set-string archive.external.databaseURLSecret.name=managed-archive \
+  --set-string archive.external.databaseURLSecret.key=uri \
+  --set-string archive.restartToken=rotation-2 \
+  --set-string 'api.config.authorization.bindings[0].permissions[2]=anvil-agents:chat:read' \
+  --set-string 'api.config.authorization.bindings[0].permissions[3]=anvil-agents:chat:write' \
+  >"${tmp_dir}/chat-archive.yaml"
+grep -A5 'ANVIL_AGENTS_CHAT_DATABASE_URL' "${tmp_dir}/chat-archive.yaml" | grep -Eq 'name: "?managed-archive"?' || fail "chat did not reuse the archive Secret name"
+grep -A5 'ANVIL_AGENTS_CHAT_DATABASE_URL' "${tmp_dir}/chat-archive.yaml" | grep -Eq 'key: "?uri"?' || fail "chat did not reuse the archive Secret key"
+grep -q 'control.anvil.hazyforge.io/archive-restart: "rotation-2"' "${tmp_dir}/chat-archive.yaml" || fail "chat-enabled API pod did not inherit archive restart token"
+helm template "${release}" "${chart}" "${api_args[@]}" \
+  --set api.config.chat.enabled=true \
+  --set archive.mode=external \
+  --set-string archive.external.databaseURLSecret.name=managed-archive \
+  --set-string archive.external.databaseURLSecret.key=uri \
+  --set-string 'api.config.authorization.bindings[0].permissions[2]=anvil-agents:chat:read' \
+  --show-only templates/api-clusterrole.yaml >"${tmp_dir}/rbac-chat.yaml"
+if grep -q 'secrets' "${tmp_dir}/rbac-chat.yaml"; then
+  fail "chat-enabled API RBAC must never grant secrets"
+fi
+
+helm template "${release}" "${chart}" "${api_args[@]}" \
+  --set api.config.chat.enabled=true \
+  --set-string api.chatDatabaseURLSecret.name=chat-only \
+  --set-string api.chatDatabaseURLSecret.key=url \
+  --set-string 'api.config.authorization.bindings[0].permissions[2]=anvil-agents:chat:write' \
+  --show-only templates/api-deployment.yaml >"${tmp_dir}/chat-override.yaml"
+grep -A5 'ANVIL_AGENTS_CHAT_DATABASE_URL' "${tmp_dir}/chat-override.yaml" | grep -Eq 'name: "?chat-only"?' || fail "chat override Secret name was not rendered"
+grep -A5 'ANVIL_AGENTS_CHAT_DATABASE_URL' "${tmp_dir}/chat-override.yaml" | grep -Eq 'key: "?url"?' || fail "chat override Secret key was not rendered"
+
 printf 'AgentRun API chart contract passed\n'
