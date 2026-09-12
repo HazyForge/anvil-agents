@@ -8,7 +8,8 @@ second console and not a Kubernetes UI. The process binary is `anvil-desktop`.
 
 Anvil Agents Desktop listens on loopback only (`127.0.0.1`):
 
-- Discovers Codex, Grok, OpenClaw, OpenCode, Hermes, Pi, and similar CLIs on PATH
+- Discovers Codex, Grok, OpenClaw, OpenCode, Hermes, Pi, and similar CLIs on
+  native PATH or inside WSL (`wsl.exe` / default distro PATH)
 - Reverse-proxies `/api/` and `/ui-config.json` to a configured OIDC API origin
 - Signs in with Authorization Code + PKCE (tokens in `sessionStorage`, never query strings)
 - Wraps three tools: `create_agent`, `anvil-api` (standing chat), and `local-harness`
@@ -73,11 +74,14 @@ go run ./cmd/anvil-desktop --snapshot
 | `GET /healthz` | Liveness of the desktop host |
 | `GET /local/v1/snapshot` | Harnesses, API origin health, wrapper tool list |
 | `GET /local/v1/api-health` | Unauthenticated probe of `{apiOrigin}/healthz` |
-| `POST /local/v1/prefs` | Save `apiOrigin` (no tokens) |
-| `POST /local/v1/delegate` | Run a catalog CLI with a prompt (no OIDC token) |
+| `POST /local/v1/prefs` | Save `apiOrigin`, `harnessTarget` (`native`/`wsl`), optional `wslDistro` (no tokens) |
+| `POST /local/v1/delegate` | Run a catalog CLI on native PATH or via WSL (no OIDC token) |
 | `GET /ui-config.json` | Proxied from the API (product title rewritten) |
 | `/api/v1/namespaces/…` | Proxied to the API with the caller's `Authorization` header |
 
-Prefs live in `~/.config/anvil-desktop/config.json` as `{ "apiOrigin": "https://…" }`.
-Anvil Agents Desktop never inspects Secrets, never binds a non-loopback
-address, and never treats kubeconfig as the control plane.
+Prefs live in `~/.config/anvil-desktop/config.json` as
+`{ "apiOrigin": "https://…", "harnessTarget": "wsl" }`. Anvil Agents Desktop
+never inspects Secrets, never binds a non-loopback address, and never treats
+kubeconfig as the control plane.
+
+Workstation installers: [`docs/desktop-install.md`](../../docs/desktop-install.md).

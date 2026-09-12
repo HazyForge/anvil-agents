@@ -15,7 +15,8 @@ It exposes three tools:
    (minimal AgentRunProfile; the API stamps `managed-by=anvil-agents-console`)
 2. **anvil-api** — standing-chat threads/messages (PR 168) plus list/get AgentRuns
 3. **local-harness** — delegate a prompt to Codex, Grok, OpenClaw, OpenCode, or
-   another catalog CLI on PATH
+   another catalog CLI on **native PATH** or **inside WSL** (`wsl.exe` / default
+   distro PATH)
 
 The **wrapper** is the entity in Desktop chat: it can spawn more profiles when
 asked. The PR 168 echo stub is not the wrapper reply. Cluster observation and
@@ -25,8 +26,9 @@ the console library remain console surfaces.
 
 The optional OIDC AgentRun API (`anvil-agents-api`) is a separate process from
 the controller. The console SPA cannot see laptop PATH. Desktop does the work
-the cluster SPA cannot: discover local CLIs and wrap them with an API client
-that reuses the console's OIDC session pattern.
+the cluster SPA cannot: discover local CLIs (including those that only exist
+inside WSL) and wrap them with an API client that reuses the console's OIDC
+session pattern.
 
 Local CLIs are **not** the cluster harness. AgentRuns still use runner images
 selected by `AgentHarnessProfile`. The wrapper never copies the OIDC token into
@@ -35,11 +37,15 @@ files (`~/.codex/auth.json`, and so on).
 
 ## OIDC session (same as the console)
 
-Desktop loads `{apiOrigin}/ui-config.json` (unauthenticated) for issuer, client
-id, audiences, scopes, and feature flags. Login is Authorization Code + PKCE
-(S256), the same provider-neutral flow as `web/console`. `state` / `nonce` /
-verifier live in `sessionStorage` under `anvil-agents-desktop.*` keys, then are
-removed. The access token stays in memory/`sessionStorage`. Redirect is
+Desktop loads `{apiOrigin}/ui-config.json` (unauthenticated) for issuer,
+audiences, client id, scopes, and feature flags. Until GitOps writes
+`desktop.oidcClientId`, Desktop keeps the API's `oidc.clientId` (live Primaris
+currently serves the console PKCE app). The Kind/desktop pattern name is
+`anvil-agents-desktop` (`--oidc-client-id` or `desktop.oidcClientId` when that
+client exists). Login is Authorization Code + PKCE (S256), the same
+provider-neutral flow as `web/console`. `state` / `nonce` / verifier live in
+`sessionStorage` under `anvil-agents-desktop.*` keys, then are removed. The
+access token stays in memory/`sessionStorage`. Redirect is
 `{origin}/auth/callback`; after exchange the app strips `code` and `state` from
 the address bar.
 
@@ -63,24 +69,30 @@ append-only, tokens are never accepted in query strings.
 | Path | Role |
 | --- | --- |
 | `cmd/anvil-desktop` | Loopback host + optional Chrome `--app` window |
-| `internal/desktop` | Catalog, PATH discovery, API origin prefs, reverse-proxy, local delegate |
+| `internal/desktop` | Catalog, native/WSL discovery, API origin prefs, reverse-proxy, local delegate |
 | `web/desktop` | Vite + React shell (OIDC login, local inventory, two-tool wrapper) |
 | `web/desktop/electron` | Optional single-window Electron wrap of the desktop SPA |
 
 ## Security
 
 - Listen address must be loopback.
-- Prefs store `apiOrigin` only. No bearer tokens, no kube user credentials.
+- Prefs store `apiOrigin`, `harnessTarget` (`native`/`wsl`), and optional
+  `wslDistro` only. No bearer tokens, no kube user credentials.
 - API origin must be http(s) with a host and without userinfo, path, query, or fragment.
 - The host does not persist tokens and does not log `Authorization`.
 - `/api/` proxy is allowlisted to `/ui-config.json` and `/api/v1/namespaces/…`.
 - Requests with `access_token` / `id_token` / `refresh_token` query params are rejected.
-- Version probes and delegates run only catalog binaries resolved on PATH, with constant argument lists.
-- Delegate prompts are capped at 64KiB; prompt files are 0600 temp files and deleted.
+- Version probes and delegates run only catalog binaries resolved on native PATH
+  or via `wsl.exe --exec`, with constant argument lists. WSL distro names are
+  allowlisted. The OIDC token is stripped from the `wsl.exe` environment
+  (`WSLENV` included).
+- Delegate prompts are capped at 64KiB; prompt files are 0600 temp files and deleted
+  (WSL file-mode prompts use `/tmp/anvil-desktop-prompt.*` inside the distro).
 
-See `web/desktop/README.md` for run commands. On a display VM:
+Workstation installers: `docs/desktop-install.md`. On a display VM:
 
 ```bash
 make desktop-run
 # or: ./hack/run-anvil-desktop.sh --open --detach --api-origin http://127.0.0.1:18080
+make desktop-package
 ```

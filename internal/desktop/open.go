@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strings"
 )
@@ -13,7 +14,7 @@ func OpenWindow(target string) error {
 	if target == "" {
 		return fmt.Errorf("open URL is empty")
 	}
-	if chrome := firstLookPath("google-chrome", "google-chrome-stable", "chromium", "chromium-browser", "chrome"); chrome != "" {
+	if chrome := firstLookPath(chromeCandidates()...); chrome != "" {
 		args := []string{"--app=" + target, "--new-window"}
 		if os.Getenv("ANVIL_DESKTOP_CHROME_NO_SANDBOX") == "1" {
 			args = append([]string{"--no-sandbox", "--disable-dev-shm-usage"}, args...)
@@ -36,8 +37,31 @@ func OpenWindow(target string) error {
 	}
 }
 
+func chromeCandidates() []string {
+	var extra []string
+	if runtime.GOOS == "windows" {
+		for _, root := range []string{os.Getenv("ProgramFiles"), os.Getenv("ProgramFiles(x86)"), os.Getenv("LOCALAPPDATA")} {
+			if strings.TrimSpace(root) == "" {
+				continue
+			}
+			extra = append(extra,
+				filepath.Join(root, "Google", "Chrome", "Application", "chrome.exe"),
+				filepath.Join(root, "Microsoft", "Edge", "Application", "msedge.exe"),
+			)
+		}
+		extra = append(extra, "chrome.exe", "msedge.exe", "chrome")
+	}
+	return append(extra, "google-chrome", "google-chrome-stable", "chromium", "chromium-browser", "chrome", "msedge")
+}
+
 func firstLookPath(names ...string) string {
 	for _, name := range names {
+		if strings.ContainsRune(name, os.PathSeparator) {
+			if info, err := os.Stat(name); err == nil && !info.IsDir() {
+				return name
+			}
+			continue
+		}
 		if path, err := exec.LookPath(name); err == nil && path != "" {
 			return path
 		}

@@ -320,8 +320,17 @@ export function WrapperPage({ snapshot, token, config }: Props) {
               </select>
             </label>
             {delegatable.length === 0 ? (
-              <p className="muted">No delegatable harness CLI was found on PATH.</p>
-            ) : null}
+              <p className="muted">
+                No delegatable harness CLI was found
+                {snapshot.harnessTarget === "wsl" ? " in WSL" : " on PATH"}. Choose Operate on WSL or
+                native PATH on Local.
+              </p>
+            ) : (
+              <p className="muted">
+                Running via {snapshot.harnessTarget === "wsl" ? "WSL (wsl.exe / distro PATH)" : "native PATH"}.
+                The OIDC token is not passed to the CLI.
+              </p>
+            )}
             <div className="btn-row">
               <button
                 type="button"
@@ -344,6 +353,8 @@ export function WrapperPage({ snapshot, token, config }: Props) {
               <pre className="hint">
                 exit {delegateOutput.exitCode}
                 {delegateOutput.timedOut ? " (timed out)" : ""}
+                {delegateOutput.target ? ` · ${delegateOutput.target}` : ""}
+                {delegateOutput.wslDistro ? ` · ${delegateOutput.wslDistro}` : ""}
                 {"\n"}
                 {delegateOutput.stdout || delegateOutput.stderr || "(no output)"}
               </pre>

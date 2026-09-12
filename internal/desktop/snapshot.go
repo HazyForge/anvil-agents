@@ -36,12 +36,14 @@ type WrapperInfo struct {
 
 // Snapshot is the payload for GET /local/v1/snapshot.
 type Snapshot struct {
-	ProductTitle string       `json:"productTitle"`
-	ListenAddr   string       `json:"listenAddr,omitempty"`
-	Prefs        Prefs        `json:"prefs"`
-	API          APIStatus    `json:"api"`
-	Harnesses    []Discovered `json:"harnesses"`
-	Wrapper      WrapperInfo  `json:"wrapper"`
+	ProductTitle  string       `json:"productTitle"`
+	ListenAddr    string       `json:"listenAddr,omitempty"`
+	Prefs         Prefs        `json:"prefs"`
+	API           APIStatus    `json:"api"`
+	Harnesses     []Discovered `json:"harnesses"`
+	Wrapper       WrapperInfo  `json:"wrapper"`
+	WSL           WSLStatus    `json:"wsl"`
+	HarnessTarget string       `json:"harnessTarget"`
 }
 
 func defaultWrapper() WrapperInfo {
@@ -60,22 +62,28 @@ func defaultWrapper() WrapperInfo {
 			{
 				ID:          "local-harness",
 				DisplayName: "local harness",
-				Notes:       "Delegate a prompt to a catalog CLI already on this machine. The CLI uses its own local auth files. The OIDC token is not copied into argv, env, or the prompt file.",
+				Notes:       "Delegate a prompt to a catalog CLI on native PATH or inside WSL (wsl.exe / default distro PATH). The CLI uses its own local auth files. The OIDC token is not copied into argv, env, or the prompt file.",
 			},
 		},
-		Message: "Anvil Agents Desktop is a wrapper agent: create_agent, standing chat, and local-harness. The wrapper is the entity that can spawn more AgentRunProfiles. It is not a Kubernetes operator UI and not a second Anvil Agents Console.",
+		Message: "Anvil Agents Desktop is a wrapper agent: create_agent, standing chat, and local-harness. Local harnesses can run on native PATH or inside WSL. The wrapper is the entity that can spawn more AgentRunProfiles. It is not a Kubernetes operator UI and not a second Anvil Agents Console.",
 	}
 }
 
 func (s *Server) snapshot(ctx context.Context) Snapshot {
 	prefs := s.currentPrefs()
+	d := s.opts.Discoverer
+	wsl := probeWSL(ctx, d)
+	d.Target = resolveHarnessTarget(prefs, wsl)
+	d.Distro = resolveWSLDistro(prefs, wsl)
 	return Snapshot{
-		ProductTitle: ProductTitle,
-		ListenAddr:   s.opts.Listen,
-		Prefs:        prefs,
-		API:          s.probeAPI(ctx, prefs.APIOrigin),
-		Harnesses:    s.opts.Discoverer.Discover(ctx),
-		Wrapper:      defaultWrapper(),
+		ProductTitle:  ProductTitle,
+		ListenAddr:    s.opts.Listen,
+		Prefs:         prefs,
+		API:           s.probeAPI(ctx, prefs.APIOrigin),
+		Harnesses:     d.Discover(ctx),
+		Wrapper:       defaultWrapper(),
+		WSL:           wsl,
+		HarnessTarget: d.Target,
 	}
 }
 

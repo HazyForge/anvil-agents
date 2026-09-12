@@ -13,15 +13,28 @@ export interface Discovered {
   authFileHint?: string;
   delegatable?: boolean;
   notes?: string;
+  source?: "native" | "wsl";
+  wslDistro?: string;
 }
 
 export interface Prefs {
   apiOrigin?: string;
+  harnessTarget?: "native" | "wsl" | "";
+  wslDistro?: string;
 }
 
 export interface APIStatus {
   origin?: string;
   reachable: boolean;
+  message?: string;
+}
+
+export interface WSLStatus {
+  available: boolean;
+  insideWSL?: boolean;
+  executable?: string;
+  defaultDistro?: string;
+  distros?: string[];
   message?: string;
 }
 
@@ -43,10 +56,14 @@ export interface Snapshot {
   api: APIStatus;
   harnesses: Discovered[];
   wrapper: WrapperInfo;
+  wsl: WSLStatus;
+  harnessTarget: "native" | "wsl";
 }
 
 export interface DelegateResult {
   harness: string;
+  target?: string;
+  wslDistro?: string;
   path?: string;
   exitCode: number;
   stdout: string;

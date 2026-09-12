@@ -26,12 +26,14 @@ func run(ctx context.Context, args []string) int {
 	apiOrigin := flags.String("api-origin", "", "anvil-agents OIDC API origin (http or https). Not a kube-apiserver.")
 	configDir := flags.String("config-dir", "", "Directory for desktop prefs. Defaults to the user config dir.")
 	pathDirs := flags.String("path", "", "PATH-formatted directories to search for harness CLIs. When set, only these directories are searched.")
-	oidcClientID := flags.String("oidc-client-id", "", "Override ui-config oidc.clientId (Kind desktop client). Empty keeps the API value.")
+	oidcClientID := flags.String("oidc-client-id", "", "Override ui-config oidc.clientId. Empty keeps desktop.oidcClientId from ui-config, else anvil-agents-desktop.")
 	oidcRedirectPath := flags.String("oidc-redirect-path", "", "Override OIDC redirect path (default /auth/callback). Kind desktop client uses /callback.")
+	harnessTarget := flags.String("harness-target", "", "Where to discover and run catalog CLIs: native, wsl, or empty (auto).")
+	wslDistro := flags.String("wsl-distro", "", "WSL distro for Operate on WSL. Empty uses the default distro.")
 	openWindow := flags.Bool("open", false, "Open a Chrome --app window on the loopback UI.")
 	snapshotOnly := flags.Bool("snapshot", false, "Print the local harness and API snapshot as JSON and exit.")
 	flags.Usage = func() {
-		fmt.Fprintln(os.Stderr, "Usage: anvil-desktop [--listen 127.0.0.1:1738] [--ui-dir PATH] [--api-origin URL] [--config-dir PATH] [--path PATH] [--oidc-client-id ID] [--oidc-redirect-path /callback] [--open]")
+		fmt.Fprintln(os.Stderr, "Usage: anvil-desktop [--listen 127.0.0.1:1738] [--ui-dir PATH] [--api-origin URL] [--config-dir PATH] [--path PATH] [--harness-target native|wsl] [--wsl-distro NAME] [--oidc-client-id ID] [--oidc-redirect-path /callback] [--open]")
 		fmt.Fprintln(os.Stderr, "       anvil-desktop --snapshot")
 		flags.PrintDefaults()
 	}
@@ -50,6 +52,8 @@ func run(ctx context.Context, args []string) int {
 		ConfigDir:        *configDir,
 		OIDCClientID:     *oidcClientID,
 		OIDCRedirectPath: *oidcRedirectPath,
+		HarnessTarget:    *harnessTarget,
+		WSLDistro:        *wslDistro,
 		Discoverer: desktop.Discoverer{
 			Path: *pathDirs,
 		},

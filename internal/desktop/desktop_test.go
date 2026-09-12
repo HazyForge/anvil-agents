@@ -39,7 +39,10 @@ func TestDiscoverFindsCatalogBinariesOnPATH(t *testing.T) {
 	writeExec(t, filepath.Join(dir, "grok"), "#!/bin/sh\necho 'grok 1.0.0'\n")
 	writeExec(t, filepath.Join(dir, "openclaw"), "#!/bin/sh\necho 'openclaw 0.9'\n")
 
-	discoverer := Discoverer{Path: dir}
+	discoverer := Discoverer{
+		Path: dir,
+		WSL:  WSLRunner{LookExe: func() (string, error) { return "", os.ErrNotExist }},
+	}
 	found := discoverer.Discover(context.Background())
 	present := map[string]Discovered{}
 	for _, item := range found {
@@ -147,6 +150,7 @@ func TestSnapshotAndPrefsHTTP(t *testing.T) {
 		ConfigDir: configDir,
 		Discoverer: Discoverer{
 			LookPath: func(string) (string, error) { return "", os.ErrNotExist },
+			WSL:      WSLRunner{LookExe: func() (string, error) { return "", os.ErrNotExist }},
 		},
 	})
 	if err != nil {
@@ -220,6 +224,7 @@ func TestHealthzAndSPAFallback(t *testing.T) {
 		ConfigDir: t.TempDir(),
 		Discoverer: Discoverer{
 			LookPath: func(string) (string, error) { return "", os.ErrNotExist },
+			WSL:      WSLRunner{LookExe: func() (string, error) { return "", os.ErrNotExist }},
 		},
 	})
 	if err != nil {
@@ -287,6 +292,7 @@ func TestAPIProxyAllowlistAndTokenQuery(t *testing.T) {
 		APIOrigin: upstream.URL,
 		Discoverer: Discoverer{
 			LookPath: func(string) (string, error) { return "", os.ErrNotExist },
+			WSL:      WSLRunner{LookExe: func() (string, error) { return "", os.ErrNotExist }},
 		},
 	})
 	if err != nil {
@@ -372,10 +378,12 @@ cat "$file"
 	t.Setenv("KUBECONFIG", "/tmp/should-not-leak")
 
 	server, err := NewServer(Options{
-		Listen:    "127.0.0.1:0",
-		ConfigDir: t.TempDir(),
+		Listen:        "127.0.0.1:0",
+		ConfigDir:     t.TempDir(),
+		HarnessTarget: HarnessTargetNative,
 		Discoverer: Discoverer{
 			Path: dir,
+			WSL:  WSLRunner{LookExe: func() (string, error) { return "", os.ErrNotExist }},
 		},
 	})
 	if err != nil {

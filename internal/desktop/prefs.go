@@ -13,12 +13,22 @@ const prefsFileName = "config.json"
 
 // Prefs are operator-local desktop settings. They never store tokens.
 type Prefs struct {
-	APIOrigin string `json:"apiOrigin,omitempty"`
+	APIOrigin     string `json:"apiOrigin,omitempty"`
+	HarnessTarget string `json:"harnessTarget,omitempty"` // native | wsl; empty = auto
+	WSLDistro     string `json:"wslDistro,omitempty"`     // empty = default distro
 }
 
 type prefsFile struct {
-	APIOrigin  string `json:"apiOrigin"`
-	ConsoleURL string `json:"consoleURL"` // legacy field from the kube-wrap scaffold
+	APIOrigin     string `json:"apiOrigin"`
+	ConsoleURL    string `json:"consoleURL"` // legacy field from the kube-wrap scaffold
+	HarnessTarget string `json:"harnessTarget"`
+	WSLDistro     string `json:"wslDistro"`
+}
+
+type prefsPatch struct {
+	APIOrigin     *string `json:"apiOrigin"`
+	HarnessTarget *string `json:"harnessTarget"`
+	WSLDistro     *string `json:"wslDistro"`
 }
 
 func prefsPath(configDir string) (string, error) {
@@ -53,17 +63,22 @@ func loadPrefs(configDir string) (Prefs, error) {
 	if origin == "" {
 		origin = strings.TrimSpace(wire.ConsoleURL)
 	}
+	prefs := Prefs{
+		HarnessTarget: strings.TrimSpace(wire.HarnessTarget),
+		WSLDistro:     strings.TrimSpace(wire.WSLDistro),
+	}
 	if origin == "" {
-		return Prefs{}, nil
+		return normalizePrefs(prefs)
 	}
 	parsed, err := ParseAPIOrigin(origin)
 	if err != nil {
 		if strings.TrimSpace(wire.APIOrigin) != "" {
 			return Prefs{}, fmt.Errorf("parse %s: %w", path, err)
 		}
-		return Prefs{}, nil
+		return normalizePrefs(prefs)
 	}
-	return Prefs{APIOrigin: parsed}, nil
+	prefs.APIOrigin = parsed
+	return normalizePrefs(prefs)
 }
 
 func savePrefs(configDir string, prefs Prefs) error {
@@ -84,22 +99,48 @@ func savePrefs(configDir string, prefs Prefs) error {
 	return os.WriteFile(path, append(raw, '\n'), 0o600)
 }
 
-func validatePrefs(prefs Prefs) error {
-	if strings.TrimSpace(prefs.APIOrigin) == "" {
-		return nil
+func applyPrefsPatch(cur Prefs, patch prefsPatch) (Prefs, error) {
+	if patch.APIOrigin != nil {
+		cur.APIOrigin = strings.TrimSpace(*patch.APIOrigin)
 	}
-	_, err := ParseAPIOrigin(prefs.APIOrigin)
-	return err
+	if patch.HarnessTarget != nil {
+		cur.HarnessTarget = strings.TrimSpace(*patch.HarnessTarget)
+	}
+	if patch.WSLDistro != nil {
+		cur.WSLDistro = strings.TrimSpace(*patch.WSLDistro)
+	}
+	return normalizePrefs(cur)
+}
+
+func validatePrefs(prefs Prefs) error {
+	if strings.TrimSpace(prefs.APIOrigin) != "" {
+		if _, err := ParseAPIOrigin(prefs.APIOrigin); err != nil {
+			return err
+		}
+	}
+	switch strings.ToLower(strings.TrimSpace(prefs.HarnessTarget)) {
+	case "", HarnessTargetNative, HarnessTargetWSL:
+	default:
+		return fmt.Errorf("harnessTarget must be native, wsl, or empty")
+	}
+	if d := strings.TrimSpace(prefs.WSLDistro); d != "" && !safeDistroName(d) {
+		return fmt.Errorf("wslDistro is not a valid WSL distro name")
+	}
+	return nil
 }
 
 func normalizePrefs(prefs Prefs) (Prefs, error) {
 	origin := strings.TrimSpace(prefs.APIOrigin)
+	target := strings.ToLower(strings.TrimSpace(prefs.HarnessTarget))
+	distro := strings.TrimSpace(prefs.WSLDistro)
+	out := Prefs{HarnessTarget: target, WSLDistro: distro}
 	if origin == "" {
-		return Prefs{}, nil
+		return out, validatePrefs(out)
 	}
 	parsed, err := ParseAPIOrigin(origin)
 	if err != nil {
 		return Prefs{}, err
 	}
-	return Prefs{APIOrigin: parsed}, nil
+	out.APIOrigin = parsed
+	return out, validatePrefs(out)
 }

@@ -31,6 +31,8 @@ type DelegateRequest struct {
 // DelegateResult is the local-harness tool result. It never includes OIDC tokens.
 type DelegateResult struct {
 	Harness  string `json:"harness"`
+	Target   string `json:"target,omitempty"`
+	Distro   string `json:"wslDistro,omitempty"`
 	Path     string `json:"path,omitempty"`
 	ExitCode int    `json:"exitCode"`
 	Stdout   string `json:"stdout"`
@@ -38,14 +40,29 @@ type DelegateResult struct {
 	TimedOut bool   `json:"timedOut"`
 }
 
-func (s *Server) resolveDelegate(harness string) (Tool, string, error) {
+func (s *Server) resolveDelegate(ctx context.Context, harness string) (Tool, invokeTarget, error) {
 	tool, ok := catalogTool(harness)
 	if !ok || !tool.Delegatable() {
-		return Tool{}, "", fmt.Errorf("harness %q is not a delegatable catalog CLI", strings.TrimSpace(harness))
+		return Tool{}, invokeTarget{}, fmt.Errorf("harness %q is not a delegatable catalog CLI", strings.TrimSpace(harness))
 	}
-	look := s.opts.Discoverer.LookPath
+	prefs := s.currentPrefs()
+	d := s.discovererFor(prefs)
+	wsl := probeWSL(ctx, d)
+	targetName := resolveHarnessTarget(prefs, wsl)
+	if targetName == HarnessTargetWSL && d.useWSL() {
+		distro := resolveWSLDistro(prefs, wsl)
+		for _, name := range tool.Binaries {
+			path, err := d.wslLookPath(ctx, distro, name)
+			if err != nil || strings.TrimSpace(path) == "" {
+				continue
+			}
+			return tool, invokeTarget{Mode: HarnessTargetWSL, Bin: path, Distro: distro, Name: name}, nil
+		}
+		return Tool{}, invokeTarget{}, fmt.Errorf("harness %q is not on the WSL distro PATH", tool.ID)
+	}
+	look := d.LookPath
 	if look == nil {
-		look = defaultLookPath(searchPATH(s.opts.Discoverer.Path))
+		look = defaultLookPath(searchPATH(d.Path))
 	}
 	var resolved string
 	for _, name := range tool.Binaries {
@@ -57,9 +74,23 @@ func (s *Server) resolveDelegate(harness string) (Tool, string, error) {
 		break
 	}
 	if resolved == "" {
-		return Tool{}, "", fmt.Errorf("harness %q is not on PATH", tool.ID)
+		if targetName == HarnessTargetWSL {
+			return Tool{}, invokeTarget{}, fmt.Errorf("harness %q is not on the WSL distro PATH", tool.ID)
+		}
+		return Tool{}, invokeTarget{}, fmt.Errorf("harness %q is not on PATH", tool.ID)
 	}
-	return tool, resolved, nil
+	mode := HarnessTargetNative
+	if targetName == HarnessTargetWSL {
+		mode = HarnessTargetWSL
+	}
+	return tool, invokeTarget{Mode: mode, Bin: resolved}, nil
+}
+
+type invokeTarget struct {
+	Mode   string
+	Bin    string
+	Distro string
+	Name   string
 }
 
 func delegateTimeout(seconds int) time.Duration {
@@ -76,8 +107,14 @@ func delegateTimeout(seconds int) time.Duration {
 	return d
 }
 
-func runDelegate(ctx context.Context, tool Tool, bin, prompt string, timeout time.Duration) (DelegateResult, error) {
-	result := DelegateResult{Harness: tool.ID, Path: bin}
+func runDelegate(ctx context.Context, d Discoverer, tool Tool, target invokeTarget, prompt string, timeout time.Duration) (DelegateResult, error) {
+	if target.Mode == HarnessTargetWSL && d.useWSL() {
+		return d.runDelegateWSL(ctx, tool, target.Distro, prompt, timeout)
+	}
+	result := DelegateResult{Harness: tool.ID, Path: target.Bin, Target: target.Mode}
+	if result.Target == "" {
+		result.Target = HarnessTargetNative
+	}
 	runCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
@@ -115,7 +152,7 @@ func runDelegate(ctx context.Context, tool Tool, bin, prompt string, timeout tim
 		return result, fmt.Errorf("harness %q cannot accept a prompt", tool.ID)
 	}
 
-	cmd := exec.CommandContext(runCtx, bin, args...) // #nosec G204 -- bin is LookPath of a catalog CLI; args are catalog constants plus a temp file path
+	cmd := exec.CommandContext(runCtx, target.Bin, args...) // #nosec G204 -- bin is LookPath of a catalog CLI; args are catalog constants plus a temp file path
 	cmd.Stdin = stdin
 	cmd.Env = delegateEnv(os.Environ())
 	var stdout, stderr cappedBuffer
@@ -157,7 +194,7 @@ func delegateEnv(env []string) []string {
 			continue
 		}
 		switch upper {
-		case "AUTHORIZATION", "ACCESS_TOKEN", "ID_TOKEN", "REFRESH_TOKEN", "OIDC_TOKEN", "BEARER_TOKEN", "KUBECONFIG":
+		case "AUTHORIZATION", "ACCESS_TOKEN", "ID_TOKEN", "REFRESH_TOKEN", "OIDC_TOKEN", "BEARER_TOKEN", "KUBECONFIG", "WSLENV":
 			continue
 		}
 		if strings.Contains(upper, "TOKEN") && (strings.Contains(upper, "OIDC") || strings.Contains(upper, "ANVIL") || strings.Contains(upper, "ACCESS")) {

@@ -9,7 +9,7 @@ RELEASE_REPO ?= HazyForge/anvil-agents
 RELEASE_DEPLOY_VALUES ?= .hazyforge/clusters/anvil-primaris/namespace/anvil-agents-system/deploy.yaml
 RELEASE_IMAGE_LOCK ?= $(RELEASE_OUTPUT)/images-$(VERSION).lock.tsv
 
-.PHONY: generate manifests test verify verify-runner-contract security security-govulncheck security-gosec security-trivy security-all build console-build console-typecheck console-embed console-embed-restore desktop-build desktop-typecheck desktop-embed desktop-embed-restore desktop-run docker-build images image-checks helm-lint archive-postgres-integration chart-package release-tag release-tag-push release-local release-publish release-github release-local-all release-pin-deploy release-primaris release-primaris-fast release-primaris-hot deploy-primaris judge-prerequisites judge-kind-e2e kind-upgrade-e2e kind-e2e
+.PHONY: generate manifests test verify verify-runner-contract security security-govulncheck security-gosec security-trivy security-all build console-build console-typecheck console-embed console-embed-restore desktop-build desktop-typecheck desktop-embed desktop-embed-restore desktop-run desktop-package desktop-package-check docker-build images image-checks helm-lint archive-postgres-integration chart-package release-tag release-tag-push release-local release-publish release-github release-local-all release-pin-deploy release-primaris release-primaris-fast release-primaris-hot deploy-primaris judge-prerequisites judge-kind-e2e kind-upgrade-e2e kind-e2e
 
 generate:
 	$(CONTROLLER_GEN) object paths=./api/...
@@ -110,6 +110,15 @@ desktop-embed-restore:
 # Start Anvil Agents Desktop on this machine's display (Kind-local API origin).
 desktop-run:
 	./hack/run-anvil-desktop.sh --open --detach --fixtures
+
+# Workstation installers: Windows zip + setup.exe, Linux tarball. See docs/desktop-install.md.
+desktop-package:
+	./hack/package-anvil-desktop.sh
+
+desktop-package-check:
+	bash -n hack/package-anvil-desktop.sh
+	bash -n hack/install-anvil-desktop.sh
+	bash hack/package-anvil-desktop_test.sh
 
 docker-build:
 	ANVIL_AGENTS_IMAGE_PREFIX="$(IMAGE_PREFIX)" ANVIL_AGENTS_IMAGE_TAG="$(IMAGE_TAG)" \
@@ -312,5 +321,5 @@ verify-runner-contract:
 		rg -q 'openssl' "$$dockerfile"; \
 	done
 
-verify: manifests test build helm-lint verify-runner-contract console-typecheck desktop-typecheck
+verify: manifests test build helm-lint verify-runner-contract console-typecheck desktop-typecheck desktop-package-check
 	@test -z "$$(rg -l 'github.com/hazyforge/anvil-primaris|github.com/hazyforge/anvil-primaris/lib/go/anvilhub' --glob '*.go' .)"

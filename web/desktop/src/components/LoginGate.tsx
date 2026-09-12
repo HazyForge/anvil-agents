@@ -60,16 +60,17 @@ export function LoginGate({
     <div className="panel token-gate">
       <h1>Sign in to {PRODUCT_TITLE}</h1>
       <p>
-        This app talks only to the anvil-agents OIDC API — the same AgentRun API the browser console
-        uses. There is no kubeconfig, kubectl, or cluster context picker. Sign in with Authorization
-        Code + PKCE. Access tokens stay in <code>sessionStorage</code> for this window and are never
-        placed in query strings after login.
+        This app talks only to the anvil-agents OIDC API — Anvil Primaris or another configured
+        apiOrigin. There is no kubeconfig, kubectl, or cluster context picker. Sign in with
+        Authorization Code + PKCE. Access tokens stay in <code>sessionStorage</code> for this window
+        and are never placed in query strings after login. Local harness processes never receive that
+        token.
       </p>
       <label className="field">
         <span className="label">OIDC API origin</span>
         <input
           className="input"
-          placeholder="https://agents.example.com"
+          placeholder="https://anvil-agents-api.example.com"
           value={originDraft}
           onChange={(event) => setOriginDraft(event.target.value)}
           autoComplete="off"

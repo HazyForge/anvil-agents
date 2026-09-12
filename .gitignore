@@ -9,5 +9,6 @@
 /web/console/*.tsbuildinfo
 /web/desktop/node_modules/
 /web/desktop/dist/
+/web/desktop/release/
 /web/desktop/*.tsbuildinfo
 **/__pycache__/

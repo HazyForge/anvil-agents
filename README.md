@@ -225,6 +225,7 @@ audience, and explicit namespace authorization bindings are configured. See
 - [AgentRun API reference](docs/agent-run.md)
 - [Create and diagnose runs with anvil-agentctl](docs/cli.md)
 - [Anvil Agents Desktop](docs/desktop.md)
+- [Install Anvil Agents Desktop](docs/desktop-install.md)
 - [Migration from Anvil Primaris](docs/migration-from-anvil-primaris.md)
 - [Third-party notices](THIRD_PARTY_NOTICES.md)
 

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { NavLink, Navigate, Route, Routes } from "react-router-dom";
 import { fetchSnapshot, savePrefs } from "./api/client";
-import type { Snapshot } from "./api/types";
+import type { Prefs, Snapshot } from "./api/types";
 import { clearUIConfigCache, loadUIConfig, type UIConfig } from "./auth/config";
 import { ensureAccessToken, logout } from "./auth/oidc";
 import { clearLegacyToken, loadSession } from "./auth/session";
@@ -84,26 +84,38 @@ export default function App() {
     };
   }, []);
 
-  const persistOrigin = useCallback(async (origin: string) => {
-    setBusy(true);
-    try {
-      clearUIConfigCache();
-      const next = await savePrefs({ apiOrigin: origin.trim() });
-      setSnapshot(next);
-      setError(null);
-      if (next.prefs.apiOrigin) {
-        const ui = await loadUIConfig(true);
-        setConfig(ui);
-        setConfigError(null);
-      } else {
-        setConfig(null);
+  const persistPrefs = useCallback(
+    async (patch: Prefs) => {
+      setBusy(true);
+      try {
+        if (patch.apiOrigin !== undefined) {
+          clearUIConfigCache();
+        }
+        const next = await savePrefs(patch);
+        setSnapshot(next);
+        setError(null);
+        if (next.prefs.apiOrigin) {
+          const ui = await loadUIConfig(true);
+          setConfig(ui);
+          setConfigError(null);
+        } else if (patch.apiOrigin !== undefined) {
+          setConfig(null);
+        }
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err));
+      } finally {
+        setBusy(false);
       }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setBusy(false);
-    }
-  }, []);
+    },
+    [],
+  );
+
+  const persistOrigin = useCallback(
+    async (origin: string) => {
+      await persistPrefs({ apiOrigin: origin.trim() });
+    },
+    [persistPrefs],
+  );
 
   const handleAuthenticated = useCallback((accessToken: string) => {
     setToken(accessToken);
@@ -145,6 +157,11 @@ export default function App() {
         <div className="titlebar-title">{snapshot?.productTitle ?? PRODUCT_TITLE}</div>
         <div className="titlebar-meta">
           <span className={`pill ${snapshot?.api.reachable ? "pill-ok" : "pill-mute"}`}>{originHost}</span>
+          <span className={`pill ${snapshot?.harnessTarget === "wsl" ? "pill-ok" : "pill-mute"}`}>
+            {snapshot?.harnessTarget === "wsl"
+              ? `WSL${snapshot.wsl.defaultDistro || snapshot.prefs.wslDistro ? ` · ${snapshot.prefs.wslDistro || snapshot.wsl.defaultDistro}` : ""}`
+              : "native PATH"}
+          </span>
           <span className={`pill ${signedIn ? "pill-ok" : "pill-mute"}`}>{signedIn ? "signed in" : "signed out"}</span>
           <button type="button" className="btn btn-ghost" onClick={() => void refresh()} disabled={busy}>
             {busy ? "Refreshing" : "Refresh"}
@@ -179,7 +196,13 @@ export default function App() {
           <Route path="/callback" element={<AuthCallbackPage onAuthenticated={handleAuthenticated} />} />
           <Route
             path="/"
-            element={snapshot ? <HarnessesPage snapshot={snapshot} /> : <div className="empty">Loading local harnesses…</div>}
+            element={
+              snapshot ? (
+                <HarnessesPage snapshot={snapshot} busy={busy} onSavePrefs={persistPrefs} />
+              ) : (
+                <div className="empty">Loading local harnesses…</div>
+              )
+            }
           />
           <Route
             path="/chat"

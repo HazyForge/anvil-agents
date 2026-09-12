@@ -33,6 +33,8 @@ type Options struct {
 	ConfigDir        string
 	OIDCClientID     string
 	OIDCRedirectPath string
+	HarnessTarget    string
+	WSLDistro        string
 	Discoverer       Discoverer
 	HTTPClient       *http.Client
 	Transport        http.RoundTripper
@@ -72,6 +74,15 @@ func NewServer(opts Options) (*Server, error) {
 			return nil, err
 		}
 		prefs.APIOrigin = parsed
+	}
+	if target := strings.TrimSpace(opts.HarnessTarget); target != "" {
+		prefs.HarnessTarget = target
+	}
+	if distro := strings.TrimSpace(opts.WSLDistro); distro != "" {
+		prefs.WSLDistro = distro
+	}
+	if err := validatePrefs(prefs); err != nil {
+		return nil, err
 	}
 	client := opts.HTTPClient
 	if client == nil {
@@ -122,6 +133,14 @@ func (s *Server) currentPrefs() Prefs {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.prefs
+}
+
+func (s *Server) discovererFor(prefs Prefs) Discoverer {
+	d := s.opts.Discoverer
+	wsl := probeWSL(context.Background(), d)
+	d.Target = resolveHarnessTarget(prefs, wsl)
+	d.Distro = resolveWSLDistro(prefs, wsl)
+	return d
 }
 
 func (s *Server) setPrefs(prefs Prefs) {
@@ -192,12 +211,12 @@ func (s *Server) handlePrefs(writer http.ResponseWriter, request *http.Request) 
 		writeError(writer, http.StatusRequestEntityTooLarge, "too_large", "prefs payload is too large")
 		return
 	}
-	var next Prefs
-	if err := json.Unmarshal(raw, &next); err != nil {
+	var patch prefsPatch
+	if err := json.Unmarshal(raw, &patch); err != nil {
 		writeError(writer, http.StatusBadRequest, "invalid_json", "prefs must be JSON")
 		return
 	}
-	normalized, err := normalizePrefs(next)
+	normalized, err := applyPrefsPatch(s.currentPrefs(), patch)
 	if err != nil {
 		writeError(writer, http.StatusBadRequest, "invalid_prefs", err.Error())
 		return
@@ -236,12 +255,12 @@ func (s *Server) handleDelegate(writer http.ResponseWriter, request *http.Reques
 		writeError(writer, http.StatusRequestEntityTooLarge, "too_large", "prompt exceeds 64KiB")
 		return
 	}
-	tool, bin, err := s.resolveDelegate(body.Harness)
+	tool, target, err := s.resolveDelegate(request.Context(), body.Harness)
 	if err != nil {
 		writeError(writer, http.StatusBadRequest, "invalid_harness", err.Error())
 		return
 	}
-	result, err := runDelegate(request.Context(), tool, bin, prompt, delegateTimeout(body.TimeoutSeconds))
+	result, err := runDelegate(request.Context(), s.discovererFor(s.currentPrefs()), tool, target, prompt, delegateTimeout(body.TimeoutSeconds))
 	if err != nil {
 		writeError(writer, http.StatusBadRequest, "delegate_failed", err.Error())
 		return

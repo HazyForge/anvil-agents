@@ -102,11 +102,12 @@ func (s *Server) rewriteUIConfig(resp *http.Response) error {
 	desktop["wrapper"] = true
 	desktop["kubernetes"] = false
 	desktop["productName"] = ProductTitle
+	desktop["wsl"] = true
 	if path := strings.TrimSpace(s.opts.OIDCRedirectPath); path != "" {
 		desktop["oidcRedirectPath"] = path
 	}
 	body["desktop"] = desktop
-	if clientID := strings.TrimSpace(s.opts.OIDCClientID); clientID != "" {
+	if clientID := desktopOIDCClientID(s.opts.OIDCClientID, body); clientID != "" {
 		oidc, _ := body["oidc"].(map[string]any)
 		if oidc == nil {
 			oidc = map[string]any{}
@@ -125,4 +126,19 @@ func (s *Server) rewriteUIConfig(resp *http.Response) error {
 	resp.Header.Set("Content-Length", strconv.Itoa(len(rewritten)))
 	resp.Header.Set("Content-Type", "application/json")
 	return nil
+}
+
+func desktopOIDCClientID(cliOverride string, body map[string]any) string {
+	if id := strings.TrimSpace(cliOverride); id != "" {
+		return id
+	}
+	if desktop, ok := body["desktop"].(map[string]any); ok {
+		if id, _ := desktop["oidcClientId"].(string); strings.TrimSpace(id) != "" {
+			return strings.TrimSpace(id)
+		}
+	}
+	// Keep the API's oidc.clientId (live Primaris currently serves the console
+	// PKCE app). DefaultOIDCClientID is the Kind/desktop pattern until GitOps
+	// writes desktop.oidcClientId.
+	return ""
 }

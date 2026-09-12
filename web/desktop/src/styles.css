@@ -236,6 +236,32 @@ a { color: var(--teal); text-decoration: none; }
 .btn-ghost { background: transparent; }
 .btn-row { display: flex; flex-wrap: wrap; gap: 0.4rem; }
 
+.seg {
+  display: inline-flex;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  overflow: hidden;
+  width: fit-content;
+}
+.seg-btn {
+  border: 0;
+  background: transparent;
+  color: var(--text-mute);
+  padding: 0.4rem 0.75rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.seg-btn + .seg-btn { border-left: 1px solid var(--border-strong); }
+.seg-btn:hover { background: var(--bg-hover); color: var(--text); }
+.seg-btn.active {
+  background: rgba(26, 158, 104, 0.2);
+  color: var(--emerald);
+}
+.runtime-card { margin-bottom: 0.25rem; }
+.runtime-card code { white-space: nowrap; }
+
 .banner { border: 1px solid var(--border); padding: 0.55rem 0.7rem; font-size: 0.8rem; }
 .banner-info { border-color: rgba(106, 169, 255, 0.35); color: #b7d2ff; background: rgba(40, 70, 120, 0.18); }
 .banner-ok { border-color: rgba(61, 255, 168, 0.35); color: #b7ffe0; background: rgba(26, 158, 104, 0.12); }
