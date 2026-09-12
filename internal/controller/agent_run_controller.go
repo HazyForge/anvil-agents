@@ -4254,7 +4254,10 @@ func (r *AgentRunReconciler) ensureRequestedPeerAgentRun(ctx context.Context, ob
 	if profile == "" {
 		return nil
 	}
-	prompt := strings.TrimSpace(status.Decision.Summary)
+	prompt := agentRunDecisionFieldFromOutput(status.Output, agentRunDecisionRequestPeer, "peerPrompt")
+	if prompt == "" {
+		prompt = strings.TrimSpace(status.Decision.Summary)
+	}
 	if prompt == "" {
 		prompt = strings.TrimSpace(obj.Spec.Prompt)
 	}
