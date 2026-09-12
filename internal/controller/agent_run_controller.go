@@ -90,6 +90,11 @@ const (
 	agentRunAnnotationSourceHash       = "control.anvil.hazyforge.io/agent-run-source-hash"
 	agentRunAnnotationComposition      = "control.anvil.hazyforge.io/resolved-composition"
 	agentRunAnnotationRequestedTTL     = "control.anvil.hazyforge.io/requested-ttl-seconds-after-finished"
+	agentRunAnnotationPeerRun          = "control.anvil.hazyforge.io/peer-run"
+	agentRunAnnotationPeerOf           = "control.anvil.hazyforge.io/peer-of"
+	agentRunLabelPeerOf                = "control.anvil.hazyforge.io/peer-of"
+	agentRunDecisionRequestPeer        = "requestPeer"
+	agentRunDecisionInterruptDuplicate = "interruptDuplicate"
 )
 
 var agentRunSkillFileNameUnsafeChars = regexp.MustCompile(`[^A-Za-z0-9_.-]+`)
@@ -520,6 +525,9 @@ func (r *AgentRunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 			agentRunApplyStatusReports(&status, agentRunStatusReportsFromOutput(logs))
 			status.Output = agentRunTrimOutput(logs)
 			status.Result = agentRunRawResult(status.Output, status.PullRequestURL, status.Decision, status.Reports)
+			if err := r.reconcileMidRunPeerDecisions(ctx, obj, &status); err != nil {
+				return ctrl.Result{}, err
+			}
 		}
 	}
 
@@ -4138,6 +4146,201 @@ func agentRunTrimOutput(output string) string {
 		return output
 	}
 	return output[len(output)-maxOutputBytes:]
+}
+
+func (r *AgentRunReconciler) reconcileMidRunPeerDecisions(ctx context.Context, obj *controlv1alpha1.AgentRun, status *controlv1alpha1.AgentRunStatus) error {
+	if obj == nil || status == nil || status.Decision == nil {
+		return nil
+	}
+	switch strings.TrimSpace(status.Decision.Action) {
+	case agentRunDecisionRequestPeer:
+		return r.ensureRequestedPeerAgentRun(ctx, obj, status)
+	case agentRunDecisionInterruptDuplicate:
+		return r.interruptDuplicatePeerRuns(ctx, obj, status)
+	default:
+		return nil
+	}
+}
+
+func agentRunPeerProfileName(status *controlv1alpha1.AgentRunStatus) string {
+	if status == nil {
+		return ""
+	}
+	if name := agentRunDecisionFieldFromOutput(status.Output, agentRunDecisionRequestPeer, "peerProfileName", "profile", "profileName", "peerProfile"); name != "" {
+		return name
+	}
+	for i := len(status.Reports) - 1; i >= 0; i-- {
+		report := status.Reports[i]
+		if name := agentRunParsePeerProfile(report.Detail); name != "" {
+			return name
+		}
+		if name := agentRunParsePeerProfile(report.Summary); name != "" {
+			return name
+		}
+	}
+	return ""
+}
+
+func agentRunDecisionFieldFromOutput(output, action string, keys ...string) string {
+	scanner := bufio.NewScanner(strings.NewReader(output))
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	found := ""
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		index := strings.Index(line, agentRunStatusLinePrefix)
+		if index < 0 {
+			continue
+		}
+		raw := strings.TrimSpace(line[index+len(agentRunStatusLinePrefix):])
+		var payload map[string]any
+		if err := json.Unmarshal([]byte(raw), &payload); err != nil {
+			continue
+		}
+		gotAction, _ := payload["action"].(string)
+		if strings.TrimSpace(gotAction) != action {
+			continue
+		}
+		for _, key := range keys {
+			if value, ok := payload[key].(string); ok {
+				if name := strings.TrimSpace(value); name != "" {
+					found = name
+				}
+			}
+		}
+	}
+	return found
+}
+
+func agentRunParsePeerProfile(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(raw), &payload); err == nil {
+		for _, key := range []string{"profile", "profileName", "peerProfile"} {
+			if value, ok := payload[key].(string); ok {
+				if name := strings.TrimSpace(value); name != "" {
+					return name
+				}
+			}
+		}
+	}
+	for _, prefix := range []string{"profile=", "profileName=", "peerProfile="} {
+		idx := strings.Index(raw, prefix)
+		if idx < 0 {
+			continue
+		}
+		rest := strings.TrimSpace(raw[idx+len(prefix):])
+		fields := strings.FieldsFunc(rest, func(r rune) bool {
+			return r == ',' || r == ';' || r == '\n'
+		})
+		if len(fields) == 0 {
+			continue
+		}
+		return strings.TrimSpace(fields[0])
+	}
+	return ""
+}
+
+func (r *AgentRunReconciler) ensureRequestedPeerAgentRun(ctx context.Context, obj *controlv1alpha1.AgentRun, status *controlv1alpha1.AgentRunStatus) error {
+	if existing := strings.TrimSpace(obj.Annotations[agentRunAnnotationPeerRun]); existing != "" {
+		return nil
+	}
+	profile := agentRunPeerProfileName(status)
+	if profile == "" && obj.Spec.ProfileRef != nil {
+		profile = strings.TrimSpace(obj.Spec.ProfileRef.Name)
+	}
+	if profile == "" {
+		return nil
+	}
+	prompt := strings.TrimSpace(status.Decision.Summary)
+	if prompt == "" {
+		prompt = strings.TrimSpace(obj.Spec.Prompt)
+	}
+	peer := &controlv1alpha1.AgentRun{
+		ObjectMeta: metav1.ObjectMeta{
+			GenerateName: sanitizeLabelValue(obj.Name) + "-peer-",
+			Namespace:    obj.Namespace,
+			Labels: map[string]string{
+				agentRunLabelPeerOf:     sanitizeLabelValue(obj.Name),
+				agentRunLabelSourceKind: sanitizeLabelValue(obj.Spec.SourceRef.Kind),
+				agentRunLabelSourceName: sanitizeLabelValue(obj.Spec.SourceRef.Name),
+				agentRunLabelIntent:     sanitizeLabelValue(string(obj.Spec.Harness.Intent)),
+			},
+			Annotations: map[string]string{
+				agentRunAnnotationPeerOf: obj.Name,
+			},
+		},
+		Spec: controlv1alpha1.AgentRunSpec{
+			Purpose:    obj.Spec.Purpose,
+			SourceRef:  obj.Spec.SourceRef,
+			SourceUID:  obj.Spec.SourceUID,
+			Prompt:     prompt,
+			ProfileRef: &controlv1alpha1.NamespacedObjectReference{Name: profile},
+			Scope:      obj.Spec.Scope,
+			CouncilRef: obj.Spec.CouncilRef,
+		},
+	}
+	if err := r.Create(ctx, peer); err != nil {
+		return fmt.Errorf("create peer AgentRun for %s/%s: %w", obj.Namespace, obj.Name, err)
+	}
+	base := obj.DeepCopy()
+	if obj.Annotations == nil {
+		obj.Annotations = map[string]string{}
+	}
+	obj.Annotations[agentRunAnnotationPeerRun] = peer.Name
+	if err := r.Patch(ctx, obj, client.MergeFrom(base)); err != nil {
+		return fmt.Errorf("record peer AgentRun %s on %s/%s: %w", peer.Name, obj.Namespace, obj.Name, err)
+	}
+	return nil
+}
+
+func (r *AgentRunReconciler) interruptDuplicatePeerRuns(ctx context.Context, obj *controlv1alpha1.AgentRun, status *controlv1alpha1.AgentRunStatus) error {
+	named := agentRunDecisionFieldFromOutput(status.Output, agentRunDecisionInterruptDuplicate, "duplicateRunName")
+	list := &controlv1alpha1.AgentRunList{}
+	if err := r.List(ctx, list, client.InNamespace(obj.Namespace)); err != nil {
+		return fmt.Errorf("list AgentRuns to interrupt duplicates: %w", err)
+	}
+	summary := strings.TrimSpace(status.Decision.Summary)
+	if summary == "" {
+		summary = "duplicate work"
+	}
+	now := metav1.Now()
+	for i := range list.Items {
+		peer := &list.Items[i]
+		if peer.Name == obj.Name {
+			continue
+		}
+		if named != "" && peer.Name != named {
+			continue
+		}
+		if named == "" && strings.TrimSpace(peer.Spec.SourceRef.Name) != strings.TrimSpace(obj.Spec.SourceRef.Name) {
+			continue
+		}
+		if peer.Status.Phase != controlv1alpha1.AgentRunPhaseRunning && peer.Status.Phase != controlv1alpha1.AgentRunPhasePending {
+			continue
+		}
+		original := peer.DeepCopy()
+		peer.Status.Phase = controlv1alpha1.AgentRunPhaseFailed
+		peer.Status.CompletedAt = &now
+		peer.Status.Error = "interruptDuplicate: " + summary
+		apimeta.SetStatusCondition(&peer.Status.Conditions, metav1.Condition{
+			Type:               agentRunReady,
+			Status:             metav1.ConditionFalse,
+			ObservedGeneration: peer.Generation,
+			LastTransitionTime: now,
+			Reason:             "InterruptDuplicate",
+			Message:            peer.Status.Error,
+		})
+		if err := r.Status().Patch(ctx, peer, client.MergeFrom(original)); err != nil {
+			if apierrors.IsConflict(err) {
+				continue
+			}
+			return fmt.Errorf("interrupt duplicate AgentRun %s/%s: %w", peer.Namespace, peer.Name, err)
+		}
+	}
+	return nil
 }
 
 func agentRunLabels(obj *controlv1alpha1.AgentRun, jobName string) map[string]string {
