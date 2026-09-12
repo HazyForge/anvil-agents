@@ -31,11 +31,17 @@ export type UIConfig = {
     productName?: string;
     stubSession?: boolean;
     oidcRedirectPath?: string;
+    oidcClientId?: string;
   };
 };
 
 let cached: UIConfig | null = null;
 let inflight: Promise<UIConfig> | null = null;
+
+function desktopOIDCClientId(body: UIConfig): string {
+  const raw = body.desktop?.oidcClientId;
+  return typeof raw === "string" ? raw.trim() : "";
+}
 
 export function clearUIConfigCache(): void {
   cached = null;
@@ -58,20 +64,23 @@ export async function loadUIConfig(force = false): Promise<UIConfig> {
       throw new Error(`ui-config unavailable (${response.status})`);
     }
     const body = (await response.json()) as UIConfig;
-    if (!body?.oidc?.issuer || !body?.oidc?.clientId) {
-      throw new Error("ui-config missing oidc.issuer or oidc.clientId");
+    const nativeClientId = desktopOIDCClientId(body);
+    const clientId = nativeClientId || body?.oidc?.clientId;
+    if (!body?.oidc?.issuer || !clientId) {
+      throw new Error("ui-config missing oidc.issuer or a PKCE client id");
     }
     const composition = body.composition;
     const controls = body.controls;
     const runs = body.runs;
     const chat = body.chat;
-    const desktop = (body as UIConfig).desktop;
+    const desktop = body.desktop;
     cached = {
       productTitle: PRODUCT_TITLE,
       defaultNamespaces: Array.isArray(body.defaultNamespaces) ? body.defaultNamespaces : [],
       oidc: {
         issuer: body.oidc.issuer.replace(/\/+$/, ""),
-        clientId: body.oidc.clientId,
+        // Prefer Native Desktop client; fall back to console User-Agent until GitOps fills desktop.oidcClientId.
+        clientId,
         audiences: Array.isArray(body.oidc.audiences) ? body.oidc.audiences : [],
         scopes:
           Array.isArray(body.oidc.scopes) && body.oidc.scopes.length > 0
@@ -102,6 +111,7 @@ export async function loadUIConfig(force = false): Promise<UIConfig> {
           typeof desktop?.oidcRedirectPath === "string" && desktop.oidcRedirectPath.startsWith("/")
             ? desktop.oidcRedirectPath
             : undefined,
+        oidcClientId: nativeClientId || undefined,
       },
     };
     return cached;
