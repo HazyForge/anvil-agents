@@ -249,7 +249,7 @@ helm template anvil-agents-system-chart "${chart}" \
 	>"${tmp_dir}/primaris.yaml"
 grep -Fq 'issuer: https://hazyforge1-azsbgb.us1.zitadel.cloud' "${tmp_dir}/primaris.yaml" || fail "Primaris overlay lost the Zitadel issuer"
 grep -Fq 'clientId: "383499920822362966"' "${tmp_dir}/primaris.yaml" || fail "Primaris overlay lost the console PKCE client id"
-grep -Fq 'oidcClientId:' "${tmp_dir}/primaris.yaml" || fail "Primaris overlay lost Desktop Native ui-config desktop.oidcClientId"
+grep -Fq 'oidcClientId: "390485194915767148"' "${tmp_dir}/primaris.yaml" || fail "Primaris overlay lost Desktop Native ui-config desktop.oidcClientId"
 if grep -Fq 'oidcClientId: "383499920822362966"' "${tmp_dir}/primaris.yaml"; then
 	fail "Desktop Native oidcClientId must not reuse the Console User-Agent client"
 fi
