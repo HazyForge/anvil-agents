@@ -70,6 +70,33 @@ func TestNormalizeMemberDecisionKeepsSpeakerAndPeerMessages(t *testing.T) {
 	}
 }
 
+func TestNormalizeControllerDecisionFillsGrokWorkHarness(t *testing.T) {
+	t.Parallel()
+	state := CouncilState{Members: defaultCouncilMembers()}
+	decision, err := normalizeCouncilDecision(state, anvilAgentProfileName, councilHarnessDecision{
+		Anvil: "Both members work on grok.",
+		Utterances: []councilHarnessUtterance{
+			{Profile: councilResearcherProfile, Content: "Mapping now."},
+			{Profile: councilImplementerProfile, Content: "Writing the note."},
+		},
+		Delegates: []councilHarnessDelegate{
+			{Profile: councilResearcherProfile, Role: "researcher", Claim: "map", Prompt: "map configmaps"},
+			{Profile: councilImplementerProfile, Role: "implementer", Claim: "note", Prompt: "write one line"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(decision.Delegates) != 2 {
+		t.Fatalf("delegates = %#v", decision.Delegates)
+	}
+	for _, item := range decision.Delegates {
+		if item.Harness != councilGrokHarness || item.Backend != "grokBuild" || item.Skip {
+			t.Fatalf("expected grokBuild fill-in, got %#v", item)
+		}
+	}
+}
+
 func TestNormalizeControllerDecisionInterruptsDuplicateClaims(t *testing.T) {
 	t.Parallel()
 	state := CouncilState{Members: defaultCouncilMembers()}

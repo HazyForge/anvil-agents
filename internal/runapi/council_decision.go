@@ -331,7 +331,7 @@ func councilIntentForRole(role string) string {
 }
 
 func councilBackendFor(profile, harness string) string {
-	if profile == councilImplementerProfile || harness == councilGrokHarness {
+	if profile == councilImplementerProfile || profile == councilResearcherProfile || harness == councilGrokHarness {
 		return "grokBuild"
 	}
 	if profile == anvilAgentProfileName || harness == councilLLMHarness {

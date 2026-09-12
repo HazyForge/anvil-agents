@@ -25,13 +25,13 @@ func buildCouncilHarnessPrompt(state CouncilState, addressee, content string) st
 	if addressee == anvilAgentProfileName {
 		b.WriteString("You are Anvil agent's council harness. You are non-deterministic: decide who confers, who waits, who is interrupted, and which members to delegate based on this operator message. Do not follow a fixed script.\n\n")
 		b.WriteString("Return ONLY a JSON object with this shape:\n")
-		b.WriteString(`{"mode":"controller","anvil":"your own words as Anvil agent","utterances":[{"profile":"council-researcher","role":"researcher","content":"their own words","kind":"utterance|interrupt","waitingOn":"optional profile","addressedTo":"optional profile or user"}],"memory":[{"key":"claim:inventory","value":"council-researcher"}],"delegates":[{"role":"researcher","profile":"council-researcher","harness":"council-research","intent":"observe","prompt":"work for this member","claim":"inventory"}]}`)
+		b.WriteString(`{"mode":"controller","anvil":"your own words as Anvil agent","utterances":[{"profile":"council-researcher","role":"researcher","content":"their own words","kind":"utterance|interrupt","waitingOn":"optional profile","addressedTo":"optional profile or user"}],"memory":[{"key":"claim:inventory","value":"council-researcher"}],"delegates":[{"role":"researcher","profile":"council-researcher","harness":"council-grok","intent":"observe","prompt":"work for this member","claim":"inventory"}]}`)
 		b.WriteString("\nRules:\n")
 		b.WriteString("- anvil is required and is Anvil agent speaking as itself.\n")
 		b.WriteString("- utterances are distinct member voices. Members post as themselves.\n")
 		b.WriteString("- If two members would claim the same work, mark the duplicate kind=interrupt and do not emit two delegates with that claim.\n")
-		b.WriteString("- delegates are optional. Only create them when work should run. Mix harnesses when two members work.\n")
-		b.WriteString("- Researcher work harness is council-research (custom). Implementer work harness is council-grok (grokBuild).\n")
+		b.WriteString("- delegates are optional. Only create them when work should run.\n")
+		b.WriteString("- Researcher and Implementer work harness is council-grok (grokBuild / xAI). Conversation stays council-llm. Do not use Codex. Do not use council-research for work.\n")
 		b.WriteString("- Do not speak as the human operator.\n\n")
 	} else {
 		b.WriteString("You are ")

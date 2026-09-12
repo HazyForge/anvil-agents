@@ -29,7 +29,9 @@ const (
 	councilLLMHarness         = "council-llm"
 	councilLLMSecretName      = "council-llm"
 	councilLLMImage           = "anvil-agents-council-llm:dev"
+	councilGrokImage          = "anvil-agent-run-grok-build:dev"
 	councilDemoImage          = "anvil-agents-demo:dev"
+	councilGrokSecretName     = "council-grok"
 	councilRunnerSA           = "agent-runner"
 )
 
@@ -484,7 +486,7 @@ func (server *Server) attachCouncilLedger(ctx context.Context, namespace string)
 			Namespace:   namespace,
 			CouncilName: anvilCouncilName,
 			Title:       "Harness mix",
-			Body:        "Conversation turns use council-llm. Work delegates mix council-research (custom) and council-grok (grokBuild). Do not share demo-state across Jobs.",
+			Body:        "Conversation turns use council-llm. Work delegates use council-grok (grokBuild / xAI). Do not use Codex for work. Do not share a PVC across Jobs.",
 		},
 	}); err != nil {
 		return err
@@ -588,7 +590,7 @@ func (server *Server) ensureAnvilCouncilObjects(ctx context.Context, namespace s
 	if err := server.ensureConsoleOwned(ctx, anvilAgentProfile(namespace)); err != nil {
 		return err
 	}
-	if err := server.ensureConsoleOwned(ctx, councilMemberProfile(namespace, councilResearcherProfile, "researcher", councilResearchHarness, "chat:"+namespace+"/"+anvilCouncilName+"/researcher", agentsv1alpha1.AgentRunIntentObserve)); err != nil {
+	if err := server.ensureConsoleOwned(ctx, councilMemberProfile(namespace, councilResearcherProfile, "researcher", councilGrokHarness, "chat:"+namespace+"/"+anvilCouncilName+"/researcher", agentsv1alpha1.AgentRunIntentObserve)); err != nil {
 		return err
 	}
 	if err := server.ensureConsoleOwned(ctx, councilMemberProfile(namespace, councilImplementerProfile, "implementer", councilGrokHarness, "chat:"+namespace+"/"+anvilCouncilName+"/implementer", agentsv1alpha1.AgentRunIntentProposeChange)); err != nil {
@@ -649,19 +651,19 @@ func (state CouncilState) memberWorkHarness(profile string) string {
 		}
 	}
 	switch profile {
-	case councilImplementerProfile:
+	case councilImplementerProfile, councilResearcherProfile:
 		return councilGrokHarness
 	case anvilAgentProfileName:
 		return councilLLMHarness
 	default:
-		return councilResearchHarness
+		return councilGrokHarness
 	}
 }
 
 func defaultCouncilMembers() []CouncilMemberView {
 	return []CouncilMemberView{
 		{Role: "controller", ProfileName: anvilAgentProfileName, Harness: councilLLMHarness, Backend: "custom", Description: "Main chat agent in charge of the council"},
-		{Role: "researcher", ProfileName: councilResearcherProfile, Harness: councilResearchHarness, Backend: "custom"},
+		{Role: "researcher", ProfileName: councilResearcherProfile, Harness: councilGrokHarness, Backend: "grokBuild"},
 		{Role: "implementer", ProfileName: councilImplementerProfile, Harness: councilGrokHarness, Backend: "grokBuild"},
 	}
 }
@@ -762,15 +764,26 @@ func (server *Server) implementerHarness(namespace string) *agentsv1alpha1.Agent
 			Namespace: namespace,
 		},
 		Spec: agentsv1alpha1.AgentHarnessProfileSpec{
-			Description: "Council implementer grokBuild harness (demo image on Kind, no demo-state PVC).",
+			Description: "Council grokBuild work harness. Mounts GROK_AUTH_JSON from Secret council-grok; the API never reads that Secret.",
 			Backend: agentsv1alpha1.AgentRunHarnessBackendSpec{
-				Kind:            agentsv1alpha1.AgentRunHarnessBackendGrokBuild,
-				Image:           councilDemoImage,
-				ImagePullPolicy: corev1.PullIfNotPresent,
+				Kind:             agentsv1alpha1.AgentRunHarnessBackendGrokBuild,
+				Image:            councilGrokImage,
+				ImagePullPolicy:  corev1.PullIfNotPresent,
+				ModelProvider:    agentsv1alpha1.AgentRunModelProviderXAI,
+				ProviderAuthMode: agentsv1alpha1.AgentRunProviderAuthModeOAuth,
+				GrokBuild: &agentsv1alpha1.AgentRunGrokBuildBackendSpec{
+					Model:          "grok-4.5",
+					AdditionalArgs: []string{"--disable-web-search", "--disallowed-tools", "run_terminal_cmd,web_search,web_fetch", "--max-turns", "16"},
+				},
 			},
 			Execution: agentsv1alpha1.AgentRunHarnessExecutionSpec{
 				ServiceAccountName: councilRunnerSA,
-				TimeoutSeconds:     120,
+				TimeoutSeconds:     240,
+				EnvSecretRefs:      []agentsv1alpha1.NamespacedObjectReference{{Name: councilGrokSecretName}},
+				ExtraEnv: []corev1.EnvVar{
+					{Name: "ANVIL_GROK_BUILD_CHECK", Value: "false"},
+					{Name: "ANVIL_GROK_BUILD_OUTPUT_FORMAT", Value: "plain"},
+				},
 			},
 		},
 	}
@@ -785,10 +798,10 @@ func anvilCouncilObject(namespace string) *agentsv1alpha1.AgentCouncil {
 		},
 		Spec: agentsv1alpha1.AgentCouncilSpec{
 			Description:   "Anvil agent council: talk to Anvil or a member. Anvil's harness decides delegation. Members reply as themselves and may message peers.",
-			CouncilPrompt: "Anvil agent is in charge. A message to Anvil goes through the council-llm harness, which decides conferral and delegation. A message to a member is a conversation with that agent; they may address Anvil or peers. Interrupt duplicate work. Mix harnesses on parallel delegates.",
+			CouncilPrompt: "Anvil agent is in charge. A message to Anvil goes through the council-llm harness, which decides conferral and delegation. A message to a member is a conversation with that agent; they may address Anvil or peers. Interrupt duplicate work. Work delegates use council-grok (grokBuild).",
 			Members: []agentsv1alpha1.AgentCouncilMemberSpec{
 				{Role: "controller", ProfileRef: agentsv1alpha1.NamespacedObjectReference{Name: anvilAgentProfileName}, Description: "Anvil agent"},
-				{Role: "researcher", ProfileRef: agentsv1alpha1.NamespacedObjectReference{Name: councilResearcherProfile}, Description: "Inventory on a custom harness"},
+				{Role: "researcher", ProfileRef: agentsv1alpha1.NamespacedObjectReference{Name: councilResearcherProfile}, Description: "Inventory on grokBuild"},
 				{Role: "implementer", ProfileRef: agentsv1alpha1.NamespacedObjectReference{Name: councilImplementerProfile}, Description: "Implement on grokBuild"},
 			},
 		},
