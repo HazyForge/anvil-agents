@@ -147,6 +147,9 @@ func (server *Server) handleUIConfig(writer http.ResponseWriter, _ *http.Request
 			"audiences": append([]string(nil), server.config.OIDC.Audiences...),
 			"scopes":    scopes,
 		},
+		"desktop": map[string]any{
+			"oidcClientId": strings.TrimSpace(server.config.UI.Desktop.OIDCClientID),
+		},
 		"composition": map[string]any{
 			"readEnabled":  server.config.Composition.ReadEnabled,
 			"writeEnabled": server.config.Composition.WriteEnabled,

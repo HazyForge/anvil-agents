@@ -186,6 +186,10 @@ api:
       oidc:
         clientId: ""
         scopes: []
+      # Public Native PKCE client id for Anvil Agents Desktop. Served as
+      # ui-config.json desktop.oidcClientId. Do not reuse ui.oidc.clientId.
+      desktop:
+        oidcClientId: ""
     # Composition library (profiles, skill/tool sets, volumes, harness).
     # GitOps-owned objects remain read-only even when writeEnabled is true;
     # only console-managed objects (label managed-by=anvil-agents-console)

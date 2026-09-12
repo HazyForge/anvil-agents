@@ -38,6 +38,43 @@ stream:
 	if config.Stream.MaxTailLines != 10_000 || len(config.Authorization.RoleClaims) != 1 || len(config.Authorization.RoleObjectClaims) != 0 {
 		t.Fatalf("expected defaults to survive partial config: %#v", config)
 	}
+	if config.UI.Desktop.OIDCClientID != "" {
+		t.Fatalf("expected empty desktop oidcClientId by default, got %q", config.UI.Desktop.OIDCClientID)
+	}
+}
+
+func TestLoadConfigParsesDesktopOIDCClientID(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	contents := `
+bindAddress: ":9090"
+oidc:
+  issuer: https://issuer.example
+  audiences: [anvil-agents]
+authorization:
+  bindings:
+    - name: viewers
+      roles: [viewer]
+      permissions: [anvil-agents:runs:read]
+      namespaces: [agents]
+ui:
+  oidc:
+    clientId: console-client
+  desktop:
+    oidcClientId: "  desktop-native-client  "
+`
+	if err := os.WriteFile(path, []byte(contents), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	config, err := LoadConfig(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if config.UI.OIDC.ClientID != "console-client" {
+		t.Fatalf("console clientId = %q", config.UI.OIDC.ClientID)
+	}
+	if config.UI.Desktop.OIDCClientID != "desktop-native-client" {
+		t.Fatalf("desktop oidcClientId = %q", config.UI.Desktop.OIDCClientID)
+	}
 }
 
 func TestLoadConfigRejectsUnknownField(t *testing.T) {
