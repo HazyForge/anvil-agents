@@ -15,9 +15,11 @@ Anvil Agents Desktop listens on loopback only (`127.0.0.1`):
 - **Wrapper** (`/wrapper`): create_agent and anvil-api (list/get/create runs)
 - **Local** (`/local`): second function — activate already-installed Codex, Grok, OpenCode on native PATH or WSL
 
-Register `http://127.0.0.1:1738/auth/callback` on the API's OIDC client. The
-API must already have exact issuer, audience, claim binding, namespace
-authorization, and CORS origins; Desktop does not loosen those rules.
+Register `http://127.0.0.1:1738/auth/callback` on the **Native** OIDC client
+(`desktop.oidcClientId` in ui-config). Prefer that id over Console
+`oidc.clientId`. The API must already have exact issuer, audience, claim
+binding, namespace authorization, and CORS origins; Desktop does not loosen
+those rules.
 
 The client is standard OIDC (Authorization Code + PKCE), the same pattern as
 `web/console`. Production IdP is **Zitadel**. Kind tests use a local issuer.

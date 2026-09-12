@@ -1,6 +1,8 @@
 package desktop
 
 import (
+	"bytes"
+	"compress/gzip"
 	"context"
 	"encoding/json"
 	"net/http"
@@ -74,12 +76,20 @@ func TestDesktopOIDCClientID(t *testing.T) {
 	if got := desktopOIDCClientID("", map[string]any{}); got != "" {
 		t.Fatalf("empty should keep API client id, got %q", got)
 	}
-	body := map[string]any{"desktop": map[string]any{"oidcClientId": "from-gitops"}}
-	if got := desktopOIDCClientID("", body); got != "from-gitops" {
-		t.Fatalf("gitops = %q", got)
+	const consoleID = "383499920822362966"
+	both := map[string]any{
+		"oidc":    map[string]any{"clientId": consoleID},
+		"desktop": map[string]any{"oidcClientId": "from-gitops"},
 	}
-	if got := desktopOIDCClientID("cli-override", body); got != "cli-override" {
+	if got := desktopOIDCClientID("", both); got != "from-gitops" {
+		t.Fatalf("Native must win over Console User-Agent, got %q", got)
+	}
+	if got := desktopOIDCClientID("cli-override", both); got != "cli-override" {
 		t.Fatalf("cli = %q", got)
+	}
+	consoleOnly := map[string]any{"oidc": map[string]any{"clientId": consoleID}}
+	if got := desktopOIDCClientID("", consoleOnly); got != "" {
+		t.Fatalf("missing Native must not invent a client id, got %q", got)
 	}
 	if DefaultOIDCClientID != "anvil-agents-desktop" {
 		t.Fatalf("Kind/desktop PKCE pattern = %q", DefaultOIDCClientID)
@@ -287,5 +297,134 @@ func TestRewriteUIConfigUsesDesktopClient(t *testing.T) {
 	}
 	if !strings.Contains(rec.Body.String(), `"clientId":"`+DefaultOIDCClientID+`"`) {
 		t.Fatalf("expected desktop.oidcClientId rewrite, got %s", rec.Body.String())
+	}
+	if strings.Contains(rec.Body.String(), `"clientId":"anvil-agents-console"`) {
+		t.Fatalf("Console client must not remain once Native exists: %s", rec.Body.String())
+	}
+}
+
+func TestDecodeMaybeGzip(t *testing.T) {
+	raw := []byte(`{"ok":true}`)
+	got, uncompressed, err := decodeMaybeGzip(raw, "")
+	if err != nil || uncompressed || string(got) != string(raw) {
+		t.Fatalf("identity: got %q uncompressed=%v err=%v", got, uncompressed, err)
+	}
+	compressed := gzipJSON(t, map[string]bool{"ok": true})
+	got, uncompressed, err = decodeMaybeGzip(compressed, "gzip")
+	if err != nil || !uncompressed || string(got) != `{"ok":true}` {
+		t.Fatalf("gzip: got %q uncompressed=%v err=%v", got, uncompressed, err)
+	}
+	if _, _, err := decodeMaybeGzip(compressed, "br"); err == nil {
+		t.Fatal("expected unsupported encoding error")
+	}
+}
+
+func gzipJSON(t *testing.T, value any) []byte {
+	t.Helper()
+	raw, err := json.Marshal(value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var buf bytes.Buffer
+	writer := gzip.NewWriter(&buf)
+	if _, err := writer.Write(raw); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return buf.Bytes()
+}
+
+func TestRewriteUIConfigGzipPrefersNativeOverConsole(t *testing.T) {
+	const consoleID = "383499920822362966"
+	const nativeID = "native-from-gitops"
+	compressed := gzipJSON(t, map[string]any{
+		"oidc":    map[string]string{"issuer": "https://auth.example.com", "clientId": consoleID},
+		"desktop": map[string]any{"oidcClientId": nativeID},
+	})
+	upstream := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path != "/ui-config.json" {
+			http.NotFound(writer, request)
+			return
+		}
+		writer.Header().Set("Content-Encoding", "gzip")
+		writer.Header().Set("Content-Type", "application/json")
+		_, _ = writer.Write(compressed)
+	}))
+	t.Cleanup(upstream.Close)
+	server, err := NewServer(Options{
+		Listen:    "127.0.0.1:0",
+		ConfigDir: t.TempDir(),
+		APIOrigin: upstream.URL,
+		Transport: &http.Transport{DisableCompression: true},
+		Discoverer: Discoverer{
+			LookPath: func(string) (string, error) { return "", os.ErrNotExist },
+			WSL:      WSLRunner{LookExe: func() (string, error) { return "", os.ErrNotExist }},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodGet, "/ui-config.json", nil)
+	req.Header.Set("Accept-Encoding", "gzip")
+	rec := httptest.NewRecorder()
+	server.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("ui-config HTTP %d %s", rec.Code, rec.Body.String())
+	}
+	if rec.Header().Get("Content-Encoding") != "" {
+		t.Fatalf("expected uncompressed rewrite, got encoding %q body %s", rec.Header().Get("Content-Encoding"), rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `"clientId":"`+nativeID+`"`) {
+		t.Fatalf("expected Native clientId, got %s", rec.Body.String())
+	}
+	if strings.Contains(rec.Body.String(), `"clientId":"`+consoleID+`"`) {
+		t.Fatalf("Console User-Agent client must not win once Native exists: %s", rec.Body.String())
+	}
+}
+
+func TestRewriteUIConfigKeepsConsoleWhenNativeMissing(t *testing.T) {
+	const consoleID = "383499920822362966"
+	compressed := gzipJSON(t, map[string]any{
+		"oidc": map[string]string{"issuer": "https://auth.example.com", "clientId": consoleID},
+	})
+	upstream := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path != "/ui-config.json" {
+			http.NotFound(writer, request)
+			return
+		}
+		writer.Header().Set("Content-Encoding", "gzip")
+		writer.Header().Set("Content-Type", "application/json")
+		_, _ = writer.Write(compressed)
+	}))
+	t.Cleanup(upstream.Close)
+	server, err := NewServer(Options{
+		Listen:    "127.0.0.1:0",
+		ConfigDir: t.TempDir(),
+		APIOrigin: upstream.URL,
+		Transport: &http.Transport{DisableCompression: true},
+		Discoverer: Discoverer{
+			LookPath: func(string) (string, error) { return "", os.ErrNotExist },
+			WSL:      WSLRunner{LookExe: func() (string, error) { return "", os.ErrNotExist }},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodGet, "/ui-config.json", nil)
+	rec := httptest.NewRecorder()
+	server.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("ui-config HTTP %d %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `"clientId":"`+consoleID+`"`) {
+		t.Fatalf("Console fallback should remain when Native is absent: %s", rec.Body.String())
+	}
+	if strings.Contains(rec.Body.String(), `"clientId":"`+DefaultOIDCClientID+`"`) {
+		t.Fatalf("must not substitute Kind pattern for missing Native: %s", rec.Body.String())
+	}
+	if strings.Contains(rec.Body.String(), `"oidcClientId"`) {
+		t.Fatalf("must not invent desktop.oidcClientId: %s", rec.Body.String())
 	}
 }

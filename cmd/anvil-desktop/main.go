@@ -26,7 +26,7 @@ func run(ctx context.Context, args []string) int {
 	apiOrigin := flags.String("api-origin", desktop.DefaultAPIOrigin, "anvil-agents OIDC API origin (http or https). Defaults to Anvil Primaris. Not a kube-apiserver.")
 	configDir := flags.String("config-dir", "", "Directory for desktop prefs. Defaults to the user config dir.")
 	pathDirs := flags.String("path", "", "PATH-formatted directories to search for harness CLIs. When set, only these directories are searched.")
-	oidcClientID := flags.String("oidc-client-id", "", "Override ui-config oidc.clientId. Empty keeps desktop.oidcClientId from ui-config, else anvil-agents-desktop.")
+	oidcClientID := flags.String("oidc-client-id", "", "Override the PKCE client id. Empty uses desktop.oidcClientId from ui-config (Native), else the API oidc.clientId (Console). Kind tests pass anvil-agents-desktop.")
 	oidcRedirectPath := flags.String("oidc-redirect-path", "", "Override OIDC redirect path (default /auth/callback). Kind desktop client uses /callback.")
 	harnessTarget := flags.String("harness-target", "", "Where to discover and run catalog CLIs: native, wsl, or empty (auto).")
 	wslDistro := flags.String("wsl-distro", "", "WSL distro for Operate on WSL. Empty uses the default distro.")

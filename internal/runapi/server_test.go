@@ -382,6 +382,30 @@ func TestUIConfigExposesPublicOIDCSettings(t *testing.T) {
 	if csp := response.Header().Get("Content-Security-Policy"); !strings.Contains(csp, "default-src 'none'") {
 		t.Fatalf("expected API CSP for ui-config, got %q", csp)
 	}
+	if strings.Contains(body, `"desktop"`) {
+		t.Fatalf("empty desktop.oidcClientId must omit desktop from ui-config, got %s", body)
+	}
+}
+
+func TestUIConfigIncludesDesktopClientID(t *testing.T) {
+	server := testServer(t, nil, staticAuthenticator{ready: true}, staticLogSource{})
+	server.config.UI.OIDC.ClientID = "console-client"
+	server.config.UI.Desktop.OIDCClientID = "native-desktop-pkce"
+	server.config.OIDC.Issuer = "https://issuer.example"
+	server.config.OIDC.Audiences = []string{"anvil-agents"}
+	request := httptest.NewRequest(http.MethodGet, "/ui-config.json", nil)
+	response := httptest.NewRecorder()
+	server.routes().ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected ui-config 200, got %d %s", response.Code, response.Body.String())
+	}
+	body := response.Body.String()
+	if !strings.Contains(body, `"oidcClientId":"native-desktop-pkce"`) {
+		t.Fatalf("ui-config missing desktop.oidcClientId in %s", body)
+	}
+	if !strings.Contains(body, `"clientId":"console-client"`) {
+		t.Fatalf("console oidc.clientId must remain the Console client, got %s", body)
+	}
 }
 
 func TestCORSRequiresExactConfiguredOrigin(t *testing.T) {

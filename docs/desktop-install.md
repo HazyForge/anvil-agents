@@ -47,10 +47,10 @@ Uninstall: `Anvil-Agents-Desktop-Setup.exe --uninstall` or
 
 The host listens on **`http://127.0.0.1:1738`** only. The process defaults to
 API origin `https://agents.anvil.hazyforge.io`. Sign-in uses `{apiOrigin}/ui-config.json`
-(issuer/audience/client id). Until GitOps writes `desktop.oidcClientId`, that
-document's `oidc.clientId` is the console PKCE app. Register
-`http://127.0.0.1:1738/auth/callback` on the desktop PKCE client when it is
-assigned (`anvil-agents-desktop` / Native key `anvil_agents_desktop`).
+(issuer/audience). Prefer `desktop.oidcClientId` (Zitadel Native PKCE). Do not
+stay on Console `oidc.clientId` once Native exists; the sign-in gate warns if
+that field is still missing. Register `http://127.0.0.1:1738/auth/callback` on
+the Native app (`anvil-agents-desktop` / Zitadel key `anvil_agents_desktop`).
 
 ## Linux
 

@@ -135,6 +135,8 @@ export default function App() {
       apiMessage={snapshot.api.message}
       apiReachable={snapshot.api.reachable}
       issuer={config?.oidc.issuer}
+      oidcClientId={config?.oidc.clientId}
+      oidcClientSource={config?.desktop?.oidcClientSource}
       stubSession={Boolean(config?.desktop?.stubSession)}
       error={configError}
       busy={busy}

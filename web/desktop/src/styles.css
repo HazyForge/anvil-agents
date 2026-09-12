@@ -271,6 +271,7 @@ a { color: var(--teal); text-decoration: none; }
 .banner { border: 1px solid var(--border); padding: 0.55rem 0.7rem; font-size: 0.8rem; }
 .banner-info { border-color: rgba(106, 169, 255, 0.35); color: #b7d2ff; background: rgba(40, 70, 120, 0.18); }
 .banner-ok { border-color: rgba(61, 255, 168, 0.35); color: #b7ffe0; background: rgba(26, 158, 104, 0.12); }
+.banner-warn { border-color: rgba(240, 180, 41, 0.4); color: #ffe0a0; background: rgba(138, 100, 20, 0.15); }
 .banner-error { border-color: rgba(255, 92, 92, 0.35); color: #ffd0d0; background: rgba(143, 47, 47, 0.18); margin-bottom: 0.75rem; }
 
 .hint {

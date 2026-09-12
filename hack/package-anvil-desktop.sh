@@ -99,8 +99,10 @@ cluster agents on Anvil Primaris (default apiOrigin
 https://agents.anvil.hazyforge.io). Chat and Wrapper are the product.
 Second function: Local page activates already-installed grok/Codex/OpenCode
 (native PATH or WSL). Local does not replace Chat/Wrapper.
-OIDC: Authorization Code + PKCE, provider-neutral. Client id anvil-agents-desktop
-until {apiOrigin}/ui-config.json desktop.oidcClientId is set by GitOps.
+OIDC: Authorization Code + PKCE, provider-neutral. Prefer desktop.oidcClientId
+from {apiOrigin}/ui-config.json (Zitadel Native). Console oidc.clientId is a
+visible fallback only when Native is absent. Kind pattern anvil-agents-desktop
+(--oidc-client-id). Redirect http://127.0.0.1:1738/auth/callback.
 
 Windows install
 ---------------
@@ -131,7 +133,8 @@ Sign-in (main)
 --------------
 1. Default OIDC API origin is https://agents.anvil.hazyforge.io
 2. Sign in with OIDC. Redirect: http://127.0.0.1:1738/auth/callback
-3. Register that redirect on the desktop PKCE client (anvil-agents-desktop).
+3. Register that redirect on the Native PKCE client (anvil-agents-desktop /
+   Zitadel Native). Prefer desktop.oidcClientId from ui-config.json.
 4. Chat and Wrapper talk to Primaris agents. There is no kube UI.
 
 Uninstall (Windows): Anvil-Agents-Desktop-Setup.exe --uninstall

@@ -241,4 +241,15 @@ for deployment in "${deployments[@]}"; do
   [[ "${#deployment}" -le 63 ]] || fail "Deployment name exceeds 63 characters: ${deployment}"
 done
 
+if ! grep -A2 'desktop:' "${tmp_dir}/enabled.yaml" | grep -q 'oidcClientId: ""'; then
+  fail "chart must declare empty ui.desktop.oidcClientId"
+fi
+helm template "${release}" "${chart}" "${api_args[@]}" \
+  --set-string api.config.ui.desktop.oidcClientId=native-desktop-pkce \
+  --show-only templates/api-configmap.yaml >"${tmp_dir}/desktop-oidc.yaml"
+grep -q 'oidcClientId: native-desktop-pkce' "${tmp_dir}/desktop-oidc.yaml" || fail "desktop.oidcClientId was not rendered"
+if grep -q '383499920822362966' "${tmp_dir}/desktop-oidc.yaml"; then
+  fail "chart must not pin the Console User-Agent client as desktop.oidcClientId"
+fi
+
 printf 'AgentRun API chart contract passed\n'

@@ -90,14 +90,24 @@ type UIConfig struct {
 	DefaultNamespaces []string `json:"defaultNamespaces"`
 	// OIDC holds public Authorization Code + PKCE client settings.
 	OIDC UIOIDCConfig `json:"oidc"`
+	// Desktop is public Native PKCE client settings for Anvil Agents Desktop.
+	Desktop DesktopUIConfig `json:"desktop"`
 }
 
 // UIOIDCConfig is served to the browser as non-secret OIDC client config.
 type UIOIDCConfig struct {
-	// ClientID is the public SPA / user-agent OIDC client id.
+	// ClientID is the public SPA / user-agent OIDC client id (Anvil Agents Console).
 	ClientID string `json:"clientId"`
 	// Scopes are requested during authorization. Empty uses console defaults.
 	Scopes []string `json:"scopes"`
+}
+
+// DesktopUIConfig is served on ui-config.json for Anvil Agents Desktop.
+type DesktopUIConfig struct {
+	// OIDCClientID is the public Native PKCE client id (Zitadel Native app).
+	// Empty omits desktop.oidcClientId so Desktop can warn instead of silently
+	// using the Console User-Agent client.
+	OIDCClientID string `json:"oidcClientId"`
 }
 
 type ListConfig struct {
@@ -238,6 +248,8 @@ func (config *Config) normalize() {
 	config.Authorization.GroupClaims = uniqueStrings(config.Authorization.GroupClaims, false)
 	config.Authorization.NamespaceClaim = strings.TrimSpace(config.Authorization.NamespaceClaim)
 	config.CORS.AllowedOrigins = uniqueStrings(config.CORS.AllowedOrigins, false)
+	config.UI.OIDC.ClientID = strings.TrimSpace(config.UI.OIDC.ClientID)
+	config.UI.Desktop.OIDCClientID = strings.TrimSpace(config.UI.Desktop.OIDCClientID)
 	for i := range config.Authorization.Bindings {
 		binding := &config.Authorization.Bindings[i]
 		binding.Name = strings.TrimSpace(binding.Name)

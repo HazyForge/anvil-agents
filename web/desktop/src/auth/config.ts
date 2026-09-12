@@ -1,6 +1,8 @@
 import { apiURL } from "../api/client";
 import { PRODUCT_TITLE } from "../product";
 
+export type OIDCClientSource = "native" | "console";
+
 export type UIConfig = {
   productTitle: string;
   defaultNamespaces: string[];
@@ -32,20 +34,33 @@ export type UIConfig = {
     stubSession?: boolean;
     oidcRedirectPath?: string;
     oidcClientId?: string;
+    oidcClientSource?: OIDCClientSource;
   };
 };
 
 let cached: UIConfig | null = null;
 let inflight: Promise<UIConfig> | null = null;
 
-function desktopOIDCClientId(body: UIConfig): string {
-  const raw = body.desktop?.oidcClientId;
-  return typeof raw === "string" ? raw.trim() : "";
-}
-
 export function clearUIConfigCache(): void {
   cached = null;
   inflight = null;
+}
+
+function trimString(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+/** Prefer Zitadel Native PKCE. Never keep Console once desktop.oidcClientId exists. */
+export function selectDesktopOIDCClient(body: {
+  oidc?: { clientId?: unknown };
+  desktop?: { oidcClientId?: unknown };
+}): { clientId: string; source: OIDCClientSource } {
+  const native = trimString(body.desktop?.oidcClientId);
+  const consoleId = trimString(body.oidc?.clientId);
+  if (native) {
+    return { clientId: native, source: "native" };
+  }
+  return { clientId: consoleId, source: "console" };
 }
 
 export async function loadUIConfig(force = false): Promise<UIConfig> {
@@ -64,9 +79,8 @@ export async function loadUIConfig(force = false): Promise<UIConfig> {
       throw new Error(`ui-config unavailable (${response.status})`);
     }
     const body = (await response.json()) as UIConfig;
-    const nativeClientId = desktopOIDCClientId(body);
-    const clientId = nativeClientId || body?.oidc?.clientId;
-    if (!body?.oidc?.issuer || !clientId) {
+    const selected = selectDesktopOIDCClient(body);
+    if (!body?.oidc?.issuer || !selected.clientId) {
       throw new Error("ui-config missing oidc.issuer or a PKCE client id");
     }
     const composition = body.composition;
@@ -79,8 +93,7 @@ export async function loadUIConfig(force = false): Promise<UIConfig> {
       defaultNamespaces: Array.isArray(body.defaultNamespaces) ? body.defaultNamespaces : [],
       oidc: {
         issuer: body.oidc.issuer.replace(/\/+$/, ""),
-        // Prefer Native Desktop client; fall back to console User-Agent until GitOps fills desktop.oidcClientId.
-        clientId,
+        clientId: selected.clientId,
         audiences: Array.isArray(body.oidc.audiences) ? body.oidc.audiences : [],
         scopes:
           Array.isArray(body.oidc.scopes) && body.oidc.scopes.length > 0
@@ -111,7 +124,8 @@ export async function loadUIConfig(force = false): Promise<UIConfig> {
           typeof desktop?.oidcRedirectPath === "string" && desktop.oidcRedirectPath.startsWith("/")
             ? desktop.oidcRedirectPath
             : undefined,
-        oidcClientId: nativeClientId || undefined,
+        oidcClientId: selected.source === "native" ? selected.clientId : undefined,
+        oidcClientSource: selected.source,
       },
     };
     return cached;

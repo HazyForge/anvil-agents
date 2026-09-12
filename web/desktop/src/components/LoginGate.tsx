@@ -2,12 +2,15 @@ import { useEffect, useState } from "react";
 import { beginLogin } from "../auth/oidc";
 import { saveStubSession } from "../auth/session";
 import { DEFAULT_API_ORIGIN, PRODUCT_TITLE } from "../product";
+import type { OIDCClientSource } from "../auth/config";
 
 interface Props {
   apiOrigin: string;
   apiMessage?: string;
   apiReachable?: boolean;
   issuer?: string;
+  oidcClientId?: string;
+  oidcClientSource?: OIDCClientSource;
   stubSession?: boolean;
   error?: string | null;
   busy?: boolean;
@@ -25,6 +28,8 @@ export function LoginGate({
   apiMessage,
   apiReachable = false,
   issuer,
+  oidcClientId,
+  oidcClientSource,
   stubSession = false,
   error = null,
   busy = false,
@@ -65,6 +70,7 @@ export function LoginGate({
   }
 
   const allowStub = stubSession && isLoopbackHost();
+  const redirect = `${window.location.origin}/auth/callback`;
 
   return (
     <div className="panel token-gate">
@@ -89,9 +95,22 @@ export function LoginGate({
       </div>
       {issuer ? (
         <p className="muted">
-          Issuer from ui-config: <span className="mono">{issuer}</span>. Register redirect{" "}
-          <span className="mono">{window.location.origin}/auth/callback</span> on that OIDC client.
+          Issuer from ui-config: <span className="mono">{issuer}</span>. Native redirect{" "}
+          <span className="mono">{redirect}</span>.
         </p>
+      ) : null}
+      {oidcClientSource === "native" && oidcClientId ? (
+        <p className="muted">
+          Native PKCE client <span className="mono">{oidcClientId}</span>.
+        </p>
+      ) : null}
+      {oidcClientSource === "console" && oidcClientId ? (
+        <div className="banner banner-warn">
+          ui-config has no <span className="mono">desktop.oidcClientId</span>. Signing in with the
+          Console User-Agent client <span className="mono">{oidcClientId}</span>, not Native. Register{" "}
+          <span className="mono">{redirect}</span> on the Native app when GitOps publishes that id.
+          Cluster agents stay the product.
+        </div>
       ) : null}
       {error ? <div className="banner banner-error">{error}</div> : null}
       {signInError ? <div className="banner banner-error">{signInError}</div> : null}

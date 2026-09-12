@@ -2,7 +2,9 @@ package desktop
 
 import (
 	"bytes"
+	"compress/gzip"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httputil"
@@ -12,6 +14,8 @@ import (
 	"strings"
 	"time"
 )
+
+var errUnsupportedUIConfigEncoding = errors.New("unsupported ui-config content-encoding")
 
 func proxyPathAllowed(method, rawPath string) bool {
 	cleaned := path.Clean("/" + strings.TrimPrefix(strings.TrimSpace(rawPath), "/"))
@@ -67,6 +71,12 @@ func (s *Server) handleAPIProxy(writer http.ResponseWriter, request *http.Reques
 		req.Header.Del("Forwarded")
 		req.Header.Del("X-Forwarded-Host")
 		req.Header.Set("X-Forwarded-Proto", target.Scheme)
+		if path.Clean("/"+strings.TrimPrefix(req.URL.Path, "/")) == "/ui-config.json" {
+			// Drop client gzip so Transport can decode, and so rewriteUIConfig
+			// can prefer desktop.oidcClientId instead of leaving a compressed
+			// Console User-Agent clientId in place.
+			req.Header.Del("Accept-Encoding")
+		}
 	}
 	proxy.ModifyResponse = func(resp *http.Response) error {
 		resp.Header.Del("Set-Cookie")
@@ -79,17 +89,19 @@ func (s *Server) handleAPIProxy(writer http.ResponseWriter, request *http.Reques
 }
 
 func (s *Server) rewriteUIConfig(resp *http.Response) error {
-	if strings.TrimSpace(resp.Header.Get("Content-Encoding")) != "" {
-		return nil
-	}
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	_ = resp.Body.Close()
 	if err != nil {
 		resp.Body = io.NopCloser(bytes.NewReader(nil))
 		return err
 	}
+	decoded, uncompressed, err := decodeMaybeGzip(raw, resp.Header.Get("Content-Encoding"))
+	if err != nil {
+		resp.Body = io.NopCloser(bytes.NewReader(raw))
+		return nil
+	}
 	var body map[string]any
-	if err := json.Unmarshal(raw, &body); err != nil {
+	if err := json.Unmarshal(decoded, &body); err != nil {
 		resp.Body = io.NopCloser(bytes.NewReader(raw))
 		resp.ContentLength = int64(len(raw))
 		return nil
@@ -106,8 +118,8 @@ func (s *Server) rewriteUIConfig(resp *http.Response) error {
 	if path := strings.TrimSpace(s.opts.OIDCRedirectPath); path != "" {
 		desktop["oidcRedirectPath"] = path
 	}
-	body["desktop"] = desktop
 	if clientID := desktopOIDCClientID(s.opts.OIDCClientID, body); clientID != "" {
+		desktop["oidcClientId"] = clientID
 		oidc, _ := body["oidc"].(map[string]any)
 		if oidc == nil {
 			oidc = map[string]any{}
@@ -115,17 +127,44 @@ func (s *Server) rewriteUIConfig(resp *http.Response) error {
 		}
 		oidc["clientId"] = clientID
 	}
+	body["desktop"] = desktop
 	rewritten, err := json.Marshal(body)
 	if err != nil {
 		resp.Body = io.NopCloser(bytes.NewReader(raw))
 		resp.ContentLength = int64(len(raw))
 		return nil
 	}
+	if uncompressed {
+		resp.Header.Del("Content-Encoding")
+	}
 	resp.Body = io.NopCloser(bytes.NewReader(rewritten))
 	resp.ContentLength = int64(len(rewritten))
 	resp.Header.Set("Content-Length", strconv.Itoa(len(rewritten)))
 	resp.Header.Set("Content-Type", "application/json")
 	return nil
+}
+
+func decodeMaybeGzip(raw []byte, encodingHeader string) (decoded []byte, uncompressed bool, err error) {
+	switch strings.ToLower(strings.TrimSpace(encodingHeader)) {
+	case "", "identity":
+		return raw, false, nil
+	case "gzip", "x-gzip":
+		reader, err := gzip.NewReader(bytes.NewReader(raw))
+		if err != nil {
+			return nil, false, err
+		}
+		out, err := io.ReadAll(io.LimitReader(reader, 1<<20))
+		closeErr := reader.Close()
+		if err != nil {
+			return nil, false, err
+		}
+		if closeErr != nil {
+			return nil, false, closeErr
+		}
+		return out, true, nil
+	default:
+		return nil, false, errUnsupportedUIConfigEncoding
+	}
 }
 
 func desktopOIDCClientID(cliOverride string, body map[string]any) string {
@@ -137,8 +176,9 @@ func desktopOIDCClientID(cliOverride string, body map[string]any) string {
 			return strings.TrimSpace(id)
 		}
 	}
-	// Keep the API's oidc.clientId (live Primaris currently serves the console
-	// PKCE app). DefaultOIDCClientID is the Kind/desktop pattern until GitOps
-	// writes desktop.oidcClientId.
+	// Empty keeps the API's oidc.clientId (Console User-Agent PKCE). Do not
+	// substitute DefaultOIDCClientID: that Kind pattern name is not the
+	// Zitadel Native app, and the SPA must warn instead of silently staying
+	// on Console once desktop.oidcClientId exists.
 	return ""
 }

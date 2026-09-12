@@ -10,9 +10,10 @@ const ProductTitle = "Anvil Agents Desktop"
 // --api-origin to a loopback issuer instead.
 const DefaultAPIOrigin = "https://agents.anvil.hazyforge.io"
 
-// DefaultOIDCClientID is the public PKCE client id for Anvil Agents Desktop.
-// Production IdP is Zitadel; Kind uses the same client id pattern. Prefer
-// desktop.oidcClientId from {apiOrigin}/ui-config.json when GitOps writes it.
+// DefaultOIDCClientID is the Kind/desktop PKCE pattern name for tests
+// (`--oidc-client-id`). Production Desktop prefers desktop.oidcClientId from
+// {apiOrigin}/ui-config.json (Zitadel Native). Do not use this string as a
+// silent fallback when the Native id is missing.
 const DefaultOIDCClientID = "anvil-agents-desktop"
 
 const (

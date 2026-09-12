@@ -39,16 +39,17 @@ auth files (`~/.codex/auth.json`, and so on).
 ## OIDC session (same as the console)
 
 Desktop loads `{apiOrigin}/ui-config.json` (unauthenticated) for issuer,
-audiences, client id, scopes, and feature flags. Until GitOps writes
-`desktop.oidcClientId`, Desktop keeps the API's `oidc.clientId` (live Primaris
-currently serves the console PKCE app). The Kind/desktop pattern name is
-`anvil-agents-desktop` (`--oidc-client-id` or `desktop.oidcClientId` when that
-client exists). Login is Authorization Code + PKCE (S256), the same
-provider-neutral flow as `web/console`. `state` / `nonce` / verifier live in
-`sessionStorage` under `anvil-agents-desktop.*` keys, then are removed. The
-access token stays in memory/`sessionStorage`. Redirect is
-`{origin}/auth/callback`; after exchange the app strips `code` and `state` from
-the address bar.
+audiences, client id, scopes, and feature flags. Prefer
+`desktop.oidcClientId` (Zitadel Native PKCE). Do not stay on the Console
+User-Agent `oidc.clientId` once that Native id exists. When the field is
+absent, Desktop still signs in with Console and shows a warning. The
+Kind/desktop pattern name is `anvil-agents-desktop` (`--oidc-client-id` in
+tests). Login is Authorization Code + PKCE (S256), the same provider-neutral
+flow as `web/console`. `state` / `nonce` / verifier live in `sessionStorage`
+under `anvil-agents-desktop.*` keys, then are removed. The access token stays
+in memory/`sessionStorage`. Redirect is `{origin}/auth/callback`
+(`http://127.0.0.1:1738/auth/callback` on the installed host); after exchange
+the app strips `code` and `state` from the address bar.
 
 Production IdP is **Zitadel**. Tests use a **local Kind issuer**, not production
 Zitadel. The desktop does not embed Zitadel APIs; switching IdPs is
@@ -56,10 +57,10 @@ Zitadel. The desktop does not embed Zitadel APIs; switching IdPs is
 
 The loopback host reverse-proxies `/api/` and `/ui-config.json` to the
 configured API origin so the SPA is same-origin. Register
-`http://127.0.0.1:1738/auth/callback` on the OIDC client (Kind client for
-tests; Zitadel client in production). Vite dev
-(`http://127.0.0.1:5174/auth/callback`) needs the same if you sign in there.
-Prefer `anvil-desktop --ui-dir` for real login.
+`http://127.0.0.1:1738/auth/callback` on the **Native** OIDC client (Kind
+client `anvil-agents-desktop` for tests; Zitadel Native `anvil_agents_desktop`
+in production). Vite dev (`http://127.0.0.1:5174/auth/callback`) needs the
+same if you sign in there. Prefer `anvil-desktop --ui-dir` for real login.
 
 AGENTS.md still applies: deny by default, exact issuer/audience/claim binding
 and namespace authorization on the API, no Secret access, AgentRuns are

@@ -186,6 +186,13 @@ api:
       oidc:
         clientId: ""
         scopes: []
+      # Public Native PKCE client id for Anvil Agents Desktop. Empty omits
+      # desktop.oidcClientId from ui-config.json so Desktop warns instead of
+      # silently using the Console User-Agent client. GitOps sets the Zitadel
+      # Native app id after identity tofu assigns it. Do not copy the Console
+      # clientId here.
+      desktop:
+        oidcClientId: ""
     # Composition library (profiles, skill/tool sets, volumes, harness).
     # GitOps-owned objects remain read-only even when writeEnabled is true;
     # only console-managed objects (label managed-by=anvil-agents-console)
