@@ -1,12 +1,14 @@
 # Install Anvil Agents Desktop
 
-**Anvil Agents Desktop** is the workstation wrapper for the anvil-agents OIDC
-API and for local harness CLIs. The process binary stays `anvil-desktop`.
-User-visible name, shortcuts, and window title are **Anvil Agents Desktop**.
+**Anvil Agents Desktop** is the workstation process that signs in to the
+anvil-agents OIDC API (Anvil Primaris) and talks to cluster agents. Chat and
+Wrapper are the product. Local harness activation is a **second** page. The
+process binary stays `anvil-desktop`. User-visible name, shortcuts, and window
+title are **Anvil Agents Desktop**.
 
-This is not Anvil Desktop, Anvil Hub, or a kube UI. Remote API origin is **Anvil
-Primaris** or another configured `apiOrigin`. Local harness processes never
-receive the OIDC token.
+This is not Anvil Desktop, Anvil Hub, or a kube UI. Default `apiOrigin` is
+`https://agents.anvil.hazyforge.io`. Local harness processes never receive the
+OIDC token.
 
 ## Build artifacts
 
@@ -43,8 +45,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1
 Uninstall: `Anvil-Agents-Desktop-Setup.exe --uninstall` or
 `install.ps1 -Uninstall`.
 
-The host listens on **`http://127.0.0.1:1738`** only. Set API origin to
-`https://agents.anvil.hazyforge.io`. Sign-in uses `{apiOrigin}/ui-config.json`
+The host listens on **`http://127.0.0.1:1738`** only. The process defaults to
+API origin `https://agents.anvil.hazyforge.io`. Sign-in uses `{apiOrigin}/ui-config.json`
 (issuer/audience/client id). Until GitOps writes `desktop.oidcClientId`, that
 document's `oidc.clientId` is the console PKCE app. Register
 `http://127.0.0.1:1738/auth/callback` on the desktop PKCE client when it is
@@ -75,11 +77,10 @@ argv, env, or prompt files.
 
 ## After install
 
-1. Launch Anvil Agents Desktop.
-2. Set OIDC API origin to `https://agents.anvil.hazyforge.io` (or another `apiOrigin`).
-3. Sign in with OIDC (Authorization Code + PKCE). Production IdP is Zitadel.
-4. On Local, choose Operate on WSL if you work in WSL.
-5. Wrapper → local-harness delegates without copying the bearer token.
+1. Launch Anvil Agents Desktop (`anvil-desktop --open`). The process calls Primaris.
+2. Sign in with OIDC (Authorization Code + PKCE). Production IdP is Zitadel.
+3. Use **Chat** and **Wrapper** to list and talk to cluster agents.
+4. **Local** is optional: activate already-installed grok/Codex (Operate on WSL when chosen). The bearer token is not copied into the CLI.
 
 Optional Electron wrap (`web/desktop/electron`) spawns the `anvil-desktop`
 sidecar from `extraResources` when packaged with electron-builder. The Go

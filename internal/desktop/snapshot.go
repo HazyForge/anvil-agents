@@ -62,10 +62,10 @@ func defaultWrapper() WrapperInfo {
 			{
 				ID:          "local-harness",
 				DisplayName: "local harness",
-				Notes:       "Delegate a prompt to a catalog CLI on native PATH or inside WSL (wsl.exe / default distro PATH). The CLI uses its own local auth files. The OIDC token is not copied into argv, env, or the prompt file.",
+				Notes:       "Second function, on the Local page: activate an already-installed catalog CLI (native PATH or WSL). Not Primaris chat. The OIDC token is not copied into argv, env, or the prompt file.",
 			},
 		},
-		Message: "Anvil Agents Desktop is a wrapper agent: create_agent, standing chat, and local-harness. Local harnesses can run on native PATH or inside WSL. The wrapper is the entity that can spawn more AgentRunProfiles. It is not a Kubernetes operator UI and not a second Anvil Agents Console.",
+		Message: "Anvil Agents Desktop is the workstation process that signs in to the anvil-agents OIDC API (Anvil Primaris) and talks to cluster agents. create_agent and standing chat are the main tools. Local harness activation is a separate page. This is not a Kubernetes operator UI.",
 	}
 }
 

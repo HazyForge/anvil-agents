@@ -23,7 +23,7 @@ func run(ctx context.Context, args []string) int {
 	flags := pflag.NewFlagSet("anvil-desktop", pflag.ContinueOnError)
 	listen := flags.String("listen", "127.0.0.1:1738", "Loopback address for Anvil Agents Desktop.")
 	uiDir := flags.String("ui-dir", "", "Directory of built web/desktop assets. Defaults to the embedded stub.")
-	apiOrigin := flags.String("api-origin", "", "anvil-agents OIDC API origin (http or https). Not a kube-apiserver.")
+	apiOrigin := flags.String("api-origin", desktop.DefaultAPIOrigin, "anvil-agents OIDC API origin (http or https). Defaults to Anvil Primaris. Not a kube-apiserver.")
 	configDir := flags.String("config-dir", "", "Directory for desktop prefs. Defaults to the user config dir.")
 	pathDirs := flags.String("path", "", "PATH-formatted directories to search for harness CLIs. When set, only these directories are searched.")
 	oidcClientID := flags.String("oidc-client-id", "", "Override ui-config oidc.clientId. Empty keeps desktop.oidcClientId from ui-config, else anvil-agents-desktop.")

@@ -1,21 +1,20 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 import { listChatMessages, listChatThreads } from "../api/chat";
 import { listRunProfiles, type CompositionDocument } from "../api/client";
-import type { Snapshot } from "../api/types";
 import type { UIConfig } from "../auth/config";
+import { personaLabel } from "../names";
 import { loadNamespace, saveNamespace } from "../state/namespace";
 import { dnsLabel, parseWrapperIntent, WRAPPER_PROFILE_NAME } from "../wrapper/intent";
 import { formatTurnError, runWrapperTurn, visibleFromChat, type EntityLine, type VisibleMessage } from "../wrapper/turn";
 
 interface Props {
-  snapshot: Snapshot;
   token: string;
   config: UIConfig;
 }
 
 const DEMO_PROMPT = "Create two agents named scout and cartographer, then have them greet each other.";
 
-export function EntityChatPage({ snapshot, token, config }: Props) {
+export function EntityChatPage({ token, config }: Props) {
   const fallbackNs = config.defaultNamespaces[0] || "agents";
   const [namespace, setNamespace] = useState(() => loadNamespace(fallbackNs));
   const [draft, setDraft] = useState("");
@@ -27,14 +26,11 @@ export function EntityChatPage({ snapshot, token, config }: Props) {
   const [room, setRoom] = useState<EntityLine[]>([]);
   const [wrapperThreadId, setWrapperThreadId] = useState<string | null>(null);
   const [chatLive, setChatLive] = useState(Boolean(config.chat?.enabled));
+  const [selected, setSelected] = useState<string | null>(null);
   const endRef = useRef<HTMLDivElement | null>(null);
 
   const writeEnabled = Boolean(config.composition.writeEnabled);
   const chatEnabled = Boolean(config.chat?.enabled) && chatLive;
-  const harnesses = useMemo(
-    () => snapshot.harnesses.filter((item) => item.delegatable && item.present).map((item) => item.id),
-    [snapshot.harnesses],
-  );
   const entityProfiles = useMemo(
     () => profiles.filter((doc) => doc.metadata.name !== WRAPPER_PROFILE_NAME),
     [profiles],
@@ -106,7 +102,6 @@ export function EntityChatPage({ snapshot, token, config }: Props) {
         writeEnabled,
         wrapperThreadId,
         existingProfileNames: profiles.map((doc) => doc.metadata.name),
-        harnesses,
       });
       if (result.wrapperThread) {
         setWrapperThreadId(result.wrapperThread.id);
@@ -155,17 +150,19 @@ export function EntityChatPage({ snapshot, token, config }: Props) {
     await runTurn(`Have ${entityProfiles[0].metadata.name} and ${entityProfiles[1].metadata.name} greet each other.`);
   }
 
-  const intentPreview = parseWrapperIntent(draft, profiles.map((doc) => doc.metadata.name));
+  const intentPreview = parseWrapperIntent(
+    draft,
+    profiles.map((doc) => doc.metadata.name),
+  );
 
   return (
     <div>
       <div className="page-header">
         <div>
-          <h1 className="page-title">Entity chat</h1>
+          <h1 className="page-title">Agents</h1>
           <p className="page-sub">
-            Talk to the <span className="mono">{WRAPPER_PROFILE_NAME}</span> wrapper. It creates agents with{" "}
-            <span className="mono">POST .../agent-run-profiles</span> and can spawn more when asked. Standing-chat
-            threads persist when the API enables chat. The PR 168 echo stub is not the wrapper reply.
+            Talk to named Primaris agents over the OIDC API. The wrapper can POST AgentRunProfiles and
+            have them speak on standing-chat threads. This is not kubectl and not a local CLI.
           </p>
         </div>
         <div className="chip-row">
@@ -178,66 +175,41 @@ export function EntityChatPage({ snapshot, token, config }: Props) {
         </div>
       </div>
 
-      <section className="panel" style={{ marginBottom: "0.75rem" }}>
-        <div className="panel-body" style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "end" }}>
-          <label className="field" style={{ minWidth: "12rem", flex: 1 }}>
-            <span className="label">Namespace</span>
-            <input
-              className="input"
-              value={namespace}
-              onChange={(event) => setNs(event.target.value)}
-              placeholder={fallbackNs}
-            />
-          </label>
-          <p className="muted" style={{ margin: 0, flex: "2 1 16rem" }}>
-            From ui-config: {config.defaultNamespaces.join(", ") || "none"}. This is not a kube context picker.
-          </p>
-        </div>
-      </section>
-
       {error ? <div className="banner banner-error">{error}</div> : null}
       {!writeEnabled ? (
         <div className="banner banner-info">
-          composition.writeEnabled is false. The Kind API must grant composition write before Desktop can create
-          agents.
+          composition.writeEnabled is false. The API must grant composition write before Desktop can
+          create agents.
         </div>
       ) : null}
 
       <div className="entity-layout">
         <aside className="panel">
           <div className="panel-header">
-            <h2 className="panel-title">Entities</h2>
+            <h2 className="panel-title">Agents</h2>
             <span className="muted">{entityProfiles.length}</span>
           </div>
           <div className="panel-body">
-            <label className="field">
-              <span className="label">Spawn name</span>
-              <input
-                className="input"
-                value={spawnName}
-                onChange={(event) => setSpawnName(event.target.value)}
-                placeholder="scout"
-                spellCheck={false}
-              />
-            </label>
-            <div className="btn-row">
-              <button type="button" className="btn" disabled={busy || !writeEnabled} onClick={() => void onSpawnNamed()}>
-                Spawn entity
-              </button>
-              <button type="button" className="btn" disabled={busy || !writeEnabled} onClick={() => void onHaveThemTalk()}>
-                Have them talk
-              </button>
-            </div>
             {entityProfiles.length === 0 ? (
-              <p className="muted">No spawned AgentRunProfiles yet. Ask the wrapper or use Spawn entity.</p>
+              <p className="muted">No AgentRunProfiles in this namespace yet. Spawn one on the right, or ask the wrapper.</p>
             ) : (
               <ul className="entity-list">
-                {entityProfiles.map((doc) => (
-                  <li key={doc.metadata.name} className="entity-item">
-                    <span className="mono">{doc.metadata.name}</span>
-                    <span className="muted">{String(doc.spec?.description ?? "AgentRunProfile")}</span>
-                  </li>
-                ))}
+                {entityProfiles.map((doc) => {
+                  const name = doc.metadata.name;
+                  const active = selected === name;
+                  return (
+                    <li key={name}>
+                      <button
+                        type="button"
+                        className={`entity-item ${active ? "selected" : ""}`}
+                        onClick={() => setSelected(name)}
+                      >
+                        <span>{personaLabel(name)}</span>
+                        <span className="chip chip-ok">online</span>
+                      </button>
+                    </li>
+                  );
+                })}
               </ul>
             )}
           </div>
@@ -245,26 +217,34 @@ export function EntityChatPage({ snapshot, token, config }: Props) {
 
         <section className="panel entity-chat-main">
           <div className="panel-header">
-            <h2 className="panel-title">Wrapper</h2>
+            <h2 className="panel-title">Conversation</h2>
             <span className="chip mono">{WRAPPER_PROFILE_NAME}</span>
           </div>
           <div className="chat-messages" aria-live="polite">
             {messages.length === 0 ? (
-              <div className="empty">Ask the wrapper to create agents. Try the demo prompt below.</div>
+              <div className="empty">Ask the wrapper to create or talk to named agents.</div>
             ) : null}
             {messages.map((message) => (
               <article key={message.id} className={`chat-bubble chat-bubble-${message.author}`}>
                 <header className="chat-bubble-header">
-                  <span className="chat-bubble-role">{message.profile || message.author}</span>
+                  <span className="chat-bubble-role">{personaLabel(message.profile || message.author)}</span>
                 </header>
                 <pre className="chat-bubble-body">{message.content}</pre>
+              </article>
+            ))}
+            {room.map((line, index) => (
+              <article key={`room-${line.author}-${index}`} className="chat-bubble chat-bubble-entity">
+                <header className="chat-bubble-header">
+                  <span className="chat-bubble-role">{personaLabel(line.author)}</span>
+                </header>
+                <pre className="chat-bubble-body">{line.content}</pre>
               </article>
             ))}
             <div ref={endRef} />
           </div>
           <form className="chat-composer" onSubmit={(event) => void onSubmit(event)}>
             <label className="field">
-              <span className="label">Message to wrapper</span>
+              <span className="label">Message</span>
               <textarea
                 className="textarea chat-composer-input"
                 rows={3}
@@ -277,7 +257,7 @@ export function EntityChatPage({ snapshot, token, config }: Props) {
             </label>
             {draft.trim() && intentPreview.spawn ? (
               <p className="muted">
-                Will spawn {intentPreview.names.join(", ") || "—"}
+                Will spawn {intentPreview.names.map(personaLabel).join(", ") || "—"}
                 {intentPreview.talk ? " and have them talk" : ""}.
               </p>
             ) : null}
@@ -299,29 +279,41 @@ export function EntityChatPage({ snapshot, token, config }: Props) {
 
         <aside className="panel">
           <div className="panel-header">
-            <h2 className="panel-title">Entity room</h2>
+            <h2 className="panel-title">Namespace</h2>
           </div>
           <div className="panel-body">
-            {room.length === 0 ? (
-              <p className="muted">
-                When two or more entities exist, the wrapper posts greetings onto their standing-chat threads (and
-                may delegate a local harness). Echo stubs stay hidden.
-              </p>
-            ) : (
-              <ul className="entity-list">
-                {room.map((line, index) => (
-                  <li key={`${line.author}-${index}`} className="entity-item">
-                    <span className="mono">{line.author}</span>
-                    <span>{line.content}</span>
-                  </li>
-                ))}
-              </ul>
-            )}
-            {harnesses.length > 0 ? (
-              <p className="muted">Local harness on PATH: {harnesses.join(", ")} (token never passed).</p>
-            ) : (
-              <p className="muted">No local harness CLI; entity lines are wrapper-authored for those personas.</p>
-            )}
+            <label className="field">
+              <span className="label">Namespace</span>
+              <input
+                className="input"
+                value={namespace}
+                onChange={(event) => setNs(event.target.value)}
+                placeholder={fallbackNs}
+              />
+            </label>
+            <p className="muted">
+              From ui-config: {config.defaultNamespaces.join(", ") || "none"}. This is not a kube
+              context picker.
+            </p>
+            <label className="field">
+              <span className="label">Spawn agent</span>
+              <input
+                className="input"
+                value={spawnName}
+                onChange={(event) => setSpawnName(event.target.value)}
+                placeholder="scout"
+                spellCheck={false}
+              />
+            </label>
+            <div className="btn-row">
+              <button type="button" className="btn btn-primary" disabled={busy || !writeEnabled} onClick={() => void onSpawnNamed()}>
+                Spawn agent
+              </button>
+              <button type="button" className="btn" disabled={busy || !writeEnabled} onClick={() => void onHaveThemTalk()}>
+                Have them talk
+              </button>
+            </div>
+            <p className="muted">No Kubernetes context. No kubectl. On-machine CLIs live on Local.</p>
           </div>
         </aside>
       </div>

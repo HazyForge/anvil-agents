@@ -1,39 +1,40 @@
 # Anvil Agents Desktop
 
-**Anvil Agents Desktop** is a local wrapper agent for the anvil-agents OIDC
-API and for harness CLIs already on the machine. The process binary is
-`anvil-desktop`. The product is Anvil Agents Desktop — not Anvil Desktop, Anvil
-Hub, or Anvil Primaris.
+**Anvil Agents Desktop** is the workstation process that signs in to the
+anvil-agents OIDC API and talks to **cluster agents on Anvil Primaris**. The
+process binary is `anvil-desktop`. The product is Anvil Agents Desktop — not
+Anvil Desktop, Anvil Hub, or a kube UI.
 
 It has **nothing to do with Kubernetes**. There is no kubeconfig, kubectl, or
-cluster context picker. Sign in with OIDC, then call the same AgentRun API the
-browser console uses.
+cluster context picker. The installed executable calls
+`https://agents.anvil.hazyforge.io` (Authorization Code + PKCE), then Chat and
+Wrapper use the same AgentRun API the browser console uses.
 
-It exposes three tools:
+Two functions, not mixed:
 
-1. **create_agent** — `POST /api/v1/namespaces/{namespace}/agent-run-profiles`
-   (minimal AgentRunProfile; the API stamps `managed-by=anvil-agents-console`)
-2. **anvil-api** — standing-chat threads/messages (PR 168) plus list/get AgentRuns
-3. **local-harness** — delegate a prompt to Codex, Grok, OpenClaw, OpenCode, or
-   another catalog CLI on **native PATH** or **inside WSL** (`wsl.exe` / default
-   distro PATH)
+1. **Main — Primaris agents.** Sign in, named-agent chat, Wrapper
+   (`create_agent` + `anvil-api` list/get/create). This is the point of the app.
+2. **Second — local harness.** The Local page activates already-installed
+   Codex, Grok, OpenClaw, OpenCode, or similar CLIs on native PATH or inside
+   WSL. It does not replace Chat/Wrapper. The OIDC token is never copied into
+   CLI argv, env, or prompt files.
 
 The **wrapper** is the entity in Desktop chat: it can spawn more profiles when
-asked. The PR 168 echo stub is not the wrapper reply. Cluster observation and
-the console library remain console surfaces.
+asked. The PR 168 echo stub is not the wrapper reply.
 
 ## Why Anvil Agents Desktop
 
 The optional OIDC AgentRun API (`anvil-agents-api`) is a separate process from
-the controller. The console SPA cannot see laptop PATH. Desktop does the work
-the cluster SPA cannot: discover local CLIs (including those that only exist
-inside WSL) and wrap them with an API client that reuses the console's OIDC
-session pattern.
+the controller. The installed desktop **process** is an OIDC client of that
+API: it signs in and calls cluster agents (Chat / Wrapper). The console SPA
+cannot see laptop PATH; the Local page is a **second** function that discovers
+already-installed CLIs (including those that only exist inside WSL) without
+mixing that into Primaris chat.
 
 Local CLIs are **not** the cluster harness. AgentRuns still use runner images
-selected by `AgentHarnessProfile`. The wrapper never copies the OIDC token into
-a CLI argv, environment, or prompt file. Those CLIs keep their own local auth
-files (`~/.codex/auth.json`, and so on).
+selected by `AgentHarnessProfile`. Local activation never copies the OIDC token
+into a CLI argv, environment, or prompt file. Those CLIs keep their own local
+auth files (`~/.codex/auth.json`, and so on).
 
 ## OIDC session (same as the console)
 
@@ -70,7 +71,7 @@ append-only, tokens are never accepted in query strings.
 | --- | --- |
 | `cmd/anvil-desktop` | Loopback host + optional Chrome `--app` window |
 | `internal/desktop` | Catalog, native/WSL discovery, API origin prefs, reverse-proxy, local delegate |
-| `web/desktop` | Vite + React shell (OIDC login, local inventory, two-tool wrapper) |
+| `web/desktop` | Vite + React shell (OIDC login, named-agent chat, Wrapper, Local delegator) |
 | `web/desktop/electron` | Optional single-window Electron wrap of the desktop SPA |
 
 ## Security

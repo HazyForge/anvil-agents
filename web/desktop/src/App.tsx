@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { NavLink, Navigate, Route, Routes } from "react-router-dom";
+import { NavLink, Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { fetchSnapshot, savePrefs } from "./api/client";
 import type { Prefs, Snapshot } from "./api/types";
 import { clearUIConfigCache, loadUIConfig, type UIConfig } from "./auth/config";
@@ -13,6 +13,7 @@ import { WrapperPage } from "./pages/WrapperPage";
 import { PRODUCT_TITLE } from "./product";
 
 export default function App() {
+  const location = useLocation();
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -84,31 +85,28 @@ export default function App() {
     };
   }, []);
 
-  const persistPrefs = useCallback(
-    async (patch: Prefs) => {
-      setBusy(true);
-      try {
-        if (patch.apiOrigin !== undefined) {
-          clearUIConfigCache();
-        }
-        const next = await savePrefs(patch);
-        setSnapshot(next);
-        setError(null);
-        if (next.prefs.apiOrigin) {
-          const ui = await loadUIConfig(true);
-          setConfig(ui);
-          setConfigError(null);
-        } else if (patch.apiOrigin !== undefined) {
-          setConfig(null);
-        }
-      } catch (err) {
-        setError(err instanceof Error ? err.message : String(err));
-      } finally {
-        setBusy(false);
+  const persistPrefs = useCallback(async (patch: Prefs) => {
+    setBusy(true);
+    try {
+      if (patch.apiOrigin !== undefined) {
+        clearUIConfigCache();
       }
-    },
-    [],
-  );
+      const next = await savePrefs(patch);
+      setSnapshot(next);
+      setError(null);
+      if (next.prefs.apiOrigin) {
+        const ui = await loadUIConfig(true);
+        setConfig(ui);
+        setConfigError(null);
+      } else if (patch.apiOrigin !== undefined) {
+        setConfig(null);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  }, []);
 
   const persistOrigin = useCallback(
     async (origin: string) => {
@@ -129,6 +127,7 @@ export default function App() {
 
   const originHost = snapshot?.api.origin?.replace(/^https?:\/\//, "") || "no API";
   const signedIn = Boolean(token);
+  const onLocal = location.pathname === "/local";
 
   const login = snapshot ? (
     <LoginGate
@@ -143,7 +142,13 @@ export default function App() {
       onAuthenticated={handleAuthenticated}
     />
   ) : (
-    <div className="empty">Loading local harnesses…</div>
+    <div className="empty">Loading Anvil Agents Desktop…</div>
+  );
+
+  const chat = snapshot && signedIn && config ? (
+    <EntityChatPage token={token} config={config} />
+  ) : (
+    login
   );
 
   return (
@@ -157,11 +162,13 @@ export default function App() {
         <div className="titlebar-title">{snapshot?.productTitle ?? PRODUCT_TITLE}</div>
         <div className="titlebar-meta">
           <span className={`pill ${snapshot?.api.reachable ? "pill-ok" : "pill-mute"}`}>{originHost}</span>
-          <span className={`pill ${snapshot?.harnessTarget === "wsl" ? "pill-ok" : "pill-mute"}`}>
-            {snapshot?.harnessTarget === "wsl"
-              ? `WSL${snapshot.wsl.defaultDistro || snapshot.prefs.wslDistro ? ` · ${snapshot.prefs.wslDistro || snapshot.wsl.defaultDistro}` : ""}`
-              : "native PATH"}
-          </span>
+          {onLocal ? (
+            <span className={`pill ${snapshot?.harnessTarget === "wsl" ? "pill-ok" : "pill-mute"}`}>
+              {snapshot?.harnessTarget === "wsl"
+                ? `WSL${snapshot.wsl.defaultDistro || snapshot.prefs.wslDistro ? ` · ${snapshot.prefs.wslDistro || snapshot.wsl.defaultDistro}` : ""}`
+                : "native PATH"}
+            </span>
+          ) : null}
           <span className={`pill ${signedIn ? "pill-ok" : "pill-mute"}`}>{signedIn ? "signed in" : "signed out"}</span>
           <button type="button" className="btn btn-ghost" onClick={() => void refresh()} disabled={busy}>
             {busy ? "Refreshing" : "Refresh"}
@@ -171,22 +178,22 @@ export default function App() {
               Sign out
             </button>
           ) : (
-            <NavLink to="/wrapper" className="btn btn-ghost">
+            <NavLink to="/chat" className="btn btn-ghost">
               Sign in
             </NavLink>
           )}
         </div>
       </div>
-      <nav className="rail">
-        <NavLink to="/" end className={({ isActive }) => (isActive ? "rail-link active" : "rail-link")}>
-          Local
-          <span className="rail-count">{presentCount}</span>
-        </NavLink>
+      <nav className="rail" aria-label="Primary">
         <NavLink to="/chat" className={({ isActive }) => (isActive ? "rail-link active" : "rail-link")}>
           Chat
         </NavLink>
         <NavLink to="/wrapper" className={({ isActive }) => (isActive ? "rail-link active" : "rail-link")}>
           Wrapper
+        </NavLink>
+        <NavLink to="/local" className={({ isActive }) => (isActive ? "rail-link active" : "rail-link")}>
+          Local
+          <span className="rail-count">{presentCount}</span>
         </NavLink>
       </nav>
       <main className="desktop-main">
@@ -194,26 +201,7 @@ export default function App() {
         <Routes>
           <Route path="/auth/callback" element={<AuthCallbackPage onAuthenticated={handleAuthenticated} />} />
           <Route path="/callback" element={<AuthCallbackPage onAuthenticated={handleAuthenticated} />} />
-          <Route
-            path="/"
-            element={
-              snapshot ? (
-                <HarnessesPage snapshot={snapshot} busy={busy} onSavePrefs={persistPrefs} />
-              ) : (
-                <div className="empty">Loading local harnesses…</div>
-              )
-            }
-          />
-          <Route
-            path="/chat"
-            element={
-              snapshot && signedIn && config ? (
-                <EntityChatPage snapshot={snapshot} token={token} config={config} />
-              ) : (
-                login
-              )
-            }
-          />
+          <Route path="/chat" element={chat} />
           <Route
             path="/wrapper"
             element={
@@ -224,7 +212,18 @@ export default function App() {
               )
             }
           />
-          <Route path="*" element={<Navigate to="/" replace />} />
+          <Route
+            path="/local"
+            element={
+              snapshot ? (
+                <HarnessesPage snapshot={snapshot} busy={busy} onSavePrefs={persistPrefs} />
+              ) : (
+                <div className="empty">Loading Anvil Agents Desktop…</div>
+              )
+            }
+          />
+          <Route path="/" element={<Navigate to="/chat" replace />} />
+          <Route path="*" element={<Navigate to="/chat" replace />} />
         </Routes>
       </main>
     </div>

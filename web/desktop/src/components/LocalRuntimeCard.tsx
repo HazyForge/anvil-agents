@@ -25,11 +25,10 @@ export function LocalRuntimeCard({ snapshot, busy, onSavePrefs }: Props) {
       </div>
       <div className="panel-body">
         <p className="muted">
-          Catalog CLIs (Grok Build, Codex, OpenCode, and the rest) are discovered and invoked on
-          native Windows PATH or inside WSL. A process already running in Ubuntu WSL2 uses the
-          distro PATH directly. A Windows-hosted <code>anvil-desktop.exe</code> uses{" "}
-          <code>wsl.exe</code> and the default distro PATH — not native Windows PATH. The OIDC
-          access token is never copied into those processes.
+          Optional on-machine work, not Primaris chat. Catalog CLIs already installed on native PATH
+          or inside WSL can be activated here. A Windows-hosted process uses <code>wsl.exe</code>{" "}
+          and the default distro PATH when Operate on WSL is selected. The OIDC token is never copied
+          into those processes.
         </p>
         <div className="seg" role="group" aria-label="Harness execution target">
           <button

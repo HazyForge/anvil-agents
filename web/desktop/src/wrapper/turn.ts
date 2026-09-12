@@ -3,7 +3,7 @@ import {
   createChatThread,
   listChatThreads,
 } from "../api/chat";
-import { APIError, delegateHarness, ensureAgentRunProfile, type CompositionDocument } from "../api/client";
+import { APIError, ensureAgentRunProfile, type CompositionDocument } from "../api/client";
 import type { ChatMessage, ChatThread } from "../api/types.chat";
 import { parseWrapperIntent, WRAPPER_PROFILE_NAME } from "./intent";
 
@@ -111,33 +111,12 @@ async function ensureThread(
   });
 }
 
-function entityLine(name: string, peer: string, stdout?: string): string {
-  const trimmed = stdout?.trim() ?? "";
-  if (trimmed && !trimmed.includes("anvil-desktop-fixture") && trimmed.length < 400) {
-    const last = trimmed.split(/\n+/).map((line) => line.trim()).filter(Boolean).at(-1);
-    if (last) {
-      return last;
-    }
-  }
-  return `Hello ${peer} — ${name} here. The desktop wrapper just spawned me.`;
+function entityLine(name: string, peer: string): string {
+  return `Hello ${peer} — ${name} here. The desktop wrapper just spawned me on Primaris.`;
 }
 
-async function speak(
-  name: string,
-  peer: string,
-  harnesses: string[],
-): Promise<{ line: string; harness?: string }> {
-  const prompt = `You are ${name}, an Anvil agent. Say one short sentence greeting ${peer}. Do not mention tokens or secrets.`;
-  const harness = harnesses[0];
-  if (!harness) {
-    return { line: entityLine(name, peer) };
-  }
-  try {
-    const result = await delegateHarness(harness, prompt, 20);
-    return { line: entityLine(name, peer, result.stdout), harness };
-  } catch {
-    return { line: entityLine(name, peer) };
-  }
+function speak(name: string, peer: string): { line: string } {
+  return { line: entityLine(name, peer) };
 }
 
 export async function runWrapperTurn(opts: {
@@ -148,7 +127,6 @@ export async function runWrapperTurn(opts: {
   writeEnabled: boolean;
   wrapperThreadId: string | null;
   existingProfileNames: string[];
-  harnesses: string[];
 }): Promise<WrapperTurnResult> {
   const text = opts.userText.trim();
   if (!text) {
@@ -214,8 +192,8 @@ export async function runWrapperTurn(opts: {
   if (shouldTalk) {
     const a = roster[0];
     const b = roster[1];
-    const first = await speak(a, b, opts.harnesses);
-    const second = await speak(b, a, opts.harnesses);
+    const first = speak(a, b);
+    const second = speak(b, a);
     room.push({ author: a, content: first.line });
     room.push({ author: b, content: second.line });
     if (opts.chatEnabled) {

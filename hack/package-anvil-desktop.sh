@@ -94,7 +94,11 @@ ${product} ${version}
 
 User-visible name: ${product}
 Process binary: anvil-desktop
-Control plane: anvil-agents OIDC API (Anvil Primaris or a configured apiOrigin)
+Main function: this process signs in to the anvil-agents OIDC API and talks to
+cluster agents on Anvil Primaris (default apiOrigin
+https://agents.anvil.hazyforge.io). Chat and Wrapper are the product.
+Second function: Local page activates already-installed grok/Codex/OpenCode
+(native PATH or WSL). Local does not replace Chat/Wrapper.
 OIDC: Authorization Code + PKCE, provider-neutral. Client id anvil-agents-desktop
 until {apiOrigin}/ui-config.json desktop.oidcClientId is set by GitOps.
 
@@ -108,7 +112,7 @@ Or unzip Anvil-Agents-Desktop-${version}-windows-amd64.zip and run:
   powershell -NoProfile -ExecutionPolicy Bypass -File .\\install.ps1
 
 Then launch "Anvil Agents Desktop" (anvil-desktop.exe --open). The host listens
-on http://127.0.0.1:1738 only.
+on http://127.0.0.1:1738 only and calls Primaris unless --api-origin is set.
 
 Linux / WSL-side binary
 -----------------------
@@ -116,20 +120,19 @@ tar -xzf anvil-desktop-${version}-linux-amd64.tar.gz
 ./hack/install-anvil-desktop.sh
 # or: PREFIX=\$HOME/.local ./install.sh
 
-Operate on WSL
+Local harness (second function)
+-------------------------------
+On the Local page, choose "Operate on WSL" or native PATH, then Run locally.
+Windows-hosted processes use wsl.exe and the default distro PATH. The OIDC
+token stays in the desktop session; it is never copied into CLI argv, env, or
+prompt files.
+
+Sign-in (main)
 --------------
-On the Local page, choose "Operate on WSL". Desktop then discovers and invokes
-grok, Codex, OpenCode, and other catalog CLIs with wsl.exe and the default
-distro PATH (not native Windows PATH). Empty distro = default WSL distro.
-
-Install those CLIs inside WSL (~/.local/bin is searched). The OIDC token stays
-in the desktop session; it is never copied into WSL argv, env, or prompt files.
-
-Sign-in
---------
-1. Set OIDC API origin to Anvil Primaris (or another apiOrigin).
+1. Default OIDC API origin is https://agents.anvil.hazyforge.io
 2. Sign in with OIDC. Redirect: http://127.0.0.1:1738/auth/callback
 3. Register that redirect on the desktop PKCE client (anvil-agents-desktop).
+4. Chat and Wrapper talk to Primaris agents. There is no kube UI.
 
 Uninstall (Windows): Anvil-Agents-Desktop-Setup.exe --uninstall
   or: powershell -File install.ps1 -Uninstall

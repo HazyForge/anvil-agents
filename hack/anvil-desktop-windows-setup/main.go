@@ -69,8 +69,8 @@ func run(args []string) error {
 	fmt.Printf("Installed %s to %s\n", productTitle, dest)
 	fmt.Println("Start Menu: Anvil Agents Desktop")
 	fmt.Println("The host listens on http://127.0.0.1:1738")
-	fmt.Println("Choose Operate on WSL to discover grok, Codex, and OpenCode in the default WSL distro.")
-	fmt.Println("Set the API origin to Anvil Primaris (or another apiOrigin), then sign in with OIDC.")
+	fmt.Println("This process signs in to Primaris agents (Chat / Wrapper).")
+	fmt.Println("Local is a second page for already-installed grok, Codex, and OpenCode.")
 	return nil
 }
 

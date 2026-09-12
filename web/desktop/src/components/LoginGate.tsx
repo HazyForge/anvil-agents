@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { beginLogin } from "../auth/oidc";
 import { saveStubSession } from "../auth/session";
-import { PRODUCT_TITLE } from "../product";
+import { DEFAULT_API_ORIGIN, PRODUCT_TITLE } from "../product";
 
 interface Props {
   apiOrigin: string;
@@ -31,17 +31,27 @@ export function LoginGate({
   onSaveOrigin,
   onAuthenticated,
 }: Props) {
-  const [originDraft, setOriginDraft] = useState(apiOrigin);
+  const [originDraft, setOriginDraft] = useState(apiOrigin || DEFAULT_API_ORIGIN);
   const [signInBusy, setSignInBusy] = useState(false);
   const [signInError, setSignInError] = useState<string | null>(null);
 
   useEffect(() => {
-    setOriginDraft(apiOrigin);
+    setOriginDraft(apiOrigin || DEFAULT_API_ORIGIN);
   }, [apiOrigin]);
+
+  async function persistDraft(): Promise<string> {
+    const origin = originDraft.trim() || DEFAULT_API_ORIGIN;
+    if (origin !== apiOrigin) {
+      await onSaveOrigin(origin);
+    }
+    return origin;
+  }
 
   async function handleSignIn() {
     setSignInBusy(true);
+    setSignInError(null);
     try {
+      await persistDraft();
       await beginLogin(window.location.pathname + window.location.search);
     } catch (err) {
       setSignInError(err instanceof Error ? err.message : String(err));
@@ -60,24 +70,22 @@ export function LoginGate({
     <div className="panel token-gate">
       <h1>Sign in to {PRODUCT_TITLE}</h1>
       <p>
-        This app talks only to the anvil-agents OIDC API — Anvil Primaris or another configured
-        apiOrigin. There is no kubeconfig, kubectl, or cluster context picker. Sign in with
-        Authorization Code + PKCE. Access tokens stay in <code>sessionStorage</code> for this window
-        and are never placed in query strings after login. Local harness processes never receive that
-        token.
+        Authorization Code + PKCE to the anvil-agents OIDC API (Anvil Primaris). This process talks
+        to cluster agents — there is no kubeconfig, kubectl, or cluster context picker. Access
+        tokens stay in <code>sessionStorage</code> and are never placed in query strings.
       </p>
       <label className="field">
         <span className="label">OIDC API origin</span>
         <input
           className="input"
-          placeholder="https://anvil-agents-api.example.com"
+          placeholder={DEFAULT_API_ORIGIN}
           value={originDraft}
           onChange={(event) => setOriginDraft(event.target.value)}
           autoComplete="off"
         />
       </label>
       <div className={`banner ${apiReachable ? "banner-ok" : "banner-info"}`}>
-        {apiMessage || "Save an API origin. The host reverse-proxies /api and /ui-config.json to that origin."}
+        {apiMessage || "Save the Primaris API origin, then sign in. The host reverse-proxies /api and /ui-config.json."}
       </div>
       {issuer ? (
         <p className="muted">
@@ -88,19 +96,14 @@ export function LoginGate({
       {error ? <div className="banner banner-error">{error}</div> : null}
       {signInError ? <div className="banner banner-error">{signInError}</div> : null}
       <div className="btn-row">
-        <button
-          type="button"
-          className="btn"
-          disabled={busy}
-          onClick={() => void onSaveOrigin(originDraft)}
-        >
+        <button type="button" className="btn" disabled={busy} onClick={() => void persistDraft()}>
           {busy ? "Saving" : "Save API origin"}
         </button>
         <button
           type="button"
           className="btn btn-primary"
           onClick={() => void handleSignIn()}
-          disabled={signInBusy || !apiOrigin}
+          disabled={signInBusy || !(originDraft.trim() || apiOrigin)}
         >
           {signInBusy ? "Redirecting…" : "Sign in with OIDC"}
         </button>

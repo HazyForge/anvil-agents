@@ -1,19 +1,19 @@
 # Anvil Agents Desktop
 
-**Anvil Agents Desktop** is a local wrapper agent: OIDC sign-in to the
-anvil-agents API, plus delegation to workstation harness CLIs. It is not a
-second console and not a Kubernetes UI. The process binary is `anvil-desktop`.
+**Anvil Agents Desktop** is the workstation OIDC client for Primaris cluster
+agents. Chat and Wrapper are the product. Local harness activation is a second
+page. It is not a second console and not a Kubernetes UI. The process binary is
+`anvil-desktop`.
 
 ## What it is
 
 Anvil Agents Desktop listens on loopback only (`127.0.0.1`):
 
-- Discovers Codex, Grok, OpenClaw, OpenCode, Hermes, Pi, and similar CLIs on
-  native PATH or inside WSL (`wsl.exe` / default distro PATH)
-- Reverse-proxies `/api/` and `/ui-config.json` to a configured OIDC API origin
+- Defaults `--api-origin` to `https://agents.anvil.hazyforge.io` and reverse-proxies `/api/` and `/ui-config.json`
 - Signs in with Authorization Code + PKCE (tokens in `sessionStorage`, never query strings)
-- Wraps three tools: `create_agent`, `anvil-api` (standing chat), and `local-harness`
-- Entity chat (`/chat`): the wrapper can POST AgentRunProfiles and spawn more when asked
+- **Chat** (`/chat`): named Primaris agents; the wrapper can POST AgentRunProfiles
+- **Wrapper** (`/wrapper`): create_agent and anvil-api (list/get/create runs)
+- **Local** (`/local`): second function — activate already-installed Codex, Grok, OpenCode on native PATH or WSL
 
 Register `http://127.0.0.1:1738/auth/callback` on the API's OIDC client. The
 API must already have exact issuer, audience, claim binding, namespace

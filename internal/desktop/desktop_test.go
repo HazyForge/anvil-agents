@@ -11,6 +11,12 @@ import (
 	"testing"
 )
 
+func TestDefaultAPIOriginIsPrimaris(t *testing.T) {
+	if DefaultAPIOrigin != "https://agents.anvil.hazyforge.io" {
+		t.Fatalf("DefaultAPIOrigin = %q", DefaultAPIOrigin)
+	}
+}
+
 func TestCatalogIDsAreUnique(t *testing.T) {
 	seen := map[string]struct{}{}
 	for _, tool := range Catalog() {

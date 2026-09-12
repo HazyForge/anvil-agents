@@ -49,5 +49,5 @@ $link.Save()
 Write-Host "Installed $ProductTitle to $Dest"
 Write-Host "Start Menu shortcut: $Shortcut"
 Write-Host "Loopback UI: http://127.0.0.1:1738"
-Write-Host "Choose Operate on WSL to run grok / Codex / OpenCode in the default WSL distro."
-Write-Host "Set apiOrigin to Anvil Primaris (or another anvil-agents OIDC API), then Sign in with OIDC."
+Write-Host "This process signs in to Primaris agents (Chat / Wrapper)."
+Write-Host "Local is a second page: activate already-installed grok / Codex / OpenCode (Operate on WSL when chosen)."

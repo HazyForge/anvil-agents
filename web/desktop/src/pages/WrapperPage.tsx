@@ -1,17 +1,17 @@
 import { Link } from "react-router-dom";
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import {
   createAgentRun,
   createAgentRunProfile,
-  delegateHarness,
   getAgentRun,
   listAgentRuns,
   listRunProfiles,
   type AgentRunView,
   type CompositionDocument,
 } from "../api/client";
-import type { DelegateResult, Snapshot } from "../api/types";
+import type { Snapshot } from "../api/types";
 import type { UIConfig } from "../auth/config";
+import { personaLabel } from "../names";
 import { loadNamespace, saveNamespace } from "../state/namespace";
 
 interface Props {
@@ -26,20 +26,14 @@ export function WrapperPage({ snapshot, token, config }: Props) {
   const [prompt, setPrompt] = useState("");
   const [profileName, setProfileName] = useState("");
   const [runName, setRunName] = useState("");
-  const [harness, setHarness] = useState(
-    snapshot.harnesses.find((item) => item.present && item.delegatable)?.id ?? "codex",
-  );
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [apiOutput, setApiOutput] = useState("");
-  const [delegateOutput, setDelegateOutput] = useState<DelegateResult | null>(null);
   const [runs, setRuns] = useState<AgentRunView[]>([]);
   const [profiles, setProfiles] = useState<CompositionDocument[]>([]);
 
-  const delegatable = useMemo(
-    () => snapshot.harnesses.filter((item) => item.delegatable && item.present),
-    [snapshot.harnesses],
-  );
+  const apiTools = snapshot.wrapper.tools.filter((tool) => tool.id !== "local-harness");
+  const localTool = snapshot.wrapper.tools.find((tool) => tool.id === "local-harness");
 
   function setNs(next: string) {
     setNamespace(next);
@@ -119,59 +113,17 @@ export function WrapperPage({ snapshot, token, config }: Props) {
     );
   }
 
-  async function onDelegate(extraPrompt?: string) {
-    const text = (extraPrompt ?? prompt).trim();
-    if (!text) {
-      setError("prompt is required");
-      return;
-    }
-    setBusy(true);
-    setError(null);
-    try {
-      const result = await delegateHarness(harness, text);
-      setDelegateOutput(result);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function onFetchThenDelegate() {
-    setBusy(true);
-    setError(null);
-    try {
-      const items = await listAgentRuns(token, namespace, 20);
-      setRuns(items);
-      const summary = JSON.stringify(
-        items.map((item) => ({ name: item.name, phase: item.phase, backend: item.backend, error: item.error })),
-        null,
-        2,
-      );
-      setApiOutput(JSON.stringify(items, null, 2));
-      const combined = [prompt.trim(), "Recent AgentRuns (metadata only; no OIDC token):", summary]
-        .filter(Boolean)
-        .join("\n\n");
-      const result = await delegateHarness(harness, combined);
-      setDelegateOutput(result);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setBusy(false);
-    }
-  }
-
   return (
     <div>
       <div className="page-header">
         <div>
-          <h1 className="page-title">Wrapper agent</h1>
+          <h1 className="page-title">Wrapper</h1>
           <p className="page-sub">{snapshot.wrapper.message}</p>
         </div>
       </div>
 
       <div className="split">
-        {snapshot.wrapper.tools.map((tool) => (
+        {apiTools.map((tool) => (
           <section key={tool.id} className="panel">
             <div className="panel-header">
               <h2 className="panel-title">{tool.displayName}</h2>
@@ -182,6 +134,20 @@ export function WrapperPage({ snapshot, token, config }: Props) {
             </div>
           </section>
         ))}
+        {localTool ? (
+          <section className="panel">
+            <div className="panel-header">
+              <h2 className="panel-title">{localTool.displayName}</h2>
+              <span className="chip">second function</span>
+            </div>
+            <div className="panel-body">
+              <p className="muted">{localTool.notes}</p>
+              <Link to="/local" className="btn">
+                Open Local
+              </Link>
+            </div>
+          </section>
+        ) : null}
       </div>
 
       <section className="panel" style={{ marginTop: "0.75rem" }}>
@@ -208,78 +174,80 @@ export function WrapperPage({ snapshot, token, config }: Props) {
             <span className="label">Prompt</span>
             <textarea
               className="input textarea"
-              rows={6}
+              rows={4}
               value={prompt}
               onChange={(event) => setPrompt(event.target.value)}
-              placeholder="Work for the API or a local harness. The OIDC token is never appended."
+              placeholder="Prompt for a new AgentRun on Primaris. The OIDC token is never appended."
             />
           </label>
         </div>
       </section>
 
-      <div className="split" style={{ marginTop: "0.75rem" }}>
-        <section className="panel">
-          <div className="panel-header">
-            <h2 className="panel-title">anvil-api</h2>
-          </div>
-          <div className="panel-body">
-            <div className="btn-row">
-              <button type="button" className="btn btn-primary" disabled={busy || !namespace} onClick={() => void onListRuns()}>
-                List runs
+      <section className="panel" style={{ marginTop: "0.75rem" }}>
+        <div className="panel-header">
+          <h2 className="panel-title">anvil-api · Primaris OIDC</h2>
+          <span className="chip">not Kubernetes</span>
+        </div>
+        <div className="panel-body">
+          <div className="btn-row">
+            <button type="button" className="btn btn-primary" disabled={busy || !namespace} onClick={() => void onListRuns()}>
+              List runs
+            </button>
+            <button type="button" className="btn" disabled={busy || !namespace} onClick={() => void onGetRun()}>
+              Get run
+            </button>
+            {config.composition.readEnabled ? (
+              <button type="button" className="btn" disabled={busy || !namespace} onClick={() => void onListProfiles()}>
+                List profiles
               </button>
-              <button type="button" className="btn" disabled={busy || !namespace} onClick={() => void onGetRun()}>
-                Get run
-              </button>
-              {config.composition.readEnabled ? (
-                <button type="button" className="btn" disabled={busy || !namespace} onClick={() => void onListProfiles()}>
-                  List profiles
-                </button>
-              ) : null}
-              {config.composition.writeEnabled ? (
-                <button
-                  type="button"
-                  className="btn"
-                  disabled={busy || !namespace || !profileName.trim()}
-                  onClick={() => void onCreateProfile()}
-                >
-                  Create profile
-                </button>
-              ) : (
-                <span className="muted">composition write is disabled; cannot POST AgentRunProfiles.</span>
-              )}
-              {config.runs.createEnabled ? (
-                <button
-                  type="button"
-                  className="btn"
-                  disabled={busy || !namespace || !prompt.trim() || !profileName.trim()}
-                  onClick={() => void onCreateRun()}
-                >
-                  Create run
-                </button>
-              ) : null}
-              <Link to="/chat" className="btn">
-                Entity chat
-              </Link>
-            </div>
-            <label className="field">
-              <span className="label">AgentRun name (get)</span>
-              <input className="input" value={runName} onChange={(event) => setRunName(event.target.value)} />
-            </label>
-            <label className="field">
-              <span className="label">AgentRunProfile name (create)</span>
-              <input
-                className="input"
-                value={profileName}
-                onChange={(event) => setProfileName(event.target.value)}
-                placeholder="herald"
-              />
-            </label>
-            {profiles.length > 0 ? (
-              <p className="muted">
-                Profiles: {profiles.map((item) => item.metadata.name).join(", ")}
-              </p>
             ) : null}
-            {runs.length > 0 ? (
+            {config.composition.writeEnabled ? (
+              <button
+                type="button"
+                className="btn"
+                disabled={busy || !namespace || !profileName.trim()}
+                onClick={() => void onCreateProfile()}
+              >
+                Create profile
+              </button>
+            ) : (
+              <span className="muted">composition write is disabled; cannot POST AgentRunProfiles.</span>
+            )}
+            {config.runs.createEnabled ? (
+              <button
+                type="button"
+                className="btn"
+                disabled={busy || !namespace || !prompt.trim() || !profileName.trim()}
+                onClick={() => void onCreateRun()}
+              >
+                Create run
+              </button>
+            ) : null}
+            <Link to="/chat" className="btn">
+              Agent chat
+            </Link>
+          </div>
+          <label className="field">
+            <span className="label">AgentRun name (get)</span>
+            <input className="input" value={runName} onChange={(event) => setRunName(event.target.value)} />
+          </label>
+          <label className="field">
+            <span className="label">AgentRunProfile name (create)</span>
+            <input
+              className="input"
+              value={profileName}
+              onChange={(event) => setProfileName(event.target.value)}
+              placeholder="herald"
+            />
+          </label>
+          {profiles.length > 0 ? (
+            <p className="muted">
+              Profiles: {profiles.map((item) => personaLabel(item.metadata.name)).join(", ")}
+            </p>
+          ) : null}
+          {runs.length > 0 ? (
+            <>
+              <p className="muted">Runs from the OIDC API, not kubectl.</p>
               <table className="run-table">
                 <thead>
                   <tr>
@@ -298,71 +266,16 @@ export function WrapperPage({ snapshot, token, config }: Props) {
                   ))}
                 </tbody>
               </table>
-            ) : null}
-            {apiOutput ? <pre className="hint">{apiOutput}</pre> : null}
-          </div>
-        </section>
-
-        <section className="panel">
-          <div className="panel-header">
-            <h2 className="panel-title">local-harness</h2>
-          </div>
-          <div className="panel-body">
-            <label className="field">
-              <span className="label">Harness</span>
-              <select className="select" value={harness} onChange={(event) => setHarness(event.target.value)}>
-                {delegatable.map((item) => (
-                  <option key={item.id} value={item.id}>
-                    {item.displayName}
-                    {item.version ? ` (${item.version})` : ""}
-                  </option>
-                ))}
-              </select>
-            </label>
-            {delegatable.length === 0 ? (
-              <p className="muted">
-                No delegatable harness CLI was found
-                {snapshot.harnessTarget === "wsl" ? " in WSL" : " on PATH"}. Choose Operate on WSL or
-                native PATH on Local.
-              </p>
-            ) : (
-              <p className="muted">
-                Running via {snapshot.harnessTarget === "wsl" ? "WSL (wsl.exe / distro PATH)" : "native PATH"}.
-                The OIDC token is not passed to the CLI.
-              </p>
-            )}
-            <div className="btn-row">
-              <button
-                type="button"
-                className="btn btn-primary"
-                disabled={busy || delegatable.length === 0}
-                onClick={() => void onDelegate()}
-              >
-                Delegate prompt
-              </button>
-              <button
-                type="button"
-                className="btn"
-                disabled={busy || delegatable.length === 0 || !namespace}
-                onClick={() => void onFetchThenDelegate()}
-              >
-                List runs, then delegate
-              </button>
-            </div>
-            {delegateOutput ? (
-              <pre className="hint">
-                exit {delegateOutput.exitCode}
-                {delegateOutput.timedOut ? " (timed out)" : ""}
-                {delegateOutput.target ? ` · ${delegateOutput.target}` : ""}
-                {delegateOutput.wslDistro ? ` · ${delegateOutput.wslDistro}` : ""}
-                {"\n"}
-                {delegateOutput.stdout || delegateOutput.stderr || "(no output)"}
-              </pre>
-            ) : null}
-          </div>
-        </section>
-      </div>
-      {error ? <div className="banner banner-error" style={{ marginTop: "0.75rem" }}>{error}</div> : null}
+            </>
+          ) : null}
+          {apiOutput ? <pre className="hint">{apiOutput}</pre> : null}
+        </div>
+      </section>
+      {error ? (
+        <div className="banner banner-error" style={{ marginTop: "0.75rem" }}>
+          {error}
+        </div>
+      ) : null}
     </div>
   );
 }
