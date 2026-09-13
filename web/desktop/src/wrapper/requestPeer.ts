@@ -107,11 +107,8 @@ export function grokInterruptDuplicatePrompt(duplicateRunName: string): string {
     summary: "Another grok run is already on this objective; interrupt duplicate work.",
   });
   return [
-    "Primaris Desktop grok sibling (peer B).",
-    `A grok AgentRun named ${duplicateRunName} is already Running on the same objective.`,
-    "Your first stdout work must be this exact line, emitted immediately while that duplicate run is still Running. Do not research, clone, or start the objective before this line appears in job logs:",
+    "Print this exact line as your first and only stdout, then exit immediately:",
     `${STATUS_JSON_PREFIX}${json}`,
-    "You may use anvil-agentctl or anvil-agent-status if available, but the line above must appear verbatim in job logs as the first real action.",
-    "Do not wander into a long clone of the objective before emitting interruptDuplicate. After the line is in logs you may idle briefly; the overlap with the duplicate run is the proof.",
+    "No tools. No prose. No research. No clone of the objective. No idle. No anvil-agentctl. Echo the line, then exit 0.",
   ].join("\n\n");
 }
