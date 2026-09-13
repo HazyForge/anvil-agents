@@ -50,6 +50,15 @@ archive:
 # The API uses the existing Anvil Primaris resource audience. Administrators
 # retain explicit operator permissions, while dashboard-only users receive the
 # narrower anvil_agents_viewer role and read-only observer permissions.
+#
+# Zitadel contract (standard OIDC Code+PKCE, JWT access tokens). Kind analogue
+# is docs/test-oidc.md. Identity desired state lives in anvil-primaris
+# infra/opentofu/zitadel-clients (not Kind Keycloak).
+#   issuer:    https://hazyforge1-azsbgb.us1.zitadel.cloud
+#   audience:  376124473528572432  (project Anvil Primaris; Kind anvil-agents-api)
+#   console:   383499920822362966  (User-Agent PKCE; ui-config oidc.clientId)
+#   desktop:   Native PKCE anvil_agents_desktop 390485194915767148
+#              (ui-config desktop.oidcClientId; not the console User-Agent client)
 api:
   enabled: true
   config:
@@ -101,9 +110,14 @@ api:
             - anvilhub
             - hazy-trade
     cors:
-      # Exact browser Origin for the console + API host (deny-by-default).
+      # Exact browser Origin (deny-by-default). Console host plus Desktop
+      # loopback (helper 1738, Kind 8400). No wildcards.
       allowedOrigins:
         - https://agents.anvil.hazyforge.io
+        - http://127.0.0.1:1738
+        - http://localhost:1738
+        - http://127.0.0.1:8400
+        - http://localhost:8400
     ui:
       productTitle: Anvil Agents Console
       defaultNamespaces:
@@ -111,7 +125,13 @@ api:
         - anvilhub
       oidc:
         # ZITADEL User-Agent app "Anvil Agents Console" on project Anvil Primaris.
+        # Hosted console keeps this clientId. Leave scopes empty so the API adds
+        # the Zitadel project-audience URN.
         clientId: "383499920822362966"
+      desktop:
+        # Native PKCE app anvil_agents_desktop (loopback
+        # http://127.0.0.1:1738/auth/callback). Not Console 383499920822362966.
+        oidcClientId: "390485194915767148"
   httpRoute:
     enabled: true
     parentRefs:

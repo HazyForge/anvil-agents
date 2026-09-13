@@ -90,6 +90,8 @@ type UIConfig struct {
 	DefaultNamespaces []string `json:"defaultNamespaces"`
 	// OIDC holds public Authorization Code + PKCE client settings.
 	OIDC UIOIDCConfig `json:"oidc"`
+	// Desktop holds public Native PKCE settings for Anvil Agents Desktop.
+	Desktop UIDesktopConfig `json:"desktop"`
 }
 
 // UIOIDCConfig is served to the browser as non-secret OIDC client config.
@@ -98,6 +100,13 @@ type UIOIDCConfig struct {
 	ClientID string `json:"clientId"`
 	// Scopes are requested during authorization. Empty uses console defaults.
 	Scopes []string `json:"scopes"`
+}
+
+// UIDesktopConfig is served as ui-config.json desktop.* for Native PKCE.
+type UIDesktopConfig struct {
+	// OIDCClientID is the public Native / desktop OIDC client id. It must not
+	// reuse the console User-Agent client. Empty omits a usable Desktop client.
+	OIDCClientID string `json:"oidcClientId"`
 }
 
 type ListConfig struct {
@@ -227,6 +236,8 @@ func LoadConfig(path string) (Config, error) {
 func (config *Config) normalize() {
 	config.BindAddress = strings.TrimSpace(config.BindAddress)
 	config.UI.StaticDir = strings.TrimSpace(config.UI.StaticDir)
+	config.UI.OIDC.ClientID = strings.TrimSpace(config.UI.OIDC.ClientID)
+	config.UI.Desktop.OIDCClientID = strings.TrimSpace(config.UI.Desktop.OIDCClientID)
 	config.OIDC.Issuer = strings.TrimSpace(config.OIDC.Issuer)
 	config.OIDC.Audiences = uniqueStrings(config.OIDC.Audiences, false)
 	config.OIDC.AllowedSigningAlgorithms = uniqueStrings(config.OIDC.AllowedSigningAlgorithms, false)

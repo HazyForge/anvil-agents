@@ -359,6 +359,7 @@ func TestUIConfigExposesPublicOIDCSettings(t *testing.T) {
 	server.config.UI.ProductTitle = "Anvil Agents Console"
 	server.config.UI.DefaultNamespaces = []string{"hazy-trade"}
 	server.config.UI.OIDC.ClientID = "console-client"
+	server.config.UI.Desktop.OIDCClientID = "desktop-native-client"
 	server.config.OIDC.Issuer = "https://issuer.example"
 	server.config.OIDC.Audiences = []string{"anvil-agents"}
 	request := httptest.NewRequest(http.MethodGet, "/ui-config.json", nil)
@@ -371,6 +372,7 @@ func TestUIConfigExposesPublicOIDCSettings(t *testing.T) {
 	for _, want := range []string{
 		`"productTitle":"Anvil Agents Console"`,
 		`"clientId":"console-client"`,
+		`"oidcClientId":"desktop-native-client"`,
 		`"issuer":"https://issuer.example"`,
 		`urn:zitadel:iam:org:project:id:anvil-agents:aud`,
 		`"hazy-trade"`,
