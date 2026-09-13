@@ -75,6 +75,12 @@ changed after launch planning. A missing Job after the create-attempt receipt is
 ambiguous and fails closed; the controller never creates a replacement that
 could duplicate external side effects.
 
+`spec.purpose=interactive` is the live chat-session medium. Only that purpose
+may participate in a chat mailbox. Public `POST /agent-runs` and
+`anvil-agentctl run create` reject it. `AgentRunControl` pause still blocks
+**launching** a new interactive Job; it does not stop a running generation.
+See [Chat delivery](chat-delivery.md).
+
 The backend adapters are `codex`, `openCode`, `hermesAgent`, `openClaw`,
 `grokBuild`, `piAgent`, and `custom`. Backend images are selected by each
 harness profile or run.

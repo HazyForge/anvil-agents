@@ -65,7 +65,9 @@ Select a provider-qualified model such as `openai/gpt-5.4`. Supply provider API
 keys through `envSecretRefs`, or seed an existing credential store with
 `OPENCODE_AUTH_JSON`. OpenCode's standard auth file lives below the runner's
 XDG data directory and is included in the `/opt/anvil/opencode` durable-home
-layout. Do not start interactive login inside an AgentRun Job.
+layout. Do not start interactive login inside an AgentRun Job. One-shot CLIs
+(`grok`, `codex exec`, `opencode run`) have no generation-interrupt hook;
+`purpose=interactive` does not make those entrypoints stop-and-listen.
 
 `openCode.auto: true` enables OpenCode's explicit auto-approval mode for
 permission requests not denied by configuration. It is intentionally false by

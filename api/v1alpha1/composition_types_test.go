@@ -6,6 +6,33 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 )
 
+func TestInteractivePurposeMailboxContract(t *testing.T) {
+	t.Parallel()
+
+	for _, purpose := range []AgentRunPurpose{
+		AgentRunPurposeManual,
+		AgentRunPurposeAdverseSituation,
+		AgentRunPurposeScheduledHealthCheck,
+		AgentRunPurposeChained,
+	} {
+		if purpose.ParticipatesInChatMailbox() {
+			t.Fatalf("%q must not participate in the chat mailbox", purpose)
+		}
+	}
+	if !AgentRunPurposeInteractive.ParticipatesInChatMailbox() {
+		t.Fatal("interactive must participate in the chat mailbox")
+	}
+	if reason := AgentRunPurposeInteractive.PublicCreateError(); reason == "" {
+		t.Fatal("interactive must be rejected on public create")
+	}
+	if reason := AgentRunPurposeChained.PublicCreateError(); reason == "" {
+		t.Fatal("chained must be rejected on public create")
+	}
+	if reason := AgentRunPurposeManual.PublicCreateError(); reason != "" {
+		t.Fatalf("manual public create: %s", reason)
+	}
+}
+
 func TestCompositionResourcesAreRegistered(t *testing.T) {
 	t.Parallel()
 

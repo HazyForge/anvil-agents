@@ -2658,12 +2658,15 @@ spec:
                       context defines the work without an additional operator request.
                     type: string
                   purpose:
-                    description: Purpose explains why this run exists.
+                    description: |-
+                      Purpose explains why this run exists. interactive is the live chat
+                      session medium; only that purpose participates in the chat mailbox.
                     enum:
                     - manual
                     - adverseSituation
                     - scheduledHealthCheck
                     - chained
+                    - interactive
                     type: string
                   scheduleRef:
                     description: ScheduleRef attaches this run to the AgentSchedule
@@ -5560,12 +5563,15 @@ spec:
                             context defines the work without an additional operator request.
                           type: string
                         purpose:
-                          description: Purpose explains why this run exists.
+                          description: |-
+                            Purpose explains why this run exists. interactive is the live chat
+                            session medium; only that purpose participates in the chat mailbox.
                           enum:
                           - manual
                           - adverseSituation
                           - scheduledHealthCheck
                           - chained
+                          - interactive
                           type: string
                         scheduleRef:
                           description: ScheduleRef attaches this run to the AgentSchedule

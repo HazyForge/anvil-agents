@@ -48,6 +48,27 @@ func TestCreateAgentRunFromCard(t *testing.T) {
 	}
 }
 
+func TestCreateAgentRunRejectsInteractivePurpose(t *testing.T) {
+	server := createRunTestServer(t, true)
+	body := `{
+		"generateName": "chat-session-",
+		"prompt": "Stay in the room.",
+		"profileName": "release-implementer",
+		"purpose": "interactive"
+	}`
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/namespaces/agents/agent-runs", bytes.NewBufferString(body))
+	request.Header.Set("Authorization", "Bearer valid")
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	server.routes().ServeHTTP(response, request)
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d %s", response.Code, response.Body.String())
+	}
+	if !strings.Contains(response.Body.String(), "reserved for the chat session API") {
+		t.Fatalf("body = %s", response.Body.String())
+	}
+}
+
 func TestCreateAgentRunDisabled(t *testing.T) {
 	server := createRunTestServer(t, false)
 	body := `{"prompt":"x","profileName":"p"}`

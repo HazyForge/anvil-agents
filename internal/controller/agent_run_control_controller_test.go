@@ -234,6 +234,7 @@ func TestPausedControlBlocksManualAndAdverseApplicationRuns(t *testing.T) {
 	for _, purpose := range []controlv1alpha1.AgentRunPurpose{
 		controlv1alpha1.AgentRunPurposeManual,
 		controlv1alpha1.AgentRunPurposeAdverseSituation,
+		controlv1alpha1.AgentRunPurposeInteractive,
 	} {
 		purpose := purpose
 		t.Run(string(purpose), func(t *testing.T) {
@@ -246,6 +247,9 @@ func TestPausedControlBlocksManualAndAdverseApplicationRuns(t *testing.T) {
 			run.Spec.SourceRef.Kind = "AdverseSituation"
 			if purpose == controlv1alpha1.AgentRunPurposeManual {
 				run.Spec.SourceRef.Kind = "Operator"
+			}
+			if purpose == controlv1alpha1.AgentRunPurposeInteractive {
+				run.Spec.SourceRef.Kind = "ChatSession"
 			}
 			control := pausedAgentRunControl("hazy-trade-control", "hazy-trade", nil)
 			c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(run, control).WithStatusSubresource(run).Build()

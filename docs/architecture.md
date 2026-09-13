@@ -64,6 +64,10 @@ These runs do not share process memory or a live conversation. `subagents`
 describes personas or delegated passes to the selected harness; it does not
 cause the controller to create child Jobs. Durable coordination requires an
 explicit API, Git repository, message bus, database, or `AgentDataVolume`.
+Fire-and-forget purposes never receive chat mailbox lines. Live queue / steer /
+interrupt uses a separate `purpose=interactive` session `AgentRun` and an
+API-owned mailbox; see [Chat delivery](chat-delivery.md). Built-in grok, Codex,
+and OpenCode CLIs have no generation-interrupt hook today.
 
 ## Composition Boundaries
 
@@ -94,7 +98,7 @@ Composition](composition.md) for the exact merge and override rules.
 - Kubernetes RBAC decides who may create and edit control-plane resources.
 - The run's ServiceAccount and credentials decide what its Job may access.
 - `AgentRunControl` pauses launches or narrows concurrency; it is not an
-  authorization system.
+  authorization system and not an in-thought interrupt.
 - A harness image turns prompt intent into actions. The controller does not
   reinterpret provider-native tool calls.
 - The optional public API is read-only. It never creates or approves runs.

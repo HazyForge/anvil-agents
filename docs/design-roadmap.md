@@ -41,7 +41,9 @@ with. These are product boundaries, not branding substitutions.
 prompt metadata. **`AgentChain` owns linear completion-driven sequencing**:
 GitOps steps create append-only `AgentRun`s when the prior step reaches an
 allowed terminal phase, with status-only handoff and no peer credential
-sharing. See `docs/agent-chain.md`.
+sharing. See `docs/agent-chain.md`. Live chat queue / steer / interrupt is a
+separate mailbox on `purpose=interactive` session runs
+([Chat delivery](chat-delivery.md)), not a chain or schedule.
 
 Still out of scope for the first chain cut (and for overloaded AgentRun):
 fan-out, join, routing, approval gates, and external event sources. Those
