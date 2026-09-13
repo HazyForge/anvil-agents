@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 import type { UIConfig } from "../auth/config";
 import { loadNamespace } from "../state/namespace";
-import { runCoordinatorCommand } from "../wrapper/coordinator";
+import { sendDesktopChat } from "../wrapper/harnessChat";
 import { formatTurnError } from "../wrapper/turn";
 
 interface Props {
@@ -11,7 +11,7 @@ interface Props {
 
 type ChatLine = {
   id: string;
-  kind: "user" | "coordinator";
+  kind: "user" | "harness" | "honest";
   content: string;
 };
 
@@ -41,17 +41,16 @@ export function EntityChatPage({ token, config }: Props) {
     setDraft("");
     setLines((prev) => [...prev, { id: `user-${Date.now()}`, kind: "user", content: text }]);
     try {
-      const result = await runCoordinatorCommand({
+      const result = await sendDesktopChat({
         token,
         namespace,
-        createEnabled: Boolean(config.runs.createEnabled),
         text,
       });
       setLines((prev) => [
         ...prev,
         {
-          id: `coord-${Date.now()}`,
-          kind: "coordinator",
+          id: `reply-${Date.now()}`,
+          kind: result.source === "harness" ? "harness" : "honest",
           content: result.text,
         },
       ]);
@@ -76,8 +75,8 @@ export function EntityChatPage({ token, config }: Props) {
           <h1 className="page-title">Chat</h1>
           <p className="page-sub">
             {canSend
-              ? "Commands for the Desktop coordinator on Primaris. Not a local CLI."
-              : "Sign in to send a command."}
+              ? "Talk to the always-on manager harness. Hello is a message, not a run."
+              : "Sign in to chat with the manager harness."}
           </p>
         </div>
       </div>
@@ -87,7 +86,7 @@ export function EntityChatPage({ token, config }: Props) {
       <section className="panel entity-chat-main">
         <div className="chat-messages" aria-live="polite">
           {lines.length === 0 ? (
-            <div className="empty">{canSend ? "status · start <agent> <work> · request peer for <run>" : null}</div>
+            <div className="empty">{canSend ? "Message the manager harness." : null}</div>
           ) : null}
           {lines.map((line) => (
             <article
@@ -95,7 +94,9 @@ export function EntityChatPage({ token, config }: Props) {
               className={`chat-bubble ${line.kind === "user" ? "chat-bubble-user" : "chat-bubble-run"}`}
             >
               <header className="chat-bubble-header">
-                <span className="chat-bubble-role">{line.kind === "user" ? "You" : "Coordinator"}</span>
+                <span className="chat-bubble-role">
+                  {line.kind === "user" ? "You" : line.kind === "harness" ? "Manager" : "Desktop"}
+                </span>
               </header>
               <pre className="chat-bubble-body">{line.content}</pre>
             </article>
@@ -105,27 +106,27 @@ export function EntityChatPage({ token, config }: Props) {
         {canSend ? (
           <form className="chat-composer" onSubmit={(event) => void onSubmit(event)}>
             <label className="field">
-              <span className="label">Command</span>
+              <span className="label">Message</span>
               <textarea
                 className="textarea chat-composer-input"
                 rows={3}
                 value={draft}
                 onChange={(event) => setDraft(event.target.value)}
                 onKeyDown={onComposerKeyDown}
-                placeholder="status"
+                placeholder="hello"
                 disabled={busy}
-                aria-label="Command"
+                aria-label="Message"
               />
             </label>
             <div className="chat-composer-actions">
               <button type="submit" className="btn btn-primary" disabled={busy || !draft.trim()}>
-                {busy ? "Working…" : "Send"}
+                {busy ? "Sending…" : "Send"}
               </button>
             </div>
           </form>
         ) : (
           <p className="human-empty" style={{ padding: "0.75rem" }}>
-            Sign in to send a command.
+            Sign in to chat with the manager harness.
           </p>
         )}
       </section>
