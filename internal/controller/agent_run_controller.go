@@ -90,6 +90,12 @@ const (
 	agentRunAnnotationSourceHash       = "control.anvil.hazyforge.io/agent-run-source-hash"
 	agentRunAnnotationComposition      = "control.anvil.hazyforge.io/resolved-composition"
 	agentRunAnnotationRequestedTTL     = "control.anvil.hazyforge.io/requested-ttl-seconds-after-finished"
+	agentRunAnnotationPeerRun          = "control.anvil.hazyforge.io/peer-run"
+	agentRunAnnotationPeerOf           = "control.anvil.hazyforge.io/peer-of"
+	agentRunAnnotationInterruptDuplicate = "control.anvil.hazyforge.io/interrupt-duplicate"
+	agentRunLabelPeerOf                = "control.anvil.hazyforge.io/peer-of"
+	agentRunDecisionRequestPeer        = "requestPeer"
+	agentRunDecisionInterruptDuplicate = "interruptDuplicate"
 )
 
 var agentRunSkillFileNameUnsafeChars = regexp.MustCompile(`[^A-Za-z0-9_.-]+`)
@@ -124,6 +130,9 @@ func (r *AgentRunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	}
 	if !obj.GetDeletionTimestamp().IsZero() {
 		return ctrl.Result{}, nil
+	}
+	if requester, held := agentRunInterruptDuplicateHold(obj); held {
+		return r.reconcileAgentRunInterruptDuplicateHold(ctx, obj, requester)
 	}
 	// AgentRuns are append-only execution records. A spec edit after terminal
 	// completion must not clear status or create a second harness Job; callers
@@ -520,6 +529,9 @@ func (r *AgentRunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 			agentRunApplyStatusReports(&status, agentRunStatusReportsFromOutput(logs))
 			status.Output = agentRunTrimOutput(logs)
 			status.Result = agentRunRawResult(status.Output, status.PullRequestURL, status.Decision, status.Reports)
+			if err := r.reconcileMidRunPeerDecisions(ctx, obj, &status); err != nil {
+				return ctrl.Result{}, err
+			}
 		}
 	}
 
@@ -597,6 +609,12 @@ func (r *AgentRunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		obj.Status = status
 		return r.patchAgentRunStatus(ctx, original, obj, false)
 	default:
+		if requester, held := agentRunInterruptDuplicateHold(obj); held {
+			return r.reconcileAgentRunInterruptDuplicateHold(ctx, obj, requester)
+		}
+		if agentRunStatusShowsInterruptDuplicate(&status) {
+			return r.reconcileAgentRunInterruptDuplicateHold(ctx, obj, agentRunInterruptDuplicateRequester(obj))
+		}
 		status.Phase = controlv1alpha1.AgentRunPhaseRunning
 		status.CompletedAt = nil
 		status.Error = ""
@@ -4138,6 +4156,312 @@ func agentRunTrimOutput(output string) string {
 		return output
 	}
 	return output[len(output)-maxOutputBytes:]
+}
+
+func (r *AgentRunReconciler) reconcileMidRunPeerDecisions(ctx context.Context, obj *controlv1alpha1.AgentRun, status *controlv1alpha1.AgentRunStatus) error {
+	if obj == nil || status == nil || status.Decision == nil {
+		return nil
+	}
+	switch strings.TrimSpace(status.Decision.Action) {
+	case agentRunDecisionRequestPeer:
+		return r.ensureRequestedPeerAgentRun(ctx, obj, status)
+	case agentRunDecisionInterruptDuplicate:
+		return r.interruptDuplicatePeerRuns(ctx, obj, status)
+	default:
+		return nil
+	}
+}
+
+func agentRunPeerProfileName(status *controlv1alpha1.AgentRunStatus) string {
+	if status == nil {
+		return ""
+	}
+	if name := agentRunDecisionFieldFromOutput(status.Output, agentRunDecisionRequestPeer, "peerProfileName", "profile", "profileName", "peerProfile"); name != "" {
+		return name
+	}
+	for i := len(status.Reports) - 1; i >= 0; i-- {
+		report := status.Reports[i]
+		if name := agentRunParsePeerProfile(report.Detail); name != "" {
+			return name
+		}
+		if name := agentRunParsePeerProfile(report.Summary); name != "" {
+			return name
+		}
+	}
+	return ""
+}
+
+func agentRunDecisionFieldFromOutput(output, action string, keys ...string) string {
+	scanner := bufio.NewScanner(strings.NewReader(output))
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	found := ""
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		index := strings.Index(line, agentRunStatusLinePrefix)
+		if index < 0 {
+			continue
+		}
+		raw := strings.TrimSpace(line[index+len(agentRunStatusLinePrefix):])
+		var payload map[string]any
+		if err := json.Unmarshal([]byte(raw), &payload); err != nil {
+			continue
+		}
+		gotAction, _ := payload["action"].(string)
+		if strings.TrimSpace(gotAction) != action {
+			continue
+		}
+		for _, key := range keys {
+			if value, ok := payload[key].(string); ok {
+				if name := strings.TrimSpace(value); name != "" {
+					found = name
+				}
+			}
+		}
+	}
+	return found
+}
+
+func agentRunParsePeerProfile(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(raw), &payload); err == nil {
+		for _, key := range []string{"profile", "profileName", "peerProfile"} {
+			if value, ok := payload[key].(string); ok {
+				if name := strings.TrimSpace(value); name != "" {
+					return name
+				}
+			}
+		}
+	}
+	for _, prefix := range []string{"profile=", "profileName=", "peerProfile="} {
+		idx := strings.Index(raw, prefix)
+		if idx < 0 {
+			continue
+		}
+		rest := strings.TrimSpace(raw[idx+len(prefix):])
+		fields := strings.FieldsFunc(rest, func(r rune) bool {
+			return r == ',' || r == ';' || r == '\n'
+		})
+		if len(fields) == 0 {
+			continue
+		}
+		return strings.TrimSpace(fields[0])
+	}
+	return ""
+}
+
+func (r *AgentRunReconciler) ensureRequestedPeerAgentRun(ctx context.Context, obj *controlv1alpha1.AgentRun, status *controlv1alpha1.AgentRunStatus) error {
+	if existing := strings.TrimSpace(obj.Annotations[agentRunAnnotationPeerRun]); existing != "" {
+		return nil
+	}
+	profile := agentRunPeerProfileName(status)
+	if profile == "" && obj.Spec.ProfileRef != nil {
+		profile = strings.TrimSpace(obj.Spec.ProfileRef.Name)
+	}
+	if profile == "" {
+		return nil
+	}
+	prompt := agentRunDecisionFieldFromOutput(status.Output, agentRunDecisionRequestPeer, "peerPrompt")
+	if prompt == "" {
+		prompt = strings.TrimSpace(status.Decision.Summary)
+	}
+	if prompt == "" {
+		prompt = strings.TrimSpace(obj.Spec.Prompt)
+	}
+	peer := &controlv1alpha1.AgentRun{
+		ObjectMeta: metav1.ObjectMeta{
+			GenerateName: sanitizeLabelValue(obj.Name) + "-peer-",
+			Namespace:    obj.Namespace,
+			Labels: map[string]string{
+				agentRunLabelPeerOf:     sanitizeLabelValue(obj.Name),
+				agentRunLabelSourceKind: sanitizeLabelValue(obj.Spec.SourceRef.Kind),
+				agentRunLabelSourceName: sanitizeLabelValue(obj.Spec.SourceRef.Name),
+				agentRunLabelIntent:     sanitizeLabelValue(string(obj.Spec.Harness.Intent)),
+			},
+			Annotations: map[string]string{
+				agentRunAnnotationPeerOf: obj.Name,
+			},
+		},
+		Spec: controlv1alpha1.AgentRunSpec{
+			Purpose:    obj.Spec.Purpose,
+			SourceRef:  obj.Spec.SourceRef,
+			SourceUID:  obj.Spec.SourceUID,
+			Prompt:     prompt,
+			ProfileRef: &controlv1alpha1.NamespacedObjectReference{Name: profile},
+			Scope:      obj.Spec.Scope,
+			CouncilRef: obj.Spec.CouncilRef,
+		},
+	}
+	if err := r.Create(ctx, peer); err != nil {
+		return fmt.Errorf("create peer AgentRun for %s/%s: %w", obj.Namespace, obj.Name, err)
+	}
+	base := obj.DeepCopy()
+	if obj.Annotations == nil {
+		obj.Annotations = map[string]string{}
+	}
+	obj.Annotations[agentRunAnnotationPeerRun] = peer.Name
+	if err := r.Patch(ctx, obj, client.MergeFrom(base)); err != nil {
+		return fmt.Errorf("record peer AgentRun %s on %s/%s: %w", peer.Name, obj.Namespace, obj.Name, err)
+	}
+	return nil
+}
+
+func (r *AgentRunReconciler) interruptDuplicatePeerRuns(ctx context.Context, obj *controlv1alpha1.AgentRun, status *controlv1alpha1.AgentRunStatus) error {
+	named := agentRunDecisionFieldFromOutput(status.Output, agentRunDecisionInterruptDuplicate, "duplicateRunName")
+	list := &controlv1alpha1.AgentRunList{}
+	if err := r.List(ctx, list, client.InNamespace(obj.Namespace)); err != nil {
+		return fmt.Errorf("list AgentRuns to interrupt duplicates: %w", err)
+	}
+	summary := strings.TrimSpace(status.Decision.Summary)
+	if summary == "" {
+		summary = "duplicate work"
+	}
+	now := metav1.Now()
+	for i := range list.Items {
+		peer := &list.Items[i]
+		if peer.Name == obj.Name {
+			continue
+		}
+		if named != "" && peer.Name != named {
+			continue
+		}
+		if named == "" && strings.TrimSpace(peer.Spec.SourceRef.Name) != strings.TrimSpace(obj.Spec.SourceRef.Name) {
+			continue
+		}
+		if peer.Status.Phase != controlv1alpha1.AgentRunPhaseRunning && peer.Status.Phase != controlv1alpha1.AgentRunPhasePending {
+			continue
+		}
+		original := peer.DeepCopy()
+		if peer.Annotations == nil {
+			peer.Annotations = map[string]string{}
+		}
+		peer.Annotations[agentRunAnnotationInterruptDuplicate] = obj.Name
+		if err := r.Patch(ctx, peer, client.MergeFrom(original)); err != nil {
+			if apierrors.IsConflict(err) {
+				continue
+			}
+			return fmt.Errorf("record interrupt-duplicate on AgentRun %s/%s: %w", peer.Namespace, peer.Name, err)
+		}
+		if err := r.Get(ctx, client.ObjectKeyFromObject(peer), peer); err != nil {
+			return fmt.Errorf("reload interrupted AgentRun %s/%s: %w", peer.Namespace, peer.Name, err)
+		}
+		statusOriginal := peer.DeepCopy()
+		peer.Status.Phase = controlv1alpha1.AgentRunPhaseFailed
+		peer.Status.CompletedAt = &now
+		peer.Status.Error = "interruptDuplicate: " + summary
+		peer.Status.Decision = &controlv1alpha1.AgentRunDecisionStatus{
+			Classification: "duplicate work",
+			Action:         agentRunDecisionInterruptDuplicate,
+			Summary:        summary,
+		}
+		apimeta.SetStatusCondition(&peer.Status.Conditions, metav1.Condition{
+			Type:               agentRunReady,
+			Status:             metav1.ConditionFalse,
+			ObservedGeneration: peer.Generation,
+			LastTransitionTime: now,
+			Reason:             "InterruptDuplicate",
+			Message:            peer.Status.Error,
+		})
+		if err := r.Status().Patch(ctx, peer, client.MergeFrom(statusOriginal)); err != nil {
+			if apierrors.IsConflict(err) {
+				continue
+			}
+			return fmt.Errorf("interrupt duplicate AgentRun %s/%s: %w", peer.Namespace, peer.Name, err)
+		}
+	}
+	return nil
+}
+
+func agentRunInterruptDuplicateRequester(obj *controlv1alpha1.AgentRun) string {
+	if obj == nil || obj.Annotations == nil {
+		return ""
+	}
+	return strings.TrimSpace(obj.Annotations[agentRunAnnotationInterruptDuplicate])
+}
+
+func agentRunStatusShowsInterruptDuplicate(status *controlv1alpha1.AgentRunStatus) bool {
+	if status == nil {
+		return false
+	}
+	if strings.HasPrefix(strings.TrimSpace(status.Error), "interruptDuplicate:") {
+		return true
+	}
+	for _, condition := range status.Conditions {
+		if condition.Type == agentRunReady && condition.Reason == "InterruptDuplicate" {
+			return true
+		}
+	}
+	return false
+}
+
+func agentRunInterruptDuplicateHold(obj *controlv1alpha1.AgentRun) (requester string, held bool) {
+	if obj == nil {
+		return "", false
+	}
+	if requester = agentRunInterruptDuplicateRequester(obj); requester != "" {
+		return requester, true
+	}
+	if agentRunStatusShowsInterruptDuplicate(&obj.Status) {
+		return "", true
+	}
+	return "", false
+}
+
+func (r *AgentRunReconciler) reconcileAgentRunInterruptDuplicateHold(ctx context.Context, obj *controlv1alpha1.AgentRun, requester string) (ctrl.Result, error) {
+	if obj == nil {
+		return ctrl.Result{}, nil
+	}
+	original := obj.DeepCopy()
+	status := obj.Status
+	now := metav1.Now()
+	message := strings.TrimSpace(status.Error)
+	if !strings.HasPrefix(message, "interruptDuplicate:") {
+		summary := "duplicate work"
+		if requester != "" {
+			message = fmt.Sprintf("interruptDuplicate: duplicate work requested by AgentRun %s/%s", obj.Namespace, requester)
+		} else {
+			message = "interruptDuplicate: " + summary
+		}
+	}
+	status.Phase = controlv1alpha1.AgentRunPhaseFailed
+	status.CompletedAt = &now
+	status.Error = message
+	if status.Decision == nil || strings.TrimSpace(status.Decision.Action) != agentRunDecisionInterruptDuplicate {
+		summary := strings.TrimPrefix(message, "interruptDuplicate:")
+		summary = strings.TrimSpace(summary)
+		if summary == "" {
+			summary = "duplicate work"
+		}
+		status.Decision = &controlv1alpha1.AgentRunDecisionStatus{
+			Classification: "duplicate work",
+			Action:         agentRunDecisionInterruptDuplicate,
+			Summary:        summary,
+		}
+	}
+	apimeta.SetStatusCondition(&status.Conditions, metav1.Condition{
+		Type:               agentRunReady,
+		Status:             metav1.ConditionFalse,
+		ObservedGeneration: obj.Generation,
+		LastTransitionTime: now,
+		Reason:             "InterruptDuplicate",
+		Message:            message,
+	})
+	obj.Status = status
+	result, err := r.patchAgentRunStatus(ctx, original, obj, false)
+	if err != nil {
+		return result, err
+	}
+	if err := r.Get(ctx, client.ObjectKeyFromObject(obj), obj); err != nil {
+		return ctrl.Result{}, err
+	}
+	terminal, err := r.reconcileTerminalAgentRun(ctx, obj)
+	if err != nil {
+		return terminal, err
+	}
+	return result, nil
 }
 
 func agentRunLabels(obj *controlv1alpha1.AgentRun, jobName string) map[string]string {

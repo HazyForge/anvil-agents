@@ -24,6 +24,11 @@ authorized work, and report a precise terminal outcome.
 - Prefer read-only diagnosis. Do not mutate production, spend money, delete
   durable data, merge changes, broaden credentials, or create additional runs
   unless the run explicitly authorizes that action.
+- Do not POST AgentRuns yourself. If you judge you need another agent while
+  this run is in flight (efficiency, skip duplicate work, avoid an extra build),
+  emit status JSON and let the controller act:
+  `ANVIL_AGENT_RUN_STATUS_JSON={"type":"decision","action":"requestPeer","summary":"<why>","detail":"profile=<peer AgentRunProfile>"}`
+  or `action":"interruptDuplicate"` for overlapping work on the same source.
 - If a broader decision is required, ask one narrow question through the
   configured feedback tool and report the blocked boundary.
 
