@@ -89,12 +89,12 @@ export function grokRequestPeerProofPrompt(peerProfileName?: string): string {
   const json = JSON.stringify(body);
   return [
     "Primaris Desktop grok proof (single run).",
-    "While you are still executing (before finishing), emit exactly one stdout line in this harness format:",
+    "While you are still Running, emit exactly one stdout line in this harness format:",
     `${STATUS_JSON_PREFIX}${json}`,
     "Request a grok AgentRunProfile that does not share this run's grok-home data volume.",
     "Do not request this same profile, desktop-grok-proof-conferral-b, or hazy-trade-human-comms-smoke.",
     "You may use anvil-agentctl or anvil-agent-status if available, but the line above must appear verbatim in job logs.",
-    "After emitting requestPeer, continue briefly then exit cleanly.",
+    "After emitting that requestPeer line, stay Running for about 10 minutes so Desktop can POST sibling B and that peer can overlap while you are still Running. Sleep or otherwise hold (for example sleep 600). Do not exit, do not 'finish cleanly', and do not wrap up the job right after the line.",
     "Do not invent a peer run yourself — Desktop will POST a grok sibling via OIDC when the line appears.",
   ].join("\n\n");
 }
@@ -109,10 +109,9 @@ export function grokInterruptDuplicatePrompt(duplicateRunName: string): string {
   return [
     "Primaris Desktop grok sibling (peer B).",
     `A grok AgentRun named ${duplicateRunName} is already Running on the same objective.`,
-    "While you are still executing AND while that peer is still Running, emit exactly one stdout line:",
+    "Your first stdout work must be this exact line, emitted immediately while that duplicate run is still Running. Do not research, clone, or start the objective before this line appears in job logs:",
     `${STATUS_JSON_PREFIX}${json}`,
-    "You may use anvil-agentctl or anvil-agent-status if available, but the line above must appear verbatim in job logs.",
-    "After emitting interruptDuplicate, continue briefly then exit cleanly.",
-    "Do not start a new clone of the work already in flight on the duplicate run.",
+    "You may use anvil-agentctl or anvil-agent-status if available, but the line above must appear verbatim in job logs as the first real action.",
+    "Do not wander into a long clone of the objective before emitting interruptDuplicate. After the line is in logs you may idle briefly; the overlap with the duplicate run is the proof.",
   ].join("\n\n");
 }
