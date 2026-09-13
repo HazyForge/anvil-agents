@@ -20,6 +20,8 @@ const (
 	PermissionCompositionWrite = "anvil-agents:composition:write"
 	PermissionControlsRead     = "anvil-agents:controls:read"
 	PermissionControlsWrite    = "anvil-agents:controls:write"
+	PermissionChatRead         = "anvil-agents:chat:read"
+	PermissionChatWrite        = "anvil-agents:chat:write"
 )
 
 // knownPermissions is the closed set of OIDC permissions the API accepts.
@@ -31,6 +33,8 @@ var knownPermissions = map[string]struct{}{
 	PermissionCompositionWrite: {},
 	PermissionControlsRead:     {},
 	PermissionControlsWrite:    {},
+	PermissionChatRead:         {},
+	PermissionChatWrite:        {},
 }
 
 type Config struct {
@@ -47,6 +51,14 @@ type Config struct {
 	Controls ControlsConfig `json:"controls"`
 	// Runs gates append-only AgentRun create from the console/API.
 	Runs RunsConfig `json:"runs"`
+	// Chat gates standing-chat and Anvil council endpoints. Disabled by default.
+	Chat ChatConfig `json:"chat"`
+}
+
+// ChatConfig controls chat/memory endpoints. The PostgreSQL URI is loaded from
+// ANVIL_AGENTS_CHAT_DATABASE_URL, never from this file.
+type ChatConfig struct {
+	Enabled bool `json:"enabled"`
 }
 
 // RunsConfig controls AgentRun mutation endpoints. Creates remain append-only.
@@ -299,6 +311,9 @@ func (config Config) Validate() error {
 			}
 			if permission == PermissionRunsCreate && !config.Runs.CreateEnabled {
 				return fmt.Errorf("authorization %s grants %s but runs.createEnabled is false", name, permission)
+			}
+			if (permission == PermissionChatRead || permission == PermissionChatWrite) && !config.Chat.Enabled {
+				return fmt.Errorf("authorization %s grants %s but chat.enabled is false", name, permission)
 			}
 			if permission == PermissionControlsRead || permission == PermissionControlsWrite {
 				if permission == PermissionControlsRead && !config.Controls.ReadEnabled {

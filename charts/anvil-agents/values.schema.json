@@ -107,6 +107,13 @@
           }
         }
       }
+    },
+    "api": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "chatDatabaseURLSecret": { "$ref": "#/definitions/databaseURLSecret" }
+      }
     }
   },
   "definitions": {

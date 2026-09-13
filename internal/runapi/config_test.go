@@ -96,6 +96,20 @@ func TestConfigControlsWriteRequiresRead(t *testing.T) {
 	}
 }
 
+func TestConfigRejectsChatPermissionWithoutGate(t *testing.T) {
+	config := DefaultConfig()
+	config.OIDC.Issuer = "https://issuer.example"
+	config.OIDC.Audiences = []string{"anvil-agents"}
+	config.Authorization.Bindings = []AuthorizationBinding{{
+		Roles:       []string{"operator"},
+		Permissions: []string{PermissionChatWrite},
+		Namespaces:  []string{"hazy-trade"},
+	}}
+	if err := config.Validate(); err == nil || !strings.Contains(err.Error(), "chat.enabled is false") {
+		t.Fatalf("expected chat gate rejection, got %v", err)
+	}
+}
+
 func TestConfigRejectsControlsPermissionWithoutGate(t *testing.T) {
 	config := DefaultConfig()
 	config.OIDC.Issuer = "https://issuer.example"
