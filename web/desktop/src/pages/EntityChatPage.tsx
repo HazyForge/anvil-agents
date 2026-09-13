@@ -1,12 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
-import {
-  AUDITOR_GROK_PROFILE,
-  GROK_BACKEND,
-  createAgentRun,
-} from "../api/client";
 import type { UIConfig } from "../auth/config";
-import { personaLabel } from "../names";
 import { loadNamespace } from "../state/namespace";
+import { runCoordinatorCommand } from "../wrapper/coordinator";
 import { formatTurnError } from "../wrapper/turn";
 
 interface Props {
@@ -16,9 +11,8 @@ interface Props {
 
 type ChatLine = {
   id: string;
-  kind: "user" | "run";
+  kind: "user" | "coordinator";
   content: string;
-  runName?: string;
 };
 
 export function EntityChatPage({ token, config }: Props) {
@@ -30,7 +24,7 @@ export function EntityChatPage({ token, config }: Props) {
   const [lines, setLines] = useState<ChatLine[]>([]);
   const endRef = useRef<HTMLDivElement | null>(null);
 
-  const canSend = Boolean(token) && Boolean(config.runs.createEnabled);
+  const canSend = Boolean(token);
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ block: "end" });
@@ -45,29 +39,20 @@ export function EntityChatPage({ token, config }: Props) {
     setBusy(true);
     setError(null);
     setDraft("");
-    const userLine: ChatLine = {
-      id: `user-${Date.now()}`,
-      kind: "user",
-      content: text,
-    };
-    setLines((prev) => [...prev, userLine]);
+    setLines((prev) => [...prev, { id: `user-${Date.now()}`, kind: "user", content: text }]);
     try {
-      const created = await createAgentRun(token, namespace, {
-        generateName: "desktop-chat-",
-        prompt: text,
-        profileName: AUDITOR_GROK_PROFILE,
-        backend: GROK_BACKEND,
+      const result = await runCoordinatorCommand({
+        token,
+        namespace,
+        createEnabled: Boolean(config.runs.createEnabled),
+        text,
       });
-      const name = created.name?.trim() || "";
       setLines((prev) => [
         ...prev,
         {
-          id: `run-${name || Date.now()}`,
-          kind: "run",
-          content: name
-            ? `Started run ${name}. The cluster harness is taking this command.`
-            : "Started a run. The cluster harness is taking this command.",
-          runName: name || undefined,
+          id: `coord-${Date.now()}`,
+          kind: "coordinator",
+          content: result.text,
         },
       ]);
     } catch (err) {
@@ -91,10 +76,8 @@ export function EntityChatPage({ token, config }: Props) {
           <h1 className="page-title">Chat</h1>
           <p className="page-sub">
             {canSend
-              ? `Each message starts a ${personaLabel(AUDITOR_GROK_PROFILE)} run on the cluster.`
-              : !token
-                ? "Sign in to send a message."
-                : "This server does not allow starting runs from Chat."}
+              ? "Commands for the Desktop coordinator on Primaris. Not a local CLI."
+              : "Sign in to send a command."}
           </p>
         </div>
       </div>
@@ -104,9 +87,7 @@ export function EntityChatPage({ token, config }: Props) {
       <section className="panel entity-chat-main">
         <div className="chat-messages" aria-live="polite">
           {lines.length === 0 ? (
-            <div className="empty">
-              {canSend ? "Write what the agent should do." : null}
-            </div>
+            <div className="empty">{canSend ? "status · start <agent> <work> · request peer for <run>" : null}</div>
           ) : null}
           {lines.map((line) => (
             <article
@@ -114,7 +95,7 @@ export function EntityChatPage({ token, config }: Props) {
               className={`chat-bubble ${line.kind === "user" ? "chat-bubble-user" : "chat-bubble-run"}`}
             >
               <header className="chat-bubble-header">
-                <span className="chat-bubble-role">{line.kind === "user" ? "You" : "Run"}</span>
+                <span className="chat-bubble-role">{line.kind === "user" ? "You" : "Coordinator"}</span>
               </header>
               <pre className="chat-bubble-body">{line.content}</pre>
             </article>
@@ -124,27 +105,27 @@ export function EntityChatPage({ token, config }: Props) {
         {canSend ? (
           <form className="chat-composer" onSubmit={(event) => void onSubmit(event)}>
             <label className="field">
-              <span className="label">Message</span>
+              <span className="label">Command</span>
               <textarea
                 className="textarea chat-composer-input"
                 rows={3}
                 value={draft}
                 onChange={(event) => setDraft(event.target.value)}
                 onKeyDown={onComposerKeyDown}
-                placeholder="Write a message"
+                placeholder="status"
                 disabled={busy}
-                aria-label="Message"
+                aria-label="Command"
               />
             </label>
             <div className="chat-composer-actions">
               <button type="submit" className="btn btn-primary" disabled={busy || !draft.trim()}>
-                {busy ? "Sending…" : "Send"}
+                {busy ? "Working…" : "Send"}
               </button>
             </div>
           </form>
         ) : (
           <p className="human-empty" style={{ padding: "0.75rem" }}>
-            {!token ? "Sign in to send a message." : "Starting a run is turned off on this server."}
+            Sign in to send a command.
           </p>
         )}
       </section>
