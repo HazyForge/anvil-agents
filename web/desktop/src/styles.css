@@ -395,6 +395,7 @@ a { color: var(--teal); text-decoration: none; }
 .chat-bubble-user { border-color: rgba(106, 169, 255, 0.35); }
 .chat-bubble-wrapper { border-color: rgba(61, 255, 168, 0.35); }
 .chat-bubble-entity { border-color: rgba(61, 224, 197, 0.35); }
+.chat-bubble-run { border-color: rgba(61, 255, 168, 0.35); }
 .chat-bubble-header {
   display: flex;
   justify-content: space-between;
