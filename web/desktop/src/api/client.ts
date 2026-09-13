@@ -473,22 +473,12 @@ export function pickGrokPeerProfileName(
   sourceProfileName: string,
 ): string {
   const source = sourceProfileName.trim();
-  const listed = profiles.find((profile) => (profile.metadata.name || "").trim() === DESKTOP_GROK_PEER_PROFILE);
-  if (DESKTOP_GROK_PEER_PROFILE !== source && !isBlockedPeerProfile(DESKTOP_GROK_PEER_PROFILE)) {
-    if (!listed) {
-      return DESKTOP_GROK_PEER_PROFILE;
-    }
-    const backend = backendKindFromComposition(listed);
-    if (
-      profileApplicationRef(listed) === HAZY_TRADE_APPLICATION &&
-      (!backend || isGrokBackend(backend))
-    ) {
-      return DESKTOP_GROK_PEER_PROFILE;
-    }
+  if (DESKTOP_GROK_PEER_PROFILE && DESKTOP_GROK_PEER_PROFILE !== source) {
+    return DESKTOP_GROK_PEER_PROFILE;
   }
   for (const profile of profiles) {
     const name = (profile.metadata.name || "").trim();
-    if (!name || isBlockedPeerProfile(name) || name === source || name === DESKTOP_GROK_PEER_PROFILE) {
+    if (!name || isBlockedPeerProfile(name) || name === source) {
       continue;
     }
     if (profileApplicationRef(profile) !== HAZY_TRADE_APPLICATION) {
@@ -500,7 +490,7 @@ export function pickGrokPeerProfileName(
     }
     return name;
   }
-  return DESKTOP_GROK_PEER_PROFILE !== source ? DESKTOP_GROK_PEER_PROFILE : "";
+  return "";
 }
 
 async function enrichInspectedProfile(

@@ -42,6 +42,10 @@ export function WrapperPage({ snapshot, token, config }: Props) {
   const [runs, setRuns] = useState<AgentRunView[]>([]);
   const [profiles, setProfiles] = useState<CompositionDocument[]>([]);
   const [requestPeerSource, setRequestPeerSource] = useState<string | null>(null);
+  const displayedPeerProfile =
+    !peerProfileName.trim() || isBlockedPeerProfile(peerProfileName) || peerProfileName.trim() === profileName.trim()
+      ? pickGrokPeerProfileName(profiles, profileName) || DESKTOP_GROK_PEER_PROFILE
+      : peerProfileName;
 
   const apiTools = snapshot.wrapper.tools.filter((tool) => tool.id !== "local-harness");
   const localTool = snapshot.wrapper.tools.find((tool) => tool.id === "local-harness");
@@ -88,13 +92,10 @@ export function WrapperPage({ snapshot, token, config }: Props) {
   }, [namespace, token]);
 
   useEffect(() => {
-    const picked = pickGrokPeerProfileName(profiles, profileName);
-    if (!picked) {
-      return;
-    }
     setPeerProfileName((current) => {
       if (!current.trim() || isBlockedPeerProfile(current) || current.trim() === profileName.trim()) {
-        return picked;
+        const next = pickGrokPeerProfileName(profiles, profileName) || DESKTOP_GROK_PEER_PROFILE;
+        return isBlockedPeerProfile(next) ? DESKTOP_GROK_PEER_PROFILE : next;
       }
       return current;
     });
@@ -175,17 +176,18 @@ export function WrapperPage({ snapshot, token, config }: Props) {
       return;
     }
     const grokProfile = profileName.trim();
-    let peerProfile = peerProfileName.trim();
+    let peerProfile = displayedPeerProfile.trim();
     if (!grokProfile) {
       setError("grok profile is required");
       return;
     }
     if (!peerProfile || isBlockedPeerProfile(peerProfile) || peerProfile === grokProfile) {
-      peerProfile = pickGrokPeerProfileName(profiles, grokProfile);
+      peerProfile = pickGrokPeerProfileName(profiles, grokProfile) || DESKTOP_GROK_PEER_PROFILE;
     }
-    if (peerProfile) {
-      setPeerProfileName(peerProfile);
+    if (isBlockedPeerProfile(peerProfile) || peerProfile === grokProfile) {
+      peerProfile = DESKTOP_GROK_PEER_PROFILE;
     }
+    setPeerProfileName(peerProfile);
     setBusy(true);
     setError(null);
     setRequestPeerStatus(null);
@@ -338,10 +340,21 @@ export function WrapperPage({ snapshot, token, config }: Props) {
             <span className="label">peerProfileName (distinct grok home, not conferral-b / Codex)</span>
             <input
               className="input"
-              value={peerProfileName}
-              onChange={(event) => setPeerProfileName(event.target.value)}
+              value={displayedPeerProfile}
+              onChange={(event) => {
+                const next = event.target.value;
+                if (!next.trim() || isBlockedPeerProfile(next)) {
+                  setPeerProfileName(DESKTOP_GROK_PEER_PROFILE);
+                  return;
+                }
+                setPeerProfileName(next);
+              }}
               placeholder={DESKTOP_GROK_PEER_PROFILE}
             />
+            <p className="muted">
+              Default B: <span className="mono">{DESKTOP_GROK_PEER_PROFILE}</span>. Blocked: conferral-b,
+              human-comms-smoke (Codex).
+            </p>
           </label>
           {config.runs.createEnabled ? (
             <button
