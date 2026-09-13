@@ -1,4 +1,4 @@
-import { appendChatMessage, getChatThread, listChatThreads } from "../api/chat";
+import { appendChatMessageStream, getChatThread, listChatThreads } from "../api/chat";
 import { APIError, AUDITOR_GROK_PROFILE, DESKTOP_GROK_PEER_PROFILE } from "../api/client";
 import type { ChatMessage, ChatThread } from "../api/types.chat";
 import { formatTurnError } from "./turn";
@@ -104,23 +104,28 @@ export async function loadManagerHarnessHistory(opts: {
 }
 
 /**
- * Proxy an existing standing harness thread. Never createAgentRun. Never create a
- * thread (that can provision a Job). Never execute harness tools on Desktop.
+ * Proxy an existing standing harness thread as a text stream.
+ * Never createAgentRun. Never create a thread. Never execute harness tools.
  * Hello is a user message; the harness replies in text and may choose zero tools.
  */
 async function proxyManagerHarnessChat(opts: {
   token: string;
   namespace: string;
   text: string;
+  onDelta?: (text: string) => void;
 }): Promise<{ text: string; threadId: string }> {
   const threads = await listChatThreads(opts.token, opts.namespace, { limit: 50 });
   const thread = pickManagerThread(threads);
   if (!thread) {
     throw new APIError(404, "harness_thread_missing", "no standing manager harness chat thread");
   }
-  const posted = await appendChatMessage(opts.token, opts.namespace, thread.id, {
-    content: opts.text,
-  });
+  const posted = await appendChatMessageStream(
+    opts.token,
+    opts.namespace,
+    thread.id,
+    { content: opts.text },
+    (chunk) => opts.onDelta?.(chunk),
+  );
   if (assistantLooksLikeTool(posted.assistant)) {
     throw new APIError(
       502,
@@ -136,13 +141,14 @@ async function proxyManagerHarnessChat(opts: {
 }
 
 /**
- * Desktop Chat Send. Proxies the always-on manager harness chat stream.
+ * Desktop Chat Send. Streams the always-on manager harness reply.
  * Never POSTs AgentRuns. No command parser. No speak() fakes. No tool execution.
  */
-export async function sendDesktopChat(opts: {
+export async function streamDesktopChat(opts: {
   token: string;
   namespace: string;
   text: string;
+  onDelta?: (text: string) => void;
 }): Promise<HarnessChatResult> {
   const text = opts.text.trim();
   if (!text) {
@@ -153,9 +159,18 @@ export async function sendDesktopChat(opts: {
       token: opts.token,
       namespace: opts.namespace,
       text,
+      onDelta: opts.onDelta,
     });
     return { text: reply.text, source: "harness", threadId: reply.threadId };
   } catch (err) {
     return { text: `${NO_HARNESS_CHAT} (${formatTurnError(err)})`, source: "honest" };
   }
+}
+
+export async function sendDesktopChat(opts: {
+  token: string;
+  namespace: string;
+  text: string;
+}): Promise<HarnessChatResult> {
+  return streamDesktopChat(opts);
 }

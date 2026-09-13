@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 import type { UIConfig } from "../auth/config";
 import { loadNamespace } from "../state/namespace";
-import { loadManagerHarnessHistory, sendDesktopChat } from "../wrapper/harnessChat";
+import { loadManagerHarnessHistory, streamDesktopChat } from "../wrapper/harnessChat";
 import { formatTurnError } from "../wrapper/turn";
 
 interface Props {
@@ -56,21 +56,43 @@ export function EntityChatPage({ token, config }: Props) {
     setBusy(true);
     setError(null);
     setDraft("");
+    const replyId = `reply-${Date.now()}`;
     setLines((prev) => [...prev, { id: `user-${Date.now()}`, kind: "user", content: text }]);
     try {
-      const result = await sendDesktopChat({
+      const result = await streamDesktopChat({
         token,
         namespace,
         text,
-      });
-      setLines((prev) => [
-        ...prev,
-        {
-          id: `reply-${Date.now()}`,
-          kind: result.source === "harness" ? "harness" : "honest",
-          content: result.text,
+        onDelta: (chunk) => {
+          setLines((prev) => {
+            const existing = prev.find((line) => line.id === replyId);
+            if (!existing) {
+              return [...prev, { id: replyId, kind: "harness", content: chunk }];
+            }
+            return prev.map((line) =>
+              line.id === replyId ? { ...line, kind: "harness", content: line.content + chunk } : line,
+            );
+          });
         },
-      ]);
+      });
+      setLines((prev) => {
+        const existing = prev.find((line) => line.id === replyId);
+        if (existing) {
+          return prev.map((line) =>
+            line.id === replyId
+              ? { ...line, kind: result.source === "harness" ? "harness" : "honest", content: result.text }
+              : line,
+          );
+        }
+        return [
+          ...prev,
+          {
+            id: replyId,
+            kind: result.source === "harness" ? "harness" : "honest",
+            content: result.text,
+          },
+        ];
+      });
     } catch (err) {
       setError(formatTurnError(err));
     } finally {
