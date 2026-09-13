@@ -4,6 +4,8 @@ import {
   createAgentRun,
   createAgentRunProfile,
   getAgentRun,
+  GROK_BACKEND,
+  GROK_PROOF_PROFILE,
   listAgentRuns,
   listRunProfiles,
   type AgentRunView,
@@ -27,8 +29,8 @@ export function WrapperPage({ snapshot, token, config }: Props) {
   const fallbackNs = config.defaultNamespaces[0] || "";
   const [namespace, setNamespace] = useState(() => loadNamespace(fallbackNs));
   const [prompt, setPrompt] = useState("");
-  const [profileName, setProfileName] = useState("desktop-grok-proof-conferral-b");
-  const [peerProfileName, setPeerProfileName] = useState("hazy-trade-human-comms-smoke");
+  const [profileName, setProfileName] = useState(GROK_PROOF_PROFILE);
+  const [peerProfileName, setPeerProfileName] = useState(GROK_PROOF_PROFILE);
   const [runName, setRunName] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -153,6 +155,7 @@ export function WrapperPage({ snapshot, token, config }: Props) {
         generateName: "desktop-reqpeer-",
         profileName: grokProfile,
         prompt: grokRequestPeerProofPrompt(peerProfile),
+        backend: GROK_BACKEND,
       });
       const name =
         created && typeof created === "object" && "name" in created && typeof created.name === "string"
@@ -275,8 +278,10 @@ export function WrapperPage({ snapshot, token, config }: Props) {
           <p className="muted">
             Primaris controller does not handle <span className="mono">requestPeer</span> yet. Desktop watches
             the grok live stream for <span className="mono">ANVIL_AGENT_RUN_STATUS_JSON</span> with{" "}
-            <span className="mono">type=requestPeer</span> while the source run is <strong>Running</strong>, then
-            POSTs the peer AgentRun through loopback OIDC (same API the controller will use later).
+            <span className="mono">type=decision action=requestPeer</span> while the source run is{" "}
+            <strong>Running</strong>, then POSTs a <strong>grok</strong> sibling (never Codex) through loopback
+            OIDC. Sibling B is prompted to emit <span className="mono">interruptDuplicate</span> with{" "}
+            <span className="mono">duplicateRunName</span> = A.
           </p>
           <label className="field">
             <span className="label">grok AgentRunProfile</span>
@@ -288,12 +293,12 @@ export function WrapperPage({ snapshot, token, config }: Props) {
             />
           </label>
           <label className="field">
-            <span className="label">peerProfileName (requestPeer target)</span>
+            <span className="label">peerProfileName (grok/grokBuild target)</span>
             <input
               className="input"
               value={peerProfileName}
               onChange={(event) => setPeerProfileName(event.target.value)}
-              placeholder="hazy-trade-human-comms-smoke"
+              placeholder={GROK_PROOF_PROFILE}
             />
           </label>
           {config.runs.createEnabled ? (

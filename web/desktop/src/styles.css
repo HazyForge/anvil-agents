@@ -485,6 +485,15 @@ a { color: var(--teal); text-decoration: none; }
   border-left: 2px solid var(--amber);
   padding-left: 0.35rem;
 }
+.stream-line-interrupt {
+  background: rgba(61, 255, 168, 0.16);
+  border-left: 3px solid var(--emerald);
+  padding-left: 0.35rem;
+  color: var(--emerald);
+}
+.stream-line-interrupt .body {
+  font-weight: 600;
+}
 .run-table tr.watch-selected td { background: rgba(61, 255, 168, 0.08); }
 .collab-run-cards {
   display: grid;

@@ -1,4 +1,4 @@
-import { createAgentRun, getAgentRun } from "../api/client";
+import { createAgentRun, getAgentRun, GROK_BACKEND } from "../api/client";
 
 export const PEER_SIGNAL = /\b(confer|conferral|peer consult|interrupt|collaborat|duplicate work|ask.*peer|peer run)\b/i;
 
@@ -66,6 +66,7 @@ export async function startStaggeredPairedObjective(opts: {
     generateName: "desktop-collab-a-",
     prompt: workerPrompt("A", objective, null),
     profileName,
+    backend: GROK_BACKEND,
   });
   const runA = runNameFromCreate(first);
   if (!runA) {
@@ -82,6 +83,7 @@ export async function startStaggeredPairedObjective(opts: {
     generateName: "desktop-collab-b-",
     prompt: workerPrompt("B", objective, runA),
     profileName,
+    backend: GROK_BACKEND,
   });
   const runB = runNameFromCreate(second);
   if (!runB) {

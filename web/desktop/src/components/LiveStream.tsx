@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { openAgentRunStream } from "../api/stream";
 import type { StreamEnvelope } from "../api/types.stream";
 import { peerSignalText } from "../wrapper/collaboration";
-import { STATUS_JSON_PREFIX } from "../wrapper/requestPeer";
+import { isInterruptDuplicateLogLine, STATUS_JSON_PREFIX } from "../wrapper/requestPeer";
 
 function statusJsonHighlight(body: string): boolean {
   return (
@@ -14,6 +14,10 @@ function statusJsonHighlight(body: string): boolean {
   );
 }
 
+function interruptDuplicateHighlight(body: string): boolean {
+  return isInterruptDuplicateLogLine(body) || (body.includes(STATUS_JSON_PREFIX) && body.includes("interruptDuplicate"));
+}
+
 const MAX_STREAM_ROWS = 2000;
 
 interface StreamRow {
@@ -22,6 +26,7 @@ interface StreamRow {
   timestamp: string;
   body: string;
   peerHighlight: boolean;
+  interruptHighlight: boolean;
 }
 
 interface Props {
@@ -47,6 +52,7 @@ export function LiveStream({ token, namespace, name, title }: Props) {
     const append = (kind: string, body: string, timestamp?: string) => {
       rowCounter.current += 1;
       const peerHighlight = statusJsonHighlight(body);
+      const interruptHighlight = interruptDuplicateHighlight(body);
       setRows((prev) => {
         const next = [
           ...prev,
@@ -56,6 +62,7 @@ export function LiveStream({ token, namespace, name, title }: Props) {
             timestamp: timestamp || new Date().toISOString(),
             body,
             peerHighlight,
+            interruptHighlight,
           },
         ];
         if (next.length <= MAX_STREAM_ROWS) {
@@ -117,6 +124,7 @@ export function LiveStream({ token, namespace, name, title }: Props) {
   }, [rows]);
 
   const peerHits = rows.filter((row) => row.peerHighlight).length;
+  const interruptHits = rows.filter((row) => row.interruptHighlight).length;
 
   return (
     <div className="stream-panel">
@@ -126,13 +134,16 @@ export function LiveStream({ token, namespace, name, title }: Props) {
           {statusText}
         </span>
         {peerHits > 0 ? <span className="chip chip-ok">{peerHits} peer signal(s)</span> : null}
+        {interruptHits > 0 ? (
+          <span className="chip chip-ok">interruptDuplicate</span>
+        ) : null}
       </div>
       <div className="stream-log" ref={scrollerRef}>
         {rows.length === 0 ? <div className="empty">Waiting for stream events…</div> : null}
         {rows.map((row) => (
           <div
             key={row.key}
-            className={`stream-line kind-${row.kind}${row.peerHighlight ? " stream-line-peer" : ""}`}
+            className={`stream-line kind-${row.kind}${row.peerHighlight ? " stream-line-peer" : ""}${row.interruptHighlight ? " stream-line-interrupt" : ""}`}
           >
             <span className="ts">{row.timestamp.slice(11, 19)}</span>
             <span className="kind">{row.kind}</span>

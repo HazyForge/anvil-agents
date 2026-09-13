@@ -1,8 +1,14 @@
 import { useEffect, useRef, useState } from "react";
-import { createAgentRun, getAgentRun } from "../api/client";
+import { createAgentRun, getAgentRun, resolveGrokPeerCreate } from "../api/client";
 import { openAgentRunStream } from "../api/stream";
+import { LiveStream } from "./LiveStream";
 import { isRunningPhase } from "../wrapper/collaboration";
-import { parseRequestPeerFromLogLine, STATUS_JSON_PREFIX, type RequestPeerPayload } from "../wrapper/requestPeer";
+import {
+  grokInterruptDuplicatePrompt,
+  parseRequestPeerFromLogLine,
+  STATUS_JSON_PREFIX,
+  type RequestPeerPayload,
+} from "../wrapper/requestPeer";
 
 interface Props {
   token: string;
@@ -14,6 +20,8 @@ interface Props {
 type PostedPeer = {
   peerProfileName: string;
   peerRunName: string;
+  backend?: string;
+  application?: string;
   at: string;
 };
 
@@ -61,7 +69,7 @@ export function RequestPeerMonitor({ token, namespace, sourceRun, createEnabled 
           const peer = parseRequestPeerFromLogLine(line);
           if (peer) {
             setLogHits((prev) => uniqueLines([...prev, line]));
-            void maybePostPeer(peer, line);
+            void maybePostPeer(peer);
           } else if (line.includes(STATUS_JSON_PREFIX) && line.includes("requestPeer")) {
             setLogHits((prev) => uniqueLines([...prev, line]));
           }
@@ -70,7 +78,7 @@ export function RequestPeerMonitor({ token, namespace, sourceRun, createEnabled 
       onTransportError: (err) => setError(err.message),
     });
 
-    async function maybePostPeer(peer: RequestPeerPayload, line: string) {
+    async function maybePostPeer(peer: RequestPeerPayload) {
       const key = `${sourceRun}:${peer.peerProfileName}`;
       if (fulfilled.current.has(key) || posting.current) {
         return;
@@ -102,24 +110,31 @@ export function RequestPeerMonitor({ token, namespace, sourceRun, createEnabled 
       posting.current = true;
       fulfilled.current.add(key);
       try {
+        const resolved = await resolveGrokPeerCreate(token, namespace, {
+          sourceRun,
+          requestedProfileName: peer.peerProfileName,
+        });
+        const peerPrompt = grokInterruptDuplicatePrompt(sourceRun);
         const created = await createAgentRun(token, namespace, {
           generateName: "desktop-peer-",
-          profileName: peer.peerProfileName,
-          prompt: [
-            `Desktop spawned this peer AgentRun after requestPeer from ${sourceRun}.`,
-            peer.summary ? `Summary: ${peer.summary}` : "",
-            `Source log line: ${line}`,
-          ]
-            .filter(Boolean)
-            .join("\n"),
+          profileName: resolved.profileName,
+          harnessProfileName: resolved.harnessProfileName,
+          application: resolved.application,
+          applicationName: resolved.application,
+          backend: resolved.backend,
+          prompt: peerPrompt,
+          peerPrompt,
         });
-        const name =
-          created && typeof created === "object" && "name" in created && typeof created.name === "string"
-            ? created.name
-            : "unknown";
+        const name = created.name?.trim() || "unknown";
         setPosted((prev) => [
           ...prev,
-          { peerProfileName: peer.peerProfileName, peerRunName: name, at: new Date().toISOString() },
+          {
+            peerProfileName: resolved.profileName,
+            peerRunName: name,
+            backend: created.backend || resolved.backend,
+            application: created.application || resolved.application,
+            at: new Date().toISOString(),
+          },
         ]);
         setError(null);
       } catch (err) {
@@ -135,6 +150,7 @@ export function RequestPeerMonitor({ token, namespace, sourceRun, createEnabled 
 
   const sawRequestPeer = logHits.some((line) => line.includes("requestPeer"));
   const running = isRunningPhase(phase);
+  const latestPeer = posted[posted.length - 1];
 
   return (
     <section className="panel" style={{ marginTop: "0.75rem" }}>
@@ -142,7 +158,7 @@ export function RequestPeerMonitor({ token, namespace, sourceRun, createEnabled 
         <h2 className="panel-title">requestPeer · live stream</h2>
         <span className={`chip ${running ? "chip-ok" : ""}`}>{phase || "—"}</span>
         {sawRequestPeer ? <span className="chip chip-ok">requestPeer line</span> : null}
-        {posted.length > 0 ? <span className="chip chip-ok">peer posted</span> : null}
+        {posted.length > 0 ? <span className="chip chip-ok">grok peer posted</span> : null}
       </div>
       <div className="panel-body">
         <p className="muted mono">{sourceRun}</p>
@@ -157,10 +173,23 @@ export function RequestPeerMonitor({ token, namespace, sourceRun, createEnabled 
           <ul className="collab-peer-notes">
             {posted.map((item) => (
               <li key={`${item.peerProfileName}-${item.at}`}>
-                POSTed peer {item.peerRunName} (profile {item.peerProfileName})
+                POSTed grok peer {item.peerRunName} (profile {item.peerProfileName}
+                {item.backend ? `, backend ${item.backend}` : ""}
+                {item.application ? `, application ${item.application}` : ""})
               </li>
             ))}
           </ul>
+        ) : null}
+        {latestPeer ? (
+          <div className="stream-dual" style={{ marginTop: "0.75rem" }}>
+            <LiveStream token={token} namespace={namespace} name={sourceRun} title={`${sourceRun} (A)`} />
+            <LiveStream
+              token={token}
+              namespace={namespace}
+              name={latestPeer.peerRunName}
+              title={`${latestPeer.peerRunName} (B grok)`}
+            />
+          </div>
         ) : null}
       </div>
     </section>

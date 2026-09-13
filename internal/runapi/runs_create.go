@@ -34,6 +34,15 @@ type CreateAgentRunRequest struct {
 	SourceName         string   `json:"sourceName,omitempty"`
 	SourceAPIVersion   string   `json:"sourceAPIVersion,omitempty"`
 	SourceNamespace    string   `json:"sourceNamespace,omitempty"`
+	// Application is the opaque Application scope key (spec.scope.applicationRef.name).
+	Application string `json:"application,omitempty"`
+	// ApplicationName is an alias for Application (Desktop/console cards).
+	ApplicationName string `json:"applicationName,omitempty"`
+	// PeerPrompt is the sibling-B prompt. Used as Spec.Prompt when Prompt is empty.
+	PeerPrompt string `json:"peerPrompt,omitempty"`
+	// Backend is an optional harness kind overlay. Desktop sends grokBuild for
+	// requestPeer siblings; Codex is ignored (never applied as a default).
+	Backend string `json:"backend,omitempty"`
 }
 
 func (server *Server) handleCreateRun(writer http.ResponseWriter, request *http.Request) {
@@ -81,6 +90,8 @@ func (server *Server) handleCreateRun(writer http.ResponseWriter, request *http.
 		"namespace", run.Namespace,
 		"agentRun", run.Name,
 		"profile", body.ProfileName,
+		"application", createRunApplication(body),
+		"backend", string(createRunBackendKind(body.Backend)),
 	)
 	writeJSON(writer, http.StatusCreated, NewAgentRunView(run, true))
 }
@@ -127,7 +138,7 @@ func buildAgentRunFromCreateRequest(namespace string, body CreateAgentRunRequest
 	if profile == "" {
 		return nil, fmt.Errorf("profileName is required")
 	}
-	prompt := body.Prompt
+	prompt := createRunPrompt(body)
 	if strings.TrimSpace(prompt) == "" {
 		return nil, fmt.Errorf("prompt is required")
 	}
@@ -186,8 +197,14 @@ func buildAgentRunFromCreateRequest(namespace string, body CreateAgentRunRequest
 			ProfileRef: &agentsv1alpha1.NamespacedObjectReference{Name: profile},
 		},
 	}
+	if application := createRunApplication(body); application != "" {
+		run.Spec.Scope.ApplicationRef = &agentsv1alpha1.ApplicationReferenceSpec{Name: application}
+	}
 	if harness := strings.TrimSpace(body.HarnessProfileName); harness != "" {
 		run.Spec.HarnessProfileRef = &agentsv1alpha1.NamespacedObjectReference{Name: harness}
+	}
+	if backend := createRunBackendKind(body.Backend); backend != "" {
+		run.Spec.Harness.Backend.Kind = backend
 	}
 	if intent != "" {
 		run.Spec.Harness.Intent = intent
@@ -205,6 +222,24 @@ func buildAgentRunFromCreateRequest(namespace string, body CreateAgentRunRequest
 		}
 	}
 	return run, nil
+}
+
+func createRunPrompt(body CreateAgentRunRequest) string {
+	return firstNonEmpty(body.Prompt, body.PeerPrompt)
+}
+
+func createRunApplication(body CreateAgentRunRequest) string {
+	return firstNonEmpty(body.Application, body.ApplicationName)
+}
+
+func createRunBackendKind(raw string) agentsv1alpha1.AgentRunHarnessBackendKind {
+	switch strings.TrimSpace(raw) {
+	case "grok", string(agentsv1alpha1.AgentRunHarnessBackendGrokBuild):
+		return agentsv1alpha1.AgentRunHarnessBackendGrokBuild
+	default:
+		// Never default or apply Codex from create JSON.
+		return ""
+	}
 }
 
 func namespacedRefs(names []string) []agentsv1alpha1.NamespacedObjectReference {
