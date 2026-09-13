@@ -119,6 +119,7 @@ export type AgentRunView = {
   error?: string;
   decision?: { action?: string; summary?: string };
   reports?: AgentRunReport[];
+  source?: { kind?: string; name?: string; namespace?: string };
   resolvedComposition?: {
     profileRef?: { name?: string };
     harnessProfileRef?: { name?: string };
@@ -192,6 +193,9 @@ export type CreateAgentRunRequest = {
   application?: string;
   applicationName?: string;
   backend?: string;
+  sourceKind?: string;
+  sourceName?: string;
+  sourceNamespace?: string;
 };
 
 /** Opaque Application scope key for Primaris hazy-trade AgentDataVolumes. */
@@ -741,6 +745,15 @@ export async function createAgentRun(
   }
   if (backend) {
     payload.backend = backend;
+  }
+  if (body.sourceKind?.trim()) {
+    payload.sourceKind = body.sourceKind.trim();
+  }
+  if (body.sourceName?.trim()) {
+    payload.sourceName = body.sourceName.trim();
+  }
+  if (body.sourceNamespace?.trim()) {
+    payload.sourceNamespace = body.sourceNamespace.trim();
   }
   const response = await apiFetch(`/api/v1/namespaces/${encodeURIComponent(namespace)}/agent-runs`, token, {
     method: "POST",

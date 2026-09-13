@@ -1,5 +1,13 @@
 import { useEffect, useRef, useState } from "react";
-import { createAgentRun, getAgentRun, resolveGrokPeerCreate, type CompositionDocument } from "../api/client";
+import {
+  createAgentRun,
+  getAgentRun,
+  isGrokBackend,
+  listAgentRuns,
+  resolveGrokPeerCreate,
+  type AgentRunView,
+  type CompositionDocument,
+} from "../api/client";
 import { openAgentRunStream } from "../api/stream";
 import { LiveStream } from "./LiveStream";
 import { isRunningPhase } from "../wrapper/collaboration";
@@ -9,6 +17,8 @@ import {
   STATUS_JSON_PREFIX,
   type RequestPeerPayload,
 } from "../wrapper/requestPeer";
+
+const DESKTOP_PEER_PREFIX = "desktop-peer-";
 
 interface Props {
   token: string;
@@ -65,6 +75,17 @@ export function RequestPeerMonitor({ token, namespace, sourceRun, createEnabled,
     setError(null);
     setStreamStatus("connecting");
     fulfilled.current = new Set();
+    posting.current = false;
+
+    let cancelled = false;
+    void (async () => {
+      const existing = await lookupExistingPeer(token, namespace, sourceRun);
+      if (cancelled || !existing) {
+        return;
+      }
+      fulfilled.current.add(sourceRun);
+      setPosted([postedFromRun(existing, "already posted for this source run")]);
+    })();
 
     const handle = openAgentRunStream(token, namespace, sourceRun, {
       onEvent: (event, payload) => {
@@ -85,7 +106,7 @@ export function RequestPeerMonitor({ token, namespace, sourceRun, createEnabled,
     });
 
     async function maybePostPeer(peer: RequestPeerPayload) {
-      const key = `${sourceRun}:${peer.peerProfileName || "*"}`;
+      const key = sourceRun;
       if (fulfilled.current.has(key) || posting.current) {
         return;
       }
@@ -110,9 +131,33 @@ export function RequestPeerMonitor({ token, namespace, sourceRun, createEnabled,
       }
       if (!running) {
         setError(`requestPeer seen but ${sourceRun} never reached Running`);
-        fulfilled.current.delete(key);
         return;
       }
+
+      let skip: { reason: string; existing: AgentRunView | null } | null;
+      try {
+        skip = await shouldSkipPeerPost(token, namespace, sourceRun);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err));
+        return;
+      }
+      if (skip) {
+        const existingForSource =
+          skip.existing && belongsToSource(skip.existing, sourceRun) ? skip.existing : null;
+        if (existingForSource) {
+          fulfilled.current.add(key);
+          rememberPeer(namespace, sourceRun, existingForSource.name);
+          setPosted((prev) =>
+            prev.some((item) => item.peerRunName === existingForSource.name)
+              ? prev
+              : [...prev, postedFromRun(existingForSource, skip.reason)],
+          );
+        }
+        setError(null);
+        setStreamStatus(skip.reason);
+        return;
+      }
+
       posting.current = true;
       fulfilled.current.add(key);
       try {
@@ -123,7 +168,7 @@ export function RequestPeerMonitor({ token, namespace, sourceRun, createEnabled,
         });
         const peerPrompt = grokInterruptDuplicatePrompt(sourceRun);
         const created = await createAgentRun(token, namespace, {
-          generateName: "desktop-peer-",
+          generateName: DESKTOP_PEER_PREFIX,
           profileName: resolved.profileName,
           harnessProfileName: resolved.harnessProfileName,
           application: resolved.application,
@@ -131,8 +176,12 @@ export function RequestPeerMonitor({ token, namespace, sourceRun, createEnabled,
           backend: resolved.backend,
           prompt: peerPrompt,
           peerPrompt,
+          sourceKind: "AgentRun",
+          sourceName: sourceRun,
+          sourceNamespace: namespace,
         });
         const name = created.name?.trim() || "unknown";
+        rememberPeer(namespace, sourceRun, name);
         setPosted((prev) => [
           ...prev,
           {
@@ -154,7 +203,10 @@ export function RequestPeerMonitor({ token, namespace, sourceRun, createEnabled,
       }
     }
 
-    return () => handle.abort();
+    return () => {
+      cancelled = true;
+      handle.abort();
+    };
   }, [token, namespace, sourceRun, createEnabled]);
 
   const sawRequestPeer = logHits.some((line) => line.includes("requestPeer"));
@@ -224,4 +276,107 @@ function uniqueLines(lines: string[]): string[] {
     out.push(line);
   }
   return out;
+}
+
+function isDesktopPeerRun(run: AgentRunView): boolean {
+  return (run.name || "").startsWith(DESKTOP_PEER_PREFIX);
+}
+
+function isGrokPeerRun(run: AgentRunView): boolean {
+  return isGrokBackend(run.backend) || !(run.backend || "").trim();
+}
+
+function isInFlightPeer(run: AgentRunView): boolean {
+  const phase = (run.phase || "").trim();
+  return phase === "Running" || phase === "Pending";
+}
+
+function peerStorageKey(namespace: string, sourceRun: string): string {
+  return `anvil-desktop.peer:${namespace}:${sourceRun}`;
+}
+
+function rememberPeer(namespace: string, sourceRun: string, peerName: string): void {
+  const name = peerName.trim();
+  if (!name) {
+    return;
+  }
+  try {
+    window.sessionStorage.setItem(peerStorageKey(namespace, sourceRun), name);
+  } catch {
+    // ignore quota / private mode
+  }
+}
+
+function recalledPeerName(namespace: string, sourceRun: string): string {
+  try {
+    return (window.sessionStorage.getItem(peerStorageKey(namespace, sourceRun)) || "").trim();
+  } catch {
+    return "";
+  }
+}
+
+function belongsToSource(run: AgentRunView, sourceRun: string): boolean {
+  return (run.source?.name || "").trim() === sourceRun;
+}
+
+async function listDesktopPeers(token: string, namespace: string): Promise<AgentRunView[]> {
+  const runs = await listAgentRuns(token, namespace, 50);
+  return runs.filter(isDesktopPeerRun);
+}
+
+async function lookupExistingPeer(
+  token: string,
+  namespace: string,
+  sourceRun: string,
+): Promise<AgentRunView | null> {
+  const recalled = recalledPeerName(namespace, sourceRun);
+  if (recalled) {
+    try {
+      return await getAgentRun(token, namespace, recalled);
+    } catch {
+      // fall through to list
+    }
+  }
+  try {
+    const peers = await listDesktopPeers(token, namespace);
+    return peers.find((run) => belongsToSource(run, sourceRun)) ?? null;
+  } catch {
+    return null;
+  }
+}
+
+async function shouldSkipPeerPost(
+  token: string,
+  namespace: string,
+  sourceRun: string,
+): Promise<{ reason: string; existing: AgentRunView | null } | null> {
+  const existing = await lookupExistingPeer(token, namespace, sourceRun);
+  if (existing) {
+    return { reason: `skip POST: ${existing.name} already exists for ${sourceRun}`, existing };
+  }
+  let peers: AgentRunView[] = [];
+  try {
+    peers = await listDesktopPeers(token, namespace);
+  } catch (err) {
+    throw err instanceof Error ? err : new Error(String(err));
+  }
+  const runningGrok = peers.find((run) => isInFlightPeer(run) && isGrokPeerRun(run));
+  if (runningGrok) {
+    return {
+      reason: `skip POST: ${runningGrok.name} already Running (phase ${runningGrok.phase || "—"})`,
+      existing: runningGrok,
+    };
+  }
+  return null;
+}
+
+function postedFromRun(run: AgentRunView, chosenBecause: string): PostedPeer {
+  return {
+    peerProfileName: run.resolvedComposition?.profileRef?.name || "desktop-peer",
+    peerRunName: run.name,
+    backend: run.backend,
+    application: run.application,
+    chosenBecause,
+    at: new Date().toISOString(),
+  };
 }
