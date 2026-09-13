@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 import type { UIConfig } from "../auth/config";
 import { loadNamespace } from "../state/namespace";
-import { sendDesktopChat } from "../wrapper/harnessChat";
+import { loadManagerHarnessHistory, sendDesktopChat } from "../wrapper/harnessChat";
 import { formatTurnError } from "../wrapper/turn";
 
 interface Props {
@@ -29,6 +29,23 @@ export function EntityChatPage({ token, config }: Props) {
   useEffect(() => {
     endRef.current?.scrollIntoView({ block: "end" });
   }, [lines]);
+
+  useEffect(() => {
+    if (!token) {
+      return;
+    }
+    const controller = new AbortController();
+    void loadManagerHarnessHistory({ token, namespace, signal: controller.signal })
+      .then((history) => {
+        if (!controller.signal.aborted && history.lines.length > 0) {
+          setLines(history.lines);
+        }
+      })
+      .catch(() => {
+        /* standing chat missing is the empty composer, not a fake reply */
+      });
+    return () => controller.abort();
+  }, [token, namespace]);
 
   async function onSubmit(event?: FormEvent) {
     event?.preventDefault();
