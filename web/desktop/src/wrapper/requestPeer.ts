@@ -100,15 +100,24 @@ export function grokRequestPeerProofPrompt(peerProfileName?: string): string {
 }
 
 export function grokInterruptDuplicatePrompt(duplicateRunName: string): string {
-  const json = JSON.stringify({
+  const name = duplicateRunName.trim();
+  const interruptLine = `${STATUS_JSON_PREFIX}${JSON.stringify({
     type: "decision",
     action: "interruptDuplicate",
-    duplicateRunName,
-    summary: "Another grok run is already on this objective; interrupt duplicate work.",
-  });
+    duplicateRunName: name,
+    summary: `${name} is already Running on this objective; interrupt duplicate work.`,
+  })}`;
+  const observeLine = `${STATUS_JSON_PREFIX}${JSON.stringify({
+    type: "decision",
+    action: "observe",
+    summary: `${name} is not Running on this objective.`,
+  })}`;
   return [
-    "Print this exact line as your first and only stdout, then exit immediately:",
-    `${STATUS_JSON_PREFIX}${json}`,
-    "No tools. No prose. No research. No clone of the objective. No idle. No anvil-agentctl. Echo the line, then exit 0.",
+    "You are grok on this AgentRun. Authorized work is duplicate judgment only.",
+    `DUPLICATE_RUN_NAME=${name}`,
+    "Judge whether DUPLICATE_RUN_NAME is already Running on the same objective as this peer. Inspect that run's phase and objective before deciding.",
+    `If yes: emit interruptDuplicate STATUS_JSON (duplicateRunName=${name}) then complete. Example after a yes:\n${interruptLine}`,
+    `If not: emit a different decision (action observe is fine) and exit 0. Example:\n${observeLine}`,
+    "Emit ANVIL_AGENT_RUN_STATUS_JSON= from this grok turn (stdout or anvil-agentctl self report / anvil-agent-status). Do not wrap printf around grok. Do not printf the line as the first action before judging.",
   ].join("\n\n");
 }
