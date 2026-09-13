@@ -83,6 +83,10 @@ for name in GITHUB_APP_ID GITHUB_APP_INSTALLATION_ID GITHUB_APP_PRIVATE_KEY GH_T
 	fi
 done
 
+if [[ "${TEST_GH_HANG:-}" == "login" ]]; then
+	sleep 30
+fi
+
 case "$*" in
 	"auth login --hostname ${TEST_EXPECTED_GH_HOST} --git-protocol https --with-token")
 		IFS= read -r token
@@ -170,8 +174,8 @@ if [[ "${app_status}" -ne 0 ]]; then
 	echo "GitHub App bootstrap failed: ${app_output}" >&2
 	exit 1
 fi
-if [[ "${app_output}" != "second-stage:github-app" || ! -f "${TEST_GH_LOGIN_MARKER}" ]]; then
-	echo "GitHub App bootstrap did not configure gh" >&2
+if [[ "${app_output}" != *"second-stage:github-app"* || ! -f "${TEST_GH_LOGIN_MARKER}" ]]; then
+	echo "GitHub App bootstrap did not configure gh: ${app_output}" >&2
 	exit 1
 fi
 
@@ -180,8 +184,8 @@ TEST_EXPECTED_GH_TOKEN=legacy-static-token
 ANVIL_AGENT_RUN_GH_CONFIG_DIR="${test_dir}/gh-config-static"
 export TEST_GH_LOGIN_MARKER TEST_EXPECTED_GH_TOKEN ANVIL_AGENT_RUN_GH_CONFIG_DIR
 static_output="$(env GH_TOKEN="${TEST_EXPECTED_GH_TOKEN}" "${proc_probe}")"
-if [[ "${static_output}" != "second-stage:static-token" ]]; then
-	echo "legacy static-token bootstrap contract changed" >&2
+if [[ "${static_output}" != *"second-stage:static-token"* ]]; then
+	echo "legacy static-token bootstrap contract changed: ${static_output}" >&2
 	exit 1
 fi
 
@@ -249,6 +253,43 @@ TEST_EXPECTED_GH_TOKEN=ghes-static-token
 TEST_EXPECTED_GH_HOST=ghe.example.com
 export TEST_GH_LOGIN_MARKER TEST_EXPECTED_GH_TOKEN TEST_EXPECTED_GH_HOST
 ghes_output="$(env GH_TOKEN="${TEST_EXPECTED_GH_TOKEN}" ANVIL_GITHUB_HOST=GHE.Example.com ANVIL_AGENT_RUN_GH_CONFIG_DIR="${test_dir}/gh-config-ghes" "${proc_probe}")"
-[[ "${ghes_output}" == "second-stage:static-token" ]]
+[[ "${ghes_output}" == *"second-stage:static-token"* ]]
+
+empty_output="$(env -u GH_TOKEN -u GITHUB_TOKEN -u GITHUB_APP_ID -u GITHUB_APP_INSTALLATION_ID -u GITHUB_APP_PRIVATE_KEY -u ANVIL_GITHUB_APP_REPOSITORY -u ANVIL_GITHUB_APP_REPOSITORY_ID -u ANVIL_GITHUB_APP_PERMISSIONS_JSON "${proc_probe}")"
+if [[ "${empty_output}" != *"ANVIL_AGENT_RUN_GITHUB_AUTH_SKIPPED reason=empty-credentials"* ]]; then
+	echo "empty GitHub credentials did not fail-open: ${empty_output}" >&2
+	exit 1
+fi
+
+whitespace_output="$(env GH_TOKEN=$' \t ' "${proc_probe}")"
+if [[ "${whitespace_output}" != *"ANVIL_AGENT_RUN_GITHUB_AUTH_SKIPPED reason=empty-credentials"* ]]; then
+	echo "whitespace GitHub token did not fail-open: ${whitespace_output}" >&2
+	exit 1
+fi
+
+incomplete_app_output="$(env GITHUB_APP_ID=123 "${proc_probe}")"
+if [[ "${incomplete_app_output}" != *"ANVIL_AGENT_RUN_GITHUB_AUTH_SKIPPED reason=incomplete-github-app"* ]]; then
+	echo "incomplete GitHub App input did not fail-open: ${incomplete_app_output}" >&2
+	exit 1
+fi
+
+hang_output_file="${test_dir}/hang-output"
+TEST_EXPECTED_GH_HOST=github.com
+TEST_EXPECTED_GH_TOKEN=hang-token
+export TEST_EXPECTED_GH_HOST TEST_EXPECTED_GH_TOKEN
+set +e
+env \
+	TEST_GH_HANG=login \
+	ANVIL_AGENT_RUN_GITHUB_AUTH_TIMEOUT_SECONDS=1 \
+	GH_TOKEN="${TEST_EXPECTED_GH_TOKEN}" \
+	ANVIL_AGENT_RUN_GH_CONFIG_DIR="${test_dir}/gh-config-hang" \
+	"${proc_probe}" >"${hang_output_file}" 2>&1
+hang_status=$?
+set -e
+hang_output="$(<"${hang_output_file}")"
+if [[ "${hang_status}" -ne 0 || "${hang_output}" != *"ANVIL_AGENT_RUN_GITHUB_AUTH_TIMEOUT"* || "${hang_output}" != *"second-stage:skipped"* ]]; then
+	echo "hanging gh login did not fail-open: status=${hang_status} ${hang_output}" >&2
+	exit 1
+fi
 
 echo "Runner GitHub auth contract passed"

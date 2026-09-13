@@ -54,8 +54,17 @@ requires the returned token expiry to cover that runtime plus a five-minute
 safety margin. Continuous work uses bounded scheduled AgentRuns; the reusable
 App key is deliberately not retained in a refresher process.
 
-Static token and App inputs are mutually exclusive. Partial or over-privileged
-App input fails closed. App bootstrap is restricted to `github.com` so a
+Empty or whitespace-only `GH_TOKEN`/`GITHUB_TOKEN` and GitHub App fields skip
+bootstrap (fail-open) and print `ANVIL_AGENT_RUN_GITHUB_AUTH_SKIPPED` so a
+runner can reach `ANVIL_AGENT_RUN_START` without calling `gh`. `gh auth login`,
+`gh auth setup-git`, and the App installation-token HTTP request are bounded
+(default 5s, `ANVIL_AGENT_RUN_GITHUB_AUTH_TIMEOUT_SECONDS`). A timeout prints
+`ANVIL_AGENT_RUN_GITHUB_AUTH_TIMEOUT`, sanitizes the process environment, and
+continues rather than hanging the entrypoint. Mixed token+App input, invalid
+hosts, and over-privileged App permissions still fail closed.
+
+Static token and App inputs are mutually exclusive. Over-privileged App input
+fails closed. App bootstrap is restricted to `github.com` so a
 run-controlled host cannot receive a signed App JWT. Static-token compatibility
 supports GitHub Enterprise Server with an exact normalized
 `ANVIL_GITHUB_HOST`, deriving `https://HOST/api/v3` rather than accepting a URL.
