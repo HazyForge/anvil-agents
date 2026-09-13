@@ -11,6 +11,7 @@ import {
 } from "../api/client";
 import type { Snapshot } from "../api/types";
 import type { UIConfig } from "../auth/config";
+import { MidrunProofPanel } from "../components/MidrunProofPanel";
 import { RequestPeerMonitor } from "../components/RequestPeerMonitor";
 import { personaLabel } from "../names";
 import { loadNamespace, saveNamespace } from "../state/namespace";
@@ -258,6 +259,12 @@ export function WrapperPage({ snapshot, token, config }: Props) {
           </label>
         </div>
       </section>
+
+      <MidrunProofPanel
+        token={token}
+        namespace={namespace}
+        onLoaded={(pair) => setApiOutput(JSON.stringify(pair, null, 2))}
+      />
 
       <section className="panel" style={{ marginTop: "0.75rem" }}>
         <div className="panel-header">

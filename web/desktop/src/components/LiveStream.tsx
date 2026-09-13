@@ -2,6 +2,17 @@ import { useEffect, useRef, useState } from "react";
 import { openAgentRunStream } from "../api/stream";
 import type { StreamEnvelope } from "../api/types.stream";
 import { peerSignalText } from "../wrapper/collaboration";
+import { STATUS_JSON_PREFIX } from "../wrapper/requestPeer";
+
+function statusJsonHighlight(body: string): boolean {
+  return (
+    body.includes(STATUS_JSON_PREFIX) ||
+    body.includes("requestPeer") ||
+    body.includes("interruptDuplicate") ||
+    body.includes('"action"') ||
+    peerSignalText(body)
+  );
+}
 
 const MAX_STREAM_ROWS = 2000;
 
@@ -35,7 +46,7 @@ export function LiveStream({ token, namespace, name, title }: Props) {
 
     const append = (kind: string, body: string, timestamp?: string) => {
       rowCounter.current += 1;
-      const peerHighlight = peerSignalText(body);
+      const peerHighlight = statusJsonHighlight(body);
       setRows((prev) => {
         const next = [
           ...prev,
