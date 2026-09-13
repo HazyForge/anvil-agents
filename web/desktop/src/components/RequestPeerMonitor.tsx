@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { createAgentRun, getAgentRun, resolveGrokPeerCreate } from "../api/client";
+import { createAgentRun, getAgentRun, resolveGrokPeerCreate, type CompositionDocument } from "../api/client";
 import { openAgentRunStream } from "../api/stream";
 import { LiveStream } from "./LiveStream";
 import { isRunningPhase } from "../wrapper/collaboration";
@@ -15,6 +15,7 @@ interface Props {
   namespace: string;
   sourceRun: string;
   createEnabled: boolean;
+  profiles: CompositionDocument[];
 }
 
 type PostedPeer = {
@@ -22,10 +23,12 @@ type PostedPeer = {
   peerRunName: string;
   backend?: string;
   application?: string;
+  dataVolumes?: string[];
+  chosenBecause?: string;
   at: string;
 };
 
-export function RequestPeerMonitor({ token, namespace, sourceRun, createEnabled }: Props) {
+export function RequestPeerMonitor({ token, namespace, sourceRun, createEnabled, profiles }: Props) {
   const [phase, setPhase] = useState("");
   const [logHits, setLogHits] = useState<string[]>([]);
   const [posted, setPosted] = useState<PostedPeer[]>([]);
@@ -33,6 +36,8 @@ export function RequestPeerMonitor({ token, namespace, sourceRun, createEnabled 
   const [streamStatus, setStreamStatus] = useState("connecting");
   const fulfilled = useRef<Set<string>>(new Set());
   const posting = useRef(false);
+  const profilesRef = useRef(profiles);
+  profilesRef.current = profiles;
 
   useEffect(() => {
     let cancelled = false;
@@ -72,6 +77,7 @@ export function RequestPeerMonitor({ token, namespace, sourceRun, createEnabled 
             void maybePostPeer(peer);
           } else if (line.includes(STATUS_JSON_PREFIX) && line.includes("requestPeer")) {
             setLogHits((prev) => uniqueLines([...prev, line]));
+            void maybePostPeer({ peerProfileName: "" });
           }
         }
       },
@@ -79,7 +85,7 @@ export function RequestPeerMonitor({ token, namespace, sourceRun, createEnabled 
     });
 
     async function maybePostPeer(peer: RequestPeerPayload) {
-      const key = `${sourceRun}:${peer.peerProfileName}`;
+      const key = `${sourceRun}:${peer.peerProfileName || "*"}`;
       if (fulfilled.current.has(key) || posting.current) {
         return;
       }
@@ -113,6 +119,7 @@ export function RequestPeerMonitor({ token, namespace, sourceRun, createEnabled 
         const resolved = await resolveGrokPeerCreate(token, namespace, {
           sourceRun,
           requestedProfileName: peer.peerProfileName,
+          profiles: profilesRef.current,
         });
         const peerPrompt = grokInterruptDuplicatePrompt(sourceRun);
         const created = await createAgentRun(token, namespace, {
@@ -133,6 +140,8 @@ export function RequestPeerMonitor({ token, namespace, sourceRun, createEnabled 
             peerRunName: name,
             backend: created.backend || resolved.backend,
             application: created.application || resolved.application,
+            dataVolumes: resolved.dataVolumes,
+            chosenBecause: resolved.chosenBecause,
             at: new Date().toISOString(),
           },
         ]);
@@ -175,7 +184,11 @@ export function RequestPeerMonitor({ token, namespace, sourceRun, createEnabled 
               <li key={`${item.peerProfileName}-${item.at}`}>
                 POSTed grok peer {item.peerRunName} (profile {item.peerProfileName}
                 {item.backend ? `, backend ${item.backend}` : ""}
-                {item.application ? `, application ${item.application}` : ""})
+                {item.application ? `, application ${item.application}` : ""}
+                {item.dataVolumes && item.dataVolumes.length > 0
+                  ? `, volumes ${item.dataVolumes.join(",")}`
+                  : ""}
+                {item.chosenBecause ? `; ${item.chosenBecause}` : ""})
               </li>
             ))}
           </ul>

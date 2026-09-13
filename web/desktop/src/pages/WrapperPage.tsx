@@ -5,9 +5,12 @@ import {
   createAgentRunProfile,
   getAgentRun,
   GROK_BACKEND,
-  GROK_PROOF_PROFILE,
+  AUDITOR_GROK_PROFILE,
+  DESKTOP_GROK_PEER_PROFILE,
+  isBlockedPeerProfile,
   listAgentRuns,
   listRunProfiles,
+  pickGrokPeerProfileName,
   type AgentRunView,
   type CompositionDocument,
 } from "../api/client";
@@ -29,8 +32,8 @@ export function WrapperPage({ snapshot, token, config }: Props) {
   const fallbackNs = config.defaultNamespaces[0] || "";
   const [namespace, setNamespace] = useState(() => loadNamespace(fallbackNs));
   const [prompt, setPrompt] = useState("");
-  const [profileName, setProfileName] = useState(GROK_PROOF_PROFILE);
-  const [peerProfileName, setPeerProfileName] = useState(GROK_PROOF_PROFILE);
+  const [profileName, setProfileName] = useState(AUDITOR_GROK_PROFILE);
+  const [peerProfileName, setPeerProfileName] = useState(DESKTOP_GROK_PEER_PROFILE);
   const [runName, setRunName] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -64,6 +67,38 @@ export function WrapperPage({ snapshot, token, config }: Props) {
       }
     }
   }
+
+  useEffect(() => {
+    if (!namespace || !token) {
+      return;
+    }
+    let cancelled = false;
+    void listRunProfiles(token, namespace)
+      .then((items) => {
+        if (!cancelled) {
+          setProfiles(items);
+        }
+      })
+      .catch(() => {
+        // list is optional until sibling POST
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [namespace, token]);
+
+  useEffect(() => {
+    const picked = pickGrokPeerProfileName(profiles, profileName);
+    if (!picked) {
+      return;
+    }
+    setPeerProfileName((current) => {
+      if (!current.trim() || isBlockedPeerProfile(current) || current.trim() === profileName.trim()) {
+        return picked;
+      }
+      return current;
+    });
+  }, [profiles, profileName]);
 
   useEffect(() => {
     if (!namespace || !token || !requestPeerSource) {
@@ -140,10 +175,16 @@ export function WrapperPage({ snapshot, token, config }: Props) {
       return;
     }
     const grokProfile = profileName.trim();
-    const peerProfile = peerProfileName.trim();
-    if (!grokProfile || !peerProfile) {
-      setError("grok profile and peer profile are required");
+    let peerProfile = peerProfileName.trim();
+    if (!grokProfile) {
+      setError("grok profile is required");
       return;
+    }
+    if (!peerProfile || isBlockedPeerProfile(peerProfile) || peerProfile === grokProfile) {
+      peerProfile = pickGrokPeerProfileName(profiles, grokProfile);
+    }
+    if (peerProfile) {
+      setPeerProfileName(peerProfile);
     }
     setBusy(true);
     setError(null);
@@ -154,7 +195,7 @@ export function WrapperPage({ snapshot, token, config }: Props) {
       const created = await createAgentRun(token, namespace, {
         generateName: "desktop-reqpeer-",
         profileName: grokProfile,
-        prompt: grokRequestPeerProofPrompt(peerProfile),
+        prompt: grokRequestPeerProofPrompt(peerProfile || undefined),
         backend: GROK_BACKEND,
       });
       const name =
@@ -279,8 +320,9 @@ export function WrapperPage({ snapshot, token, config }: Props) {
             Primaris controller does not handle <span className="mono">requestPeer</span> yet. Desktop watches
             the grok live stream for <span className="mono">ANVIL_AGENT_RUN_STATUS_JSON</span> with{" "}
             <span className="mono">type=decision action=requestPeer</span> while the source run is{" "}
-            <strong>Running</strong>, then POSTs a <strong>grok</strong> sibling (never Codex) through loopback
-            OIDC. Sibling B is prompted to emit <span className="mono">interruptDuplicate</span> with{" "}
+            <strong>Running</strong>, then             POSTs <span className="mono">hazy-trade-desktop-grok-peer</span> when that profile is grokBuild
+            with Application hazy-trade (own grok-home). Never the auditor grok-home, conferral-b, or
+            Codex. Sibling B is prompted to emit <span className="mono">interruptDuplicate</span> with{" "}
             <span className="mono">duplicateRunName</span> = A.
           </p>
           <label className="field">
@@ -289,23 +331,23 @@ export function WrapperPage({ snapshot, token, config }: Props) {
               className="input"
               value={profileName}
               onChange={(event) => setProfileName(event.target.value)}
-              placeholder="desktop-grok-proof-conferral-b"
+              placeholder={AUDITOR_GROK_PROFILE}
             />
           </label>
           <label className="field">
-            <span className="label">peerProfileName (grok/grokBuild target)</span>
+            <span className="label">peerProfileName (distinct grok home, not conferral-b / Codex)</span>
             <input
               className="input"
               value={peerProfileName}
               onChange={(event) => setPeerProfileName(event.target.value)}
-              placeholder={GROK_PROOF_PROFILE}
+              placeholder={DESKTOP_GROK_PEER_PROFILE}
             />
           </label>
           {config.runs.createEnabled ? (
             <button
               type="button"
               className="btn btn-primary"
-              disabled={busy || !namespace || !profileName.trim() || !peerProfileName.trim()}
+              disabled={busy || !namespace || !profileName.trim()}
               onClick={() => void onStartRequestPeerProof()}
             >
               {busy ? "Starting grok proof…" : "Start grok requestPeer proof"}
@@ -401,6 +443,7 @@ export function WrapperPage({ snapshot, token, config }: Props) {
           namespace={namespace}
           sourceRun={requestPeerSource}
           createEnabled={Boolean(config.runs.createEnabled)}
+          profiles={profiles}
         />
       ) : null}
 

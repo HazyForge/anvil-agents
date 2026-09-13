@@ -51,9 +51,6 @@ export function parseRequestPeerFromLogLine(line: string): RequestPeerPayload | 
       : typeof body.peerProfile === "string"
         ? body.peerProfile.trim()
         : "";
-  if (!peerProfileName) {
-    return null;
-  }
   return {
     peerProfileName,
     summary: typeof body.summary === "string" ? body.summary : undefined,
@@ -80,17 +77,22 @@ export function isInterruptDuplicateLogLine(line: string): boolean {
   return parseInterruptDuplicateFromLogLine(line) !== null;
 }
 
-export function grokRequestPeerProofPrompt(peerProfileName: string): string {
-  const json = JSON.stringify({
+export function grokRequestPeerProofPrompt(peerProfileName?: string): string {
+  const body: Record<string, unknown> = {
     type: "decision",
     action: "requestPeer",
-    peerProfileName,
-    summary: "Need a grok peer before duplicate work on this objective.",
-  });
+    summary: "Need a grok peer with a different grok-home before duplicate work on this objective.",
+  };
+  if (peerProfileName?.trim()) {
+    body.peerProfileName = peerProfileName.trim();
+  }
+  const json = JSON.stringify(body);
   return [
     "Primaris Desktop grok proof (single run).",
     "While you are still executing (before finishing), emit exactly one stdout line in this harness format:",
     `${STATUS_JSON_PREFIX}${json}`,
+    "Request a grok AgentRunProfile that does not share this run's grok-home data volume.",
+    "Do not request this same profile, desktop-grok-proof-conferral-b, or hazy-trade-human-comms-smoke.",
     "You may use anvil-agentctl or anvil-agent-status if available, but the line above must appear verbatim in job logs.",
     "After emitting requestPeer, continue briefly then exit cleanly.",
     "Do not invent a peer run yourself — Desktop will POST a grok sibling via OIDC when the line appears.",
