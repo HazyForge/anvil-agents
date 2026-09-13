@@ -1,5 +1,5 @@
-import { Link } from "react-router-dom";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import {
   createAgentRun,
   createAgentRunProfile,
@@ -20,6 +20,7 @@ import { MidrunProofPanel } from "../components/MidrunProofPanel";
 import { RequestPeerMonitor } from "../components/RequestPeerMonitor";
 import { personaLabel } from "../names";
 import { loadNamespace, saveNamespace } from "../state/namespace";
+import { WRAPPER_PROFILE_NAME } from "../wrapper/intent";
 import { grokRequestPeerProofPrompt } from "../wrapper/requestPeer";
 
 interface Props {
@@ -28,11 +29,13 @@ interface Props {
   config: UIConfig;
 }
 
-export function WrapperPage({ snapshot, token, config }: Props) {
+export function WrapperPage({ token, config }: Props) {
+  const [params] = useSearchParams();
+  const lab = params.get("lab") === "1";
   const fallbackNs = config.defaultNamespaces[0] || "";
   const [namespace, setNamespace] = useState(() => loadNamespace(fallbackNs));
   const [prompt, setPrompt] = useState("");
-  const [profileName, setProfileName] = useState(AUDITOR_GROK_PROFILE);
+  const [profileName, setProfileName] = useState("");
   const [peerProfileName, setPeerProfileName] = useState(DESKTOP_GROK_PEER_PROFILE);
   const [runName, setRunName] = useState("");
   const [busy, setBusy] = useState(false);
@@ -47,8 +50,10 @@ export function WrapperPage({ snapshot, token, config }: Props) {
       ? pickGrokPeerProfileName(profiles, profileName) || DESKTOP_GROK_PEER_PROFILE
       : peerProfileName;
 
-  const apiTools = snapshot.wrapper.tools.filter((tool) => tool.id !== "local-harness");
-  const localTool = snapshot.wrapper.tools.find((tool) => tool.id === "local-harness");
+  const entityProfiles = useMemo(
+    () => profiles.filter((doc) => doc.metadata.name !== WRAPPER_PROFILE_NAME),
+    [profiles],
+  );
 
   function setNs(next: string) {
     setNamespace(next);
@@ -67,7 +72,7 @@ export function WrapperPage({ snapshot, token, config }: Props) {
       }
     } catch (err) {
       if (!silent) {
-        setError(`list runs: ${err instanceof Error ? err.message : String(err)}`);
+        setError(`Could not load runs: ${err instanceof Error ? err.message : String(err)}`);
       }
     }
   }
@@ -77,21 +82,46 @@ export function WrapperPage({ snapshot, token, config }: Props) {
       return;
     }
     let cancelled = false;
-    void listRunProfiles(token, namespace)
-      .then((items) => {
+    void (async () => {
+      try {
+        const items = await listRunProfiles(token, namespace);
         if (!cancelled) {
           setProfiles(items);
         }
-      })
-      .catch(() => {
-        // list is optional until sibling POST
-      });
+      } catch {
+        // roster is optional for the run list
+      }
+      try {
+        const items = await listAgentRuns(token, namespace, 50);
+        if (!cancelled) {
+          setRuns(items);
+          setError(null);
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setError(`Could not load runs: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      }
+    })();
     return () => {
       cancelled = true;
     };
   }, [namespace, token]);
 
   useEffect(() => {
+    if (profileName.trim()) {
+      return;
+    }
+    const first = entityProfiles[0]?.metadata.name;
+    if (first) {
+      setProfileName(first);
+    }
+  }, [entityProfiles, profileName]);
+
+  useEffect(() => {
+    if (!lab) {
+      return;
+    }
     setPeerProfileName((current) => {
       if (!current.trim() || isBlockedPeerProfile(current) || current.trim() === profileName.trim()) {
         const next = pickGrokPeerProfileName(profiles, profileName) || DESKTOP_GROK_PEER_PROFILE;
@@ -99,17 +129,17 @@ export function WrapperPage({ snapshot, token, config }: Props) {
       }
       return current;
     });
-  }, [profiles, profileName]);
+  }, [lab, profiles, profileName]);
 
   useEffect(() => {
-    if (!namespace || !token || !requestPeerSource) {
+    if (!lab || !namespace || !token || !requestPeerSource) {
       return;
     }
     const id = window.setInterval(() => {
       void refreshRuns(true);
     }, 4000);
     return () => window.clearInterval(id);
-  }, [namespace, token, requestPeerSource]);
+  }, [lab, namespace, token, requestPeerSource]);
 
   async function runAPI(label: string, fn: () => Promise<unknown>) {
     setBusy(true);
@@ -127,37 +157,22 @@ export function WrapperPage({ snapshot, token, config }: Props) {
     }
   }
 
-  async function onListRuns() {
-    setBusy(true);
-    setError(null);
-    try {
-      await refreshRuns();
-    } finally {
-      setBusy(false);
-    }
-  }
-
   async function onGetRun() {
     const name = runName.trim();
     if (!name) {
-      setError("enter an AgentRun name to get");
+      setError("Enter a run name");
       return;
     }
     await runAPI("get run", () => getAgentRun(token, namespace, name));
   }
 
-  async function onListProfiles() {
-    const items = (await runAPI("list profiles", () => listRunProfiles(token, namespace))) as
-      | CompositionDocument[]
-      | null;
-    if (items) {
-      setProfiles(items);
-    }
-  }
-
   async function onCreateRun() {
     if (!config.runs.createEnabled) {
-      setError("AgentRun create is disabled on this API");
+      setError("Starting a run is turned off on this server");
+      return;
+    }
+    if (!prompt.trim() || !profileName.trim()) {
+      setError("Choose an agent and write what they should do");
       return;
     }
     await runAPI("create run", () =>
@@ -175,12 +190,8 @@ export function WrapperPage({ snapshot, token, config }: Props) {
       setError("AgentRun create is disabled on this API");
       return;
     }
-    const grokProfile = profileName.trim();
+    const grokProfile = profileName.trim() || AUDITOR_GROK_PROFILE;
     let peerProfile = displayedPeerProfile.trim();
-    if (!grokProfile) {
-      setError("grok profile is required");
-      return;
-    }
     if (!peerProfile || isBlockedPeerProfile(peerProfile) || peerProfile === grokProfile) {
       peerProfile = pickGrokPeerProfileName(profiles, grokProfile) || DESKTOP_GROK_PEER_PROFILE;
     }
@@ -237,232 +248,199 @@ export function WrapperPage({ snapshot, token, config }: Props) {
   }
 
   return (
-    <div>
+    <div className="human-page">
       <div className="page-header">
         <div>
-          <h1 className="page-title">Wrapper</h1>
-          <p className="page-sub">{snapshot.wrapper.message}</p>
+          <h1 className="page-title">Runs</h1>
+          <p className="page-sub">Cluster work. See what is running, or start a run.</p>
         </div>
       </div>
 
-      <div className="split">
-        {apiTools.map((tool) => (
-          <section key={tool.id} className="panel">
-            <div className="panel-header">
-              <h2 className="panel-title">{tool.displayName}</h2>
-              <span className="chip mono">{tool.id}</span>
-            </div>
-            <div className="panel-body">
-              <p className="muted">{tool.notes}</p>
-            </div>
-          </section>
-        ))}
-        {localTool ? (
-          <section className="panel">
-            <div className="panel-header">
-              <h2 className="panel-title">{localTool.displayName}</h2>
-              <span className="chip">second function</span>
-            </div>
-            <div className="panel-body">
-              <p className="muted">{localTool.notes}</p>
-              <Link to="/local" className="btn">
-                Open Local
-              </Link>
-            </div>
-          </section>
-        ) : null}
-      </div>
+      {error ? <div className="banner banner-error">{error}</div> : null}
+
+      <section className="panel">
+        <div className="panel-header">
+          <h2 className="panel-title">Now</h2>
+          <span className="muted">{runs.length}</span>
+        </div>
+        <div className="panel-body">
+          {runs.length === 0 ? (
+            <p className="muted">No runs yet in this workspace.</p>
+          ) : (
+            <table className="run-table">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Status</th>
+                  <th>Agent</th>
+                </tr>
+              </thead>
+              <tbody>
+                {runs.slice(0, 20).map((run) => (
+                  <tr key={run.name}>
+                    <td className="mono">{run.name}</td>
+                    <td>{run.phase || "—"}</td>
+                    <td>
+                      {run.resolvedComposition?.profileRef?.name
+                        ? personaLabel(run.resolvedComposition.profileRef.name)
+                        : run.backend || "—"}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      </section>
 
       <section className="panel" style={{ marginTop: "0.75rem" }}>
         <div className="panel-header">
-          <h2 className="panel-title">Session</h2>
+          <h2 className="panel-title">Start a run</h2>
         </div>
         <div className="panel-body">
           <label className="field">
-            <span className="label">Namespace</span>
-            <input
-              className="input"
-              value={namespace}
-              onChange={(event) => setNs(event.target.value)}
-              placeholder={fallbackNs || "namespace"}
-            />
+            <span className="label">Agent</span>
+            <select
+              className="select"
+              value={profileName}
+              onChange={(event) => setProfileName(event.target.value)}
+            >
+              {entityProfiles.length === 0 ? <option value="">Loading agents…</option> : null}
+              {entityProfiles.map((doc) => (
+                <option key={doc.metadata.name} value={doc.metadata.name}>
+                  {personaLabel(doc.metadata.name)}
+                </option>
+              ))}
+            </select>
           </label>
-          {config.defaultNamespaces.length > 0 ? (
-            <p className="muted">
-              From ui-config: {config.defaultNamespaces.join(", ")}. The API is namespaced; this is not a
-              kube context picker.
-            </p>
-          ) : null}
           <label className="field">
-            <span className="label">Prompt (single run)</span>
+            <span className="label">What should they do?</span>
             <textarea
               className="input textarea"
               rows={3}
               value={prompt}
               onChange={(event) => setPrompt(event.target.value)}
-              placeholder="Prompt for a new AgentRun on Primaris. The OIDC token is never appended."
+              placeholder="Describe the work"
             />
-          </label>
-        </div>
-      </section>
-
-      <MidrunProofPanel
-        token={token}
-        namespace={namespace}
-        onLoaded={(pair) => setApiOutput(JSON.stringify(pair, null, 2))}
-      />
-
-      <section className="panel" style={{ marginTop: "0.75rem" }}>
-        <div className="panel-header">
-          <h2 className="panel-title">Grok requestPeer proof</h2>
-          <span className="chip">controller stub</span>
-        </div>
-        <div className="panel-body">
-          <p className="muted">
-            Primaris controller does not handle <span className="mono">requestPeer</span> yet. Desktop watches
-            the grok live stream for <span className="mono">ANVIL_AGENT_RUN_STATUS_JSON</span> with{" "}
-            <span className="mono">type=decision action=requestPeer</span> while the source run is{" "}
-            <strong>Running</strong>, then             POSTs <span className="mono">hazy-trade-desktop-grok-peer</span> when that profile is grokBuild
-            with Application hazy-trade (own grok-home). Never the auditor grok-home, conferral-b, or
-            Codex. Sibling B is prompted to emit <span className="mono">interruptDuplicate</span> with{" "}
-            <span className="mono">duplicateRunName</span> = A.
-          </p>
-          <label className="field">
-            <span className="label">grok AgentRunProfile</span>
-            <input
-              className="input"
-              value={profileName}
-              onChange={(event) => setProfileName(event.target.value)}
-              placeholder={AUDITOR_GROK_PROFILE}
-            />
-          </label>
-          <label className="field">
-            <span className="label">peerProfileName (distinct grok home, not conferral-b / Codex)</span>
-            <input
-              className="input"
-              value={displayedPeerProfile}
-              onChange={(event) => {
-                const next = event.target.value;
-                if (!next.trim() || isBlockedPeerProfile(next)) {
-                  setPeerProfileName(DESKTOP_GROK_PEER_PROFILE);
-                  return;
-                }
-                setPeerProfileName(next);
-              }}
-              placeholder={DESKTOP_GROK_PEER_PROFILE}
-            />
-            <p className="muted">
-              Default B: <span className="mono">{DESKTOP_GROK_PEER_PROFILE}</span>. Blocked: conferral-b,
-              human-comms-smoke (Codex).
-            </p>
           </label>
           {config.runs.createEnabled ? (
-            <button
-              type="button"
-              className="btn btn-primary"
-              disabled={busy || !namespace || !profileName.trim()}
-              onClick={() => void onStartRequestPeerProof()}
-            >
-              {busy ? "Starting grok proof…" : "Start grok requestPeer proof"}
-            </button>
-          ) : (
-            <span className="muted">AgentRun create is disabled on this API.</span>
-          )}
-          {requestPeerStatus ? <p className="muted">{requestPeerStatus}</p> : null}
-        </div>
-      </section>
-
-      <section className="panel" style={{ marginTop: "0.75rem" }}>
-        <div className="panel-header">
-          <h2 className="panel-title">anvil-api · Primaris OIDC</h2>
-          <span className="chip">not Kubernetes</span>
-        </div>
-        <div className="panel-body">
-          <div className="btn-row">
-            <button type="button" className="btn btn-primary" disabled={busy || !namespace} onClick={() => void onListRuns()}>
-              List runs
-            </button>
-            <button type="button" className="btn" disabled={busy || !namespace} onClick={() => void onGetRun()}>
-              Get run
-            </button>
-            {config.composition.readEnabled ? (
-              <button type="button" className="btn" disabled={busy || !namespace} onClick={() => void onListProfiles()}>
-                List profiles
-              </button>
-            ) : null}
-            {config.composition.writeEnabled ? (
+            <div className="btn-row">
               <button
                 type="button"
-                className="btn"
-                disabled={busy || !namespace || !profileName.trim()}
-                onClick={() => void onCreateProfile()}
-              >
-                Create profile
-              </button>
-            ) : null}
-            {config.runs.createEnabled ? (
-              <button
-                type="button"
-                className="btn"
+                className="btn btn-primary"
                 disabled={busy || !namespace || !prompt.trim() || !profileName.trim()}
                 onClick={() => void onCreateRun()}
               >
-                Create run
+                {busy ? "Starting…" : "Start run"}
               </button>
-            ) : null}
-            <Link to="/chat" className="btn">
-              Agent chat
-            </Link>
-          </div>
-          <label className="field">
-            <span className="label">AgentRun name (get)</span>
-            <input className="input" value={runName} onChange={(event) => setRunName(event.target.value)} />
-          </label>
-          {profiles.length > 0 ? (
-            <p className="muted">
-              Profiles: {profiles.map((item) => personaLabel(item.metadata.name)).join(", ")}
-            </p>
-          ) : null}
-          {runs.length > 0 ? (
-            <>
-              <p className="muted">Runs from the OIDC API, not kubectl.</p>
-              <table className="run-table">
-                <thead>
-                  <tr>
-                    <th>Name</th>
-                    <th>Phase</th>
-                    <th>Backend</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {runs.slice(0, 20).map((run) => (
-                    <tr key={run.name}>
-                      <td className="mono">{run.name}</td>
-                      <td>{run.phase || "—"}</td>
-                      <td className="mono">{run.backend || "—"}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </>
-          ) : null}
-          {apiOutput ? <pre className="hint">{apiOutput}</pre> : null}
+            </div>
+          ) : (
+            <p className="muted">Starting a run is turned off on this server.</p>
+          )}
         </div>
       </section>
 
-      {requestPeerSource ? (
-        <RequestPeerMonitor
-          token={token}
-          namespace={namespace}
-          sourceRun={requestPeerSource}
-          createEnabled={Boolean(config.runs.createEnabled)}
-          profiles={profiles}
-        />
-      ) : null}
-
-      {error ? (
-        <div className="banner banner-error" style={{ marginTop: "0.75rem" }}>
-          {error}
+      {lab ? (
+        <div className="lab-chrome">
+          <div className="banner banner-warn" style={{ marginTop: "0.75rem" }}>
+            Lab controls. Not the default Runs page.
+          </div>
+          <MidrunProofPanel
+            token={token}
+            namespace={namespace}
+            onLoaded={(pair) => setApiOutput(JSON.stringify(pair, null, 2))}
+          />
+          <section className="panel" style={{ marginTop: "0.75rem" }}>
+            <div className="panel-header">
+              <h2 className="panel-title">Grok requestPeer proof</h2>
+            </div>
+            <div className="panel-body">
+              <label className="field">
+                <span className="label">grok AgentRunProfile</span>
+                <input
+                  className="input"
+                  value={profileName}
+                  onChange={(event) => setProfileName(event.target.value)}
+                  placeholder={AUDITOR_GROK_PROFILE}
+                />
+              </label>
+              <label className="field">
+                <span className="label">peerProfileName</span>
+                <input
+                  className="input"
+                  value={displayedPeerProfile}
+                  onChange={(event) => {
+                    const next = event.target.value;
+                    if (!next.trim() || isBlockedPeerProfile(next)) {
+                      setPeerProfileName(DESKTOP_GROK_PEER_PROFILE);
+                      return;
+                    }
+                    setPeerProfileName(next);
+                  }}
+                  placeholder={DESKTOP_GROK_PEER_PROFILE}
+                />
+              </label>
+              {config.runs.createEnabled ? (
+                <button
+                  type="button"
+                  className="btn"
+                  disabled={busy || !namespace || !profileName.trim()}
+                  onClick={() => void onStartRequestPeerProof()}
+                >
+                  {busy ? "Starting grok proof…" : "Start grok requestPeer proof"}
+                </button>
+              ) : null}
+              {requestPeerStatus ? <p className="muted">{requestPeerStatus}</p> : null}
+            </div>
+          </section>
+          <section className="panel" style={{ marginTop: "0.75rem" }}>
+            <div className="panel-header">
+              <h2 className="panel-title">Lab API</h2>
+            </div>
+            <div className="panel-body">
+              <label className="field">
+                <span className="label">Namespace</span>
+                <input
+                  className="input"
+                  value={namespace}
+                  onChange={(event) => setNs(event.target.value)}
+                  placeholder={fallbackNs || "namespace"}
+                />
+              </label>
+              <label className="field">
+                <span className="label">AgentRun name (get)</span>
+                <input className="input" value={runName} onChange={(event) => setRunName(event.target.value)} />
+              </label>
+              <div className="btn-row">
+                <button type="button" className="btn" disabled={busy || !namespace} onClick={() => void refreshRuns()}>
+                  List runs
+                </button>
+                <button type="button" className="btn" disabled={busy || !namespace} onClick={() => void onGetRun()}>
+                  Get run
+                </button>
+                {config.composition.writeEnabled ? (
+                  <button
+                    type="button"
+                    className="btn"
+                    disabled={busy || !namespace || !profileName.trim()}
+                    onClick={() => void onCreateProfile()}
+                  >
+                    Create profile
+                  </button>
+                ) : null}
+              </div>
+              {apiOutput ? <pre className="hint">{apiOutput}</pre> : null}
+            </div>
+          </section>
+          {requestPeerSource ? (
+            <RequestPeerMonitor
+              token={token}
+              namespace={namespace}
+              sourceRun={requestPeerSource}
+              createEnabled={Boolean(config.runs.createEnabled)}
+              profiles={profiles}
+            />
+          ) : null}
         </div>
       ) : null}
     </div>

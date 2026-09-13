@@ -46,12 +46,8 @@ export function HarnessesPage({
     <div>
       <div className="page-header">
         <div>
-          <h1 className="page-title">Local harness</h1>
-          <p className="page-sub">
-            Second function: activate already-installed CLIs on this machine (or WSL) for on-machine
-            work. Primaris chat and Wrapper stay on their own pages. The OIDC token is never copied
-            into the CLI argv, environment, or prompt file.
-          </p>
+          <h1 className="page-title">Local</h1>
+          <p className="page-sub">Run a program already on this machine. Cluster agents stay on Chat and Runs.</p>
         </div>
       </div>
       <LocalRuntimeCard snapshot={snapshot} busy={busy} onSavePrefs={onSavePrefs} />

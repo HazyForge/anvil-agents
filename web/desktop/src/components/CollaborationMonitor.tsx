@@ -58,7 +58,7 @@ export function CollaborationMonitor({ token, namespace, runA, runB, objective }
     if (bothRunning) {
       return {
         kind: "info" as const,
-        text: "Both grok AgentRuns are Running on the shared objective — watching streams for conferral or interrupt.",
+        text: "Both runs are in progress on the shared objective.",
       };
     }
     return {
@@ -72,7 +72,7 @@ export function CollaborationMonitor({ token, namespace, runA, runB, objective }
       <div className="panel-header">
         <h2 className="panel-title">Shared objective · in-flight collaboration</h2>
         <span className={`chip ${bothRunning ? "chip-ok" : ""}`}>
-          {bothRunning ? "both running" : "waiting overlap"}
+          {bothRunning ? "overlap" : "waiting"}
         </span>
         {peerDetected ? <span className="chip chip-ok">peer signal</span> : null}
       </div>

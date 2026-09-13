@@ -38,7 +38,7 @@ export function AuthCallbackPage({ onAuthenticated }: Props) {
         <h1>Sign-in failed</h1>
         <div className="banner banner-error">{error}</div>
         <button type="button" className="btn btn-primary" onClick={() => navigate("/", { replace: true })}>
-          Back to desktop
+          Back
         </button>
       </div>
     );
@@ -46,8 +46,8 @@ export function AuthCallbackPage({ onAuthenticated }: Props) {
 
   return (
     <div className="panel token-gate">
-      <h1>Completing sign-in…</h1>
-      <p>Exchanging authorization code for an access token. The code is then stripped from the address bar.</p>
+      <h1>Signing in…</h1>
+      <p>One moment.</p>
     </div>
   );
 }

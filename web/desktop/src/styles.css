@@ -430,6 +430,33 @@ a { color: var(--teal); text-decoration: none; }
 }
 .empty { color: var(--text-mute); padding: 1rem 0.2rem; }
 
+.human-page { max-width: 56rem; }
+.roster-layout {
+  display: grid;
+  grid-template-columns: minmax(16rem, 22rem) minmax(0, 1fr);
+  gap: 0.75rem;
+  align-items: start;
+}
+.roster-chat-layout {
+  display: grid;
+  grid-template-columns: minmax(14rem, 18rem) minmax(0, 1fr);
+  gap: 0.75rem;
+  align-items: stretch;
+}
+@media (max-width: 900px) {
+  .roster-layout, .roster-chat-layout { grid-template-columns: 1fr; }
+}
+.entity-item-static { cursor: default; }
+.human-next .panel-body { gap: 0.85rem; }
+.human-empty {
+  margin: 0;
+  color: var(--text);
+  font-size: 0.92rem;
+  max-width: 28rem;
+}
+.lab-chrome { margin-top: 0.5rem; }
+.token-gate .btn-ghost { align-self: flex-start; padding-left: 0; }
+
 .stream-dual {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

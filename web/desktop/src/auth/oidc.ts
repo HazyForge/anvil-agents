@@ -86,7 +86,14 @@ export function takeReturnPath(): string {
   try {
     const value = sessionStorage.getItem(RETURN_KEY) || "/";
     sessionStorage.removeItem(RETURN_KEY);
-    return value.startsWith("/") ? value : "/";
+    if (!value.startsWith("/") || value.startsWith("//") || value.includes("://")) {
+      return "/";
+    }
+    const path = value.split("?")[0] || "/";
+    if (path === "/" || path === "/chat" || path === "/wrapper" || path === "/local" || path === "/auth/callback") {
+      return value;
+    }
+    return "/";
   } catch {
     return "/";
   }

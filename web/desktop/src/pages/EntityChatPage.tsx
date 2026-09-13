@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
+import { Link } from "react-router-dom";
 import { listChatMessages, listChatThreads } from "../api/chat";
 import { listRunProfiles, type CompositionDocument } from "../api/client";
 import type { UIConfig } from "../auth/config";
 import { personaLabel } from "../names";
-import { loadNamespace, saveNamespace } from "../state/namespace";
-import { dnsLabel, parseWrapperIntent, WRAPPER_PROFILE_NAME } from "../wrapper/intent";
+import { loadNamespace } from "../state/namespace";
+import { WRAPPER_PROFILE_NAME } from "../wrapper/intent";
 import { formatTurnError, runWrapperTurn, visibleFromChat, type EntityLine, type VisibleMessage } from "../wrapper/turn";
 
 interface Props {
@@ -12,13 +13,22 @@ interface Props {
   config: UIConfig;
 }
 
-const DEMO_PROMPT = "Create two agents named scout and cartographer, then have them greet each other.";
+/** Live Primaris still origin_denied for Origin http://127.0.0.1:1738 until anvil-agents#178. */
+function desktopChatCanReply(chatConfigured: boolean, chatLive: boolean): boolean {
+  if (!chatConfigured || !chatLive) {
+    return false;
+  }
+  const host = window.location.hostname;
+  if (host === "127.0.0.1" || host === "localhost" || host === "[::1]") {
+    return false;
+  }
+  return true;
+}
 
 export function EntityChatPage({ token, config }: Props) {
   const fallbackNs = config.defaultNamespaces[0] || "agents";
-  const [namespace, setNamespace] = useState(() => loadNamespace(fallbackNs));
+  const [namespace] = useState(() => loadNamespace(fallbackNs));
   const [draft, setDraft] = useState("");
-  const [spawnName, setSpawnName] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [profiles, setProfiles] = useState<CompositionDocument[]>([]);
@@ -27,19 +37,16 @@ export function EntityChatPage({ token, config }: Props) {
   const [wrapperThreadId, setWrapperThreadId] = useState<string | null>(null);
   const [chatLive, setChatLive] = useState(Boolean(config.chat?.enabled));
   const [selected, setSelected] = useState<string | null>(null);
+  const [loaded, setLoaded] = useState(false);
   const endRef = useRef<HTMLDivElement | null>(null);
 
   const writeEnabled = Boolean(config.composition.writeEnabled);
-  const chatEnabled = Boolean(config.chat?.enabled) && chatLive;
+  const chatConfigured = Boolean(config.chat?.enabled);
+  const canReply = desktopChatCanReply(chatConfigured, chatLive);
   const entityProfiles = useMemo(
     () => profiles.filter((doc) => doc.metadata.name !== WRAPPER_PROFILE_NAME),
     [profiles],
   );
-
-  function setNs(next: string) {
-    setNamespace(next);
-    saveNamespace(next);
-  }
 
   const refresh = useCallback(async () => {
     if (!namespace) {
@@ -50,7 +57,7 @@ export function EntityChatPage({ token, config }: Props) {
       if (config.composition.readEnabled) {
         setProfiles(await listRunProfiles(token, namespace));
       }
-      if (config.chat?.enabled) {
+      if (canReply && chatConfigured) {
         const threads = await listChatThreads(token, namespace, { mode: "persona", limit: 100 });
         setChatLive(true);
         const wrapper = threads.find((thread) => thread.profileName === WRAPPER_PROFILE_NAME);
@@ -59,6 +66,8 @@ export function EntityChatPage({ token, config }: Props) {
           const items = await listChatMessages(token, namespace, wrapper.id);
           setMessages(visibleFromChat(items));
         }
+      } else if (!chatConfigured) {
+        setChatLive(false);
       }
     } catch (err) {
       const text = formatTurnError(err);
@@ -67,8 +76,10 @@ export function EntityChatPage({ token, config }: Props) {
       } else {
         setError(text);
       }
+    } finally {
+      setLoaded(true);
     }
-  }, [config.chat?.enabled, config.composition.readEnabled, namespace, token]);
+  }, [canReply, chatConfigured, config.composition.readEnabled, namespace, token]);
 
   useEffect(() => {
     void refresh();
@@ -80,7 +91,7 @@ export function EntityChatPage({ token, config }: Props) {
 
   async function runTurn(userText: string) {
     const text = userText.trim();
-    if (!text || busy) {
+    if (!text || busy || !canReply) {
       return;
     }
     setBusy(true);
@@ -98,7 +109,7 @@ export function EntityChatPage({ token, config }: Props) {
         token,
         namespace,
         userText: text,
-        chatEnabled,
+        chatEnabled: canReply,
         writeEnabled,
         wrapperThreadId,
         existingProfileNames: profiles.map((doc) => doc.metadata.name),
@@ -110,8 +121,6 @@ export function EntityChatPage({ token, config }: Props) {
       setMessages((prev) => [...prev, ...result.history]);
       if (config.composition.readEnabled) {
         setProfiles(await listRunProfiles(token, namespace));
-      } else {
-        setProfiles((prev) => mergeProfiles(prev, result.spawned));
       }
     } catch (err) {
       setError(formatTurnError(err));
@@ -132,199 +141,142 @@ export function EntityChatPage({ token, config }: Props) {
     }
   }
 
-  async function onSpawnNamed() {
-    const name = dnsLabel(spawnName);
-    if (!name) {
-      setError("spawn name must be a DNS label (lowercase, digits, hyphens)");
-      return;
-    }
-    await runTurn(`Create an agent named ${name}.`);
-    setSpawnName("");
-  }
-
-  async function onHaveThemTalk() {
-    if (entityProfiles.length < 2) {
-      setError("spawn at least two agents before they can talk");
-      return;
-    }
-    await runTurn(`Have ${entityProfiles[0].metadata.name} and ${entityProfiles[1].metadata.name} greet each other.`);
-  }
-
-  const intentPreview = parseWrapperIntent(
-    draft,
-    profiles.map((doc) => doc.metadata.name),
-  );
+  const selectedName = selected || entityProfiles[0]?.metadata.name || "";
 
   return (
-    <div>
+    <div className="human-page">
       <div className="page-header">
         <div>
-          <h1 className="page-title">Agents</h1>
+          <h1 className="page-title">Chat</h1>
           <p className="page-sub">
-            Talk to named Primaris agents over the OIDC API. The wrapper can POST AgentRunProfiles and
-            have them speak on standing-chat threads. This is not kubectl and not a local CLI.
+            {canReply
+              ? "Talk with a named cluster agent."
+              : "Named agents on the cluster. This window cannot send a message yet."}
           </p>
-        </div>
-        <div className="chip-row">
-          <span className={`chip ${writeEnabled ? "chip-ok" : ""}`}>
-            {writeEnabled ? "composition write" : "write off"}
-          </span>
-          <span className={`chip ${chatEnabled ? "chip-ok" : ""}`}>
-            {chatEnabled ? "standing chat" : "chat local/off"}
-          </span>
         </div>
       </div>
 
       {error ? <div className="banner banner-error">{error}</div> : null}
-      {!writeEnabled ? (
-        <div className="banner banner-info">
-          composition.writeEnabled is false. The API must grant composition write before Desktop can
-          create agents.
-        </div>
-      ) : null}
 
-      <div className="entity-layout">
-        <aside className="panel">
-          <div className="panel-header">
-            <h2 className="panel-title">Agents</h2>
-            <span className="muted">{entityProfiles.length}</span>
-          </div>
-          <div className="panel-body">
-            {entityProfiles.length === 0 ? (
-              <p className="muted">No AgentRunProfiles in this namespace yet. Spawn one on the right, or ask the wrapper.</p>
-            ) : (
-              <ul className="entity-list">
-                {entityProfiles.map((doc) => {
-                  const name = doc.metadata.name;
-                  const active = selected === name;
-                  return (
-                    <li key={name}>
-                      <button
-                        type="button"
-                        className={`entity-item ${active ? "selected" : ""}`}
-                        onClick={() => setSelected(name)}
-                      >
-                        <span>{personaLabel(name)}</span>
-                        <span className="chip chip-ok">online</span>
-                      </button>
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
-          </div>
-        </aside>
-
-        <section className="panel entity-chat-main">
-          <div className="panel-header">
-            <h2 className="panel-title">Conversation</h2>
-            <span className="chip mono">{WRAPPER_PROFILE_NAME}</span>
-          </div>
-          <div className="chat-messages" aria-live="polite">
-            {messages.length === 0 ? (
-              <div className="empty">Ask the wrapper to create or talk to named agents.</div>
-            ) : null}
-            {messages.map((message) => (
-              <article key={message.id} className={`chat-bubble chat-bubble-${message.author}`}>
-                <header className="chat-bubble-header">
-                  <span className="chat-bubble-role">{personaLabel(message.profile || message.author)}</span>
-                </header>
-                <pre className="chat-bubble-body">{message.content}</pre>
-              </article>
-            ))}
-            {room.map((line, index) => (
-              <article key={`room-${line.author}-${index}`} className="chat-bubble chat-bubble-entity">
-                <header className="chat-bubble-header">
-                  <span className="chat-bubble-role">{personaLabel(line.author)}</span>
-                </header>
-                <pre className="chat-bubble-body">{line.content}</pre>
-              </article>
-            ))}
-            <div ref={endRef} />
-          </div>
-          <form className="chat-composer" onSubmit={(event) => void onSubmit(event)}>
-            <label className="field">
-              <span className="label">Message</span>
-              <textarea
-                className="textarea chat-composer-input"
-                rows={3}
-                value={draft}
-                onChange={(event) => setDraft(event.target.value)}
-                onKeyDown={onComposerKeyDown}
-                placeholder={DEMO_PROMPT}
-                disabled={busy || !writeEnabled}
-              />
-            </label>
-            {draft.trim() && intentPreview.spawn ? (
-              <p className="muted">
-                Will spawn {intentPreview.names.map(personaLabel).join(", ") || "—"}
-                {intentPreview.talk ? " and have them talk" : ""}.
+      {!canReply ? (
+        <div className="roster-layout">
+          <section className="panel">
+            <div className="panel-header">
+              <h2 className="panel-title">Cluster agents</h2>
+              <span className="muted">{loaded ? entityProfiles.length : "…"}</span>
+            </div>
+            <div className="panel-body">
+              {!loaded ? <p className="muted">Loading names…</p> : null}
+              {loaded && entityProfiles.length === 0 ? (
+                <p className="muted">No named agents in this workspace yet. Start work from Runs.</p>
+              ) : null}
+              {entityProfiles.length > 0 ? (
+                <ul className="entity-list">
+                  {entityProfiles.map((doc) => {
+                    const name = doc.metadata.name;
+                    return (
+                      <li key={name}>
+                        <div className="entity-item entity-item-static">
+                          <span>{personaLabel(name)}</span>
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ul>
+              ) : null}
+            </div>
+          </section>
+          <section className="panel human-next">
+            <div className="panel-body">
+              <p className="human-empty">
+                Chat cannot reply from this desktop yet. Standing chat is off, and sending from here is
+                blocked.
               </p>
-            ) : null}
-            <div className="chat-composer-actions">
-              <button
-                type="button"
-                className="btn"
-                disabled={busy || !writeEnabled}
-                onClick={() => void runTurn(DEMO_PROMPT)}
-              >
-                Spawn two and let them talk
-              </button>
-              <button type="submit" className="btn btn-primary" disabled={busy || !draft.trim() || !writeEnabled}>
-                {busy ? "Working…" : "Send"}
-              </button>
+              <Link to="/wrapper" className="btn btn-primary">
+                Open Runs
+              </Link>
             </div>
-          </form>
-        </section>
-
-        <aside className="panel">
-          <div className="panel-header">
-            <h2 className="panel-title">Namespace</h2>
-          </div>
-          <div className="panel-body">
-            <label className="field">
-              <span className="label">Namespace</span>
-              <input
-                className="input"
-                value={namespace}
-                onChange={(event) => setNs(event.target.value)}
-                placeholder={fallbackNs}
-              />
-            </label>
-            <p className="muted">
-              From ui-config: {config.defaultNamespaces.join(", ") || "none"}. This is not a kube
-              context picker.
-            </p>
-            <label className="field">
-              <span className="label">Spawn agent</span>
-              <input
-                className="input"
-                value={spawnName}
-                onChange={(event) => setSpawnName(event.target.value)}
-                placeholder="scout"
-                spellCheck={false}
-              />
-            </label>
-            <div className="btn-row">
-              <button type="button" className="btn btn-primary" disabled={busy || !writeEnabled} onClick={() => void onSpawnNamed()}>
-                Spawn agent
-              </button>
-              <button type="button" className="btn" disabled={busy || !writeEnabled} onClick={() => void onHaveThemTalk()}>
-                Have them talk
-              </button>
+          </section>
+        </div>
+      ) : (
+        <div className="roster-chat-layout">
+          <aside className="panel">
+            <div className="panel-header">
+              <h2 className="panel-title">Agents</h2>
+              <span className="muted">{entityProfiles.length}</span>
             </div>
-            <p className="muted">No Kubernetes context. No kubectl. On-machine CLIs live on Local.</p>
-          </div>
-        </aside>
-      </div>
+            <div className="panel-body">
+              {entityProfiles.length === 0 ? (
+                <p className="muted">No named agents yet. Start work from Runs.</p>
+              ) : (
+                <ul className="entity-list">
+                  {entityProfiles.map((doc) => {
+                    const name = doc.metadata.name;
+                    const active = selectedName === name;
+                    return (
+                      <li key={name}>
+                        <button
+                          type="button"
+                          className={`entity-item ${active ? "selected" : ""}`}
+                          onClick={() => setSelected(name)}
+                        >
+                          <span>{personaLabel(name)}</span>
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </div>
+          </aside>
+          <section className="panel entity-chat-main">
+            <div className="panel-header">
+              <h2 className="panel-title">{selectedName ? personaLabel(selectedName) : "Conversation"}</h2>
+            </div>
+            <div className="chat-messages" aria-live="polite">
+              {messages.length === 0 && room.length === 0 ? (
+                <div className="empty">No messages yet.</div>
+              ) : null}
+              {messages.map((message) => (
+                <article key={message.id} className={`chat-bubble chat-bubble-${message.author}`}>
+                  <header className="chat-bubble-header">
+                    <span className="chat-bubble-role">{personaLabel(message.profile || message.author)}</span>
+                  </header>
+                  <pre className="chat-bubble-body">{message.content}</pre>
+                </article>
+              ))}
+              {room.map((line, index) => (
+                <article key={`room-${line.author}-${index}`} className="chat-bubble chat-bubble-entity">
+                  <header className="chat-bubble-header">
+                    <span className="chat-bubble-role">{personaLabel(line.author)}</span>
+                  </header>
+                  <pre className="chat-bubble-body">{line.content}</pre>
+                </article>
+              ))}
+              <div ref={endRef} />
+            </div>
+            <form className="chat-composer" onSubmit={(event) => void onSubmit(event)}>
+              <label className="field">
+                <span className="label">Message</span>
+                <textarea
+                  className="textarea chat-composer-input"
+                  rows={3}
+                  value={draft}
+                  onChange={(event) => setDraft(event.target.value)}
+                  onKeyDown={onComposerKeyDown}
+                  placeholder="Write a message"
+                  disabled={busy}
+                />
+              </label>
+              <div className="chat-composer-actions">
+                <button type="submit" className="btn btn-primary" disabled={busy || !draft.trim()}>
+                  {busy ? "Sending…" : "Send"}
+                </button>
+              </div>
+            </form>
+          </section>
+        </div>
+      )}
     </div>
   );
-}
-
-function mergeProfiles(prev: CompositionDocument[], spawned: CompositionDocument[]): CompositionDocument[] {
-  const byName = new Map(prev.map((doc) => [doc.metadata.name, doc]));
-  for (const doc of spawned) {
-    byName.set(doc.metadata.name, doc);
-  }
-  return [...byName.values()];
 }

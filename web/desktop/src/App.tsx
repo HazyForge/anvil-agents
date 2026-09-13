@@ -3,7 +3,7 @@ import { NavLink, Navigate, Route, Routes, useLocation } from "react-router-dom"
 import { fetchSnapshot, savePrefs } from "./api/client";
 import type { Prefs, Snapshot } from "./api/types";
 import { clearUIConfigCache, loadUIConfig, type UIConfig } from "./auth/config";
-import { ensureAccessToken, logout } from "./auth/oidc";
+import { beginLogin, ensureAccessToken, logout } from "./auth/oidc";
 import { clearLegacyToken, loadSession } from "./auth/session";
 import { LoginGate } from "./components/LoginGate";
 import { AuthCallbackPage } from "./pages/AuthCallbackPage";
@@ -180,9 +180,13 @@ export default function App() {
               Sign out
             </button>
           ) : (
-            <NavLink to="/chat" className="btn btn-ghost">
+            <button
+              type="button"
+              className="btn btn-ghost"
+              onClick={() => void beginLogin(location.pathname + location.search)}
+            >
               Sign in
-            </NavLink>
+            </button>
           )}
         </div>
       </div>
@@ -191,7 +195,7 @@ export default function App() {
           Chat
         </NavLink>
         <NavLink to="/wrapper" className={({ isActive }) => (isActive ? "rail-link active" : "rail-link")}>
-          Wrapper
+          Runs
         </NavLink>
         <NavLink to="/local" className={({ isActive }) => (isActive ? "rail-link active" : "rail-link")}>
           Local
