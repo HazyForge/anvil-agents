@@ -11,10 +11,10 @@ import {
 } from "../api/client";
 import type { Snapshot } from "../api/types";
 import type { UIConfig } from "../auth/config";
-import { CollaborationMonitor } from "../components/CollaborationMonitor";
+import { RequestPeerMonitor } from "../components/RequestPeerMonitor";
 import { personaLabel } from "../names";
 import { loadNamespace, saveNamespace } from "../state/namespace";
-import { startStaggeredPairedObjective } from "../wrapper/collaboration";
+import { grokRequestPeerProofPrompt } from "../wrapper/requestPeer";
 
 interface Props {
   snapshot: Snapshot;
@@ -26,18 +26,16 @@ export function WrapperPage({ snapshot, token, config }: Props) {
   const fallbackNs = config.defaultNamespaces[0] || "";
   const [namespace, setNamespace] = useState(() => loadNamespace(fallbackNs));
   const [prompt, setPrompt] = useState("");
-  const [objective, setObjective] = useState(
-    "Draft a one-paragraph Primaris desktop collab note; coordinate with the peer grok run so only one build happens.",
-  );
-  const [profileName, setProfileName] = useState("");
+  const [profileName, setProfileName] = useState("desktop-grok-proof-conferral-b");
+  const [peerProfileName, setPeerProfileName] = useState("hazy-trade-human-comms-smoke");
   const [runName, setRunName] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [collabStatus, setCollabStatus] = useState<string | null>(null);
+  const [requestPeerStatus, setRequestPeerStatus] = useState<string | null>(null);
   const [apiOutput, setApiOutput] = useState("");
   const [runs, setRuns] = useState<AgentRunView[]>([]);
   const [profiles, setProfiles] = useState<CompositionDocument[]>([]);
-  const [pairedRuns, setPairedRuns] = useState<{ runA: string; runB: string; objective: string } | null>(null);
+  const [requestPeerSource, setRequestPeerSource] = useState<string | null>(null);
 
   const apiTools = snapshot.wrapper.tools.filter((tool) => tool.id !== "local-harness");
   const localTool = snapshot.wrapper.tools.find((tool) => tool.id === "local-harness");
@@ -65,14 +63,14 @@ export function WrapperPage({ snapshot, token, config }: Props) {
   }
 
   useEffect(() => {
-    if (!namespace || !token || !pairedRuns) {
+    if (!namespace || !token || !requestPeerSource) {
       return;
     }
     const id = window.setInterval(() => {
       void refreshRuns(true);
     }, 4000);
     return () => window.clearInterval(id);
-  }, [namespace, token, pairedRuns]);
+  }, [namespace, token, requestPeerSource]);
 
   async function runAPI(label: string, fn: () => Promise<unknown>) {
     setBusy(true);
@@ -133,28 +131,41 @@ export function WrapperPage({ snapshot, token, config }: Props) {
     await refreshRuns(true);
   }
 
-  async function onStartPairedObjective() {
+  async function onStartRequestPeerProof() {
     if (!config.runs.createEnabled) {
       setError("AgentRun create is disabled on this API");
       return;
     }
+    const grokProfile = profileName.trim();
+    const peerProfile = peerProfileName.trim();
+    if (!grokProfile || !peerProfile) {
+      setError("grok profile and peer profile are required");
+      return;
+    }
     setBusy(true);
     setError(null);
-    setCollabStatus(null);
-    setPairedRuns(null);
+    setRequestPeerStatus(null);
+    setRequestPeerSource(null);
     try {
-      const result = await startStaggeredPairedObjective({
-        token,
-        namespace,
-        profileName: profileName.trim(),
-        objective: objective.trim(),
-        onStatus: (message) => setCollabStatus(message),
+      setRequestPeerStatus("Creating grok proof run…");
+      const created = await createAgentRun(token, namespace, {
+        generateName: "desktop-reqpeer-",
+        profileName: grokProfile,
+        prompt: grokRequestPeerProofPrompt(peerProfile),
       });
-      setPairedRuns({ ...result, objective: objective.trim() });
-      setApiOutput(JSON.stringify(result, null, 2));
+      const name =
+        created && typeof created === "object" && "name" in created && typeof created.name === "string"
+          ? created.name
+          : "";
+      if (!name) {
+        throw new Error("API did not return source run name");
+      }
+      setRequestPeerSource(name);
+      setApiOutput(JSON.stringify(created, null, 2));
+      setRequestPeerStatus(`Watching ${name} for requestPeer while Running…`);
       await refreshRuns(true);
     } catch (err) {
-      setError(`paired objective: ${err instanceof Error ? err.message : String(err)}`);
+      setError(`requestPeer proof: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
       setBusy(false);
     }
@@ -250,46 +261,47 @@ export function WrapperPage({ snapshot, token, config }: Props) {
 
       <section className="panel" style={{ marginTop: "0.75rem" }}>
         <div className="panel-header">
-          <h2 className="panel-title">Paired grok objective</h2>
-          <span className="chip">staggered overlap</span>
+          <h2 className="panel-title">Grok requestPeer proof</h2>
+          <span className="chip">controller stub</span>
         </div>
         <div className="panel-body">
           <p className="muted">
-            Starts worker A, waits until it is <strong>Running</strong>, then starts worker B on the same
-            objective so conferral or interrupt can happen while both are in flight. Proof is live phases plus
-            stream/report peer signals — not two jobs at one click.
+            Primaris controller does not handle <span className="mono">requestPeer</span> yet. Desktop watches
+            the grok live stream for <span className="mono">ANVIL_AGENT_RUN_STATUS_JSON</span> with{" "}
+            <span className="mono">type=requestPeer</span> while the source run is <strong>Running</strong>, then
+            POSTs the peer AgentRun through loopback OIDC (same API the controller will use later).
           </p>
-          <label className="field">
-            <span className="label">Shared objective</span>
-            <textarea
-              className="input textarea"
-              rows={3}
-              value={objective}
-              onChange={(event) => setObjective(event.target.value)}
-            />
-          </label>
           <label className="field">
             <span className="label">grok AgentRunProfile</span>
             <input
               className="input"
               value={profileName}
               onChange={(event) => setProfileName(event.target.value)}
-              placeholder="list profiles first"
+              placeholder="desktop-grok-proof-conferral-b"
+            />
+          </label>
+          <label className="field">
+            <span className="label">peerProfileName (requestPeer target)</span>
+            <input
+              className="input"
+              value={peerProfileName}
+              onChange={(event) => setPeerProfileName(event.target.value)}
+              placeholder="hazy-trade-human-comms-smoke"
             />
           </label>
           {config.runs.createEnabled ? (
             <button
               type="button"
               className="btn btn-primary"
-              disabled={busy || !namespace || !profileName.trim() || !objective.trim()}
-              onClick={() => void onStartPairedObjective()}
+              disabled={busy || !namespace || !profileName.trim() || !peerProfileName.trim()}
+              onClick={() => void onStartRequestPeerProof()}
             >
-              {busy ? "Starting paired objective…" : "Start paired grok objective"}
+              {busy ? "Starting grok proof…" : "Start grok requestPeer proof"}
             </button>
           ) : (
             <span className="muted">AgentRun create is disabled on this API.</span>
           )}
-          {collabStatus ? <p className="muted">{collabStatus}</p> : null}
+          {requestPeerStatus ? <p className="muted">{requestPeerStatus}</p> : null}
         </div>
       </section>
 
@@ -371,13 +383,12 @@ export function WrapperPage({ snapshot, token, config }: Props) {
         </div>
       </section>
 
-      {pairedRuns ? (
-        <CollaborationMonitor
+      {requestPeerSource ? (
+        <RequestPeerMonitor
           token={token}
           namespace={namespace}
-          runA={pairedRuns.runA}
-          runB={pairedRuns.runB}
-          objective={pairedRuns.objective}
+          sourceRun={requestPeerSource}
+          createEnabled={Boolean(config.runs.createEnabled)}
         />
       ) : null}
 
