@@ -1,8 +1,11 @@
 import { useEffect, useRef, useState } from "react";
+import { getAgentRun, type AgentRunView } from "../api/client";
 import { openAgentRunStream } from "../api/stream";
 import type { StreamEnvelope } from "../api/types.stream";
 import { peerSignalText } from "../wrapper/collaboration";
 import { isInterruptDuplicateLogLine, STATUS_JSON_PREFIX } from "../wrapper/requestPeer";
+import { isInterruptDuplicateHold, readyReason, stickAgentRunStatus } from "../wrapper/runStatus";
+import { AgentRunStatusCard } from "./AgentRunStatusCard";
 
 function statusJsonHighlight(body: string): boolean {
   return (
@@ -15,7 +18,12 @@ function statusJsonHighlight(body: string): boolean {
 }
 
 function interruptDuplicateHighlight(body: string): boolean {
-  return isInterruptDuplicateLogLine(body) || (body.includes(STATUS_JSON_PREFIX) && body.includes("interruptDuplicate"));
+  return (
+    isInterruptDuplicateLogLine(body) ||
+    (body.includes(STATUS_JSON_PREFIX) && body.includes("interruptDuplicate")) ||
+    body.includes("ready=InterruptDuplicate") ||
+    (body.includes("phase=Failed") && body.includes("interruptDuplicate:"))
+  );
 }
 
 const MAX_STREAM_ROWS = 2000;
@@ -38,6 +46,7 @@ interface Props {
 
 export function LiveStream({ token, namespace, name, title }: Props) {
   const [rows, setRows] = useState<StreamRow[]>([]);
+  const [crStatus, setCrStatus] = useState<AgentRunView | null>(null);
   const [status, setStatus] = useState<"idle" | "connecting" | "live" | "ended" | "error">("idle");
   const [statusText, setStatusText] = useState("idle");
   const scrollerRef = useRef<HTMLDivElement | null>(null);
@@ -45,6 +54,7 @@ export function LiveStream({ token, namespace, name, title }: Props) {
 
   useEffect(() => {
     setRows([]);
+    setCrStatus(null);
     setStatus("connecting");
     setStatusText("connecting");
     rowCounter.current = 0;
@@ -72,6 +82,42 @@ export function LiveStream({ token, namespace, name, title }: Props) {
       });
     };
 
+    const ingestRun = (payload: StreamEnvelope) => {
+      if (!payload.run) {
+        return;
+      }
+      setCrStatus((prev) =>
+        stickAgentRunStatus(prev, {
+          name: payload.run?.name || prev?.name || name,
+          namespace: payload.run?.namespace || prev?.namespace || namespace,
+          ...payload.run,
+        }),
+      );
+    };
+
+    let cancelled = false;
+    void (async () => {
+      try {
+        const run = await getAgentRun(token, namespace, name);
+        if (!cancelled) {
+          setCrStatus((prev) => stickAgentRunStatus(prev, run));
+        }
+      } catch {
+        // stream snapshot still hydrates CR fields
+      }
+    })();
+    const poll = window.setInterval(() => {
+      void getAgentRun(token, namespace, name)
+        .then((run) => {
+          if (!cancelled) {
+            setCrStatus((prev) => stickAgentRunStatus(prev, run));
+          }
+        })
+        .catch(() => {
+          // keep last sticky CR status
+        });
+    }, 3000);
+
     const handle = openAgentRunStream(token, namespace, name, {
       onEvent: (event, payload) => {
         setStatus("live");
@@ -80,6 +126,7 @@ export function LiveStream({ token, namespace, name, title }: Props) {
           case "snapshot":
           case "status":
           case "terminal":
+            ingestRun(payload);
             append(event, summarizeRunEvent(event, payload));
             if (event === "terminal") {
               setStatus("ended");
@@ -112,7 +159,11 @@ export function LiveStream({ token, namespace, name, title }: Props) {
       },
     });
 
-    return () => handle.abort();
+    return () => {
+      cancelled = true;
+      window.clearInterval(poll);
+      handle.abort();
+    };
   }, [token, namespace, name]);
 
   useEffect(() => {
@@ -125,6 +176,7 @@ export function LiveStream({ token, namespace, name, title }: Props) {
 
   const peerHits = rows.filter((row) => row.peerHighlight).length;
   const interruptHits = rows.filter((row) => row.interruptHighlight).length;
+  const crHeld = isInterruptDuplicateHold(crStatus);
 
   return (
     <div className="stream-panel">
@@ -135,9 +187,11 @@ export function LiveStream({ token, namespace, name, title }: Props) {
         </span>
         {peerHits > 0 ? <span className="chip chip-ok">{peerHits} peer signal(s)</span> : null}
         {interruptHits > 0 ? (
-          <span className="chip chip-ok">interruptDuplicate</span>
+          <span className="chip chip-ok">STATUS_JSON interruptDuplicate</span>
         ) : null}
+        {crHeld ? <span className="chip chip-fail">CR InterruptDuplicate</span> : null}
       </div>
+      {crStatus ? <AgentRunStatusCard run={crStatus} /> : null}
       <div className="stream-log" ref={scrollerRef}>
         {rows.length === 0 ? <div className="empty">Waiting for stream events…</div> : null}
         {rows.map((row) => (
@@ -156,19 +210,15 @@ export function LiveStream({ token, namespace, name, title }: Props) {
 }
 
 function summarizeRunEvent(event: string, payload: StreamEnvelope): string {
-  if (payload.message) {
-    return payload.message;
-  }
   const run = payload.run;
-  if (!run) {
-    return event;
-  }
   const bits = [
-    `phase=${run.phase ?? "—"}`,
-    run.backend ? `backend=${run.backend}` : "",
-    run.error ? `error=${run.error}` : "",
-    run.decision?.action ? `action=${run.decision.action}` : "",
-    run.decision?.summary ? `summary=${run.decision.summary}` : "",
+    payload.message || "",
+    run ? `phase=${run.phase ?? "—"}` : "",
+    run && readyReason(run) ? `ready=${readyReason(run)}` : "",
+    run?.error ? `error=${run.error}` : "",
+    run?.decision?.action ? `action=${run.decision.action}` : "",
+    run?.decision?.summary ? `summary=${run.decision.summary}` : "",
+    run?.backend ? `backend=${run.backend}` : "",
   ].filter(Boolean);
-  return bits.join(" · ");
+  return bits.join(" · ") || event;
 }

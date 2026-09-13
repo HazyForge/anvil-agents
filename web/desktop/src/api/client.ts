@@ -109,6 +109,13 @@ export type AgentRunReport = {
   action?: string;
 };
 
+export type AgentRunCondition = {
+  type?: string;
+  status?: string;
+  reason?: string;
+  message?: string;
+};
+
 export type AgentRunView = {
   name: string;
   namespace: string;
@@ -117,6 +124,7 @@ export type AgentRunView = {
   intent?: string;
   application?: string;
   error?: string;
+  conditions?: AgentRunCondition[];
   decision?: { action?: string; summary?: string };
   reports?: AgentRunReport[];
   source?: { kind?: string; name?: string; namespace?: string };

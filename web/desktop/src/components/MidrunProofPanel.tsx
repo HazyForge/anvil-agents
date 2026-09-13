@@ -1,5 +1,7 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { getAgentRun, type AgentRunView } from "../api/client";
+import { stickAgentRunStatus } from "../wrapper/runStatus";
+import { AgentRunStatusCard } from "./AgentRunStatusCard";
 import { LiveStream } from "./LiveStream";
 
 export const MIDRUN_OBJECTIVE = "midrun-proof-bc98af8-20260912";
@@ -34,6 +36,38 @@ export function MidrunProofPanel({ token, namespace, onLoaded }: Props) {
     }
   }
 
+  const watching = Boolean(runs);
+
+  useEffect(() => {
+    if (!watching || !token || !namespace) {
+      return;
+    }
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const [a, b] = await Promise.all([
+          getAgentRun(token, namespace, MIDRUN_RUN_A),
+          getAgentRun(token, namespace, MIDRUN_RUN_B),
+        ]);
+        if (cancelled) {
+          return;
+        }
+        setRuns((prev) =>
+          prev
+            ? { a: stickAgentRunStatus(prev.a, a), b: stickAgentRunStatus(prev.b, b) }
+            : { a, b },
+        );
+      } catch {
+        // keep last sticky GET
+      }
+    };
+    const id = window.setInterval(() => void poll(), 3000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+    };
+  }, [watching, token, namespace]);
+
   return (
     <section className="panel" style={{ marginTop: "0.75rem" }}>
       <div className="panel-header">
@@ -54,8 +88,8 @@ export function MidrunProofPanel({ token, namespace, onLoaded }: Props) {
         {runs ? (
           <>
             <div className="collab-run-cards">
-              <RunDecisionCard run={runs.a} label="requestPeer" />
-              <RunDecisionCard run={runs.b} label="interruptDuplicate" />
+              <RunDecisionCard run={runs.a} label="A GET" />
+              <RunDecisionCard run={runs.b} label="B GET" />
             </div>
             <div className="stream-dual">
               <LiveStream token={token} namespace={namespace} name={MIDRUN_RUN_A} title={`${MIDRUN_RUN_A} (A)`} />
@@ -72,15 +106,9 @@ function RunDecisionCard({ run, label }: { run: AgentRunView; label: string }) {
   const action = run.decision?.action || "—";
   const summary = run.decision?.summary || "";
   return (
-    <div className="collab-run-card collab-run-card-running">
-      <div>
-        <div className="mono">{run.name}</div>
-        <div className="muted">expected: {label}</div>
-      </div>
-      <div>
-        <span className="chip chip-ok">{run.phase || "—"}</span>
-        <span className="chip mono">action={action}</span>
-      </div>
+    <div className="collab-run-card">
+      <AgentRunStatusCard run={run} label={label} />
+      <span className="chip mono">action={action}</span>
       {summary ? <p className="muted">{summary}</p> : null}
     </div>
   );

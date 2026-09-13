@@ -17,6 +17,7 @@ export interface StreamEnvelope {
     phase?: string;
     backend?: string;
     error?: string;
+    conditions?: { type?: string; status?: string; reason?: string; message?: string }[];
     decision?: { action?: string; summary?: string };
   };
   reason?: string;

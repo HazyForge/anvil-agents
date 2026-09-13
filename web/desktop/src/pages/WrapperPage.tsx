@@ -18,10 +18,13 @@ import type { Snapshot } from "../api/types";
 import type { UIConfig } from "../auth/config";
 import { MidrunProofPanel } from "../components/MidrunProofPanel";
 import { RequestPeerMonitor } from "../components/RequestPeerMonitor";
+import { AgentRunStatusCard } from "../components/AgentRunStatusCard";
+import { LiveStream } from "../components/LiveStream";
 import { personaLabel } from "../names";
 import { loadNamespace, saveNamespace } from "../state/namespace";
 import { WRAPPER_PROFILE_NAME } from "../wrapper/intent";
 import { grokRequestPeerProofPrompt } from "../wrapper/requestPeer";
+import { stickAgentRunStatus } from "../wrapper/runStatus";
 
 interface Props {
   snapshot: Snapshot;
@@ -45,6 +48,7 @@ export function WrapperPage({ token, config }: Props) {
   const [runs, setRuns] = useState<AgentRunView[]>([]);
   const [profiles, setProfiles] = useState<CompositionDocument[]>([]);
   const [requestPeerSource, setRequestPeerSource] = useState<string | null>(null);
+  const [inspectedRun, setInspectedRun] = useState<AgentRunView | null>(null);
   const displayedPeerProfile =
     !peerProfileName.trim() || isBlockedPeerProfile(peerProfileName) || peerProfileName.trim() === profileName.trim()
       ? pickGrokPeerProfileName(profiles, profileName) || DESKTOP_GROK_PEER_PROFILE
@@ -141,6 +145,29 @@ export function WrapperPage({ token, config }: Props) {
     return () => window.clearInterval(id);
   }, [lab, namespace, token, requestPeerSource]);
 
+  useEffect(() => {
+    if (!lab || !namespace || !token || !inspectedRun?.name) {
+      return;
+    }
+    const name = inspectedRun.name;
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const run = await getAgentRun(token, namespace, name);
+        if (!cancelled) {
+          setInspectedRun((prev) => (prev && prev.name === run.name ? stickAgentRunStatus(prev, run) : prev));
+        }
+      } catch {
+        // keep last sticky GET
+      }
+    };
+    const id = window.setInterval(() => void poll(), 3000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+    };
+  }, [lab, namespace, token, inspectedRun?.name]);
+
   async function runAPI(label: string, fn: () => Promise<unknown>) {
     setBusy(true);
     setError(null);
@@ -163,7 +190,10 @@ export function WrapperPage({ token, config }: Props) {
       setError("Enter a run name");
       return;
     }
-    await runAPI("get run", () => getAgentRun(token, namespace, name));
+    const result = await runAPI("get run", () => getAgentRun(token, namespace, name));
+    if (result && typeof result === "object" && "name" in result) {
+      setInspectedRun((prev) => stickAgentRunStatus(prev?.name === (result as AgentRunView).name ? prev : null, result as AgentRunView));
+    }
   }
 
   async function onCreateRun() {
@@ -411,6 +441,10 @@ export function WrapperPage({ token, config }: Props) {
                 <span className="label">AgentRun name (get)</span>
                 <input className="input" value={runName} onChange={(event) => setRunName(event.target.value)} />
               </label>
+              <p className="muted">
+                GET/stream show CR <strong>Phase</strong>, <strong>Ready</strong>, and <strong>Error</strong>.
+                Failed / InterruptDuplicate / interruptDuplicate: stick if a later Running patch arrives.
+              </p>
               <div className="btn-row">
                 <button type="button" className="btn" disabled={busy || !namespace} onClick={() => void refreshRuns()}>
                   List runs
@@ -429,6 +463,17 @@ export function WrapperPage({ token, config }: Props) {
                   </button>
                 ) : null}
               </div>
+              {inspectedRun ? (
+                <>
+                  <AgentRunStatusCard run={inspectedRun} label="GET" />
+                  <LiveStream
+                    token={token}
+                    namespace={namespace}
+                    name={inspectedRun.name}
+                    title={`${inspectedRun.name} GET/stream`}
+                  />
+                </>
+              ) : null}
               {apiOutput ? <pre className="hint">{apiOutput}</pre> : null}
             </div>
           </section>

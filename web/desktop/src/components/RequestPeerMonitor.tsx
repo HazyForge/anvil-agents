@@ -10,6 +10,7 @@ import {
 } from "../api/client";
 import { openAgentRunStream } from "../api/stream";
 import { LiveStream } from "./LiveStream";
+import { AgentRunStatusCard } from "./AgentRunStatusCard";
 import { isRunningPhase } from "../wrapper/collaboration";
 import {
   grokInterruptDuplicatePrompt,
@@ -17,6 +18,7 @@ import {
   STATUS_JSON_PREFIX,
   type RequestPeerPayload,
 } from "../wrapper/requestPeer";
+import { stickAgentRunStatus } from "../wrapper/runStatus";
 
 const DESKTOP_PEER_PREFIX = "desktop-peer-";
 
@@ -40,6 +42,7 @@ type PostedPeer = {
 
 export function RequestPeerMonitor({ token, namespace, sourceRun, createEnabled, profiles }: Props) {
   const [phase, setPhase] = useState("");
+  const [sourceStatus, setSourceStatus] = useState<AgentRunView | null>(null);
   const [logHits, setLogHits] = useState<string[]>([]);
   const [posted, setPosted] = useState<PostedPeer[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -51,11 +54,13 @@ export function RequestPeerMonitor({ token, namespace, sourceRun, createEnabled,
 
   useEffect(() => {
     let cancelled = false;
+    setSourceStatus(null);
     const pollPhase = async () => {
       try {
         const run = await getAgentRun(token, namespace, sourceRun);
         if (!cancelled) {
           setPhase(run.phase || "");
+          setSourceStatus((prev) => stickAgentRunStatus(prev, run));
         }
       } catch {
         // keep last phase
@@ -119,6 +124,7 @@ export function RequestPeerMonitor({ token, namespace, sourceRun, createEnabled,
         try {
           const run = await getAgentRun(token, namespace, sourceRun);
           setPhase(run.phase || "");
+          setSourceStatus((prev) => stickAgentRunStatus(prev, run));
           if (isRunningPhase(run.phase)) {
             running = true;
             break;
@@ -223,6 +229,7 @@ export function RequestPeerMonitor({ token, namespace, sourceRun, createEnabled,
       </div>
       <div className="panel-body">
         <p className="muted mono">{sourceRun}</p>
+        {sourceStatus ? <AgentRunStatusCard run={sourceStatus} label="A GET" /> : null}
         {error ? <div className="banner banner-error">{error}</div> : null}
         <p className="muted">Stream: {streamStatus}</p>
         {logHits.length > 0 ? (
@@ -255,7 +262,9 @@ export function RequestPeerMonitor({ token, namespace, sourceRun, createEnabled,
               title={`${latestPeer.peerRunName} (B grok)`}
             />
           </div>
-        ) : null}
+        ) : (
+          <LiveStream token={token} namespace={namespace} name={sourceRun} title={`${sourceRun} (A)`} />
+        )}
       </div>
     </section>
   );

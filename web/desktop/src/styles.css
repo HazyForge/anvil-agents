@@ -166,6 +166,7 @@ a { color: var(--teal); text-decoration: none; }
   color: var(--text-dim);
 }
 .chip-ok { border-color: rgba(61, 255, 168, 0.35); color: var(--emerald); }
+.chip-fail { border-color: rgba(255, 92, 92, 0.55); color: var(--red); }
 .pill {
   border: 1px solid var(--border);
   border-radius: 999px;
@@ -531,8 +532,9 @@ a { color: var(--teal); text-decoration: none; }
 }
 .collab-run-card {
   display: flex;
-  justify-content: space-between;
-  align-items: center;
+  flex-direction: column;
+  justify-content: flex-start;
+  align-items: stretch;
   gap: 0.5rem;
   border: 1px solid var(--border);
   padding: 0.45rem 0.55rem;
@@ -541,6 +543,28 @@ a { color: var(--teal); text-decoration: none; }
 .collab-run-card-running {
   border-color: rgba(61, 255, 168, 0.45);
   box-shadow: inset 0 0 0 1px rgba(61, 255, 168, 0.12);
+}
+.cr-status-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding: 0.45rem 0.6rem;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-input);
+}
+.cr-status-card-held {
+  border-left: 3px solid var(--red);
+  background: rgba(255, 92, 92, 0.08);
+}
+.cr-status-fields { gap: 0.4rem; }
+.cr-status-error {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  word-break: break-word;
+}
+.cr-status-error-held {
+  color: var(--red);
+  font-weight: 600;
 }
 .collab-peer-notes {
   margin: 0 0 0.75rem;

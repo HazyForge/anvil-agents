@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { getAgentRun, type AgentRunView } from "../api/client";
 import { isRunningPhase, peerSignalText } from "../wrapper/collaboration";
+import { stickAgentRunStatus } from "../wrapper/runStatus";
+import { AgentRunStatusCard } from "./AgentRunStatusCard";
 import { LiveStream } from "./LiveStream";
 
 interface Props {
@@ -12,8 +14,8 @@ interface Props {
 }
 
 export function CollaborationMonitor({ token, namespace, runA, runB, objective }: Props) {
-  const [phaseA, setPhaseA] = useState("");
-  const [phaseB, setPhaseB] = useState("");
+  const [runViewA, setRunViewA] = useState<AgentRunView | null>(null);
+  const [runViewB, setRunViewB] = useState<AgentRunView | null>(null);
   const [peerNotes, setPeerNotes] = useState<string[]>([]);
 
   useEffect(() => {
@@ -30,14 +32,14 @@ export function CollaborationMonitor({ token, namespace, runA, runB, objective }
         if (cancelled) {
           return;
         }
-        setPhaseA(a.phase || "");
-        setPhaseB(b.phase || "");
+        setRunViewA((prev) => stickAgentRunStatus(prev, a));
+        setRunViewB((prev) => stickAgentRunStatus(prev, b));
         const hits = collectPeerNotes(a, b);
         if (hits.length > 0) {
           setPeerNotes((prev) => uniqueStrings([...prev, ...hits]));
         }
       } catch {
-        // keep last known phases
+        // keep last sticky CR status
       }
     };
     void poll();
@@ -47,6 +49,9 @@ export function CollaborationMonitor({ token, namespace, runA, runB, objective }
       window.clearInterval(id);
     };
   }, [token, namespace, runA, runB]);
+
+  const phaseA = runViewA?.phase || "";
+  const phaseB = runViewB?.phase || "";
 
   const bothRunning = isRunningPhase(phaseA) && isRunningPhase(phaseB);
   const peerDetected = peerNotes.length > 0;
@@ -80,8 +85,8 @@ export function CollaborationMonitor({ token, namespace, runA, runB, objective }
         <p className="muted">{objective}</p>
         <div className={`banner banner-${banner.kind === "ok" ? "info" : "info"}`}>{banner.text}</div>
         <div className="collab-run-cards">
-          <RunCard name={runA} phase={phaseA} />
-          <RunCard name={runB} phase={phaseB} />
+          <RunCard name={runA} run={runViewA} />
+          <RunCard name={runB} run={runViewB} />
         </div>
         {peerNotes.length > 0 ? (
           <ul className="collab-peer-notes">
@@ -99,12 +104,14 @@ export function CollaborationMonitor({ token, namespace, runA, runB, objective }
   );
 }
 
-function RunCard({ name, phase }: { name: string; phase: string }) {
-  const running = isRunningPhase(phase);
+function RunCard({ name, run }: { name: string; run: AgentRunView | null }) {
+  if (run) {
+    return <AgentRunStatusCard run={run} />;
+  }
   return (
-    <div className={`collab-run-card ${running ? "collab-run-card-running" : ""}`}>
+    <div className="collab-run-card">
       <span className="mono">{name}</span>
-      <span className={`chip ${running ? "chip-ok" : ""}`}>{phase || "—"}</span>
+      <span className="chip">Phase —</span>
     </div>
   );
 }
