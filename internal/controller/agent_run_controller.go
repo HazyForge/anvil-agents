@@ -92,6 +92,7 @@ const (
 	agentRunAnnotationRequestedTTL     = "control.anvil.hazyforge.io/requested-ttl-seconds-after-finished"
 	agentRunAnnotationPeerRun          = "control.anvil.hazyforge.io/peer-run"
 	agentRunAnnotationPeerOf           = "control.anvil.hazyforge.io/peer-of"
+	agentRunAnnotationInterruptDuplicate = "control.anvil.hazyforge.io/interrupt-duplicate"
 	agentRunLabelPeerOf                = "control.anvil.hazyforge.io/peer-of"
 	agentRunDecisionRequestPeer        = "requestPeer"
 	agentRunDecisionInterruptDuplicate = "interruptDuplicate"
@@ -129,6 +130,9 @@ func (r *AgentRunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	}
 	if !obj.GetDeletionTimestamp().IsZero() {
 		return ctrl.Result{}, nil
+	}
+	if requester, held := agentRunInterruptDuplicateHold(obj); held {
+		return r.reconcileAgentRunInterruptDuplicateHold(ctx, obj, requester)
 	}
 	// AgentRuns are append-only execution records. A spec edit after terminal
 	// completion must not clear status or create a second harness Job; callers
@@ -605,6 +609,12 @@ func (r *AgentRunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		obj.Status = status
 		return r.patchAgentRunStatus(ctx, original, obj, false)
 	default:
+		if requester, held := agentRunInterruptDuplicateHold(obj); held {
+			return r.reconcileAgentRunInterruptDuplicateHold(ctx, obj, requester)
+		}
+		if agentRunStatusShowsInterruptDuplicate(&status) {
+			return r.reconcileAgentRunInterruptDuplicateHold(ctx, obj, agentRunInterruptDuplicateRequester(obj))
+		}
 		status.Phase = controlv1alpha1.AgentRunPhaseRunning
 		status.CompletedAt = nil
 		status.Error = ""
@@ -4325,9 +4335,28 @@ func (r *AgentRunReconciler) interruptDuplicatePeerRuns(ctx context.Context, obj
 			continue
 		}
 		original := peer.DeepCopy()
+		if peer.Annotations == nil {
+			peer.Annotations = map[string]string{}
+		}
+		peer.Annotations[agentRunAnnotationInterruptDuplicate] = obj.Name
+		if err := r.Patch(ctx, peer, client.MergeFrom(original)); err != nil {
+			if apierrors.IsConflict(err) {
+				continue
+			}
+			return fmt.Errorf("record interrupt-duplicate on AgentRun %s/%s: %w", peer.Namespace, peer.Name, err)
+		}
+		if err := r.Get(ctx, client.ObjectKeyFromObject(peer), peer); err != nil {
+			return fmt.Errorf("reload interrupted AgentRun %s/%s: %w", peer.Namespace, peer.Name, err)
+		}
+		statusOriginal := peer.DeepCopy()
 		peer.Status.Phase = controlv1alpha1.AgentRunPhaseFailed
 		peer.Status.CompletedAt = &now
 		peer.Status.Error = "interruptDuplicate: " + summary
+		peer.Status.Decision = &controlv1alpha1.AgentRunDecisionStatus{
+			Classification: "duplicate work",
+			Action:         agentRunDecisionInterruptDuplicate,
+			Summary:        summary,
+		}
 		apimeta.SetStatusCondition(&peer.Status.Conditions, metav1.Condition{
 			Type:               agentRunReady,
 			Status:             metav1.ConditionFalse,
@@ -4336,7 +4365,7 @@ func (r *AgentRunReconciler) interruptDuplicatePeerRuns(ctx context.Context, obj
 			Reason:             "InterruptDuplicate",
 			Message:            peer.Status.Error,
 		})
-		if err := r.Status().Patch(ctx, peer, client.MergeFrom(original)); err != nil {
+		if err := r.Status().Patch(ctx, peer, client.MergeFrom(statusOriginal)); err != nil {
 			if apierrors.IsConflict(err) {
 				continue
 			}
@@ -4344,6 +4373,95 @@ func (r *AgentRunReconciler) interruptDuplicatePeerRuns(ctx context.Context, obj
 		}
 	}
 	return nil
+}
+
+func agentRunInterruptDuplicateRequester(obj *controlv1alpha1.AgentRun) string {
+	if obj == nil || obj.Annotations == nil {
+		return ""
+	}
+	return strings.TrimSpace(obj.Annotations[agentRunAnnotationInterruptDuplicate])
+}
+
+func agentRunStatusShowsInterruptDuplicate(status *controlv1alpha1.AgentRunStatus) bool {
+	if status == nil {
+		return false
+	}
+	if strings.HasPrefix(strings.TrimSpace(status.Error), "interruptDuplicate:") {
+		return true
+	}
+	for _, condition := range status.Conditions {
+		if condition.Type == agentRunReady && condition.Reason == "InterruptDuplicate" {
+			return true
+		}
+	}
+	return false
+}
+
+func agentRunInterruptDuplicateHold(obj *controlv1alpha1.AgentRun) (requester string, held bool) {
+	if obj == nil {
+		return "", false
+	}
+	if requester = agentRunInterruptDuplicateRequester(obj); requester != "" {
+		return requester, true
+	}
+	if agentRunStatusShowsInterruptDuplicate(&obj.Status) {
+		return "", true
+	}
+	return "", false
+}
+
+func (r *AgentRunReconciler) reconcileAgentRunInterruptDuplicateHold(ctx context.Context, obj *controlv1alpha1.AgentRun, requester string) (ctrl.Result, error) {
+	if obj == nil {
+		return ctrl.Result{}, nil
+	}
+	original := obj.DeepCopy()
+	status := obj.Status
+	now := metav1.Now()
+	message := strings.TrimSpace(status.Error)
+	if !strings.HasPrefix(message, "interruptDuplicate:") {
+		summary := "duplicate work"
+		if requester != "" {
+			message = fmt.Sprintf("interruptDuplicate: duplicate work requested by AgentRun %s/%s", obj.Namespace, requester)
+		} else {
+			message = "interruptDuplicate: " + summary
+		}
+	}
+	status.Phase = controlv1alpha1.AgentRunPhaseFailed
+	status.CompletedAt = &now
+	status.Error = message
+	if status.Decision == nil || strings.TrimSpace(status.Decision.Action) != agentRunDecisionInterruptDuplicate {
+		summary := strings.TrimPrefix(message, "interruptDuplicate:")
+		summary = strings.TrimSpace(summary)
+		if summary == "" {
+			summary = "duplicate work"
+		}
+		status.Decision = &controlv1alpha1.AgentRunDecisionStatus{
+			Classification: "duplicate work",
+			Action:         agentRunDecisionInterruptDuplicate,
+			Summary:        summary,
+		}
+	}
+	apimeta.SetStatusCondition(&status.Conditions, metav1.Condition{
+		Type:               agentRunReady,
+		Status:             metav1.ConditionFalse,
+		ObservedGeneration: obj.Generation,
+		LastTransitionTime: now,
+		Reason:             "InterruptDuplicate",
+		Message:            message,
+	})
+	obj.Status = status
+	result, err := r.patchAgentRunStatus(ctx, original, obj, false)
+	if err != nil {
+		return result, err
+	}
+	if err := r.Get(ctx, client.ObjectKeyFromObject(obj), obj); err != nil {
+		return ctrl.Result{}, err
+	}
+	terminal, err := r.reconcileTerminalAgentRun(ctx, obj)
+	if err != nil {
+		return terminal, err
+	}
+	return result, nil
 }
 
 func agentRunLabels(obj *controlv1alpha1.AgentRun, jobName string) map[string]string {
