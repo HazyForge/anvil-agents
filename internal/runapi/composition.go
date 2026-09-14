@@ -90,6 +90,13 @@ var compositionKinds = map[string]compositionKind{
 		NewObject:   func() client.Object { return &agentsv1alpha1.AgentCouncil{} },
 		NewList:     func() client.ObjectList { return &agentsv1alpha1.AgentCouncilList{} },
 	},
+	"agent-external-triggers": {
+		PathSegment: "agent-external-triggers",
+		Kind:        "AgentExternalTrigger",
+		NewObject:   func() client.Object { return &agentsv1alpha1.AgentExternalTrigger{} },
+		NewList:     func() client.ObjectList { return &agentsv1alpha1.AgentExternalTriggerList{} },
+		HasStatus:   true,
+	},
 	"volume-profiles": {
 		PathSegment: "volume-profiles",
 		Kind:        "VolumeProfile",
@@ -476,6 +483,10 @@ func (server *Server) authorizeCompositionKind(writer http.ResponseWriter, reque
 	}
 	kind, ok := compositionKinds[pathSegment]
 	if !ok {
+		writeAPIError(writer, http.StatusNotFound, "not_found", "resource not found")
+		return compositionKind{}, principal, false
+	}
+	if pathSegment == "agent-external-triggers" && !server.config.ExternalTriggers.Enabled {
 		writeAPIError(writer, http.StatusNotFound, "not_found", "resource not found")
 		return compositionKind{}, principal, false
 	}

@@ -6,7 +6,8 @@ export type CompositionPathSegment =
   | "agent-councils"
   | "volume-profiles"
   | "agent-data-volumes"
-  | "agent-auth-sessions";
+  | "agent-auth-sessions"
+  | "agent-external-triggers";
 
 export type CompositionKindName =
   | "AgentRunProfile"
@@ -16,7 +17,8 @@ export type CompositionKindName =
   | "AgentCouncil"
   | "VolumeProfile"
   | "AgentDataVolume"
-  | "AgentAuthSession";
+  | "AgentAuthSession"
+  | "AgentExternalTrigger";
 
 export type CompositionManagementReason =
   | "console_managed"
@@ -137,6 +139,15 @@ export const COMPOSITION_KINDS: CompositionKindInfo[] = [
       "Append-only reauth/logout maintenance on data volumes (blocks AgentRuns while active)",
     danger: true,
     appendOnly: true,
+  },
+  {
+    segment: "agent-external-triggers",
+    kind: "AgentExternalTrigger",
+    title: "External triggers",
+    plural: "external triggers",
+    route: "external-triggers",
+    description:
+      "Inbound GitHub webhook receivers that create or annotate AgentRuns from signed events",
   },
 ];
 

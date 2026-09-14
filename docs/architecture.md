@@ -7,7 +7,8 @@ state back onto the `AgentRun`.
 
 ## Control Loop
 
-1. A user or `AgentSchedule` creates an `AgentRun`.
+1. A user, `AgentSchedule`, or signed `AgentExternalTrigger` webhook creates an
+   `AgentRun` (see [External triggers](external-triggers.md)).
 2. The controller resolves its namespace-local `AgentRunProfile`,
    `AgentHarnessProfile`, ordered `AgentSkillSet` and `AgentToolSet` refs,
    optional `AgentCouncil` association, and local overrides.

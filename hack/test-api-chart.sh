@@ -63,7 +63,7 @@ fi
 expected_crd_count="$(find "${root_dir}/config/crd/bases" -maxdepth 1 -type f -name '*.yaml' | wc -l)"
 [[ "$(grep -c 'helm.sh/resource-policy: keep' "${tmp_dir}/disabled.yaml")" -eq "${expected_crd_count}" ]] || fail "all ${expected_crd_count} CRDs must be retained on Helm uninstall"
 [[ "$(grep -c 'argocd.argoproj.io/sync-options: Prune=false' "${tmp_dir}/disabled.yaml")" -eq "${expected_crd_count}" ]] || fail "all ${expected_crd_count} CRDs must be retained during Argo ownership transfer"
-for crd in agentharnessprofiles agentskillsets agenttoolsets agentcouncils adversesignals; do
+for crd in agentharnessprofiles agentskillsets agenttoolsets agentcouncils adversesignals agentexternaltriggers; do
   grep -Eq "name: ${crd}\.control\.anvil\.hazyforge\.io" "${tmp_dir}/disabled.yaml" || fail "${crd} CRD was not rendered"
 done
 grep -q 'harnessProfileRef:' "${tmp_dir}/disabled.yaml" || fail "composition harnessProfileRef schema is missing"
@@ -79,8 +79,11 @@ for resource in agentharnessprofiles agentskillsets agenttoolsets agentcouncils;
   grep -q "${resource}" "${tmp_dir}/controller-rbac.yaml" || fail "controller RBAC is missing ${resource}"
 done
 grep -q 'adversesignals' "${tmp_dir}/controller-rbac.yaml" || fail "controller RBAC is missing adversesignals"
+grep -q 'agentexternaltriggers' "${tmp_dir}/controller-rbac.yaml" || fail "controller RBAC is missing agentexternaltriggers"
 grep -A1 'resources: \["adversesignals"\]' "${tmp_dir}/controller-rbac.yaml" | grep -q '"patch"' || fail "controller RBAC cannot patch AdverseSignal finalizers"
+grep -A1 'resources: \["agentexternaltriggers"\]' "${tmp_dir}/controller-rbac.yaml" | grep -q '"patch"' || fail "controller RBAC cannot patch AgentExternalTrigger finalizers"
 grep -q 'adversesignals/finalizers' "${tmp_dir}/controller-rbac.yaml" || fail "controller RBAC is missing AdverseSignal finalizer updates"
+grep -q 'agentexternaltriggers/finalizers' "${tmp_dir}/controller-rbac.yaml" || fail "controller RBAC is missing AgentExternalTrigger finalizer updates"
 helm template "${release}" "${chart}" \
   --set-json 'adverseSources=[{"apiVersion":"apps.example.io/v1","kind":"Release","resource":"releases","situationRef":{"name":"release-health"}}]' \
   --show-only templates/clusterrole.yaml >"${tmp_dir}/controller-rbac-adverse-source.yaml"
@@ -167,8 +170,20 @@ if grep -Eq 'verbs:.*create| - create' "${tmp_dir}/rbac-composition-read.yaml"; 
   fail "composition read RBAC must not grant create"
 fi
 if grep -q 'secrets' "${tmp_dir}/rbac-composition-read.yaml"; then
-  fail "API RBAC must never grant secrets"
+  fail "API RBAC must not grant secrets unless externalTriggers.enabled"
 fi
+
+helm template "${release}" "${chart}" "${api_args[@]}" \
+  --set api.config.externalTriggers.enabled=true \
+  --show-only templates/api-clusterrole.yaml >"${tmp_dir}/rbac-external-triggers.yaml"
+grep -q 'agentexternaltriggers' "${tmp_dir}/rbac-external-triggers.yaml" || fail "externalTriggers RBAC missing agentexternaltriggers"
+grep -q 'agentexternaltriggers/status' "${tmp_dir}/rbac-external-triggers.yaml" || fail "externalTriggers RBAC missing status updates"
+grep -q 'resources: \["secrets"\]' "${tmp_dir}/rbac-external-triggers.yaml" || fail "externalTriggers RBAC missing secrets get"
+grep -A6 'resources: \["secrets"\]' "${tmp_dir}/rbac-external-triggers.yaml" | grep -q 'get' || fail "externalTriggers secrets verb must include get"
+if grep -A6 'resources: \["secrets"\]' "${tmp_dir}/rbac-external-triggers.yaml" | grep -Eq 'list|watch|create|update|patch|delete'; then
+  fail "externalTriggers secrets RBAC must be get-only"
+fi
+grep -A8 'resources: \["agentruns"\]' "${tmp_dir}/rbac-external-triggers.yaml" | grep -q 'create' || fail "externalTriggers RBAC must create AgentRuns"
 
 helm template "${release}" "${chart}" "${api_args[@]}" \
   --set api.config.composition.readEnabled=true \
@@ -202,6 +217,16 @@ expect_template_failure route-wildcard \
   --set-string 'api.httpRoute.parentRefs[0].name=public' \
   --set-string 'api.httpRoute.parentRefs[0].sectionName=https' \
   --set-string 'api.httpRoute.hostnames[0]=*.example.com'
+expect_template_failure ext-trigger-route-wildcard \
+  --set api.config.externalTriggers.enabled=true \
+  --set api.httpRoute.enabled=true \
+  --set-string 'api.httpRoute.parentRefs[0].name=public' \
+  --set-string 'api.httpRoute.parentRefs[0].sectionName=https' \
+  --set-string 'api.httpRoute.hostnames[0]=agents.example.com' \
+  --set-string 'api.externalTriggerHTTPRoute.hostnames[0]=*.hooks.example.com'
+expect_template_failure ext-trigger-route-missing-parents \
+  --set api.config.externalTriggers.enabled=true \
+  --set api.externalTriggerHTTPRoute.enabled=true
 expect_template_failure route-listener-unspecified \
   --set api.httpRoute.enabled=true \
   --set-string 'api.httpRoute.parentRefs[0].name=public' \
@@ -250,6 +275,88 @@ helm template "${release}" "${chart}" "${api_args[@]}" \
 grep -q 'oidcClientId: native-desktop-pkce' "${tmp_dir}/desktop-oidc.yaml" || fail "desktop.oidcClientId was not rendered"
 if grep -q '383499920822362966' "${tmp_dir}/desktop-oidc.yaml"; then
   fail "chart must not pin the Console User-Agent client as desktop.oidcClientId"
+fi
+
+helm template "${release}" "${chart}" "${api_args[@]}" \
+  --set api.config.externalTriggers.enabled=true \
+  --show-only templates/deployment.yaml >"${tmp_dir}/controller-ext-triggers-no-route.yaml"
+if grep -q -- '--external-trigger-httproute-enabled=true' "${tmp_dir}/controller-ext-triggers-no-route.yaml"; then
+  fail "HTTPRoute ownership rendered without Gateway parent config"
+fi
+helm template "${release}" "${chart}" "${api_args[@]}" \
+  --set api.config.externalTriggers.enabled=true \
+  --show-only templates/clusterrole.yaml >"${tmp_dir}/controller-rbac-ext-triggers-no-route.yaml"
+if grep -q 'gateway.networking.k8s.io' "${tmp_dir}/controller-rbac-ext-triggers-no-route.yaml"; then
+  fail "HTTPRoute RBAC rendered without Gateway parent config"
+fi
+
+helm template "${release}" "${chart}" "${api_args[@]}" \
+  --set api.config.externalTriggers.enabled=true \
+  --set api.httpRoute.enabled=true \
+  --set-string 'api.httpRoute.parentRefs[0].name=public' \
+  --set-string 'api.httpRoute.parentRefs[0].namespace=gateway-system' \
+  --set-string 'api.httpRoute.parentRefs[0].sectionName=https' \
+  --set-string 'api.httpRoute.hostnames[0]=agents.example.com' \
+  --set-string 'api.config.ui.defaultNamespaces[0]=agents' \
+  --show-only templates/deployment.yaml >"${tmp_dir}/controller-ext-trigger-route.yaml"
+grep -Fq -- '--external-triggers-enabled=true' "${tmp_dir}/controller-ext-trigger-route.yaml" || fail "external trigger gate was not passed to the controller"
+grep -Fq -- '--external-trigger-httproute-enabled=true' "${tmp_dir}/controller-ext-trigger-route.yaml" || fail "HTTPRoute ownership was not enabled on the controller"
+grep -F -- '--external-trigger-httproute-json=' "${tmp_dir}/controller-ext-trigger-route.yaml" | grep -q 'agents.example.com' || fail "inherited HTTPRoute hostname missing from controller flag"
+grep -F -- '--external-trigger-httproute-json=' "${tmp_dir}/controller-ext-trigger-route.yaml" | grep -q 'https' || fail "inherited HTTPRoute sectionName missing from controller flag"
+grep -F -- '--external-trigger-httproute-json=' "${tmp_dir}/controller-ext-trigger-route.yaml" | grep -q 'routeNamespace' || fail "HTTPRoute JSON missing install-namespace routeNamespace"
+if grep -F -- '--external-trigger-httproute-json=' "${tmp_dir}/controller-ext-trigger-route.yaml" | grep -q '\*'; then
+  fail "controller HTTPRoute JSON must not contain wildcard hostnames"
+fi
+grep -q 'name: POD_NAMESPACE' "${tmp_dir}/controller-ext-trigger-route.yaml" || fail "controller Deployment missing POD_NAMESPACE"
+
+helm template "${release}" "${chart}" "${api_args[@]}" \
+  --set api.config.externalTriggers.enabled=true \
+  --set api.httpRoute.enabled=true \
+  --set-string 'api.httpRoute.parentRefs[0].name=public' \
+  --set-string 'api.httpRoute.parentRefs[0].sectionName=https' \
+  --set-string 'api.httpRoute.hostnames[0]=agents.example.com' \
+  --set-string 'api.config.ui.defaultNamespaces[0]=agents' \
+  --show-only templates/clusterrole.yaml >"${tmp_dir}/controller-rbac-ext-trigger-route.yaml"
+grep -q 'gateway.networking.k8s.io' "${tmp_dir}/controller-rbac-ext-trigger-route.yaml" || fail "controller RBAC missing HTTPRoute apiGroup"
+grep -q 'httproutes' "${tmp_dir}/controller-rbac-ext-trigger-route.yaml" || fail "controller RBAC missing httproutes"
+grep -A6 'resources: \["httproutes"\]' "${tmp_dir}/controller-rbac-ext-trigger-route.yaml" | grep -q 'create' || fail "controller HTTPRoute RBAC missing create"
+grep -A6 'resources: \["httproutes"\]' "${tmp_dir}/controller-rbac-ext-trigger-route.yaml" | grep -q 'delete' || fail "controller HTTPRoute RBAC missing delete"
+
+helm template "${release}" "${chart}" "${api_args[@]}" \
+  --set api.config.externalTriggers.enabled=true \
+  --set api.httpRoute.enabled=true \
+  --set-string 'api.httpRoute.parentRefs[0].name=public' \
+  --set-string 'api.httpRoute.parentRefs[0].sectionName=https' \
+  --set-string 'api.httpRoute.hostnames[0]=agents.example.com' \
+  --set-string 'api.config.ui.defaultNamespaces[0]=agents' \
+  >"${tmp_dir}/ext-trigger-install-ns.yaml"
+if grep -q 'kind: ReferenceGrant' "${tmp_dir}/ext-trigger-install-ns.yaml"; then
+  fail "ReferenceGrant must not render when webhook HTTPRoutes live in the install namespace"
+fi
+
+helm template "${release}" "${chart}" "${api_args[@]}" \
+  --namespace anvil-agents-system \
+  --set api.config.externalTriggers.enabled=true \
+  --set api.httpRoute.enabled=true \
+  --set-string 'api.httpRoute.parentRefs[0].name=public' \
+  --set-string 'api.httpRoute.parentRefs[0].sectionName=https' \
+  --set-string 'api.httpRoute.hostnames[0]=agents.example.com' \
+  --show-only templates/deployment.yaml >"${tmp_dir}/controller-ext-trigger-route-ns.yaml"
+grep -F -- '--external-trigger-httproute-json=' "${tmp_dir}/controller-ext-trigger-route-ns.yaml" | grep -q 'routeNamespace' || fail "HTTPRoute JSON missing routeNamespace"
+grep -F -- '--external-trigger-httproute-json=' "${tmp_dir}/controller-ext-trigger-route-ns.yaml" | grep -q 'anvil-agents-system' || fail "HTTPRoute JSON must use the Helm release namespace"
+
+helm template "${release}" "${chart}" "${api_args[@]}" \
+  --set api.config.externalTriggers.enabled=true \
+  --set api.httpRoute.enabled=true \
+  --set-string 'api.httpRoute.parentRefs[0].name=public' \
+  --set-string 'api.httpRoute.parentRefs[0].sectionName=https' \
+  --set-string 'api.httpRoute.hostnames[0]=agents.example.com' \
+  --set-string api.externalTriggerHTTPRoute.namespace=hooks \
+  --show-only templates/api-external-trigger-referencegrant.yaml >"${tmp_dir}/ext-trigger-referencegrant-custom.yaml"
+grep -q 'kind: ReferenceGrant' "${tmp_dir}/ext-trigger-referencegrant-custom.yaml" || fail "ReferenceGrant missing when HTTPRoute namespace differs from the API Service"
+grep -q 'namespace: "hooks"' "${tmp_dir}/ext-trigger-referencegrant-custom.yaml" || fail "ReferenceGrant missing custom HTTPRoute namespace"
+if grep -q '\*' "${tmp_dir}/ext-trigger-referencegrant-custom.yaml"; then
+  fail "ReferenceGrant must list exact namespaces, never wildcards"
 fi
 
 printf 'AgentRun API chart contract passed\n'

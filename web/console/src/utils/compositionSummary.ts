@@ -104,6 +104,39 @@ export function compositionCardSummary(doc: CompositionDocument): string {
           .join(" · ") || "auth session"
       );
     }
+    case "AgentExternalTrigger": {
+      const status = asRecord(doc.status);
+      const phase = String(status.phase ?? (spec.suspend ? "Suspended" : "Pending"));
+      const source = asRecord(spec.source);
+      const sourceKind = String(source.kind ?? "");
+      const targets = Array.isArray(spec.targets) ? spec.targets.length : 0;
+      const lastEvent = String(status.lastEventType ?? "");
+      const lastAt = String(status.lastDeliveryAt ?? "");
+      const secretRef = asRecord(spec.secretRef);
+      const secretName = String(secretRef.name ?? "").trim();
+      const secretKey = String(secretRef.webhookSecretKey ?? "").trim();
+      const httpRoute = asRecord(status.httpRoute);
+      const routeName = String(httpRoute.name ?? "").trim();
+      const routeNamespace = String(httpRoute.namespace ?? "").trim();
+      const routeRef = routeNamespace && routeName ? `${routeNamespace}/${routeName}` : routeName;
+      const publicURL = String(httpRoute.publicURL ?? "").trim();
+      return (
+        [
+          `phase:${phase}`,
+          spec.suspend ? "suspend" : null,
+          sourceKind || null,
+          targets ? `targets:${targets}` : null,
+          lastEvent ? `event:${lastEvent}` : null,
+          lastAt ? `last:${lastAt}` : null,
+          routeRef ? `route:${routeRef}` : null,
+          publicURL ? publicURL : null,
+          secretName ? `secret:${secretName}` : null,
+          secretKey ? `key:${secretKey}` : null,
+        ]
+          .filter(Boolean)
+          .join(" · ") || "external trigger"
+      );
+    }
     default:
       return String(spec.description ?? "").trim() || kind;
   }

@@ -47,6 +47,18 @@ type Config struct {
 	Controls ControlsConfig `json:"controls"`
 	// Runs gates append-only AgentRun create from the console/API.
 	Runs RunsConfig `json:"runs"`
+	// ExternalTriggers gates unauthenticated GitHub webhook receivers and the
+	// console Library surface for AgentExternalTrigger objects.
+	ExternalTriggers ExternalTriggersConfig `json:"externalTriggers"`
+}
+
+// ExternalTriggersConfig controls inbound AgentExternalTrigger webhooks.
+// Disabled by default. When enabled, the API may read same-namespace Secret
+// values only to verify HMAC signatures and optional path tokens; Secret bytes
+// are never returned in API responses, status, or logs.
+type ExternalTriggersConfig struct {
+	// Enabled serves POST /api/v1/external-triggers/... when true.
+	Enabled bool `json:"enabled"`
 }
 
 // RunsConfig controls AgentRun mutation endpoints. Creates remain append-only.

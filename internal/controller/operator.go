@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"k8s.io/apimachinery/pkg/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
@@ -10,6 +11,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/metrics/server"
+	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 
 	agentsv1alpha1 "github.com/hazyforge/anvil-agents/api/v1alpha1"
 )
@@ -26,6 +28,17 @@ func Run(ctx context.Context, options *Options) error {
 	if err := agentsv1alpha1.AddToScheme(scheme); err != nil {
 		return fmt.Errorf("add agent scheme: %w", err)
 	}
+	if err := gatewayv1.Install(scheme); err != nil {
+		return fmt.Errorf("add Gateway API scheme: %w", err)
+	}
+	if options.ExternalTriggerHTTPRoute.Enabled {
+		if err := options.ExternalTriggerHTTPRoute.Validate(); err != nil {
+			return fmt.Errorf("external trigger HTTPRoute config: %w", err)
+		}
+		if !options.ExternalTriggersEnabled {
+			return fmt.Errorf("external trigger HTTPRoute creation requires api.config.externalTriggers.enabled")
+		}
+	}
 
 	managerOptions := ctrl.Options{
 		Scheme:                 scheme,
@@ -38,6 +51,15 @@ func Run(ctx context.Context, options *Options) error {
 		managerOptions.Cache = cache.Options{DefaultNamespaces: map[string]cache.Config{}}
 		for _, namespace := range namespaces {
 			managerOptions.Cache.DefaultNamespaces[namespace] = cache.Config{}
+		}
+		if options.ExternalTriggerHTTPRoute.Enabled {
+			routeNS := strings.TrimSpace(options.ExternalTriggerHTTPRoute.RouteNamespace)
+			if routeNS == "" {
+				routeNS = controllerPodNamespace()
+			}
+			if routeNS != "" {
+				managerOptions.Cache.DefaultNamespaces[routeNS] = cache.Config{}
+			}
 		}
 	}
 
@@ -73,6 +95,12 @@ func Run(ctx context.Context, options *Options) error {
 		{"AgentRunControl", (&AgentRunControlReconciler{Client: mgr.GetClient(), Scheme: mgr.GetScheme()}).SetupWithManager},
 		{"AgentRun", (&AgentRunReconciler{Client: mgr.GetClient(), Scheme: mgr.GetScheme(), CommonReconcilerOptions: common, AgentRunArchive: archiveStore}).SetupWithManager},
 		{"AgentSchedule", (&AgentScheduleReconciler{Client: mgr.GetClient(), Scheme: mgr.GetScheme()}).SetupWithManager},
+		{"AgentExternalTrigger", (&AgentExternalTriggerReconciler{
+			Client:                  mgr.GetClient(),
+			Scheme:                  mgr.GetScheme(),
+			ExternalTriggersEnabled: options.ExternalTriggersEnabled,
+			HTTPRoute:               options.ExternalTriggerHTTPRoute,
+		}).SetupWithManager},
 		{"AgentChain", (&AgentChainReconciler{Client: mgr.GetClient(), Scheme: mgr.GetScheme()}).SetupWithManager},
 		{"AdverseSignal", (&AdverseSignalReconciler{Client: mgr.GetClient(), Scheme: mgr.GetScheme()}).SetupWithManager},
 		{"AdverseSituation", (&AdverseSituationReconciler{Client: mgr.GetClient(), Scheme: mgr.GetScheme()}).SetupWithManager},

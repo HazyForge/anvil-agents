@@ -13,6 +13,7 @@ import {
   type CompositionDocument,
 } from "../../api/types.composition";
 import { DataVolumeForm } from "../../components/DataVolumeForm";
+import { ExternalTriggerForm } from "../../components/ExternalTriggerForm";
 import { HarnessProfileForm } from "../../components/HarnessProfileForm";
 import { IconPicker } from "../../components/IconPicker";
 import { RelatedAuthSessionCards } from "../../components/RelatedAuthSessionCards";
@@ -59,6 +60,13 @@ import {
   validateVolumeProfileForm,
   type VolumeProfileForm as VolumeProfileFormModel,
 } from "./volumeProfileForm";
+import {
+  buildExternalTriggerSpec,
+  emptyExternalTriggerForm,
+  formFromExternalTriggerSpec,
+  validateExternalTriggerForm,
+  type ExternalTriggerForm as ExternalTriggerFormModel,
+} from "./externalTriggerForm";
 
 interface Props {
   token: string;
@@ -71,7 +79,8 @@ type GuidedKind =
   | "AgentDataVolume"
   | "VolumeProfile"
   | "AgentSkillSet"
-  | "AgentToolSet";
+  | "AgentToolSet"
+  | "AgentExternalTrigger";
 
 function guidedKindFrom(
   kindName: string | undefined,
@@ -92,6 +101,9 @@ function guidedKindFrom(
   if (kindName === "AgentToolSet" || kindRoute === "tool-sets") {
     return "AgentToolSet";
   }
+  if (kindName === "AgentExternalTrigger" || kindRoute === "external-triggers") {
+    return "AgentExternalTrigger";
+  }
   return null;
 }
 
@@ -101,6 +113,7 @@ const CREATE_TITLES: Record<GuidedKind, string> = {
   VolumeProfile: "New volume profile",
   AgentSkillSet: "New skill set",
   AgentToolSet: "New tool set",
+  AgentExternalTrigger: "New external trigger",
 };
 
 export function CompositionEditorPage({ token, namespace: activeNamespace, writeEnabled }: Props) {
@@ -115,6 +128,7 @@ export function CompositionEditorPage({ token, namespace: activeNamespace, write
   const isVolumeProfile = guided === "VolumeProfile";
   const isSkillSet = guided === "AgentSkillSet";
   const isToolSet = guided === "AgentToolSet";
+  const isExternalTrigger = guided === "AgentExternalTrigger";
   const isAuthSession =
     kind?.kind === "AgentAuthSession" || kindRoute === "auth-sessions";
   const isGuided = guided !== null;
@@ -128,6 +142,8 @@ export function CompositionEditorPage({ token, namespace: activeNamespace, write
     useState<VolumeProfileFormModel>(emptyVolumeProfileForm);
   const [skillSetForm, setSkillSetForm] = useState<SkillSetFormModel>(emptySkillSetForm);
   const [toolSetForm, setToolSetForm] = useState<ToolSetFormModel>(emptyToolSetForm);
+  const [externalTriggerForm, setExternalTriggerForm] =
+    useState<ExternalTriggerFormModel>(emptyExternalTriggerForm);
   const [showAdvancedJson, setShowAdvancedJson] = useState(false);
   const [icon, setIcon] = useState("");
   const [screenshot, setScreenshot] = useState("");
@@ -170,6 +186,7 @@ export function CompositionEditorPage({ token, namespace: activeNamespace, write
         setVolumeProfileForm(emptyVolumeProfileForm());
         setSkillSetForm(emptySkillSetForm());
         setToolSetForm(emptyToolSetForm());
+        setExternalTriggerForm(emptyExternalTriggerForm());
         // Seed advanced JSON from empty guided builders so toggle stays consistent.
         if (kind.kind === "AgentHarnessProfile") {
           setSpecText(JSON.stringify(buildHarnessSpec(emptyHarnessForm()), null, 2));
@@ -181,6 +198,8 @@ export function CompositionEditorPage({ token, namespace: activeNamespace, write
           setSpecText(JSON.stringify(buildSkillSetSpec(emptySkillSetForm()), null, 2));
         } else if (kind.kind === "AgentToolSet") {
           setSpecText(JSON.stringify(buildToolSetSpec(emptyToolSetForm()), null, 2));
+        } else if (kind.kind === "AgentExternalTrigger") {
+          setSpecText(JSON.stringify(buildExternalTriggerSpec(emptyExternalTriggerForm()), null, 2));
         } else {
           setSpecText("{}");
         }
@@ -210,6 +229,8 @@ export function CompositionEditorPage({ token, namespace: activeNamespace, write
           setSkillSetForm(formFromSkillSetSpec(spec, loaded.metadata.name));
         } else if (kind.kind === "AgentToolSet") {
           setToolSetForm(formFromToolSetSpec(spec, loaded.metadata.name));
+        } else if (kind.kind === "AgentExternalTrigger") {
+          setExternalTriggerForm(formFromExternalTriggerSpec(spec, loaded.metadata.name));
         }
         setIcon(getIconUrl(loaded.metadata.annotations));
         setScreenshot(getScreenshotUrl(loaded.metadata.annotations));
@@ -251,6 +272,8 @@ export function CompositionEditorPage({ token, namespace: activeNamespace, write
           return JSON.stringify(buildSkillSetSpec(skillSetForm), null, 2);
         case "AgentToolSet":
           return JSON.stringify(buildToolSetSpec(toolSetForm), null, 2);
+        case "AgentExternalTrigger":
+          return JSON.stringify(buildExternalTriggerSpec(externalTriggerForm), null, 2);
         default:
           return "";
       }
@@ -265,6 +288,7 @@ export function CompositionEditorPage({ token, namespace: activeNamespace, write
     volumeProfileForm,
     skillSetForm,
     toolSetForm,
+    externalTriggerForm,
   ]);
 
   if (!kind) {
@@ -307,6 +331,13 @@ export function CompositionEditorPage({ token, namespace: activeNamespace, write
     setToolSetForm((prev) => ({ ...prev, [key]: value }));
   }
 
+  function updateExternalTrigger<K extends keyof ExternalTriggerFormModel>(
+    key: K,
+    value: ExternalTriggerFormModel[K],
+  ) {
+    setExternalTriggerForm((prev) => ({ ...prev, [key]: value }));
+  }
+
   function createNameFromForms(): string {
     if (isHarness) {
       return harnessForm.name.trim();
@@ -322,6 +353,9 @@ export function CompositionEditorPage({ token, namespace: activeNamespace, write
     }
     if (isToolSet) {
       return toolSetForm.name.trim();
+    }
+    if (isExternalTrigger) {
+      return externalTriggerForm.name.trim();
     }
     return name.trim();
   }
@@ -364,6 +398,13 @@ export function CompositionEditorPage({ token, namespace: activeNamespace, write
           }
           return { ok: true, spec: buildToolSetSpec(toolSetForm) };
         }
+        case "AgentExternalTrigger": {
+          const validation = validateExternalTriggerForm(externalTriggerForm, isCreate);
+          if (validation) {
+            return { ok: false, error: validation };
+          }
+          return { ok: true, spec: buildExternalTriggerSpec(externalTriggerForm) };
+        }
         default:
           break;
       }
@@ -389,6 +430,8 @@ export function CompositionEditorPage({ token, namespace: activeNamespace, write
       setSkillSetForm(formFromSkillSetSpec(spec, resourceName));
     } else if (isToolSet) {
       setToolSetForm(formFromToolSetSpec(spec, resourceName));
+    } else if (isExternalTrigger) {
+      setExternalTriggerForm(formFromExternalTriggerSpec(spec, resourceName));
     }
   }
 
@@ -526,6 +569,7 @@ export function CompositionEditorPage({ token, namespace: activeNamespace, write
             {isVolumeProfile ? " · reusable storage shape" : null}
             {isSkillSet ? " · instruction packs" : null}
             {isToolSet ? " · setup / verify tools" : null}
+            {isExternalTrigger ? " · GitHub webhook receivers" : null}
             {isAuthSession ? " · append-only auth maintenance" : null}
           </p>
         </div>
@@ -665,6 +709,15 @@ export function CompositionEditorPage({ token, namespace: activeNamespace, write
                         onChange={updateToolSet}
                       />
                     ) : null}
+                    {isExternalTrigger ? (
+                      <ExternalTriggerForm
+                        form={externalTriggerForm}
+                        disabled={!writable}
+                        isCreate={isCreate}
+                        status={doc?.status ?? null}
+                        onChange={updateExternalTrigger}
+                      />
+                    ) : null}
 
                     {isDataVolume && !isCreate ? (
                       <RelatedAuthSessionCards
@@ -706,6 +759,8 @@ export function CompositionEditorPage({ token, namespace: activeNamespace, write
                               updateSkillSet("name", value);
                             } else if (isToolSet) {
                               updateToolSet("name", value);
+                            } else if (isExternalTrigger) {
+                              updateExternalTrigger("name", value);
                             } else {
                               setName(value);
                             }

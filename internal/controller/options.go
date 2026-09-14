@@ -64,6 +64,8 @@ type Options struct {
 	GrokBuildRunnerImage         string
 	PiAgentRunnerImage           string
 	AgyRunnerImage               string
+	ExternalTriggersEnabled      bool
+	ExternalTriggerHTTPRoute     ExternalTriggerHTTPRouteConfig
 }
 
 func DefaultOptions() *Options {

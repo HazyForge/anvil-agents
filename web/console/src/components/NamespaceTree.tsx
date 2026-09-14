@@ -9,6 +9,7 @@ interface Props {
   activeNamespace: string;
   compositionRead: boolean;
   controlsRead: boolean;
+  externalTriggersEnabled: boolean;
   onSelectNamespace: (namespace: string) => void;
   onAddNamespace: (namespace: string) => void;
   onRemoveNamespace: (namespace: string) => void;
@@ -48,7 +49,10 @@ function pathForLeaf(namespace: string, leaf: TreeLeafId): string {
 }
 
 /** CRD subfolders under each namespace folder. AgentRuns is always first. */
-function crdLeaves(compositionRead: boolean): Array<{ id: TreeLeafId; label: string; kind: string }> {
+function crdLeaves(
+  compositionRead: boolean,
+  externalTriggersEnabled: boolean,
+): Array<{ id: TreeLeafId; label: string; kind: string }> {
   const leaves: Array<{ id: TreeLeafId; label: string; kind: string }> = [
     { id: "agent-runs", label: "Agent runs", kind: "AgentRun" },
   ];
@@ -56,6 +60,9 @@ function crdLeaves(compositionRead: boolean): Array<{ id: TreeLeafId; label: str
     return leaves;
   }
   for (const info of COMPOSITION_KINDS) {
+    if (info.route === "external-triggers" && !externalTriggersEnabled) {
+      continue;
+    }
     leaves.push({
       id: info.route,
       label: info.title,
@@ -70,6 +77,7 @@ export function NamespaceTree({
   activeNamespace,
   compositionRead,
   controlsRead,
+  externalTriggersEnabled,
   onSelectNamespace,
   onAddNamespace,
   onRemoveNamespace,
@@ -86,7 +94,10 @@ export function NamespaceTree({
   });
 
   const activeLeaf = useMemo(() => leafForPath(location.pathname), [location.pathname]);
-  const leaves = useMemo(() => crdLeaves(compositionRead), [compositionRead]);
+  const leaves = useMemo(
+    () => crdLeaves(compositionRead, externalTriggersEnabled),
+    [compositionRead, externalTriggersEnabled],
+  );
 
   useEffect(() => {
     if (!activeNamespace) {

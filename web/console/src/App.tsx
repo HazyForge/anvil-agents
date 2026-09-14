@@ -34,6 +34,7 @@ export default function App() {
   const [compositionWrite, setCompositionWrite] = useState(false);
   const [controlsRead, setControlsRead] = useState(false);
   const [controlsWrite, setControlsWrite] = useState(false);
+  const [externalTriggersEnabled, setExternalTriggersEnabled] = useState(false);
   /** Avoid catch-all redirect until /api/v1/ui-config finishes — deep links like /harness-profiles/new must not bounce to /. */
   const [configReady, setConfigReady] = useState(false);
 
@@ -51,6 +52,7 @@ export default function App() {
         setCompositionWrite(config.composition.writeEnabled);
         setControlsRead(config.controls?.readEnabled ?? false);
         setControlsWrite(config.controls?.writeEnabled ?? false);
+        setExternalTriggersEnabled(config.externalTriggers?.enabled ?? false);
         if (config.defaultNamespaces.length > 0) {
           setNamespaces((prev) => {
             const next = uniqueNamespaces([...config.defaultNamespaces, ...prev]);
@@ -186,6 +188,7 @@ export default function App() {
                   activeNamespace={activeNamespace}
                   compositionRead={compositionRead}
                   controlsRead={controlsRead}
+                  externalTriggersEnabled={externalTriggersEnabled}
                   onSelectNamespace={onSelectNamespace}
                   onAddNamespace={onAddNamespace}
                   onRemoveNamespace={onRemoveNamespace}
@@ -251,6 +254,7 @@ export default function App() {
                             <LibraryHubPage
                               namespace={activeNamespace}
                               writeEnabled={compositionWrite}
+                              externalTriggersEnabled={externalTriggersEnabled}
                             />
                           }
                         />

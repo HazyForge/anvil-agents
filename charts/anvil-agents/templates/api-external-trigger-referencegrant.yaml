@@ -1,0 +1,22 @@
+{{- if eq (include "anvil-agents.externalTriggerHTTPRouteEnabled" . | trim) "true" }}
+{{- $routeNS := include "anvil-agents.externalTriggerHTTPRouteNamespace" . | trim }}
+{{- if and $routeNS (ne $routeNS .Release.Namespace) }}
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: ReferenceGrant
+metadata:
+  name: {{ printf "%s-xt" (include "anvil-agents.apiFullname" .) | trunc 63 | trimSuffix "-" }}
+  labels:
+    app.kubernetes.io/name: {{ include "anvil-agents.apiName" . }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: external-trigger-httproute
+spec:
+  from:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      namespace: {{ $routeNS | quote }}
+  to:
+    - group: ""
+      kind: Service
+      name: {{ include "anvil-agents.apiFullname" . }}
+{{- end }}
+{{- end }}
