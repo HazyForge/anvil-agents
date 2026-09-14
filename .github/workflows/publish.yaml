@@ -78,7 +78,7 @@ jobs:
           go build -trimpath -o /tmp/anvil-agents ./cmd/anvil-agents
           govulncheck -mode=binary /tmp/anvil-agents
       - name: gosec
-        uses: securego/gosec@45b083a0cb42119d61b1e0e364d8c62c68f6f5cd # master
+        uses: securego/gosec@8075fd2e520d33330afe168f26fc7a91f57f2cbc # master
         with:
           args: >-
             -no-fail=false
