@@ -1,7 +1,8 @@
-# One-shot GHCR publish for PR 195. The cloud-agent Cursor App token can
-# read HazyForge packages but cannot Write organization package; GitHub
-# Actions GITHUB_TOKEN can, matching publish.yaml and the PR 182 grok-build
-# push. Builds the cherry-pick commit (508ed26 + #181), not this workflow file.
+# One-shot GHCR publish for PR 195. The cloud-agent Cursor App token cannot
+# Write organization package; GITHUB_TOKEN also cannot write_package on the
+# existing org-root ghcr.io/hazyforge/anvil-agents (first GHA attempt).
+# Same as PR 182 grok-build: publish a repo-linked nested name this token
+# can create. Builds cherry-pick d58936c (508ed26 + #181), not this file.
 name: Push controller (PR 195)
 
 on:
@@ -47,7 +48,9 @@ jobs:
             exit 1
           }
           short="$(git rev-parse --short=7 HEAD)"
-          prefix="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}"
+          # Org-root ghcr.io/hazyforge/anvil-agents is repo-linked but GITHUB_TOKEN
+          # still got write_package denied. Nested name under the repo can be created.
+          prefix="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/${GITHUB_REPOSITORY#*/}"
           ./hack/build-images.sh \
             --component controller \
             --prefix "${prefix}" \
