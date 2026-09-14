@@ -148,6 +148,10 @@ func agentRunSpecModel(run *agentsv1alpha1.AgentRun) string {
 		if backend.PiAgent != nil {
 			return backend.PiAgent.Model
 		}
+	case agentsv1alpha1.AgentRunHarnessBackendPrimeAgent:
+		if backend.PrimeAgent != nil {
+			return backend.PrimeAgent.Model
+		}
 	case agentsv1alpha1.AgentRunHarnessBackendAgy:
 		if backend.Agy != nil {
 			return backend.Agy.Model

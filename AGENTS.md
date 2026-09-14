@@ -77,7 +77,7 @@ GitHub Actions is never required. Prefer local Docker Buildx:
 
 - `make release-primaris-hot` — controller-only build/push, pin Primaris
   `deploy.yaml`, helm-deploy chart+CRDs (fast console/API loops).
-- `VERSION=vX.Y.Z make release-primaris-fast` — eight-image publish without Kind
+- `VERSION=vX.Y.Z make release-primaris-fast` — nine-image publish without Kind
   e2e, pin Primaris digests (add `RELEASE_DEPLOY=true` for live apply).
 - `VERSION=vX.Y.Z make release-primaris` — full gates including Kind e2e.
 - `make deploy-primaris` — apply local chart + current Primaris overlay only.

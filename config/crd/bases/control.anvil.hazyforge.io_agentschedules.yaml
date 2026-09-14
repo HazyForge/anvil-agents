@@ -366,6 +366,7 @@ spec:
                             - openClaw
                             - grokBuild
                             - piAgent
+                            - primeAgent
                             - agy
                             - custom
                             type: string
@@ -503,6 +504,52 @@ spec:
                                 description: |-
                                   Thinking selects Pi's thinking level when the selected provider/model
                                   supports it, such as low, medium, high, xhigh, or max.
+                                type: string
+                            type: object
+                          primeAgent:
+                            description: PrimeAgent configures the Prime Agent Python/IPython
+                              runtime.
+                            properties:
+                              additionalArgs:
+                                description: AdditionalArgs appends raw arguments
+                                  to the Prime Agent command.
+                                items:
+                                  type: string
+                                type: array
+                              mode:
+                                description: |-
+                                  Mode selects Prime Agent output mode. Empty defaults to json for native
+                                  public event streaming and persisted chat reply extraction.
+                                enum:
+                                - text
+                                - json
+                                type: string
+                              model:
+                                description: Model selects the Prime Agent model ID.
+                                  Empty uses its native default.
+                                type: string
+                              noSession:
+                                description: |-
+                                  NoSession runs Prime Agent with --no-session for fully ephemeral checks. Empty
+                                  keeps Prime Agent sessions in the attached data volume.
+                                type: boolean
+                              provider:
+                                description: |-
+                                  Provider selects the concrete Prime Agent provider name. Empty derives from
+                                  modelProvider; authentication remains provider-native.
+                                type: string
+                              thinking:
+                                description: |-
+                                  Thinking selects Prime Agent's thinking level when the selected provider/model
+                                  supports it. Empty uses its native default.
+                                enum:
+                                - "off"
+                                - minimal
+                                - low
+                                - medium
+                                - high
+                                - xhigh
+                                - max
                                 type: string
                             type: object
                           providerAuthMode:
@@ -3272,6 +3319,7 @@ spec:
                                   - openClaw
                                   - grokBuild
                                   - piAgent
+                                  - primeAgent
                                   - agy
                                   - custom
                                   type: string
@@ -3410,6 +3458,52 @@ spec:
                                       description: |-
                                         Thinking selects Pi's thinking level when the selected provider/model
                                         supports it, such as low, medium, high, xhigh, or max.
+                                      type: string
+                                  type: object
+                                primeAgent:
+                                  description: PrimeAgent configures the Prime Agent
+                                    Python/IPython runtime.
+                                  properties:
+                                    additionalArgs:
+                                      description: AdditionalArgs appends raw arguments
+                                        to the Prime Agent command.
+                                      items:
+                                        type: string
+                                      type: array
+                                    mode:
+                                      description: |-
+                                        Mode selects Prime Agent output mode. Empty defaults to json for native
+                                        public event streaming and persisted chat reply extraction.
+                                      enum:
+                                      - text
+                                      - json
+                                      type: string
+                                    model:
+                                      description: Model selects the Prime Agent model
+                                        ID. Empty uses its native default.
+                                      type: string
+                                    noSession:
+                                      description: |-
+                                        NoSession runs Prime Agent with --no-session for fully ephemeral checks. Empty
+                                        keeps Prime Agent sessions in the attached data volume.
+                                      type: boolean
+                                    provider:
+                                      description: |-
+                                        Provider selects the concrete Prime Agent provider name. Empty derives from
+                                        modelProvider; authentication remains provider-native.
+                                      type: string
+                                    thinking:
+                                      description: |-
+                                        Thinking selects Prime Agent's thinking level when the selected provider/model
+                                        supports it. Empty uses its native default.
+                                      enum:
+                                      - "off"
+                                      - minimal
+                                      - low
+                                      - medium
+                                      - high
+                                      - xhigh
+                                      - max
                                       type: string
                                   type: object
                                 providerAuthMode:

@@ -58,8 +58,8 @@ lock="${tmp_dir}/images.lock.tsv"
 	--version v0.1.0 \
 	--output "${lock}" >/dev/null
 [[ -f "${lock}" ]] || fail "publication did not create a lock"
-[[ "$(rg -c $'^(controller|codex|opencode|grok-build|hermes|openclaw|pi|agy)\t' "${lock}")" -eq 8 ]] || fail "lock does not contain eight components"
-[[ "$(rg -c '^buildx build --push ' "${FAKE_LOG}")" -eq 8 ]] || fail "publication did not build eight images"
+[[ "$(rg -c $'^(controller|codex|opencode|grok-build|hermes|openclaw|pi|agy|prime)\t' "${lock}")" -eq 9 ]] || fail "lock does not contain nine components"
+[[ "$(rg -c '^buildx build --push ' "${FAKE_LOG}")" -eq 9 ]] || fail "publication did not build nine images"
 "${repo_root}/hack/publish-images.sh" --verify-lock "${lock}" >/dev/null
 cp "${lock}" "${tmp_dir}/valid.lock"
 
@@ -79,7 +79,7 @@ rg -q 'tags resolve to different digests' "${tmp_dir}/mismatch.out" || fail "tag
 
 awk -F '\t' '$1 != "opencode"' <(
 	printf 'schema\tanvil-agents-image-lock/v1\nsource-revision\t%s\nplatform\tlinux/amd64\n' "${FAKE_REVISION}"
-	for component in controller codex grok-build hermes openclaw pi agy; do
+	for component in controller codex grok-build hermes openclaw pi agy prime; do
 		printf '%s\tregistry.example.com/team/%s@sha256:%064d\n' "${component}" "${component}" 0
 	done
 ) > "${tmp_dir}/missing.lock"
@@ -87,5 +87,11 @@ if "${repo_root}/hack/publish-images.sh" --verify-lock "${tmp_dir}/missing.lock"
 	fail "verification accepted a lock missing opencode"
 fi
 rg -q 'missing component: opencode' "${tmp_dir}/missing.out" || fail "missing-component error is unclear"
+
+awk -F '\t' '$1 != "prime"' "${tmp_dir}/valid.lock" > "${tmp_dir}/missing-prime.lock"
+if "${repo_root}/hack/publish-images.sh" --verify-lock "${tmp_dir}/missing-prime.lock" >"${tmp_dir}/missing-prime.out" 2>&1; then
+	fail "verification accepted a lock missing Prime"
+fi
+rg -q 'missing component: prime' "${tmp_dir}/missing-prime.out" || fail "missing Prime component error is unclear"
 
 echo "publish-images contract tests passed"

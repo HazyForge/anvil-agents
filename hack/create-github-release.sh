@@ -151,13 +151,13 @@ while IFS=$'\t' read -r key value extra; do
 		schema) lock_schema="${value}" ;;
 		source-revision) lock_revision="${value}" ;;
 		platform) lock_platform="${value}" ;;
-		controller|codex|opencode|grok-build|hermes|openclaw|pi|agy) locked_refs["${key}"]="${value}" ;;
+		controller|codex|opencode|grok-build|hermes|openclaw|pi|agy|prime) locked_refs["${key}"]="${value}" ;;
 	esac
 done < "${lock}"
 [[ "${lock_schema}" == "anvil-agents-image-lock/v1" ]] || { echo "image lock has an unsupported schema" >&2; exit 2; }
 [[ "${lock_revision}" =~ ^[0-9a-f]{40}([0-9a-f]{24})?$ ]] || { echo "image lock has an invalid source revision" >&2; exit 2; }
 [[ -n "${lock_platform}" ]] || { echo "image lock is missing platform" >&2; exit 2; }
-for component in controller codex opencode grok-build hermes openclaw pi agy; do
+for component in controller codex opencode grok-build hermes openclaw pi agy prime; do
 	[[ -n "${locked_refs[${component}]:-}" ]] || { echo "image lock is missing component: ${component}" >&2; exit 2; }
 	[[ "${locked_refs[${component}]}" == *@sha256:* ]] || { echo "${component} is not digest-pinned" >&2; exit 2; }
 done

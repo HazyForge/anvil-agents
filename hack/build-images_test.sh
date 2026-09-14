@@ -42,7 +42,7 @@ local_command="$(tail -n 1 "${FAKE_DOCKER_LOG}")"
 
 : > "${FAKE_DOCKER_LOG}"
 "${repo_root}/hack/build-images.sh" --check >/dev/null
-[[ "$(grep -c '^build --check ' "${FAKE_DOCKER_LOG}")" == "8" ]] || fail "all-image check did not inspect eight Dockerfiles"
+[[ "$(grep -c '^build --check ' "${FAKE_DOCKER_LOG}")" == "9" ]] || fail "all-image check did not inspect nine Dockerfiles"
 for dockerfile in \
 	Dockerfile \
 	docker/agent-run-codex/Dockerfile \
@@ -51,7 +51,8 @@ for dockerfile in \
 	docker/agent-run-hermes/Dockerfile \
 	docker/agent-run-openclaw/Dockerfile \
 	docker/agent-run-pi/Dockerfile \
-	docker/agent-run-agy/Dockerfile; do
+	docker/agent-run-agy/Dockerfile \
+	docker/agent-run-prime/Dockerfile; do
 	rg -q --fixed-strings -- "--file ${repo_root}/${dockerfile}" "${FAKE_DOCKER_LOG}" || fail "missing check for ${dockerfile}"
 done
 rg -q 'OPENCODE_LICENSE_SHA256=625f0f619133f89bbbb2abe37369613dfa1885eba1e50d02170deb62bb42cb6b' \
@@ -105,5 +106,12 @@ source_command="$(tail -n 1 "${FAKE_DOCKER_LOG}")"
 for pattern in '.env' '.env.*' '**/.env' '**/.env.*' '**/.aws' '**/.kube' '**/.ssh' '**/*.key' '**/*.pem'; do
 	rg -Fxq "${pattern}" "${repo_root}/.dockerignore" || fail ".dockerignore is missing ${pattern}"
 done
+
+# Prime uses its own build component and repository in push mode.
+: > "${FAKE_DOCKER_LOG}"
+"${repo_root}/hack/build-images.sh" --component prime --prefix registry.example.com/team --tag release --allow-dirty --push >/dev/null
+prime_command="$(tail -n 1 "${FAKE_DOCKER_LOG}")"
+[[ "${prime_command}" == *"--file ${repo_root}/docker/agent-run-prime/Dockerfile"* ]] || fail "Prime Dockerfile mapping is wrong"
+[[ "${prime_command}" == *"--tag registry.example.com/team/anvil-agent-run-prime:release"* ]] || fail "Prime repository mapping is wrong"
 
 echo "build-images contract tests passed"

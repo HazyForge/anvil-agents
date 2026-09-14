@@ -6,6 +6,7 @@ export type DataVolumeBackend =
   | "openClaw"
   | "grokBuild"
   | "piAgent"
+  | "primeAgent"
   | "agy"
   | "custom";
 
@@ -183,6 +184,14 @@ export const DATA_VOLUME_BACKENDS: {
     summary: "Pi agent home",
     defaultMount: "/opt/anvil/pi",
     homeEnvName: "PI_HOME",
+  },
+
+  {
+    value: "primeAgent",
+    label: "Prime Agent",
+    summary: "Prime Agent home",
+    defaultMount: "/opt/anvil/prime",
+    homeEnvName: "ANVIL_PRIME_HOME",
   },
   {
     value: "agy",

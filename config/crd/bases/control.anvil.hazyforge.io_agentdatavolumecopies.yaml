@@ -73,6 +73,7 @@ spec:
                     - openClaw
                     - grokBuild
                     - piAgent
+                    - primeAgent
                     - agy
                     - custom
                     type: string

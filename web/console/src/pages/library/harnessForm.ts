@@ -7,6 +7,7 @@ export type HarnessBackendKind =
   | "openClaw"
   | "grokBuild"
   | "piAgent"
+  | "primeAgent"
   | "agy"
   | "custom";
 
@@ -70,6 +71,14 @@ export const BACKEND_KIND_OPTIONS: BackendKindOption[] = [
     modelHint: "Pi model id",
   },
   {
+    kind: "primeAgent",
+    title: "Prime Agent",
+    summary: "Prime Agent with native IPython tools",
+    detail: "Provider-native Prime Agent runner with JSON activity and durable agent home.",
+    needsSharedProvider: true,
+    modelHint: "Prime Agent model id",
+  },
+  {
     kind: "agy",
     title: "Antigravity",
     summary: "Google Antigravity CLI",
@@ -93,6 +102,7 @@ export interface HarnessForm {
   modelProvider: string;
   providerAuthMode: string;
   model: string;
+  primeOptions: Record<string, unknown>;
   agyMode: string;
   agyThinking: string;
   agyAdditionalArgs: string;
@@ -122,6 +132,7 @@ export function emptyHarnessForm(): HarnessForm {
     modelProvider: "",
     providerAuthMode: "",
     model: "",
+    primeOptions: {},
     agyMode: "stream-json",
     agyThinking: "",
     agyAdditionalArgs: "[]",
@@ -185,6 +196,7 @@ export function formFromHarnessSpec(spec: Record<string, unknown>, name = ""): H
   const openClaw = asRecord(backend.openClaw);
   const grokBuild = asRecord(backend.grokBuild);
   const pi = asRecord(backend.piAgent);
+  const prime = asRecord(backend.primeAgent);
   const agy = asRecord(backend.agy);
 
   let model = "";
@@ -210,12 +222,16 @@ export function formFromHarnessSpec(spec: Record<string, unknown>, name = ""): H
     case "piAgent":
       model = String(pi.model ?? "");
       break;
+    case "primeAgent":
+      model = String(prime.model ?? "");
+      break;
     default:
       model = "";
   }
 
   const form = emptyHarnessForm();
   form.name = name;
+  form.primeOptions = {...prime};
   form.description = String(spec.description ?? "");
   form.backendKind = BACKEND_KIND_OPTIONS.some((opt) => opt.kind === kind) ? kind : "codex";
   form.image = String(backend.image ?? "");
@@ -332,6 +348,14 @@ export function buildHarnessSpec(form: HarnessForm): Record<string, unknown> {
       if (Object.keys(pi).length) {
         backend.piAgent = pi;
       }
+      break;
+    }
+    case "primeAgent": {
+      const prime: Record<string, unknown> = {...form.primeOptions};
+      if (!prime.mode) prime.mode = "json";
+      delete prime.model;
+      setIf(prime, "model", form.model);
+      backend.primeAgent = prime;
       break;
     }
     case "agy": {

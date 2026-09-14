@@ -33,7 +33,7 @@ kubectl config current-context
 
 | Mode | Command | What it does |
 |------|---------|----------------|
-| **full** | `VERSION=vX.Y.Z make release-primaris` | Tag+push, `make verify` + Kind e2e, build/push 8 images, OCI chart, pin Primaris digests |
+| **full** | `VERSION=vX.Y.Z make release-primaris` | Tag+push, `make verify` + Kind e2e, build/push 9 images, OCI chart, pin Primaris digests |
 | **fast** | `VERSION=vX.Y.Z make release-primaris-fast` | Same without Kind e2e (still `make verify`); good trusted cutovers |
 | **hot** | `make release-primaris-hot` | Rebuild/push **controller** only, pin its digest, **helm deploy** chart+CRDs now |
 | **deploy** | `make deploy-primaris` | Apply local chart + current `deploy.yaml` only (no build) |
@@ -81,7 +81,7 @@ make release-primaris-hot RELEASE_DEPLOY=false
 ```
 
 Hot mode does **not** rebuild runners. Use `fast`/`full` when runner images or
-the eight-image lock must move together.
+the nine-image lock must move together.
 
 ### deploy-only (CRDs + chart)
 

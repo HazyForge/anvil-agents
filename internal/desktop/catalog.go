@@ -106,6 +106,16 @@ func Catalog() []Tool {
 			Notes:       "Pi coding agent CLI. Inventory only until a constant, prompt-file-safe invoke is documented.",
 		},
 		{
+			ID:          "prime",
+			DisplayName: "Prime Agent",
+			Kind:        KindHarness,
+			Backend:     "primeAgent",
+			Binaries:    []string{"prime-agent"},
+			VersionArgs: [][]string{{"--version"}},
+			Notes:       "Prime Agent with its native IPython tools. Prompts use stdin; public JSON events retain provider-native semantics. Local credentials stay in Prime Agent's home.",
+			Invoke:      Invoke{Mode: PromptStdin, Args: []string{"--print", "--mode", "json", "--no-session"}},
+		},
+		{
 			ID:          "agy",
 			DisplayName: "Antigravity",
 			Kind:        KindHarness,

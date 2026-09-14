@@ -3,6 +3,12 @@
   "type": "object",
   "additionalProperties": true,
   "properties": {
+    "runnerImages": {
+      "type": "object",
+      "properties": {
+        "primeAgent": {"type": "string", "minLength": 1}
+      }
+    },
     "extraObjects": {
       "type": "array",
       "description": "Additional explicit Kubernetes objects owned by this Helm release; no template evaluation.",

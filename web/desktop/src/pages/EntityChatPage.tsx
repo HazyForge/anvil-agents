@@ -159,7 +159,7 @@ export function EntityChatPage({token, config}: Props) {
   }
   function restoreNewChat(choices = profiles) {
     const saved = readNewChatConfig(namespace);
-    setProfile(saved && choices.some(p => p.metadata.name === saved.profile) ? saved.profile : '');
+    setProfile(saved ? (choices.some(p => p.metadata.name === saved.profile) ? saved.profile : '') : (choices.some(p => p.metadata.name === 'desktop-assistant') ? 'desktop-assistant' : ''));
     setHarness(saved?.harness ?? ''); setMode(saved?.mode ?? 'persona');
     setCoordinate(saved?.coordinate ?? false); setPeers((saved?.peers ?? []).filter(peer => choices.some(p => p.metadata.name === peer)));
     setDraft(readChatDraft(namespace, '') ?? '');

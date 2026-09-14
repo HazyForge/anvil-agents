@@ -36,6 +36,7 @@ type WSLStatus struct {
 // OIDC token or from free-form prompt text.
 type WSLRequest struct {
 	Distro  string
+	Stdout  io.Writer // optional streaming stdout observer; capture remains bounded
 	Argv    []string
 	Stdin   io.Reader
 	AgyTurn bool     // keep native stream input open until the turn result
@@ -164,11 +165,15 @@ func defaultWSLRun(look func() (string, error)) func(ctx context.Context, req WS
 		}
 		cmd := exec.CommandContext(ctx, exe, args...) // #nosec G204 -- exe is LookPath of wsl.exe; argv is catalog constants plus a validated distro/temp path
 		cmd.Stdin = req.Stdin
+		configureDelegateProcess(cmd)
 		cmd.Env = delegateEnv(os.Environ())
 		var stdout, stderr cappedBuffer
 		stdout.limit = maxDelegateCapture
 		stderr.limit = maxDelegateCapture
 		cmd.Stdout = &stdout
+		if req.Stdout != nil {
+			cmd.Stdout = io.MultiWriter(&stdout, req.Stdout)
+		}
 		cmd.Stderr = &stderr
 		if req.AgyTurn {
 			err = runAgyTurn(cmd, req.Stdin)
@@ -521,7 +526,11 @@ func (d Discoverer) wslRemove(ctx context.Context, distro, path string) {
 }
 
 func (d Discoverer) runDelegateWSL(ctx context.Context, tool Tool, distro, prompt string, timeout time.Duration) (DelegateResult, error) {
-	result := DelegateResult{Harness: tool.ID, Target: HarnessTargetWSL, Distro: distro}
+	return d.runDelegateWSLWithOptions(ctx, tool, distro, prompt, timeout, delegateOptions{})
+}
+
+func (d Discoverer) runDelegateWSLWithOptions(ctx context.Context, tool Tool, distro, prompt string, timeout time.Duration, options delegateOptions) (DelegateResult, error) {
+	result := DelegateResult{Harness: tool.ID, Target: HarnessTargetWSL, Distro: distro, Workdir: options.Workdir}
 	var binName string
 	for _, name := range tool.Binaries {
 		if !safeBinName(name) {
@@ -542,7 +551,11 @@ func (d Discoverer) runDelegateWSL(ctx context.Context, tool Tool, distro, promp
 	runCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	linuxArgv := []string{"/bin/bash", "-c", wslPathScript(), "anvil-desktop"}
+	script := wslPathScript()
+	if options.Workdir != "" {
+		script = `cd -- "$ANVIL_DESKTOP_WORKDIR" || exit 125` + "\n" + script
+	}
+	linuxArgv := []string{"/bin/bash", "-c", script, "anvil-desktop"}
 	linuxArgv = append(linuxArgv, tool.Invoke.Args...)
 	var stdin io.Reader
 	switch tool.Invoke.Mode {
@@ -569,12 +582,17 @@ func (d Discoverer) runDelegateWSL(ctx context.Context, tool Tool, distro, promp
 	}
 
 	runner := d.wslRunner()
+	env := d.wslEnv(binName)
+	if options.Workdir != "" {
+		env = append(env, "ANVIL_DESKTOP_WORKDIR="+options.Workdir)
+	}
 	wslResult, err := runner.Run(runCtx, WSLRequest{
 		Distro:  distro,
 		Argv:    linuxArgv,
 		Stdin:   stdin,
 		AgyTurn: tool.Invoke.Mode == PromptAgyStream,
-		Env:     d.wslEnv(binName),
+		Env:     env,
+		Stdout:  options.Stdout,
 	})
 	result.Stdout = wslResult.Stdout
 	result.Stderr = wslResult.Stderr

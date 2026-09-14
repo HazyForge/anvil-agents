@@ -31,6 +31,7 @@ const withheldDetails = new Map(), deniedDetails = new Map(), detailGets = new M
 const eventPlans = new Map(), eventGets = new Map(), eventAuth = new Map(), heldDetailReads = new Map();
 page.on('pageerror', error => errors.push(error.message));
 await context.addInitScript(() => {
+  localStorage.setItem('anvil-agents-desktop.chat-location', 'remote');
   sessionStorage.setItem('anvil-agents-desktop.accessToken', 'ui-contract-fixture-not-a-token');
   sessionStorage.setItem('anvil-agents-desktop.expiresAt', String(Date.now()+3600000));
 });

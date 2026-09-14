@@ -110,6 +110,7 @@ func NewServer(opts Options) (*Server, error) {
 	mux.HandleFunc("GET /local/v1/api-health", server.handleAPIHealth)
 	mux.HandleFunc("POST /local/v1/prefs", server.handlePrefs)
 	mux.HandleFunc("POST /local/v1/delegate", server.handleDelegate)
+	mux.HandleFunc("POST /local/v1/chat/stream", server.handleChatStream)
 	mux.HandleFunc("/ui-config.json", server.handleAPIProxy)
 	mux.HandleFunc("/api/", server.handleAPIProxy)
 	mux.HandleFunc("/", server.handleUI)

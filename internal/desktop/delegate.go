@@ -27,6 +27,7 @@ type DelegateRequest struct {
 	Harness        string `json:"harness"`
 	Prompt         string `json:"prompt"`
 	TimeoutSeconds int    `json:"timeoutSeconds,omitempty"`
+	Workdir        string `json:"workdir,omitempty"`
 }
 
 // DelegateResult is the local-harness tool result. It never includes OIDC tokens.
@@ -39,6 +40,7 @@ type DelegateResult struct {
 	Stdout   string `json:"stdout"`
 	Stderr   string `json:"stderr"`
 	TimedOut bool   `json:"timedOut"`
+	Workdir  string `json:"workdir,omitempty"`
 }
 
 func (s *Server) resolveDelegate(ctx context.Context, harness string) (Tool, invokeTarget, error) {
@@ -47,9 +49,10 @@ func (s *Server) resolveDelegate(ctx context.Context, harness string) (Tool, inv
 		return Tool{}, invokeTarget{}, fmt.Errorf("harness %q is not a delegatable catalog CLI", strings.TrimSpace(harness))
 	}
 	prefs := s.currentPrefs()
-	d := s.discovererFor(prefs)
+	d := s.opts.Discoverer
 	wsl := probeWSL(ctx, d)
 	targetName := resolveHarnessTarget(prefs, wsl)
+	d.Target = targetName
 	if targetName == HarnessTargetWSL && d.useWSL() {
 		distro := resolveWSLDistro(prefs, wsl)
 		for _, name := range tool.Binaries {
@@ -84,7 +87,11 @@ func (s *Server) resolveDelegate(ctx context.Context, harness string) (Tool, inv
 	if targetName == HarnessTargetWSL {
 		mode = HarnessTargetWSL
 	}
-	return tool, invokeTarget{Mode: mode, Bin: resolved}, nil
+	distro := ""
+	if mode == HarnessTargetWSL {
+		distro = wsl.DefaultDistro
+	}
+	return tool, invokeTarget{Mode: mode, Bin: resolved, Distro: distro}, nil
 }
 
 type invokeTarget struct {
@@ -108,11 +115,20 @@ func delegateTimeout(seconds int) time.Duration {
 	return d
 }
 
+type delegateOptions struct {
+	Workdir string
+	Stdout  io.Writer
+}
+
 func runDelegate(ctx context.Context, d Discoverer, tool Tool, target invokeTarget, prompt string, timeout time.Duration) (DelegateResult, error) {
+	return runDelegateWithOptions(ctx, d, tool, target, prompt, timeout, delegateOptions{})
+}
+
+func runDelegateWithOptions(ctx context.Context, d Discoverer, tool Tool, target invokeTarget, prompt string, timeout time.Duration, options delegateOptions) (DelegateResult, error) {
 	if target.Mode == HarnessTargetWSL && d.useWSL() {
-		return d.runDelegateWSL(ctx, tool, target.Distro, prompt, timeout)
+		return d.runDelegateWSLWithOptions(ctx, tool, target.Distro, prompt, timeout, options)
 	}
-	result := DelegateResult{Harness: tool.ID, Path: target.Bin, Target: target.Mode}
+	result := DelegateResult{Harness: tool.ID, Path: target.Bin, Target: target.Mode, Distro: target.Distro, Workdir: options.Workdir}
 	if result.Target == "" {
 		result.Target = HarnessTargetNative
 	}
@@ -157,11 +173,16 @@ func runDelegate(ctx context.Context, d Discoverer, tool Tool, target invokeTarg
 
 	cmd := exec.CommandContext(runCtx, target.Bin, args...) // #nosec G204 -- bin is LookPath of a catalog CLI; args are catalog constants plus a temp file path
 	cmd.Stdin = stdin
+	cmd.Dir = options.Workdir
+	configureDelegateProcess(cmd)
 	cmd.Env = delegateEnv(os.Environ())
 	var stdout, stderr cappedBuffer
 	stdout.limit = maxDelegateCapture
 	stderr.limit = maxDelegateCapture
 	cmd.Stdout = &stdout
+	if options.Stdout != nil {
+		cmd.Stdout = io.MultiWriter(&stdout, options.Stdout)
+	}
 	cmd.Stderr = &stderr
 	var err error
 	if tool.Invoke.Mode == PromptAgyStream {
@@ -265,8 +286,12 @@ func runAgyTurn(cmd *exec.Cmd, input io.Reader) error {
 	if err := cmd.Start(); err != nil {
 		return err
 	}
-	go func() { _, _ = io.Copy(stdin, input) }()
-	return cmd.Wait()
+	copied := make(chan struct{})
+	go func() { defer close(copied); _, _ = io.Copy(stdin, input) }()
+	err = cmd.Wait()
+	_ = stdin.Close()
+	<-copied
+	return err
 }
 
 type agyResultWriter struct {

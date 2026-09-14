@@ -39,6 +39,7 @@ func main() {
 	flag.StringVar(&options.OpenClawRunnerImage, "runner-image-openclaw", options.OpenClawRunnerImage, "Default image for OpenClaw AgentRuns that do not set spec.harness.backend.image.")
 	flag.StringVar(&options.GrokBuildRunnerImage, "runner-image-grok-build", options.GrokBuildRunnerImage, "Default image for Grok Build AgentRuns that do not set spec.harness.backend.image.")
 	flag.StringVar(&options.PiAgentRunnerImage, "runner-image-pi-agent", options.PiAgentRunnerImage, "Default image for Pi Agent AgentRuns that do not set spec.harness.backend.image.")
+	flag.StringVar(&options.PrimeAgentRunnerImage, "runner-image-prime-agent", options.PrimeAgentRunnerImage, "Default image for Prime Agent AgentRuns that do not set spec.harness.backend.image.")
 	flag.StringVar(&options.AgyRunnerImage, "runner-image-agy", options.AgyRunnerImage, "Default image for Agy AgentRuns that do not set spec.harness.backend.image.")
 	flag.BoolVar(&options.ExternalTriggersEnabled, "external-triggers-enabled", options.ExternalTriggersEnabled, "Enable AgentExternalTrigger webhook receivers in this process (must match api.config.externalTriggers.enabled).")
 	flag.BoolVar(&options.ExternalTriggerHTTPRoute.Enabled, "external-trigger-httproute-enabled", options.ExternalTriggerHTTPRoute.Enabled, "Create Gateway API HTTPRoutes for ready AgentExternalTrigger receivers.")

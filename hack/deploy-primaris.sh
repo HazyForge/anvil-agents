@@ -170,7 +170,7 @@ fi
 # Surface image pins for operators before helm mutates the cluster.
 if command -v rg >/dev/null 2>&1; then
 	echo "Deploying with image pins from ${values_file}:"
-	rg -n 'reference:|codex:|openCode:|hermesAgent:|openClaw:|grokBuild:|piAgent:|agy:|crds:' "${values_file}" || true
+	rg -n 'reference:|codex:|openCode:|hermesAgent:|openClaw:|grokBuild:|piAgent:|agy:|primeAgent:|crds:' "${values_file}" || true
 fi
 
 printf '+ helm'

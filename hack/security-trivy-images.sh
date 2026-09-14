@@ -7,7 +7,7 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-components=(controller codex opencode grok-build hermes openclaw pi agy)
+components=(controller codex opencode grok-build hermes openclaw pi agy prime)
 image_prefix="${ANVIL_AGENTS_IMAGE_PREFIX:-}"
 image_tag="${ANVIL_AGENTS_IMAGE_TAG:-security-scan}"
 platform="${ANVIL_AGENTS_IMAGE_PLATFORM:-linux/amd64}"
@@ -22,7 +22,7 @@ selected_components=()
 
 usage() {
 	cat <<'EOF'
-Trivy-scan each anvil-agents container (controller + seven runners).
+Trivy-scan each anvil-agents container (controller + eight runners).
 
 Usage:
   ./hack/security-trivy-images.sh [options]
@@ -30,7 +30,7 @@ Usage:
   ./hack/security-trivy-images.sh --no-build --ref anvil-agents:dev --ref anvil-agent-run-codex:dev
 
 Options:
-  --component NAME     Scan one component; repeatable. Default: all eight.
+  --component NAME     Scan one component; repeatable. Default: all nine.
   --prefix PREFIX      Image prefix (e.g. ghcr.io/hazyforge). Default: local names.
   --tag TAG            Image tag when building/scanning by component. Default: security-scan.
   --platform PLATFORM  Build platform. Default: linux/amd64.
@@ -59,6 +59,7 @@ image_name() {
 		openclaw) printf '%s\n' anvil-agent-run-openclaw ;;
 		pi) printf '%s\n' anvil-agent-run-pi ;;
 		agy) printf '%s\n' anvil-agent-run-agy ;;
+		prime) printf '%s\n' anvil-agent-run-prime ;;
 		*) return 1 ;;
 	esac
 }

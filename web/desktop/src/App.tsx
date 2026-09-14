@@ -9,6 +9,7 @@ import { LoginGate } from "./components/LoginGate";
 import { AuthCallbackPage } from "./pages/AuthCallbackPage";
 import { EntityChatPage } from "./pages/EntityChatPage";
 import { HarnessesPage } from "./pages/HarnessesPage";
+import { LocalChatPage } from "./pages/LocalChatPage";
 import { WrapperPage } from "./pages/WrapperPage";
 import { PRODUCT_TITLE } from "./product";
 
@@ -20,6 +21,10 @@ export default function App() {
   const [token, setToken] = useState(() => loadSession()?.accessToken ?? "");
   const [config, setConfig] = useState<UIConfig | null>(null);
   const [configError, setConfigError] = useState<string | null>(null);
+  const [chatLocation, setChatLocation] = useState<'local' | 'remote'>(() => {
+    try { return localStorage.getItem('anvil-agents-desktop.chat-location') === 'remote' ? 'remote' : 'local'; } catch { return 'local'; }
+  });
+  const [localChatBusy, setLocalChatBusy] = useState(false);
 
   const refresh = useCallback(async () => {
     setBusy(true);
@@ -147,11 +152,19 @@ export default function App() {
     <div className="empty">Loading Anvil Agents Desktop…</div>
   );
 
-  const chat = snapshot && signedIn && config ? (
+  const remoteChat = snapshot && signedIn && config ? (
     <EntityChatPage token={token} config={config} />
   ) : (
     login
   );
+  const chat = <>
+    <div className="chat-location" role="group" aria-label="Chat execution location">
+      <span>Run assistant on</span>
+      <button className={`btn ${chatLocation === 'local' ? 'btn-primary' : 'btn-ghost'}`} disabled={localChatBusy} onClick={() => {setChatLocation('local'); try {localStorage.setItem('anvil-agents-desktop.chat-location', 'local');} catch { /* In-memory selection remains. */ }}}>{snapshot?.wsl.insideWSL || snapshot?.harnessTarget === 'wsl' ? 'Local WSL' : 'This computer'}</button>
+      <button className={`btn ${chatLocation === 'remote' ? 'btn-primary' : 'btn-ghost'}`} disabled={localChatBusy} onClick={() => {setChatLocation('remote'); try {localStorage.setItem('anvil-agents-desktop.chat-location', 'remote');} catch { /* In-memory selection remains. */ }}}>Primaris</button>
+    </div>
+    {chatLocation === 'local' ? snapshot ? <LocalChatPage snapshot={snapshot} onBusyChange={setLocalChatBusy}/> : <div className="empty">Loading local harnesses…</div> : remoteChat}
+  </>;
 
   return (
     <div className="desktop-shell">
@@ -176,13 +189,14 @@ export default function App() {
             {busy ? "Refreshing" : "Refresh"}
           </button>
           {signedIn ? (
-            <button type="button" className="btn btn-ghost" onClick={() => void logout()}>
+            <button type="button" className="btn btn-ghost" disabled={localChatBusy} onClick={() => void logout()}>
               Sign out
             </button>
           ) : (
             <button
               type="button"
               className="btn btn-ghost"
+              disabled={localChatBusy}
               onClick={() => void beginLogin(location.pathname + location.search)}
             >
               Sign in
@@ -194,10 +208,10 @@ export default function App() {
         <NavLink to="/chat" className={({ isActive }) => (isActive ? "rail-link active" : "rail-link")}>
           Chat
         </NavLink>
-        <NavLink to="/wrapper" className={({ isActive }) => (isActive ? "rail-link active" : "rail-link")}>
+        <NavLink to="/wrapper" aria-disabled={localChatBusy} onClick={e => {if(localChatBusy) e.preventDefault();}} className={({ isActive }) => (isActive ? "rail-link active" : "rail-link")}>
           Runs
         </NavLink>
-        <NavLink to="/local" className={({ isActive }) => (isActive ? "rail-link active" : "rail-link")}>
+        <NavLink to="/local" aria-disabled={localChatBusy} onClick={e => {if(localChatBusy) e.preventDefault();}} className={({ isActive }) => (isActive ? "rail-link active" : "rail-link")}>
           Local
           <span className="rail-count">{presentCount}</span>
         </NavLink>

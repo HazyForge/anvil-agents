@@ -29,6 +29,7 @@ runnerImages:
   grokBuild: anvil-agent-run-grok-build:dev
   piAgent: anvil-agent-run-pi:dev
   agy: anvil-agent-run-agy:dev
+  primeAgent: anvil-agent-run-prime:dev
 
 platformContext:
   repository: HazyForge/anvil-agents

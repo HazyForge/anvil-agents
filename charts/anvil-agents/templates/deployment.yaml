@@ -56,6 +56,7 @@ spec:
             - --runner-image-grok-build={{ .Values.runnerImages.grokBuild }}
             - --runner-image-pi-agent={{ .Values.runnerImages.piAgent }}
             - --runner-image-agy={{ .Values.runnerImages.agy }}
+            - --runner-image-prime-agent={{ .Values.runnerImages.primeAgent }}
             {{- if eq (include "anvil-agents.externalTriggerHTTPRouteEnabled" . | trim) "true" }}
             - --external-triggers-enabled=true
             - --external-trigger-httproute-enabled=true

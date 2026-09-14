@@ -233,6 +233,8 @@ func createRunBackendKind(raw string) agentsv1alpha1.AgentRunHarnessBackendKind 
 	switch strings.TrimSpace(raw) {
 	case "grok", string(agentsv1alpha1.AgentRunHarnessBackendGrokBuild):
 		return agentsv1alpha1.AgentRunHarnessBackendGrokBuild
+	case string(agentsv1alpha1.AgentRunHarnessBackendPrimeAgent):
+		return agentsv1alpha1.AgentRunHarnessBackendPrimeAgent
 	case string(agentsv1alpha1.AgentRunHarnessBackendAgy):
 		return agentsv1alpha1.AgentRunHarnessBackendAgy
 	default:

@@ -206,6 +206,59 @@ extraObjects:
   - apiVersion: control.anvil.hazyforge.io/v1alpha1
     kind: AgentHarnessProfile
     metadata:
+      name: desktop-prime
+      namespace: anvilhub
+      labels:
+        app.kubernetes.io/part-of: desktop-chat
+        control.anvil.hazyforge.io/application: desktop-chat
+        control.anvil.hazyforge.io/ownership: helm
+    spec:
+      description: Prime Agent with native Python tools and the operator's DeepSeek Flash default.
+      backend:
+        kind: primeAgent
+        modelProvider: deepseek
+        providerAuthMode: apiKey
+        primeAgent:
+          provider: deepseek
+          model: deepseek-v4-flash
+          thinking: high
+          mode: json
+          noSession: true
+      execution:
+        serviceAccountName: anvil-opencode-observe
+        nodeSelector:
+          hazyforge.io/home-lab: "true"
+        imagePullSecrets:
+          - name: ghcr-creds
+        envSecretRefs:
+          - name: deepseek-credentials
+        extraEnv:
+          - name: ANVIL_AGENT_RUN_AUTO_CLONE_REPO
+            value: "false"
+        resources:
+          requests:
+            cpu: 100m
+            memory: 256Mi
+            ephemeral-storage: 64Mi
+          limits:
+            cpu: "1"
+            memory: 1Gi
+            ephemeral-storage: 512Mi
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop: [ALL]
+          runAsNonRoot: true
+          runAsUser: 10001
+          runAsGroup: 10001
+          seccompProfile:
+            type: RuntimeDefault
+        workdir: /workspace
+        timeoutSeconds: 300
+        ttlSecondsAfterFinished: 86400
+  - apiVersion: control.anvil.hazyforge.io/v1alpha1
+    kind: AgentHarnessProfile
+    metadata:
       name: desktop-opencode-workspace
       namespace: anvilhub
       labels:
@@ -266,13 +319,13 @@ extraObjects:
         control.anvil.hazyforge.io/application: desktop-chat
         control.anvil.hazyforge.io/ownership: helm
     spec:
-      description: General assistant that uses workspace tools for user-initiated Desktop tasks.
+      description: Prime Agent assistant that uses workspace tools for user-initiated Desktop tasks.
       scope:
         applicationRef:
           name: desktop-chat
         summary: Perform the user's workspace task and coordinate only with explicitly allowed peers.
       harnessProfileRef:
-        name: desktop-opencode-workspace
+        name: desktop-prime
       harness:
         intent: proposeChange
         systemPrompt: |

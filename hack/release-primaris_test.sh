@@ -32,6 +32,7 @@ runnerImages:
   grokBuild: ghcr.io/hazyforge/anvil-agent-run-grok-build@sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
   piAgent: ghcr.io/hazyforge/anvil-agent-run-pi@sha256:1111111111111111111111111111111111111111111111111111111111111111
   agy: ghcr.io/hazyforge/anvil-agent-run-agy@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+  primeAgent: ghcr.io/hazyforge/anvil-agent-run-prime@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 crds:
   install: true
 EOF
@@ -50,6 +51,7 @@ hermes	ghcr.io/hazyforge/anvil-agent-run-hermes@sha256:6666666666666666666666666
 openclaw	ghcr.io/hazyforge/anvil-agent-run-openclaw@sha256:7777777777777777777777777777777777777777777777777777777777777777
 pi	ghcr.io/hazyforge/anvil-agent-run-pi@sha256:8888888888888888888888888888888888888888888888888888888888888888
 agy	ghcr.io/hazyforge/anvil-agent-run-agy@sha256:9999999999999999999999999999999999999999999999999999999999999999
+prime	ghcr.io/hazyforge/anvil-agent-run-prime@sha256:8888888888888888888888888888888888888888888888888888888888888888
 EOF
 
 "${source_root}/hack/pin-deploy-values-from-lock.sh" \
@@ -60,6 +62,8 @@ rg -q 'sha256:2222222222222222222222222222222222222222222222222222222222222222' 
 rg -q 'sha256:3333333333333333333333333333333333333333333333333333333333333333' "${deploy}" ||
 	fail "codex pin missing"
 rg -q 'install: true' "${deploy}" || fail "crds.install lost"
+
+rg -q '^  primeAgent: ghcr.io/hazyforge/anvil-agent-run-prime@sha256:8888888888888888888888888888888888888888888888888888888888888888$' "${deploy}" || fail "Prime image digest was not pinned"
 
 # Fake helm for deploy dry-run path
 mkdir -p "${tmp_dir}/bin"

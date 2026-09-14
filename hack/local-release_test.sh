@@ -24,6 +24,7 @@ hermes	ghcr.io/hazyforge/anvil-agent-run-hermes@sha256:5555555555555555555555555
 openclaw	ghcr.io/hazyforge/anvil-agent-run-openclaw@sha256:6666666666666666666666666666666666666666666666666666666666666666
 pi	ghcr.io/hazyforge/anvil-agent-run-pi@sha256:7777777777777777777777777777777777777777777777777777777777777777
 agy	ghcr.io/hazyforge/anvil-agent-run-agy@sha256:9999999999999999999999999999999999999999999999999999999999999999
+prime	ghcr.io/hazyforge/anvil-agent-run-prime@sha256:8888888888888888888888888888888888888888888888888888888888888888
 EOF
 : > "${tmp_dir}/dist/anvil-agents-9.8.7.tgz"
 
@@ -40,6 +41,7 @@ runnerImages:
   grokBuild: ghcr.io/hazyforge/anvil-agent-run-grok-build@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
   piAgent: ghcr.io/hazyforge/anvil-agent-run-pi@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
   agy: ghcr.io/hazyforge/anvil-agent-run-agy@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+  primeAgent: ghcr.io/hazyforge/anvil-agent-run-prime@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 crds:
   install: true
 EOF
@@ -56,6 +58,8 @@ for digest in 1111111111111111111111111111111111111111111111111111111111111111 \
 	7777777777777777777777777777777777777777777777777777777777777777; do
 	rg -q "${digest}" "${tmp_dir}/deploy.yaml" || fail "deploy values missing digest ${digest}"
 done
+
+rg -q '^  primeAgent: ghcr.io/hazyforge/anvil-agent-run-prime@sha256:8888888888888888888888888888888888888888888888888888888888888888$' "${tmp_dir}/deploy.yaml" || fail "Prime image digest was not pinned"
 
 tag_repo="${tmp_dir}/tag-repo"
 mkdir -p "${tag_repo}/hack"

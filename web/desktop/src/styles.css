@@ -646,6 +646,7 @@ a { color: var(--teal); text-decoration: none; }
 .remote-coordination { grid-column: 1 / -1; border: 0; padding: 0; font-size: 13px; }
 .remote-peer-options { display: flex; flex-wrap: wrap; gap: 12px; padding-top: 10px; }
 .remote-coordination input { margin-right: 8px; }
+.chat-location { display: flex; align-items: center; gap: 10px; margin: 0 0 16px; color: var(--text-dim); font-size: 13px; }
 
 /* Conversation text and live feedback should stay readable on a desktop. */
 .human-page:has(.remote-chat-layout) { max-width: 1200px; }

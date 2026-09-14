@@ -109,9 +109,16 @@ grep -q 'external-secrets.io' "${tmp_dir}/controller-rbac-external-secrets.yaml"
 helm template "${release}" "${chart}" \
   --set-string runnerImages.codex=registry.example/codex@sha256:abc \
   --set-string runnerImages.openCode=registry.example/opencode@sha256:def \
+  --set-string runnerImages.primeAgent=registry.example/prime@sha256:123 \
   --show-only templates/deployment.yaml >"${tmp_dir}/controller-runner-images.yaml"
 grep -Fq -- '--runner-image-codex=registry.example/codex@sha256:abc' "${tmp_dir}/controller-runner-images.yaml" || fail "configured runner image was not rendered"
 grep -Fq -- '--runner-image-opencode=registry.example/opencode@sha256:def' "${tmp_dir}/controller-runner-images.yaml" || fail "configured OpenCode runner image was not rendered"
+
+grep -Fq -- '--runner-image-prime-agent=registry.example/prime@sha256:123' "${tmp_dir}/controller-runner-images.yaml" || fail "configured Prime Agent runner image was not rendered"
+
+if helm template "${release}" "${chart}" --set-string runnerImages.primeAgent= >"${tmp_dir}/empty-prime-image.out" 2>&1; then
+  fail "chart accepted an empty Prime Agent runner image"
+fi
 
 helm template "${release}" "${chart}" "${api_args[@]}" >"${tmp_dir}/enabled.yaml"
 helm template "${release}" "${chart}" \

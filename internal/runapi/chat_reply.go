@@ -46,6 +46,32 @@ func extractChatReply(backend agents.AgentRunHarnessBackendKind, output string) 
 		structured = true
 		typ, name := replyString(event["type"]), replyString(event["event"])
 		switch backend {
+		case agents.AgentRunHarnessBackendPrimeAgent:
+			// Prime v0.9.4 JSON mode emits complete native message_end events.
+			// The last assistant completion owns the reply; tool-use preambles,
+			// thinking blocks, retries, and agent_end message copies do not.
+			if typ == "message_end" {
+				var message struct {
+					Role       string `json:"role"`
+					StopReason string `json:"stopReason"`
+					Content    []struct {
+						Type string `json:"type"`
+						Text string `json:"text"`
+					} `json:"content"`
+				}
+				if json.Unmarshal(event["message"], &message) == nil && message.Role == "assistant" {
+					final = ""
+					if message.StopReason == "stop" || message.StopReason == "length" {
+						var blocks []string
+						for _, block := range message.Content {
+							if block.Type == "text" {
+								blocks = append(blocks, block.Text)
+							}
+						}
+						final = strings.TrimSpace(strings.Join(blocks, "\n"))
+					}
+				}
+			}
 		case agents.AgentRunHarnessBackendCodex:
 			if typ == "item.completed" {
 				var item struct {
@@ -100,7 +126,7 @@ func extractChatReply(backend agents.AgentRunHarnessBackendKind, output string) 
 	if text := strings.TrimSpace(strings.Join(parts, "\n")); text != "" {
 		return text, nil
 	}
-	if !structured && backend != agents.AgentRunHarnessBackendCodex && backend != agents.AgentRunHarnessBackendAgy {
+	if !structured && backend != agents.AgentRunHarnessBackendCodex && backend != agents.AgentRunHarnessBackendAgy && backend != agents.AgentRunHarnessBackendPrimeAgent {
 		if text := strings.TrimSpace(strings.Join(plain, "\n")); text != "" {
 			return text, nil
 		}

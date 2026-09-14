@@ -19,6 +19,7 @@ function toolActivity(name: unknown, id: unknown): RunActivity {
   // Only a short tool name can enter the label. Never inspect arguments, paths,
   // command text, results, model reasoning, or status summary/detail fields.
   const safeName = typeof name === 'string' && /^[A-Za-z][A-Za-z0-9_.-]{0,47}$/.test(name) ? name : '';
+  if (safeName === 'ipython') return activity('Running Python', 'work', id);
   if (/^(read|read_file|readfile|view_file)$/i.test(safeName)) return activity('Reading files', 'work', id);
   if (/^(write|write_file)$/i.test(safeName)) return activity('Writing files', 'work', id);
   if (/^(edit|apply_patch)$/i.test(safeName)) return activity('Editing files', 'work', id);
@@ -82,6 +83,23 @@ export function activityFromLog(line: string): RunActivity | null {
       case 'poll': return activity('Checking for updates', 'work', 'status.poll');
       default: return null;
     }
+  }
+
+  // Prime Agent v0.9.4 native session events (docs/json.md). IPython's
+  // args/results can contain commands, credentials and model reasoning; only
+  // the observed public tool name is eligible for an activity label.
+  if (event.type === 'agent_start' || event.type === 'turn_start') return activity('Harness is working', 'work', event.id);
+  if (event.type === 'tool_execution_start') return toolActivity(event.toolName, event.toolCallId);
+  if (event.type === 'tool_execution_end') return activity(event.isError === true ? 'Tool reported an error' : 'Tool finished', event.isError === true ? 'error' : 'work', event.toolCallId);
+  if (event.type === 'message_update' || event.type === 'message_end') {
+    const message = record(event.message);
+    if (message.role !== 'assistant') return null;
+    if (event.type === 'message_end' && (message.stopReason === 'error' || message.stopReason === 'aborted')) return activity('Harness failed', 'error', message.id);
+    if (event.type === 'message_update' && record(event.assistantMessageEvent).type !== 'text_delta') return null;
+    if (Array.isArray(message.content) && message.content.some(block => record(block).type === 'text' && text(record(block).text))) {
+      return activity('Composing answer', 'reply', message.id);
+    }
+    return null;
   }
 
   // Codex JSONL lifecycle and public item types. Reasoning items are excluded.

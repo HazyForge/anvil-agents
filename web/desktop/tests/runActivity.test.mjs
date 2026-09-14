@@ -79,3 +79,16 @@ test('unknown logs, reasoning, tool results and malformed frames never become ac
     {type: 'unknown', text: 'secret'},
   ]) assert.equal(from(event), null);
 });
+
+test('Prime native IPython events expose tool activity but not Python or thought content', () => {
+  const start = {type: 'tool_execution_start', toolCallId: 'call_1', toolName: 'ipython', args: {code: 'private-code'}};
+  assert.equal(from(start).label, 'Using tool ipython');
+  assert.deepEqual(from(start), from({...start, args: {code: 'different-code'}}));
+  assert.equal(from({...start, type: 'tool_execution_end', isError: false, result: {text: 'secret'}}).label, 'Tool finished');
+  assert.equal(from({...start, type: 'tool_execution_end', isError: true, result: {text: 'secret'}}).label, 'Tool reported an error');
+  assert.equal(from({...start, type: 'tool_execution_update', partialResult: 'private'}), null);
+  assert.equal(from({type: 'message_update', assistantMessageEvent: {type: 'thinking_delta', delta: 'private'}, message: {role: 'assistant', content: [{type: 'text', text: 'earlier'}]}}), null);
+  assert.equal(from({type: 'message_update', assistantMessageEvent: {type: 'text_delta', delta: 'private'}, message: {role: 'assistant', content: [{type: 'text', text: 'private'}]}}).label, 'Composing answer');
+  assert.equal(from({type: 'message_end', message: {role: 'toolResult', content: [{type: 'text', text: 'private'}]}}), null);
+  assert.equal(from({type: 'message_end', message: {role: 'assistant', stopReason: 'error', errorMessage: 'private', content: []}}).label, 'Harness failed');
+});

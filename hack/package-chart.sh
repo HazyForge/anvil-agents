@@ -18,9 +18,9 @@ Usage:
 Options:
   --version VERSION  SemVer with or without a leading v, for example 0.1.1.
   --output DIR       Package destination. Default: ./dist.
-  --image-prefix     Registry/repository prefix for all eight images.
+  --image-prefix     Registry/repository prefix for all nine images.
                      Default: ghcr.io/hazyforge.
-  --image-lock FILE  Eight-image lock produced by publish-images.sh. When set,
+  --image-lock FILE  Nine-image lock produced by publish-images.sh. When set,
                      the packaged chart uses its immutable digest references.
   --source-revision  Expected 40- or 64-character source commit for the image
                      lock. Required when the matching local version tag is not
@@ -119,7 +119,7 @@ if [[ -n "${image_lock}" ]]; then
 				lock_platform="${value}"
 				;;
 			"") echo "image lock contains an empty row" >&2; exit 2 ;;
-			controller|codex|opencode|grok-build|hermes|openclaw|pi|agy)
+			controller|codex|opencode|grok-build|hermes|openclaw|pi|agy|prime)
 				[[ -z "${locked_refs[${key}]:-}" ]] || { echo "duplicate image lock component: ${key}" >&2; exit 2; }
 				locked_refs["${key}"]="${value}"
 				;;
@@ -153,8 +153,9 @@ if [[ -n "${image_lock}" ]]; then
 		[openclaw]=anvil-agent-run-openclaw
 		[pi]=anvil-agent-run-pi
 		[agy]=anvil-agent-run-agy
+		[prime]=anvil-agent-run-prime
 	)
-	for component in controller codex opencode grok-build hermes openclaw pi agy; do
+	for component in controller codex opencode grok-build hermes openclaw pi agy prime; do
 		ref="${locked_refs[${component}]:-}"
 		[[ "${ref}" == "${image_prefix}/${image_names[${component}]}"@sha256:* ]] || {
 			echo "image lock component ${component} does not match ${image_prefix}/${image_names[${component}]}" >&2
@@ -181,6 +182,7 @@ sed -i \
 	-e "s#grokBuild: anvil-agent-run-grok-build:dev#grokBuild: ${image_prefix}/anvil-agent-run-grok-build:v${version}#" \
 	-e "s#piAgent: anvil-agent-run-pi:dev#piAgent: ${image_prefix}/anvil-agent-run-pi:v${version}#" \
 	-e "s#agy: anvil-agent-run-agy:dev#agy: ${image_prefix}/anvil-agent-run-agy:v${version}#" \
+	-e "s#primeAgent: anvil-agent-run-prime:dev#primeAgent: ${image_prefix}/anvil-agent-run-prime:v${version}#" \
 	"${tmp_dir}/anvil-agents/values.yaml"
 
 if [[ -n "${image_lock}" ]]; then
@@ -193,6 +195,7 @@ if [[ -n "${image_lock}" ]]; then
 		-e "s#grokBuild: ${image_prefix}/anvil-agent-run-grok-build:v${version}#grokBuild: ${locked_refs[grok-build]}#" \
 		-e "s#piAgent: ${image_prefix}/anvil-agent-run-pi:v${version}#piAgent: ${locked_refs[pi]}#" \
 		-e "s#agy: ${image_prefix}/anvil-agent-run-agy:v${version}#agy: ${locked_refs[agy]}#" \
+		-e "s#primeAgent: ${image_prefix}/anvil-agent-run-prime:v${version}#primeAgent: ${locked_refs[prime]}#" \
 		"${tmp_dir}/anvil-agents/values.yaml"
 fi
 

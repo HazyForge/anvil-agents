@@ -50,6 +50,7 @@ const (
 	AgentRunHarnessBackendOpenClaw    AgentRunHarnessBackendKind = "openClaw"
 	AgentRunHarnessBackendGrokBuild   AgentRunHarnessBackendKind = "grokBuild"
 	AgentRunHarnessBackendPiAgent     AgentRunHarnessBackendKind = "piAgent"
+	AgentRunHarnessBackendPrimeAgent  AgentRunHarnessBackendKind = "primeAgent"
 	AgentRunHarnessBackendAgy         AgentRunHarnessBackendKind = "agy"
 	AgentRunHarnessBackendCustom      AgentRunHarnessBackendKind = "custom"
 )
@@ -396,6 +397,33 @@ type AgentRunPiBackendSpec struct {
 	AdditionalArgs []string `json:"additionalArgs,omitempty"`
 }
 
+type AgentRunPrimeBackendSpec struct {
+	// Provider selects the concrete Prime Agent provider name. Empty derives from
+	// modelProvider; authentication remains provider-native.
+	// +optional
+	Provider string `json:"provider,omitempty"`
+	// Model selects the Prime Agent model ID. Empty uses its native default.
+	// +optional
+	Model string `json:"model,omitempty"`
+	// Thinking selects Prime Agent's thinking level when the selected provider/model
+	// supports it. Empty uses its native default.
+	// +kubebuilder:validation:Enum=off;minimal;low;medium;high;xhigh;max
+	// +optional
+	Thinking string `json:"thinking,omitempty"`
+	// Mode selects Prime Agent output mode. Empty defaults to json for native
+	// public event streaming and persisted chat reply extraction.
+	// +kubebuilder:validation:Enum=text;json
+	// +optional
+	Mode string `json:"mode,omitempty"`
+	// NoSession runs Prime Agent with --no-session for fully ephemeral checks. Empty
+	// keeps Prime Agent sessions in the attached data volume.
+	// +optional
+	NoSession bool `json:"noSession,omitempty"`
+	// AdditionalArgs appends raw arguments to the Prime Agent command.
+	// +optional
+	AdditionalArgs []string `json:"additionalArgs,omitempty"`
+}
+
 type AgentRunAgyBackendSpec struct {
 	// Model selects the agy model ID, for example gemini-3.8-flash or
 	// claude-sonnet-4.6. Empty uses the adapter default.
@@ -424,7 +452,7 @@ type AgentRunCustomBackendSpec struct {
 
 type AgentRunHarnessBackendSpec struct {
 	// Kind selects the harness backend adapter.
-	// +kubebuilder:validation:Enum=codex;openCode;hermesAgent;openClaw;grokBuild;piAgent;agy;custom
+	// +kubebuilder:validation:Enum=codex;openCode;hermesAgent;openClaw;grokBuild;piAgent;primeAgent;agy;custom
 	// +optional
 	Kind AgentRunHarnessBackendKind `json:"kind,omitempty"`
 	// Image selects the agent container image. When empty, built-in backends use
@@ -476,6 +504,9 @@ type AgentRunHarnessBackendSpec struct {
 	// PiAgent configures the Pi coding agent adapter.
 	// +optional
 	PiAgent *AgentRunPiBackendSpec `json:"piAgent,omitempty"`
+	// PrimeAgent configures the Prime Agent Python/IPython runtime.
+	// +optional
+	PrimeAgent *AgentRunPrimeBackendSpec `json:"primeAgent,omitempty"`
 	// Agy configures the Antigravity (agy) agent CLI adapter.
 	// +optional
 	Agy *AgentRunAgyBackendSpec `json:"agy,omitempty"`

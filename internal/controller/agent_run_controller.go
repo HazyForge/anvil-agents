@@ -53,6 +53,7 @@ const (
 	agentRunDefaultOpenClawImage                   = "anvil-agent-run-openclaw:dev"
 	agentRunDefaultGrokBuildImage                  = "anvil-agent-run-grok-build:dev"
 	agentRunDefaultPiAgentImage                    = "anvil-agent-run-pi:dev"
+	agentRunDefaultPrimeAgentImage                 = "anvil-agent-run-prime:dev"
 	agentRunDefaultAgyImage                        = "anvil-agent-run-agy:dev"
 	agentRunDefaultGitHubAPIBaseURL                = "https://api.github.com"
 	agentRunRemoteSkillMaxBytes                    = 256 * 1024
@@ -60,43 +61,43 @@ const (
 	agentRunPodLogTailLines                  int64 = 10_000
 	agentRunPodLogMaxBytes                   int64 = 4 * 1024 * 1024
 
-	agentRunContainerName              = "agent"
-	agentRunPayloadVolume              = "agent-run-payload"
-	agentRunToolsVolume                = "agent-run-tools"
-	agentRunToolsMountPath             = "/opt/anvil/tools"
-	agentRunToolsDefaultFSGroup        = 10001
-	agentRunDataVolumePrefix           = "agent-data-"
-	agentRunSpiffeWorkloadAPIVolume    = "spiffe-workload-api"
-	agentRunSpiffeWorkloadAPIMountPath = "/spiffe-workload-api"
-	agentRunSpiffeWorkloadAPISocket    = "/spiffe-workload-api/spire-agent.sock"
-	agentRunSpiffeCSIDriver            = "csi.spiffe.io"
-	agentRunPayloadMountPath           = "/var/run/anvil-agent-run"
-	agentRunPromptFile                 = "prompt.md"
-	agentRunContextFile                = "source.json"
-	agentRunSkillFilePrefix            = "skill-"
-	agentRunToolFilePrefix             = "tool-"
-	agentRunStatusFile                 = "/tmp/anvil-agent-run-status/status.jsonl"
-	agentRunStatusLinePrefix           = "ANVIL_AGENT_RUN_STATUS_JSON="
-	agentRunPlatformRepository         = defaultPlatformRepository
-	agentRunPlatformRepositoryURL      = defaultPlatformRepositoryURL
-	agentRunLabel                      = "control.anvil.hazyforge.io/agent-run"
-	agentRunJobLabel                   = "control.anvil.hazyforge.io/agent-run-job"
-	agentRunLabelBackend               = "control.anvil.hazyforge.io/agent-run-backend"
-	agentRunLabelIntent                = "control.anvil.hazyforge.io/agent-run-intent"
-	agentRunLabelSourceKind            = "control.anvil.hazyforge.io/agent-run-source-kind"
-	agentRunLabelSourceName            = "control.anvil.hazyforge.io/agent-run-source-name"
-	agentRunLabelSpiffeWorkloadAPI     = "control.anvil.hazyforge.io/spiffe-workload-api"
-	agentRunLabelServiceAccount        = "control.anvil.hazyforge.io/agent-run-service-account"
-	agentRunAnnotationSourceUID        = "control.anvil.hazyforge.io/agent-run-source-uid"
-	agentRunAnnotationSourceHash       = "control.anvil.hazyforge.io/agent-run-source-hash"
-	agentRunAnnotationComposition      = "control.anvil.hazyforge.io/resolved-composition"
-	agentRunAnnotationRequestedTTL     = "control.anvil.hazyforge.io/requested-ttl-seconds-after-finished"
-	agentRunAnnotationPeerRun          = "control.anvil.hazyforge.io/peer-run"
-	agentRunAnnotationPeerOf           = "control.anvil.hazyforge.io/peer-of"
+	agentRunContainerName                = "agent"
+	agentRunPayloadVolume                = "agent-run-payload"
+	agentRunToolsVolume                  = "agent-run-tools"
+	agentRunToolsMountPath               = "/opt/anvil/tools"
+	agentRunToolsDefaultFSGroup          = 10001
+	agentRunDataVolumePrefix             = "agent-data-"
+	agentRunSpiffeWorkloadAPIVolume      = "spiffe-workload-api"
+	agentRunSpiffeWorkloadAPIMountPath   = "/spiffe-workload-api"
+	agentRunSpiffeWorkloadAPISocket      = "/spiffe-workload-api/spire-agent.sock"
+	agentRunSpiffeCSIDriver              = "csi.spiffe.io"
+	agentRunPayloadMountPath             = "/var/run/anvil-agent-run"
+	agentRunPromptFile                   = "prompt.md"
+	agentRunContextFile                  = "source.json"
+	agentRunSkillFilePrefix              = "skill-"
+	agentRunToolFilePrefix               = "tool-"
+	agentRunStatusFile                   = "/tmp/anvil-agent-run-status/status.jsonl"
+	agentRunStatusLinePrefix             = "ANVIL_AGENT_RUN_STATUS_JSON="
+	agentRunPlatformRepository           = defaultPlatformRepository
+	agentRunPlatformRepositoryURL        = defaultPlatformRepositoryURL
+	agentRunLabel                        = "control.anvil.hazyforge.io/agent-run"
+	agentRunJobLabel                     = "control.anvil.hazyforge.io/agent-run-job"
+	agentRunLabelBackend                 = "control.anvil.hazyforge.io/agent-run-backend"
+	agentRunLabelIntent                  = "control.anvil.hazyforge.io/agent-run-intent"
+	agentRunLabelSourceKind              = "control.anvil.hazyforge.io/agent-run-source-kind"
+	agentRunLabelSourceName              = "control.anvil.hazyforge.io/agent-run-source-name"
+	agentRunLabelSpiffeWorkloadAPI       = "control.anvil.hazyforge.io/spiffe-workload-api"
+	agentRunLabelServiceAccount          = "control.anvil.hazyforge.io/agent-run-service-account"
+	agentRunAnnotationSourceUID          = "control.anvil.hazyforge.io/agent-run-source-uid"
+	agentRunAnnotationSourceHash         = "control.anvil.hazyforge.io/agent-run-source-hash"
+	agentRunAnnotationComposition        = "control.anvil.hazyforge.io/resolved-composition"
+	agentRunAnnotationRequestedTTL       = "control.anvil.hazyforge.io/requested-ttl-seconds-after-finished"
+	agentRunAnnotationPeerRun            = "control.anvil.hazyforge.io/peer-run"
+	agentRunAnnotationPeerOf             = "control.anvil.hazyforge.io/peer-of"
 	agentRunAnnotationInterruptDuplicate = "control.anvil.hazyforge.io/interrupt-duplicate"
-	agentRunLabelPeerOf                = "control.anvil.hazyforge.io/peer-of"
-	agentRunDecisionRequestPeer        = "requestPeer"
-	agentRunDecisionInterruptDuplicate = "interruptDuplicate"
+	agentRunLabelPeerOf                  = "control.anvil.hazyforge.io/peer-of"
+	agentRunDecisionRequestPeer          = "requestPeer"
+	agentRunDecisionInterruptDuplicate   = "interruptDuplicate"
 )
 
 var agentRunSkillFileNameUnsafeChars = regexp.MustCompile(`[^A-Za-z0-9_.-]+`)
@@ -1773,6 +1774,26 @@ func (r *AgentRunReconciler) agentRunEnv(obj *controlv1alpha1.AgentRun, dataVolu
 			}
 		}
 	}
+	if agentRunBackendKind(obj) == controlv1alpha1.AgentRunHarnessBackendPrimeAgent {
+		primeAgent := obj.Spec.Harness.Backend.PrimeAgent
+		if primeAgent == nil {
+			primeAgent = &controlv1alpha1.AgentRunPrimeBackendSpec{}
+		}
+		env = append(env,
+			corev1.EnvVar{Name: "ANVIL_PRIME_MODEL_PROVIDER", Value: string(agentRunModelProvider(obj))},
+			corev1.EnvVar{Name: "ANVIL_PRIME_PROVIDER_AUTH_MODE", Value: string(agentRunProviderAuthMode(obj))},
+			corev1.EnvVar{Name: "ANVIL_PRIME_PROVIDER", Value: agentRunPrimeProvider(obj, primeAgent)},
+			corev1.EnvVar{Name: "ANVIL_PRIME_MODEL", Value: strings.TrimSpace(primeAgent.Model)},
+			corev1.EnvVar{Name: "ANVIL_PRIME_THINKING", Value: strings.TrimSpace(primeAgent.Thinking)},
+			corev1.EnvVar{Name: "ANVIL_PRIME_MODE", Value: strings.TrimSpace(primeAgent.Mode)},
+			corev1.EnvVar{Name: "ANVIL_PRIME_NO_SESSION", Value: strconv.FormatBool(primeAgent.NoSession)},
+		)
+		if len(primeAgent.AdditionalArgs) > 0 {
+			if raw, err := json.Marshal(primeAgent.AdditionalArgs); err == nil {
+				env = append(env, corev1.EnvVar{Name: "ANVIL_PRIME_ADDITIONAL_ARGS_JSON", Value: string(raw)})
+			}
+		}
+	}
 	if agentRunBackendKind(obj) == controlv1alpha1.AgentRunHarnessBackendAgy {
 		agy := obj.Spec.Harness.Backend.Agy
 		if agy == nil {
@@ -2613,6 +2634,7 @@ func agentRunMergeBackend(profile, run controlv1alpha1.AgentRunHarnessBackendSpe
 	out.OpenClaw = agentRunMergeOpenClawBackend(profile.OpenClaw, run.OpenClaw)
 	out.GrokBuild = agentRunMergeGrokBuildBackend(profile.GrokBuild, run.GrokBuild)
 	out.PiAgent = agentRunMergePiBackend(profile.PiAgent, run.PiAgent)
+	out.PrimeAgent = agentRunMergePrimeBackend(profile.PrimeAgent, run.PrimeAgent)
 	out.Agy = agentRunMergeAgyBackend(profile.Agy, run.Agy)
 	out.Custom = agentRunMergeCustomBackend(profile.Custom, run.Custom)
 	return out
@@ -2785,6 +2807,36 @@ func agentRunMergePiBackend(profile, run *controlv1alpha1.AgentRunPiBackendSpec)
 		return nil
 	}
 	out := &controlv1alpha1.AgentRunPiBackendSpec{}
+	if profile != nil {
+		out = profile.DeepCopy()
+	}
+	if run == nil {
+		return out
+	}
+	if strings.TrimSpace(run.Provider) != "" {
+		out.Provider = run.Provider
+	}
+	if strings.TrimSpace(run.Model) != "" {
+		out.Model = run.Model
+	}
+	if strings.TrimSpace(run.Thinking) != "" {
+		out.Thinking = run.Thinking
+	}
+	if strings.TrimSpace(run.Mode) != "" {
+		out.Mode = run.Mode
+	}
+	if run.NoSession {
+		out.NoSession = true
+	}
+	out.AdditionalArgs = append(out.AdditionalArgs, run.AdditionalArgs...)
+	return out
+}
+
+func agentRunMergePrimeBackend(profile, run *controlv1alpha1.AgentRunPrimeBackendSpec) *controlv1alpha1.AgentRunPrimeBackendSpec {
+	if profile == nil && run == nil {
+		return nil
+	}
+	out := &controlv1alpha1.AgentRunPrimeBackendSpec{}
 	if profile != nil {
 		out = profile.DeepCopy()
 	}
@@ -3467,6 +3519,11 @@ func (r *AgentRunReconciler) agentRunBlockingValidation(obj *controlv1alpha1.Age
 			return controlv1alpha1.AgentRunPhaseNeedsHuman, "PiAgentImageNotConfigured", "A Pi AgentRun container image is required."
 		}
 		return "", "", ""
+	case controlv1alpha1.AgentRunHarnessBackendPrimeAgent:
+		if strings.TrimSpace(r.agentRunImage(obj)) == "" {
+			return controlv1alpha1.AgentRunPhaseNeedsHuman, "PrimeAgentImageNotConfigured", "A Prime AgentRun container image is required."
+		}
+		return "", "", ""
 	case controlv1alpha1.AgentRunHarnessBackendAgy:
 		if strings.TrimSpace(r.agentRunImage(obj)) == "" {
 			return controlv1alpha1.AgentRunPhaseNeedsHuman, "AgyImageNotConfigured", "An Agy AgentRun container image is required."
@@ -3527,6 +3584,10 @@ func agentRunBackendModel(obj *controlv1alpha1.AgentRun) string {
 		if backend.PiAgent != nil {
 			return strings.TrimSpace(backend.PiAgent.Model)
 		}
+	case controlv1alpha1.AgentRunHarnessBackendPrimeAgent:
+		if backend.PrimeAgent != nil {
+			return strings.TrimSpace(backend.PrimeAgent.Model)
+		}
 	case controlv1alpha1.AgentRunHarnessBackendAgy:
 		if backend.Agy != nil {
 			return strings.TrimSpace(backend.Agy.Model)
@@ -3548,6 +3609,7 @@ func agentRunModelFromJob(job *batchv1.Job) string {
 		"ANVIL_OPENCLAW_MODEL",
 		"ANVIL_GROK_BUILD_MODEL",
 		"ANVIL_PI_MODEL",
+		"ANVIL_PRIME_MODEL",
 		"ANVIL_AGY_MODEL",
 	} {
 		if value := strings.TrimSpace(agentRunJobEnvValue(job, key)); value != "" {
@@ -3598,6 +3660,14 @@ func agentRunPiProvider(obj *controlv1alpha1.AgentRun, piAgent *controlv1alpha1.
 	return string(provider)
 }
 
+// Prime retains its native provider names instead of inheriting Pi auth aliases.
+func agentRunPrimeProvider(obj *controlv1alpha1.AgentRun, primeAgent *controlv1alpha1.AgentRunPrimeBackendSpec) string {
+	if primeAgent != nil && strings.TrimSpace(primeAgent.Provider) != "" {
+		return strings.TrimSpace(primeAgent.Provider)
+	}
+	return string(agentRunModelProvider(obj))
+}
+
 func agentRunIntent(obj *controlv1alpha1.AgentRun) controlv1alpha1.AgentRunIntent {
 	intent := obj.Spec.Harness.Intent
 	if strings.TrimSpace(string(intent)) == "" {
@@ -3634,6 +3704,8 @@ func agentRunImageWithOptions(obj *controlv1alpha1.AgentRun, options *Options) s
 		return strings.TrimSpace(options.GrokBuildRunnerImage)
 	case controlv1alpha1.AgentRunHarnessBackendPiAgent:
 		return strings.TrimSpace(options.PiAgentRunnerImage)
+	case controlv1alpha1.AgentRunHarnessBackendPrimeAgent:
+		return strings.TrimSpace(options.PrimeAgentRunnerImage)
 	case controlv1alpha1.AgentRunHarnessBackendAgy:
 		return strings.TrimSpace(options.AgyRunnerImage)
 	default:
