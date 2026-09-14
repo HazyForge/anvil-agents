@@ -20,7 +20,9 @@ source /opt/anvil-agent-run/lib/github-auth.sh
 anvil_configure_github_auth "$0" "$@"
 source /opt/anvil-agent-run/lib/repository-checkout.sh
 
-mkdir -p "$(dirname "${status_file}")" "${grok_build_home}/.grok" "${workdir}"
+# Status and workspace dirs are local. Do not mkdir the grok-build PVC here —
+# a stuck dual-volume peer-home must not block ANVIL_AGENT_RUN_START.
+mkdir -p "$(dirname "${status_file}")" "${workdir}"
 : > "${status_file}"
 export ANVIL_AGENT_RUN_STATUS_FILE="${status_file}"
 export ANVIL_AGENT_RUN_STATUS_LOG_PREFIX="${ANVIL_AGENT_RUN_STATUS_LOG_PREFIX:-ANVIL_AGENT_RUN_STATUS_JSON=}"
@@ -41,45 +43,57 @@ seed_grok_auth_home() {
 	local seed_file="${grok_build_home}/.anvil-grok-auth-seed-id"
 	local logout_file="${grok_build_home}/.anvil-grok-auth-logged-out"
 	local seed_id="${ANVIL_GROK_AUTH_SEED_ID:-${GROK_AUTH_SEED_ID:-}}"
-	local existing_seed=""
+	local seed_timeout=""
+	local seed_status=0
 
-	mkdir -p "${grok_home}"
-
-	if [[ -f "${logout_file}" ]]; then
-		echo "ANVIL_GROK_AUTH_LOGGED_OUT home=${grok_build_home}"
-		unset GROK_AUTH_JSON GROK_AUTH_SEED_ID ANVIL_GROK_AUTH_SEED_ID || true
-		return 0
-	fi
-
+	# Durable auth.json on the grok-build volume is used as-is. Skip all
+	# grok-build PVC I/O when there is nothing to seed so a stuck volume cannot
+	# block ANVIL_AGENT_RUN_START. Do not redirect HOME to /tmp.
 	if [[ -z "${GROK_AUTH_JSON:-}" ]]; then
 		return 0
 	fi
 
-	if [[ -f "${seed_file}" ]]; then
-		existing_seed="$(tr -d '[:space:]' < "${seed_file}" || true)"
-	fi
+	seed_timeout="$(anvil_github_auth_positive_seconds "${ANVIL_GROK_AUTH_SEED_TIMEOUT_SECONDS:-3}" 3 30)"
+	echo "ANVIL_GROK_AUTH_SEED_BEGIN home=${grok_build_home} timeoutSeconds=${seed_timeout}"
+	export GROK_AUTH_JSON
+	export GROK_BUILD_HOME="${grok_build_home}"
 
-	# Durable OAuth auth.json is authoritative. Reseed only when missing, or when
-	# the operator deliberately changes the opaque seed id after reauth.
-	if [[ -f "${auth_file}" ]]; then
-		if [[ -z "${seed_id}" || -z "${existing_seed}" || "${seed_id}" == "${existing_seed}" ]]; then
-			unset GROK_AUTH_JSON GROK_AUTH_SEED_ID ANVIL_GROK_AUTH_SEED_ID || true
-			return 0
+	anvil_run_bounded_detach "${seed_timeout}" bash -c '
+		set -euo pipefail
+		grok_home="$1"
+		auth_file="$2"
+		seed_file="$3"
+		logout_file="$4"
+		seed_id="$5"
+		mkdir -p "${grok_home}"
+		if [[ -f "${logout_file}" ]]; then
+			echo "ANVIL_GROK_AUTH_LOGGED_OUT home=${GROK_BUILD_HOME:-${grok_home}}"
+			exit 0
 		fi
-		echo "ANVIL_GROK_AUTH_RESEED reason=seed-id-changed home=${grok_build_home}"
-	else
-		echo "ANVIL_GROK_AUTH_SEED reason=missing-auth-json home=${grok_build_home}"
-	fi
-
-	umask 077
-	local tmp_file
-	tmp_file="$(mktemp "${grok_home}/.auth.json.XXXXXX")"
-	printf '%s' "${GROK_AUTH_JSON}" > "${tmp_file}"
-	chmod 600 "${tmp_file}"
-	mv "${tmp_file}" "${auth_file}"
-	if [[ -n "${seed_id}" ]]; then
-		printf '%s\n' "${seed_id}" > "${seed_file}"
-		chmod 600 "${seed_file}" >/dev/null 2>&1 || true
+		existing_seed=""
+		if [[ -f "${seed_file}" ]]; then
+			existing_seed="$(tr -d "[:space:]" < "${seed_file}" || true)"
+		fi
+		if [[ -f "${auth_file}" ]]; then
+			if [[ -z "${seed_id}" || -z "${existing_seed}" || "${seed_id}" == "${existing_seed}" ]]; then
+				exit 0
+			fi
+			echo "ANVIL_GROK_AUTH_RESEED reason=seed-id-changed home=${GROK_BUILD_HOME:-${grok_home}}"
+		else
+			echo "ANVIL_GROK_AUTH_SEED reason=missing-auth-json home=${GROK_BUILD_HOME:-${grok_home}}"
+		fi
+		umask 077
+		tmp_file="$(mktemp "${grok_home}/.auth.json.XXXXXX")"
+		printf "%s" "${GROK_AUTH_JSON}" > "${tmp_file}"
+		chmod 600 "${tmp_file}"
+		mv "${tmp_file}" "${auth_file}"
+		if [[ -n "${seed_id}" ]]; then
+			printf "%s\n" "${seed_id}" > "${seed_file}"
+			chmod 600 "${seed_file}" >/dev/null 2>&1 || true
+		fi
+	' bash "${grok_home}" "${auth_file}" "${seed_file}" "${logout_file}" "${seed_id}" || seed_status=$?
+	if [[ "${seed_status}" -ne 0 ]]; then
+		echo "ANVIL_GROK_AUTH_SEED_TIMEOUT home=${grok_build_home} timeoutSeconds=${seed_timeout} status=${seed_status}"
 	fi
 	unset GROK_AUTH_JSON GROK_AUTH_SEED_ID ANVIL_GROK_AUTH_SEED_ID || true
 }
@@ -87,9 +101,12 @@ seed_grok_auth_home() {
 seed_grok_auth_home
 
 cd "${workdir}"
-git config --global --add safe.directory "${workdir}" >/dev/null 2>&1 || true
-git config --global user.name "${ANVIL_AGENT_GIT_AUTHOR_NAME:-Anvil AgentRun}" >/dev/null 2>&1 || true
-git config --global user.email "${ANVIL_AGENT_GIT_AUTHOR_EMAIL:-agent-run@anvil-agents.invalid}" >/dev/null 2>&1 || true
+git_timeout="$(anvil_github_auth_positive_seconds "${ANVIL_GROK_GIT_CONFIG_TIMEOUT_SECONDS:-3}" 3 30)"
+anvil_run_bounded_detach "${git_timeout}" bash -c '
+	git config --global --add safe.directory "$1" >/dev/null 2>&1 || true
+	git config --global user.name "$2" >/dev/null 2>&1 || true
+	git config --global user.email "$3" >/dev/null 2>&1 || true
+' bash "${workdir}" "${ANVIL_AGENT_GIT_AUTHOR_NAME:-Anvil AgentRun}" "${ANVIL_AGENT_GIT_AUTHOR_EMAIL:-agent-run@anvil-agents.invalid}" || true
 
 workspace_empty() {
 	[[ -z "$(find . -mindepth 1 -maxdepth 1 -print -quit)" ]]

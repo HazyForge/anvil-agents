@@ -22,3 +22,7 @@ OAuth consent inside the Job. Credentials come from run-selected Secrets:
   (default `/opt/anvil/grok-build/.grok/auth.json`). Operators re-seed with
   `anvil-agentctl auth grok reauth --auth-file ~/.grok/auth.json`.
   `GROK_AUTH_JSON` only seeds when auth is missing or the seed id changes.
+  When `GROK_AUTH_JSON` is empty, `seed_grok_auth_home` does not touch the
+  grok-build volume. When a seed write is required, volume I/O is time-bounded
+  and fail-open so a stuck PVC cannot block `ANVIL_AGENT_RUN_START`. Do not set
+  `ANVIL_GROK_BUILD_HOME=/tmp` to skip this.

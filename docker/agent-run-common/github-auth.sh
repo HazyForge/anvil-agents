@@ -15,6 +15,77 @@ anvil_github_auth_clear_app_environment() {
 		ANVIL_GITHUB_HOST
 }
 
+anvil_github_auth_trim() {
+	local value="${1-}"
+	value="${value#"${value%%[![:space:]]*}"}"
+	value="${value%"${value##*[![:space:]]}"}"
+	printf '%s' "${value}"
+}
+
+# Bounded network/PVC helpers. Default stays well under a typical 8s /events poll
+# so ANVIL_AGENT_RUN_START can still appear after a skipped or timed-out bootstrap.
+anvil_github_auth_positive_seconds() {
+	local value="${1:-}"
+	local fallback="${2:-5}"
+	local max="${3:-30}"
+	if [[ ! "${value}" =~ ^[1-9][0-9]*$ ]] || ((value > max)); then
+		printf '%s' "${fallback}"
+		return 0
+	fi
+	printf '%s' "${value}"
+}
+
+anvil_github_auth_bootstrap_seconds() {
+	anvil_github_auth_positive_seconds "${ANVIL_AGENT_RUN_GITHUB_AUTH_TIMEOUT_SECONDS:-5}" 5 30
+}
+
+# Run COMMAND with a hard deadline. Prefer timeout(1). On timeout the status is 124.
+anvil_run_bounded() {
+	local duration="${1:-}"
+	shift
+	if [[ -z "${duration}" ]]; then
+		"$@"
+		return $?
+	fi
+	if command -v timeout >/dev/null 2>&1; then
+		timeout --signal=TERM --kill-after=2 "${duration}" "$@"
+		return $?
+	fi
+	"$@"
+}
+
+# Same deadline as anvil_run_bounded, but do not wait(1) after kill. An
+# uninterruptible grok-build PVC syscall must not block ANVIL_AGENT_RUN_START.
+anvil_run_bounded_detach() {
+	local duration="${1:-}"
+	shift
+	local pid=""
+	local waited=0
+	if [[ ! "${duration}" =~ ^[1-9][0-9]*$ ]]; then
+		"$@"
+		return $?
+	fi
+	"$@" &
+	pid=$!
+	while kill -0 "${pid}" 2>/dev/null; do
+		if ((waited >= duration)); then
+			kill -TERM "${pid}" 2>/dev/null || true
+			sleep 1
+			kill -KILL "${pid}" 2>/dev/null || true
+			return 124
+		fi
+		sleep 1
+		waited=$((waited + 1))
+	done
+	wait "${pid}"
+	return $?
+}
+
+anvil_github_auth_timeout_status() {
+	local status="${1:-0}"
+	[[ "${status}" -eq 124 || "${status}" -eq 137 || "${status}" -eq 28 ]]
+}
+
 anvil_github_auth_normalize_host() {
 	local github_host="${1:-}"
 	if [[ -z "${github_host}" || ! "${github_host}" =~ ^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?$ || "${github_host}" == *..* ]]; then
@@ -72,6 +143,9 @@ anvil_mint_github_app_token() {
 	local token=""
 	local expires_at=""
 	local expires_epoch=""
+	local http_timeout=""
+	local curl_status=0
+	http_timeout="$(anvil_github_auth_bootstrap_seconds)"
 
 	if [[ ! "${app_id}" =~ ^[1-9][0-9]*$ || ! "${installation_id}" =~ ^[1-9][0-9]*$ ]]; then
 		echo "AgentRun GitHub App IDs must be positive integers." >&2
@@ -153,16 +227,25 @@ anvil_mint_github_app_token() {
 	fi
 
 	# Feed the JWT header through curl's stdin configuration so it never appears
-	# in argv or the inherited process environment.
-	if ! response="$({
+	# in argv or the inherited process environment. Bound connect/transfer so a
+	# blackholed GitHub API cannot hang the runner before ANVIL_AGENT_RUN_START.
+	# Do not toggle errexit: a timeout return must remain catchable by the caller.
+	response="$({
 		printf '%s\n' 'silent'
 		printf '%s\n' 'show-error'
 		printf '%s\n' 'fail-with-body'
 		printf '%s\n' 'header = "Accept: application/vnd.github+json"'
 		printf '%s\n' 'header = "X-GitHub-Api-Version: 2022-11-28"'
+		printf 'connect-timeout = %s\n' "${http_timeout}"
+		printf 'max-time = %s\n' "${http_timeout}"
 		printf 'header = "Authorization: Bearer %s"\n' "${jwt}"
-	} | curl --config - --request POST --data-binary "${request_body}" "${api_url}/app/installations/${installation_id}/access_tokens")"; then
+	} | curl --config - --request POST --data-binary "${request_body}" "${api_url}/app/installations/${installation_id}/access_tokens")" || curl_status=$?
+	if [[ "${curl_status}" -ne 0 ]]; then
 		jwt=""
+		if anvil_github_auth_timeout_status "${curl_status}"; then
+			echo "ANVIL_AGENT_RUN_GITHUB_AUTH_TIMEOUT host=${github_host} command=mint timeoutSeconds=${http_timeout}"
+			return 124
+		fi
 		echo "AgentRun GitHub App installation-token request failed." >&2
 		return 1
 	fi
@@ -233,7 +316,11 @@ anvil_configure_github_token() {
 	local token="${1:-}"
 	local github_host="${2:-github.com}"
 	local config_root="${ANVIL_AGENT_RUN_GH_CONFIG_DIR:-/tmp/anvil-agent-run-gh}"
+	local bootstrap_seconds=""
+	local gh_status=0
+	local -a gh_cmd=(gh)
 
+	token="$(anvil_github_auth_trim "${token}")"
 	[[ -n "${token}" ]] || return 0
 	mkdir -p "${config_root}"
 	chmod 0700 "${config_root}"
@@ -241,19 +328,34 @@ anvil_configure_github_token() {
 	if [[ "${github_host}" != "github.com" ]]; then
 		export GH_HOST="${github_host}"
 	fi
+	bootstrap_seconds="$(anvil_github_auth_bootstrap_seconds)"
+	if command -v timeout >/dev/null 2>&1; then
+		gh_cmd=(timeout --signal=TERM --kill-after=2 "${bootstrap_seconds}" gh)
+	fi
 
 	# Agent tool sandboxes intentionally omit raw credential environment
 	# variables. gh keeps the scoped token only in its pod-local credential
 	# store so authenticated gh and git operations remain available.
-	if ! printf '%s\n' "${token}" \
+	echo "ANVIL_AGENT_RUN_GITHUB_AUTH_LOGIN host=${github_host} timeoutSeconds=${bootstrap_seconds}"
+	printf '%s\n' "${token}" \
 		| env -u GH_TOKEN -u GITHUB_TOKEN \
 			HOME="${HOME:-/tmp}" GH_CONFIG_DIR="${GH_CONFIG_DIR}" \
-			gh auth login --hostname "${github_host}" --git-protocol https --with-token \
-			>/dev/null 2>&1; then
+			"${gh_cmd[@]}" auth login --hostname "${github_host}" --git-protocol https --with-token \
+			>/dev/null 2>&1 || gh_status=$?
+	if [[ "${gh_status}" -ne 0 ]]; then
+		if anvil_github_auth_timeout_status "${gh_status}"; then
+			echo "ANVIL_AGENT_RUN_GITHUB_AUTH_TIMEOUT host=${github_host} command=login timeoutSeconds=${bootstrap_seconds}"
+			return 124
+		fi
 		echo "AgentRun GitHub credential bootstrap failed for ${github_host}." >&2
 		return 1
 	fi
-	if ! env -u GH_TOKEN -u GITHUB_TOKEN gh auth setup-git --hostname "${github_host}" --force >/dev/null 2>&1; then
+	env -u GH_TOKEN -u GITHUB_TOKEN "${gh_cmd[@]}" auth setup-git --hostname "${github_host}" --force >/dev/null 2>&1 || gh_status=$?
+	if [[ "${gh_status}" -ne 0 ]]; then
+		if anvil_github_auth_timeout_status "${gh_status}"; then
+			echo "ANVIL_AGENT_RUN_GITHUB_AUTH_TIMEOUT host=${github_host} command=setup-git timeoutSeconds=${bootstrap_seconds}"
+			return 124
+		fi
 		echo "AgentRun git credential-helper setup failed for ${github_host}." >&2
 		return 1
 	fi
@@ -273,6 +375,19 @@ anvil_configure_github_auth() {
 	local app_configured="false"
 	local minted_token=""
 	local timeout_seconds="${ANVIL_AGENT_RUN_TIMEOUT_SECONDS:-}"
+	local token_status=0
+
+	token="$(anvil_github_auth_trim "${token}")"
+	app_id="$(anvil_github_auth_trim "${app_id}")"
+	installation_id="$(anvil_github_auth_trim "${installation_id}")"
+	# PEM payloads keep interior and trailing newlines; only blank a whitespace-only key.
+	if [[ -z "$(anvil_github_auth_trim "${private_key}")" ]]; then
+		private_key=""
+	fi
+	repository="$(anvil_github_auth_trim "${repository}")"
+	repository_id="$(anvil_github_auth_trim "${repository_id}")"
+	permissions_json="$(anvil_github_auth_trim "${permissions_json}")"
+	github_host="$(anvil_github_auth_trim "${github_host}")"
 
 	if [[ -n "${app_id}" || -n "${installation_id}" || -n "${private_key}" || -n "${repository}" || -n "${repository_id}" || -n "${permissions_json}" ]]; then
 		app_configured="true"
@@ -286,31 +401,49 @@ anvil_configure_github_auth() {
 		return 1
 	}
 
+	if [[ -z "${token}" && "${app_configured}" != "true" ]]; then
+		echo "ANVIL_AGENT_RUN_GITHUB_AUTH_SKIPPED reason=empty-credentials host=${github_host}"
+		return 0
+	fi
 	if [[ -n "${token}" && "${app_configured}" == "true" ]]; then
 		echo "AgentRun GitHub auth must select either a static token or a GitHub App, not both." >&2
 		return 1
 	fi
 	if [[ -n "${token}" ]]; then
-		anvil_configure_github_token "${token}" "${github_host}"
+		anvil_configure_github_token "${token}" "${github_host}" || token_status=$?
 		token=""
+		if [[ "${token_status}" -ne 0 ]]; then
+			if anvil_github_auth_timeout_status "${token_status}"; then
+				anvil_github_auth_reexec_sanitized skipped "${github_host}" "${entrypoint}" "$@"
+			fi
+			return 1
+		fi
 		anvil_github_auth_reexec_sanitized static-token "${github_host}" "${entrypoint}" "$@"
 	fi
 	if [[ "${app_configured}" != "true" ]]; then
 		return 0
 	fi
 	if [[ -z "${app_id}" || -z "${installation_id}" || -z "${private_key}" || -z "${permissions_json}" ]]; then
-		echo "AgentRun GitHub App auth requires ID, installation ID, private key, repository scope, and explicit permissions." >&2
-		return 1
+		echo "ANVIL_AGENT_RUN_GITHUB_AUTH_SKIPPED reason=incomplete-github-app host=${github_host}"
+		return 0
 	fi
-	if ! minted_token="$(anvil_mint_github_app_token \
+	minted_token="$(anvil_mint_github_app_token \
 		"${app_id}" "${installation_id}" "${private_key}" \
-		"${repository}" "${repository_id}" "${permissions_json}" "${github_host}" "${timeout_seconds}")"; then
+		"${repository}" "${repository_id}" "${permissions_json}" "${github_host}" "${timeout_seconds}")" || token_status=$?
+	if [[ "${token_status}" -ne 0 ]]; then
 		private_key=""
+		if anvil_github_auth_timeout_status "${token_status}"; then
+			anvil_github_auth_reexec_sanitized skipped "${github_host}" "${entrypoint}" "$@"
+		fi
 		return 1
 	fi
 	private_key=""
-	if ! anvil_configure_github_token "${minted_token}" "${github_host}"; then
+	anvil_configure_github_token "${minted_token}" "${github_host}" || token_status=$?
+	if [[ "${token_status}" -ne 0 ]]; then
 		minted_token=""
+		if anvil_github_auth_timeout_status "${token_status}"; then
+			anvil_github_auth_reexec_sanitized skipped "${github_host}" "${entrypoint}" "$@"
+		fi
 		return 1
 	fi
 	minted_token=""
