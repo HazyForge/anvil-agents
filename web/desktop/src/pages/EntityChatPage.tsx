@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
+import type { ChatChip } from "../api/types.chat";
 import type { UIConfig } from "../auth/config";
 import { loadNamespace } from "../state/namespace";
-import { loadManagerHarnessHistory, streamDesktopChat } from "../wrapper/harnessChat";
+import { loadManagerHarnessHistory, streamDesktopChat, type HarnessChatLine } from "../wrapper/harnessChat";
 import { formatTurnError } from "../wrapper/turn";
 
 interface Props {
@@ -9,19 +10,13 @@ interface Props {
   config: UIConfig;
 }
 
-type ChatLine = {
-  id: string;
-  kind: "user" | "harness" | "honest";
-  content: string;
-};
-
 export function EntityChatPage({ token, config }: Props) {
   const fallbackNs = config.defaultNamespaces[0] || "agents";
   const [namespace] = useState(() => loadNamespace(fallbackNs));
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [lines, setLines] = useState<ChatLine[]>([]);
+  const [lines, setLines] = useState<HarnessChatLine[]>([]);
   const endRef = useRef<HTMLDivElement | null>(null);
 
   const canSend = Boolean(token);
@@ -59,18 +54,27 @@ export function EntityChatPage({ token, config }: Props) {
     const replyId = `reply-${Date.now()}`;
     setLines((prev) => [...prev, { id: `user-${Date.now()}`, kind: "user", content: text }]);
     try {
+      const activeChips: ChatChip[] = [];
       const result = await streamDesktopChat({
         token,
         namespace,
         text,
+        onChips: (chips) => {
+          activeChips.push(...chips);
+          setLines((prev) =>
+            prev.map((line) =>
+              line.id === replyId ? { ...line, chips: [...activeChips] } : line,
+            ),
+          );
+        },
         onDelta: (chunk) => {
           setLines((prev) => {
             const existing = prev.find((line) => line.id === replyId);
             if (!existing) {
-              return [...prev, { id: replyId, kind: "harness", content: chunk }];
+              return [...prev, { id: replyId, kind: "harness", content: chunk, chips: [...activeChips] }];
             }
             return prev.map((line) =>
-              line.id === replyId ? { ...line, kind: "harness", content: line.content + chunk } : line,
+              line.id === replyId ? { ...line, kind: "harness", content: line.content + chunk, chips: [...activeChips] } : line,
             );
           });
         },
@@ -80,7 +84,13 @@ export function EntityChatPage({ token, config }: Props) {
         if (existing) {
           return prev.map((line) =>
             line.id === replyId
-              ? { ...line, kind: result.source === "harness" ? "harness" : "honest", content: result.text }
+              ? {
+                  ...line,
+                  kind: result.source === "harness" ? "harness" : "honest",
+                  content: result.text,
+                  chips: result.chips || activeChips,
+                  targetAgent: result.targetAgent,
+                }
               : line,
           );
         }
@@ -90,6 +100,8 @@ export function EntityChatPage({ token, config }: Props) {
             id: replyId,
             kind: result.source === "harness" ? "harness" : "honest",
             content: result.text,
+            chips: result.chips || activeChips,
+            targetAgent: result.targetAgent,
           },
         ];
       });
@@ -136,7 +148,22 @@ export function EntityChatPage({ token, config }: Props) {
                 <span className="chat-bubble-role">
                   {line.kind === "user" ? "You" : line.kind === "harness" ? "Manager" : "Desktop"}
                 </span>
+                {line.targetAgent ? (
+                  <span className="chat-target-indicator">To: {line.targetAgent}</span>
+                ) : null}
               </header>
+              {line.chips && line.chips.length > 0 ? (
+                <div className="chat-chips-container">
+                  {line.chips.map((chip) => (
+                    <span
+                      key={chip.id}
+                      className={`chat-chip chat-chip-${chip.type} ${chip.status ? `chat-chip-status-${chip.status}` : ""}`}
+                    >
+                      {chip.label}
+                    </span>
+                  ))}
+                </div>
+              ) : null}
               <pre className="chat-bubble-body">{line.content}</pre>
             </article>
           ))}

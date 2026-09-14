@@ -557,6 +557,63 @@ a { color: var(--teal); text-decoration: none; }
   background: rgba(255, 92, 92, 0.08);
 }
 .cr-status-fields { gap: 0.4rem; }
+
+.chat-target-indicator {
+  font-size: 0.68rem;
+  padding: 0.1rem 0.35rem;
+  background: rgba(61, 224, 197, 0.15);
+  color: var(--teal);
+  border: 1px solid rgba(61, 224, 197, 0.35);
+  border-radius: var(--radius);
+  font-family: var(--font-mono);
+  margin-left: auto;
+}
+
+.chat-chips-container {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin: 0.25rem 0 0.5rem;
+}
+
+.chat-chip {
+  font-size: 0.68rem;
+  padding: 0.12rem 0.4rem;
+  border-radius: var(--radius);
+  font-family: var(--font-mono);
+  border: 1px solid var(--border);
+  background: var(--bg-panel-2);
+  color: var(--text-dim);
+}
+
+.chat-chip-routing {
+  border-color: rgba(61, 255, 168, 0.4);
+  color: var(--emerald);
+  background: rgba(61, 255, 168, 0.08);
+}
+
+.chat-chip-target {
+  border-color: rgba(61, 224, 197, 0.4);
+  color: var(--teal);
+  background: rgba(61, 224, 197, 0.08);
+}
+
+.chat-chip-lifecycle {
+  border-color: rgba(240, 180, 41, 0.4);
+  color: var(--amber);
+  background: rgba(240, 180, 41, 0.08);
+}
+
+.chat-chip-status-dispatched {
+  border-color: rgba(106, 169, 255, 0.4);
+  color: var(--blue);
+}
+
+.chat-chip-status-running {
+  border-color: rgba(61, 255, 168, 0.5);
+  color: var(--emerald);
+}
+
 .cr-status-error {
   font-family: var(--font-mono);
   font-size: 0.72rem;

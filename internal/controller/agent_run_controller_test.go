@@ -2015,6 +2015,47 @@ func TestAgentRunBackendProviderAndGrokBuildEnv(t *testing.T) {
 			}
 		}
 	})
+
+	t.Run("agy backend", func(t *testing.T) {
+		t.Parallel()
+
+		run := &controlv1alpha1.AgentRun{
+			ObjectMeta: metav1.ObjectMeta{Name: "agy-run", Namespace: "default"},
+			Spec: controlv1alpha1.AgentRunSpec{
+				Harness: controlv1alpha1.AgentRunHarnessSpec{
+					Backend: controlv1alpha1.AgentRunHarnessBackendSpec{
+						Kind: controlv1alpha1.AgentRunHarnessBackendAgy,
+						Agy: &controlv1alpha1.AgentRunAgyBackendSpec{
+							Model:          "gemini-3.8-flash",
+							Mode:           "stream-json",
+							Thinking:       "high",
+							AdditionalArgs: []string{"--temperature", "0.2"},
+						},
+					},
+				},
+			},
+		}
+
+		if got, want := agentRunImage(run), agentRunDefaultAgyImage; got != want {
+			t.Fatalf("Agy image = %q, want %q", got, want)
+		}
+		job := agentRunJob(run, "agy-harness", "agy-context", nil)
+		env := map[string]string{}
+		for _, item := range job.Spec.Template.Spec.Containers[0].Env {
+			env[item.Name] = item.Value
+		}
+		expected := map[string]string{
+			"ANVIL_AGY_MODEL":                "gemini-3.8-flash",
+			"ANVIL_AGY_MODE":                 "stream-json",
+			"ANVIL_AGY_THINKING":             "high",
+			"ANVIL_AGY_ADDITIONAL_ARGS_JSON": `["--temperature","0.2"]`,
+		}
+		for key, want := range expected {
+			if got := env[key]; got != want {
+				t.Fatalf("env[%s] = %q, want %q", key, got, want)
+			}
+		}
+	})
 }
 
 func TestAgentRunImageUsesConfiguredBackendDefault(t *testing.T) {
@@ -2027,6 +2068,7 @@ func TestAgentRunImageUsesConfiguredBackendDefault(t *testing.T) {
 	}}
 	reconciler := &AgentRunReconciler{CommonReconcilerOptions: CommonReconcilerOptions{Options: &Options{
 		CodexRunnerImage: "registry.example/agents/codex@sha256:configured",
+		AgyRunnerImage:   "registry.example/agents/agy@sha256:configured",
 	}}}
 	if got, want := reconciler.agentRunImage(run), "registry.example/agents/codex@sha256:configured"; got != want {
 		t.Fatalf("configured Codex image = %q, want %q", got, want)
@@ -2034,6 +2076,24 @@ func TestAgentRunImageUsesConfiguredBackendDefault(t *testing.T) {
 	run.Spec.Harness.Backend.Image = "registry.example/agents/codex@sha256:run-specific"
 	if got, want := reconciler.agentRunImage(run), "registry.example/agents/codex@sha256:run-specific"; got != want {
 		t.Fatalf("run-specific Codex image = %q, want %q", got, want)
+	}
+
+	agyRun := &controlv1alpha1.AgentRun{Spec: controlv1alpha1.AgentRunSpec{
+		SourceRef: controlv1alpha1.AgentRunSourceRef{Kind: "Manual", Name: "operator"},
+		Harness: controlv1alpha1.AgentRunHarnessSpec{
+			Backend: controlv1alpha1.AgentRunHarnessBackendSpec{Kind: controlv1alpha1.AgentRunHarnessBackendAgy},
+		},
+	}}
+	if got, want := reconciler.agentRunImage(agyRun), "registry.example/agents/agy@sha256:configured"; got != want {
+		t.Fatalf("configured Agy image = %q, want %q", got, want)
+	}
+	if phase, reason, msg := reconciler.agentRunBlockingValidation(agyRun); phase != "" || reason != "" || msg != "" {
+		t.Fatalf("validation with configured Agy image returned (%q, %q, %q), want valid", phase, reason, msg)
+	}
+
+	emptyReconciler := &AgentRunReconciler{CommonReconcilerOptions: CommonReconcilerOptions{Options: &Options{}}}
+	if phase, reason, _ := emptyReconciler.agentRunBlockingValidation(agyRun); phase != controlv1alpha1.AgentRunPhaseNeedsHuman || reason != "AgyImageNotConfigured" {
+		t.Fatalf("validation without configured Agy image = (%q, %q), want NeedsHuman/AgyImageNotConfigured", phase, reason)
 	}
 }
 
@@ -2194,6 +2254,47 @@ func TestAgentRunMergeBackendMergesPiAgent(t *testing.T) {
 	}
 }
 
+func TestAgentRunMergeBackendMergesAgy(t *testing.T) {
+	t.Parallel()
+
+	profile := controlv1alpha1.AgentRunHarnessBackendSpec{
+		Kind: controlv1alpha1.AgentRunHarnessBackendAgy,
+		Agy: &controlv1alpha1.AgentRunAgyBackendSpec{
+			Model:          "gemini-3.8-flash",
+			Thinking:       "medium",
+			Mode:           "print",
+			AdditionalArgs: []string{"--temperature", "0.5"},
+		},
+	}
+	run := controlv1alpha1.AgentRunHarnessBackendSpec{
+		Agy: &controlv1alpha1.AgentRunAgyBackendSpec{
+			Model:          "claude-sonnet-4.6",
+			Thinking:       "high",
+			AdditionalArgs: []string{"--top-p", "0.9"},
+		},
+	}
+
+	merged := agentRunMergeBackend(profile, run)
+	if got, want := merged.Kind, controlv1alpha1.AgentRunHarnessBackendAgy; got != want {
+		t.Fatalf("kind = %q, want %q", got, want)
+	}
+	if merged.Agy == nil {
+		t.Fatal("Agy backend was not merged")
+	}
+	if got, want := merged.Agy.Model, "claude-sonnet-4.6"; got != want {
+		t.Fatalf("Agy model = %q, want %q", got, want)
+	}
+	if got, want := merged.Agy.Thinking, "high"; got != want {
+		t.Fatalf("Agy thinking = %q, want %q", got, want)
+	}
+	if got, want := merged.Agy.Mode, "print"; got != want {
+		t.Fatalf("Agy mode = %q, want %q", got, want)
+	}
+	if got, want := strings.Join(merged.Agy.AdditionalArgs, ","), "--temperature,0.5,--top-p,0.9"; got != want {
+		t.Fatalf("Agy additional args = %q, want %q", got, want)
+	}
+}
+
 func TestAgentDataVolumeMountPathDefaultsForAgentBackends(t *testing.T) {
 	t.Parallel()
 
@@ -2205,6 +2306,7 @@ func TestAgentDataVolumeMountPathDefaultsForAgentBackends(t *testing.T) {
 		{name: "grok build", backend: controlv1alpha1.AgentRunHarnessBackendGrokBuild, want: "/opt/anvil/grok-build"},
 		{name: "opencode", backend: controlv1alpha1.AgentRunHarnessBackendOpenCode, want: "/opt/anvil/opencode"},
 		{name: "pi agent", backend: controlv1alpha1.AgentRunHarnessBackendPiAgent, want: "/opt/anvil/pi"},
+		{name: "agy", backend: controlv1alpha1.AgentRunHarnessBackendAgy, want: "/opt/anvil/agy"},
 	}
 	for _, tc := range cases {
 		tc := tc

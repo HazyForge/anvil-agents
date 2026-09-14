@@ -8,11 +8,11 @@ platform="linux/amd64"
 output=""
 verify_lock=""
 
-components=(controller codex opencode grok-build hermes openclaw pi)
+components=(controller codex opencode grok-build hermes openclaw pi agy)
 
 usage() {
 	cat <<'EOF'
-Publish and verify one immutable seven-image Anvil Agents release.
+Publish and verify one immutable eight-image Anvil Agents release.
 
 Usage:
   ./hack/publish-images.sh --prefix REGISTRY/PATH --version vX.Y.Z [options]
@@ -47,6 +47,7 @@ image_name() {
 		hermes) printf '%s\n' anvil-agent-run-hermes ;;
 		openclaw) printf '%s\n' anvil-agent-run-openclaw ;;
 		pi) printf '%s\n' anvil-agent-run-pi ;;
+		agy) printf '%s\n' anvil-agent-run-agy ;;
 		*) return 1 ;;
 	esac
 }
@@ -109,7 +110,7 @@ read_lock() {
 				;;
 			source-revision) lock_revision="${value}" ;;
 			platform) lock_platform="${value}" ;;
-			controller|codex|opencode|grok-build|hermes|openclaw|pi)
+			controller|codex|opencode|grok-build|hermes|openclaw|pi|agy)
 				[[ -z "${locked_refs[${key}]:-}" ]] || { echo "duplicate image lock component: ${key}" >&2; exit 2; }
 				locked_refs["${key}"]="${value}"
 				;;

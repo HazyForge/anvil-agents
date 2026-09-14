@@ -412,6 +412,34 @@ spec:
                           backend:
                             description: Backend selects the swappable harness adapter.
                             properties:
+                              agy:
+                                description: Agy configures the Antigravity (agy)
+                                  agent CLI adapter.
+                                properties:
+                                  additionalArgs:
+                                    description: AdditionalArgs appends raw arguments
+                                      to the agy command.
+                                    items:
+                                      type: string
+                                    type: array
+                                  mode:
+                                    description: Mode selects agy output or execution
+                                      mode.
+                                    enum:
+                                    - print
+                                    - stream-json
+                                    - text
+                                    type: string
+                                  model:
+                                    description: |-
+                                      Model selects the agy model ID, for example gemini-3.8-flash or
+                                      claude-sonnet-4.6. Empty uses the adapter default.
+                                    type: string
+                                  thinking:
+                                    description: Thinking selects agy thinking level
+                                      when supported.
+                                    type: string
+                                type: object
                               codex:
                                 description: Codex configures the first proof-of-concept
                                   backend.
@@ -576,6 +604,7 @@ spec:
                                 - openClaw
                                 - grokBuild
                                 - piAgent
+                                - agy
                                 - custom
                                 type: string
                               modelProvider:
@@ -3876,6 +3905,34 @@ spec:
                             backend:
                               description: Backend selects the swappable harness adapter.
                               properties:
+                                agy:
+                                  description: Agy configures the Antigravity (agy)
+                                    agent CLI adapter.
+                                  properties:
+                                    additionalArgs:
+                                      description: AdditionalArgs appends raw arguments
+                                        to the agy command.
+                                      items:
+                                        type: string
+                                      type: array
+                                    mode:
+                                      description: Mode selects agy output or execution
+                                        mode.
+                                      enum:
+                                      - print
+                                      - stream-json
+                                      - text
+                                      type: string
+                                    model:
+                                      description: |-
+                                        Model selects the agy model ID, for example gemini-3.8-flash or
+                                        claude-sonnet-4.6. Empty uses the adapter default.
+                                      type: string
+                                    thinking:
+                                      description: Thinking selects agy thinking level
+                                        when supported.
+                                      type: string
+                                  type: object
                                 codex:
                                   description: Codex configures the first proof-of-concept
                                     backend.
@@ -4040,6 +4097,7 @@ spec:
                                   - openClaw
                                   - grokBuild
                                   - piAgent
+                                  - agy
                                   - custom
                                   type: string
                                 modelProvider:
@@ -7122,6 +7180,7 @@ spec:
                     - openClaw
                     - grokBuild
                     - piAgent
+                    - agy
                     - custom
                     type: string
                   name:
@@ -7510,6 +7569,7 @@ spec:
                 - openClaw
                 - grokBuild
                 - piAgent
+                - agy
                 - custom
                 type: string
               claimName:
@@ -7956,6 +8016,31 @@ spec:
                 description: Backend selects and configures the harness adapter and
                   image.
                 properties:
+                  agy:
+                    description: Agy configures the Antigravity (agy) agent CLI adapter.
+                    properties:
+                      additionalArgs:
+                        description: AdditionalArgs appends raw arguments to the agy
+                          command.
+                        items:
+                          type: string
+                        type: array
+                      mode:
+                        description: Mode selects agy output or execution mode.
+                        enum:
+                        - print
+                        - stream-json
+                        - text
+                        type: string
+                      model:
+                        description: |-
+                          Model selects the agy model ID, for example gemini-3.8-flash or
+                          claude-sonnet-4.6. Empty uses the adapter default.
+                        type: string
+                      thinking:
+                        description: Thinking selects agy thinking level when supported.
+                        type: string
+                    type: object
                   codex:
                     description: Codex configures the first proof-of-concept backend.
                     properties:
@@ -8117,6 +8202,7 @@ spec:
                     - openClaw
                     - grokBuild
                     - piAgent
+                    - agy
                     - custom
                     type: string
                   modelProvider:
@@ -10413,6 +10499,33 @@ spec:
                   backend:
                     description: Backend selects the swappable harness adapter.
                     properties:
+                      agy:
+                        description: Agy configures the Antigravity (agy) agent CLI
+                          adapter.
+                        properties:
+                          additionalArgs:
+                            description: AdditionalArgs appends raw arguments to the
+                              agy command.
+                            items:
+                              type: string
+                            type: array
+                          mode:
+                            description: Mode selects agy output or execution mode.
+                            enum:
+                            - print
+                            - stream-json
+                            - text
+                            type: string
+                          model:
+                            description: |-
+                              Model selects the agy model ID, for example gemini-3.8-flash or
+                              claude-sonnet-4.6. Empty uses the adapter default.
+                            type: string
+                          thinking:
+                            description: Thinking selects agy thinking level when
+                              supported.
+                            type: string
+                        type: object
                       codex:
                         description: Codex configures the first proof-of-concept backend.
                         properties:
@@ -10575,6 +10688,7 @@ spec:
                         - openClaw
                         - grokBuild
                         - piAgent
+                        - agy
                         - custom
                         type: string
                       modelProvider:
@@ -13226,6 +13340,33 @@ spec:
                   backend:
                     description: Backend selects the swappable harness adapter.
                     properties:
+                      agy:
+                        description: Agy configures the Antigravity (agy) agent CLI
+                          adapter.
+                        properties:
+                          additionalArgs:
+                            description: AdditionalArgs appends raw arguments to the
+                              agy command.
+                            items:
+                              type: string
+                            type: array
+                          mode:
+                            description: Mode selects agy output or execution mode.
+                            enum:
+                            - print
+                            - stream-json
+                            - text
+                            type: string
+                          model:
+                            description: |-
+                              Model selects the agy model ID, for example gemini-3.8-flash or
+                              claude-sonnet-4.6. Empty uses the adapter default.
+                            type: string
+                          thinking:
+                            description: Thinking selects agy thinking level when
+                              supported.
+                            type: string
+                        type: object
                       codex:
                         description: Codex configures the first proof-of-concept backend.
                         properties:
@@ -13388,6 +13529,7 @@ spec:
                         - openClaw
                         - grokBuild
                         - piAgent
+                        - agy
                         - custom
                         type: string
                       modelProvider:
@@ -16642,6 +16784,34 @@ spec:
                       backend:
                         description: Backend selects the swappable harness adapter.
                         properties:
+                          agy:
+                            description: Agy configures the Antigravity (agy) agent
+                              CLI adapter.
+                            properties:
+                              additionalArgs:
+                                description: AdditionalArgs appends raw arguments
+                                  to the agy command.
+                                items:
+                                  type: string
+                                type: array
+                              mode:
+                                description: Mode selects agy output or execution
+                                  mode.
+                                enum:
+                                - print
+                                - stream-json
+                                - text
+                                type: string
+                              model:
+                                description: |-
+                                  Model selects the agy model ID, for example gemini-3.8-flash or
+                                  claude-sonnet-4.6. Empty uses the adapter default.
+                                type: string
+                              thinking:
+                                description: Thinking selects agy thinking level when
+                                  supported.
+                                type: string
+                            type: object
                           codex:
                             description: Codex configures the first proof-of-concept
                               backend.
@@ -16805,6 +16975,7 @@ spec:
                             - openClaw
                             - grokBuild
                             - piAgent
+                            - agy
                             - custom
                             type: string
                           modelProvider:
@@ -19518,6 +19689,34 @@ spec:
                             backend:
                               description: Backend selects the swappable harness adapter.
                               properties:
+                                agy:
+                                  description: Agy configures the Antigravity (agy)
+                                    agent CLI adapter.
+                                  properties:
+                                    additionalArgs:
+                                      description: AdditionalArgs appends raw arguments
+                                        to the agy command.
+                                      items:
+                                        type: string
+                                      type: array
+                                    mode:
+                                      description: Mode selects agy output or execution
+                                        mode.
+                                      enum:
+                                      - print
+                                      - stream-json
+                                      - text
+                                      type: string
+                                    model:
+                                      description: |-
+                                        Model selects the agy model ID, for example gemini-3.8-flash or
+                                        claude-sonnet-4.6. Empty uses the adapter default.
+                                      type: string
+                                    thinking:
+                                      description: Thinking selects agy thinking level
+                                        when supported.
+                                      type: string
+                                  type: object
                                 codex:
                                   description: Codex configures the first proof-of-concept
                                     backend.
@@ -19682,6 +19881,7 @@ spec:
                                   - openClaw
                                   - grokBuild
                                   - piAgent
+                                  - agy
                                   - custom
                                   type: string
                                 modelProvider:

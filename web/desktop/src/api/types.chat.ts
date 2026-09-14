@@ -61,3 +61,38 @@ export type ListChatThreadsParams = {
   mode?: string;
   limit?: number;
 };
+
+export type ChatChipType = "routing" | "target" | "lifecycle" | "tool";
+
+export type ChatChipStatus = "dispatched" | "running" | "completed" | "failed" | "pending";
+
+export type ChatChip = {
+  id: string;
+  type: ChatChipType;
+  label: string;
+  detail?: string;
+  status?: ChatChipStatus;
+  targetAgent?: string;
+};
+
+export type ChatRoutingDecision = {
+  action: "delegate" | "startRun" | "steer" | "stop" | "directReply";
+  targetAgent?: string;
+  runName?: string;
+  transitionState?: string;
+};
+
+export type ChatToolCall = {
+  tool: string;
+  args?: Record<string, unknown>;
+  output?: string;
+};
+
+export type ChatMessageMetadata = {
+  chips?: ChatChip[];
+  routing?: ChatRoutingDecision;
+  targetAgent?: string;
+  transitionState?: string;
+  toolCalls?: ChatToolCall[];
+  [key: string]: unknown;
+};

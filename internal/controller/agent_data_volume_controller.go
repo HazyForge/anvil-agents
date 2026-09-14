@@ -517,6 +517,8 @@ func agentDataVolumeMountPath(obj *controlv1alpha1.AgentDataVolume) string {
 			return "/opt/anvil/grok-build"
 		case controlv1alpha1.AgentRunHarnessBackendPiAgent:
 			return "/opt/anvil/pi"
+		case controlv1alpha1.AgentRunHarnessBackendAgy:
+			return "/opt/anvil/agy"
 		}
 	}
 	return "/agent-state"

@@ -87,6 +87,7 @@ spec:
                 - openClaw
                 - grokBuild
                 - piAgent
+                - agy
                 - custom
                 type: string
               claimName:

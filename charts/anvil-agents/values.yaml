@@ -28,6 +28,7 @@ runnerImages:
   openClaw: anvil-agent-run-openclaw:dev
   grokBuild: anvil-agent-run-grok-build:dev
   piAgent: anvil-agent-run-pi:dev
+  agy: anvil-agent-run-agy:dev
 
 platformContext:
   repository: HazyForge/anvil-agents

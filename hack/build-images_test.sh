@@ -42,7 +42,7 @@ local_command="$(tail -n 1 "${FAKE_DOCKER_LOG}")"
 
 : > "${FAKE_DOCKER_LOG}"
 "${repo_root}/hack/build-images.sh" --check >/dev/null
-[[ "$(grep -c '^build --check ' "${FAKE_DOCKER_LOG}")" == "7" ]] || fail "all-image check did not inspect seven Dockerfiles"
+[[ "$(grep -c '^build --check ' "${FAKE_DOCKER_LOG}")" == "8" ]] || fail "all-image check did not inspect eight Dockerfiles"
 for dockerfile in \
 	Dockerfile \
 	docker/agent-run-codex/Dockerfile \
@@ -50,7 +50,8 @@ for dockerfile in \
 	docker/agent-run-grok-build/Dockerfile \
 	docker/agent-run-hermes/Dockerfile \
 	docker/agent-run-openclaw/Dockerfile \
-	docker/agent-run-pi/Dockerfile; do
+	docker/agent-run-pi/Dockerfile \
+	docker/agent-run-agy/Dockerfile; do
 	rg -q --fixed-strings -- "--file ${repo_root}/${dockerfile}" "${FAKE_DOCKER_LOG}" || fail "missing check for ${dockerfile}"
 done
 rg -q 'OPENCODE_LICENSE_SHA256=625f0f619133f89bbbb2abe37369613dfa1885eba1e50d02170deb62bb42cb6b' \

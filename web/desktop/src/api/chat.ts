@@ -137,6 +137,7 @@ export async function appendChatMessageStream(
   request: AppendChatMessageRequest,
   onDelta: (text: string) => void,
   signal?: AbortSignal,
+  onChips?: (chips: import("./types.chat").ChatChip[]) => void,
 ): Promise<ChatAppendResponse> {
   const response = await apiFetch(`${threadsPath(namespace, threadID)}/messages`, token, {
     method: "POST",
@@ -181,6 +182,38 @@ export async function appendChatMessageStream(
           }
           if (streamPayloadLooksLikeTool(payload) || /tool/i.test(parsed.event)) {
             sawTool = true;
+            if (isRecord(payload) && onChips) {
+              const toolName = String(payload.tool || payload.name || payload.toolName || "tool");
+              const chips: import("./types.chat").ChatChip[] = [];
+              if (toolName === "startSpecialistAgentRun" || toolName === "requestPeer") {
+                const target = String((payload.args as Record<string, unknown>)?.peerProfileName || (payload.args as Record<string, unknown>)?.profileName || (payload.args as Record<string, unknown>)?.specialist || "");
+                chips.push({
+                  id: `chip-route-${Date.now()}`,
+                  type: "routing",
+                  label: "Routing: Delegate",
+                  status: "dispatched",
+                  targetAgent: target || undefined,
+                });
+                if (target) {
+                  chips.push({
+                    id: `chip-target-${Date.now()}`,
+                    type: "target",
+                    label: `To: ${target}`,
+                    targetAgent: target,
+                  });
+                }
+              } else if (toolName === "interruptDuplicate" || toolName === "stopAgentRun") {
+                chips.push({
+                  id: `chip-stop-${Date.now()}`,
+                  type: "routing",
+                  label: "Routing: Interrupt",
+                  status: "running",
+                });
+              }
+              if (chips.length > 0) {
+                onChips(chips);
+              }
+            }
             continue;
           }
           const chunk = deltaTextFromPayload(payload);

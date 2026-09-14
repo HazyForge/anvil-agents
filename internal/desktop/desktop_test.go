@@ -44,6 +44,7 @@ func TestDiscoverFindsCatalogBinariesOnPATH(t *testing.T) {
 	writeExec(t, filepath.Join(dir, "codex"), "#!/bin/sh\necho 'codex-cli 0.42.0'\n")
 	writeExec(t, filepath.Join(dir, "grok"), "#!/bin/sh\necho 'grok 1.0.0'\n")
 	writeExec(t, filepath.Join(dir, "openclaw"), "#!/bin/sh\necho 'openclaw 0.9'\n")
+	writeExec(t, filepath.Join(dir, "agy"), "#!/bin/sh\necho 'agy 1.2.2'\n")
 
 	discoverer := Discoverer{
 		Path: dir,
@@ -56,7 +57,7 @@ func TestDiscoverFindsCatalogBinariesOnPATH(t *testing.T) {
 			present[item.ID] = item
 		}
 	}
-	for _, id := range []string{"codex", "grok", "openclaw"} {
+	for _, id := range []string{"codex", "grok", "openclaw", "agy"} {
 		item, ok := present[id]
 		if !ok {
 			t.Fatalf("expected %s to be present, got %#v", id, found)
@@ -380,6 +381,10 @@ while [ $# -gt 0 ]; do
 done
 cat "$file"
 `)
+	writeExec(t, filepath.Join(dir, "agy"), `#!/bin/sh
+if [ "$1" = "--version" ]; then echo "agy 1.2.2"; exit 0; fi
+cat
+`)
 	t.Setenv("AUTHORIZATION", "Bearer should-not-leak")
 	t.Setenv("KUBECONFIG", "/tmp/should-not-leak")
 
@@ -430,6 +435,20 @@ cat "$file"
 	}
 	if strings.TrimSpace(result.Stdout) != "from-file" {
 		t.Fatalf("grok stdout = %q", result.Stdout)
+	}
+
+	body = strings.NewReader(`{"harness":"agy","prompt":"hello-agy"}`)
+	req = httptest.NewRequest(http.MethodPost, "/local/v1/delegate", body)
+	rec = httptest.NewRecorder()
+	server.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("agy delegate HTTP %d %s", rec.Code, rec.Body.String())
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(result.Stdout, "hello-agy") {
+		t.Fatalf("agy stdout = %q", result.Stdout)
 	}
 
 	body = strings.NewReader(`{"harness":"kubectl","prompt":"nope"}`)

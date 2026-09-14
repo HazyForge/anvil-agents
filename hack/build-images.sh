@@ -14,7 +14,7 @@ tags=()
 cache_from=()
 cache_to=()
 
-all_components=(controller codex opencode grok-build hermes openclaw pi)
+all_components=(controller codex opencode grok-build hermes openclaw pi agy)
 
 usage() {
 	cat <<'EOF'
@@ -26,7 +26,7 @@ Usage:
 Options:
   --component NAME       Build one component; repeatable. Default: all.
                          Names: controller, codex, opencode, grok-build, hermes,
-                         openclaw, pi, all.
+                         openclaw, pi, agy, all.
   --prefix PREFIX        Image repository prefix, for example
                          ghcr.io/hazyforge. Default: local Docker names.
   --tag TAG              Image tag; repeatable. Default: dev.
@@ -66,6 +66,7 @@ image_name() {
 		hermes) printf '%s\n' "anvil-agent-run-hermes" ;;
 		openclaw) printf '%s\n' "anvil-agent-run-openclaw" ;;
 		pi) printf '%s\n' "anvil-agent-run-pi" ;;
+		agy) printf '%s\n' "anvil-agent-run-agy" ;;
 		*) return 1 ;;
 	esac
 }
@@ -79,6 +80,7 @@ dockerfile_path() {
 		hermes) printf '%s\n' "docker/agent-run-hermes/Dockerfile" ;;
 		openclaw) printf '%s\n' "docker/agent-run-openclaw/Dockerfile" ;;
 		pi) printf '%s\n' "docker/agent-run-pi/Dockerfile" ;;
+		agy) printf '%s\n' "docker/agent-run-agy/Dockerfile" ;;
 		*) return 1 ;;
 	esac
 }

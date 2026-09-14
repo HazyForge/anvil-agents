@@ -1,6 +1,6 @@
 import { appendChatMessageStream, getChatThread, listChatThreads } from "../api/chat";
 import { APIError, AUDITOR_GROK_PROFILE, DESKTOP_GROK_PEER_PROFILE } from "../api/client";
-import type { ChatMessage, ChatThread } from "../api/types.chat";
+import type { ChatChip, ChatMessage, ChatThread } from "../api/types.chat";
 import { formatTurnError } from "./turn";
 
 /** Always-on manager harness profiles. Dedicated grok-home — never auditor or desktop-grok-peer. */
@@ -22,12 +22,16 @@ export type HarnessChatLine = {
   id: string;
   kind: "user" | "harness" | "honest";
   content: string;
+  chips?: ChatChip[];
+  targetAgent?: string;
 };
 
 export type HarnessChatResult = {
   text: string;
   source: "harness" | "honest";
   threadId?: string;
+  chips?: ChatChip[];
+  targetAgent?: string;
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -77,12 +81,21 @@ function linesFromMessages(messages: ChatMessage[]): HarnessChatLine[] {
     if (!content || assistantLooksLikeTool(message)) {
       continue;
     }
+    const meta = (message.metadata || {}) as Record<string, unknown>;
+    const chips = (meta.chips as ChatChip[]) || [];
+    const target = typeof meta.targetAgent === "string" ? meta.targetAgent : undefined;
     if (message.role === "user") {
       out.push({ id: message.id || `user-${message.sequence}`, kind: "user", content });
       continue;
     }
     if (message.role === "assistant") {
-      out.push({ id: message.id || `harness-${message.sequence}`, kind: "harness", content });
+      out.push({
+        id: message.id || `harness-${message.sequence}`,
+        kind: "harness",
+        content,
+        chips: chips.length > 0 ? chips : undefined,
+        targetAgent: target,
+      });
     }
   }
   return out;
@@ -113,18 +126,25 @@ async function proxyManagerHarnessChat(opts: {
   namespace: string;
   text: string;
   onDelta?: (text: string) => void;
-}): Promise<{ text: string; threadId: string }> {
+  onChips?: (chips: ChatChip[]) => void;
+}): Promise<{ text: string; threadId: string; chips?: ChatChip[]; targetAgent?: string }> {
   const threads = await listChatThreads(opts.token, opts.namespace, { limit: 50 });
   const thread = pickManagerThread(threads);
   if (!thread) {
     throw new APIError(404, "harness_thread_missing", "no standing manager harness chat thread");
   }
+  const collectedChips: ChatChip[] = [];
   const posted = await appendChatMessageStream(
     opts.token,
     opts.namespace,
     thread.id,
     { content: opts.text },
     (chunk) => opts.onDelta?.(chunk),
+    undefined,
+    (chips) => {
+      collectedChips.push(...chips);
+      opts.onChips?.(chips);
+    },
   );
   if (assistantLooksLikeTool(posted.assistant)) {
     throw new APIError(
@@ -137,7 +157,14 @@ async function proxyManagerHarnessChat(opts: {
   if (!reply) {
     throw new APIError(502, "empty_assistant", "manager harness returned an empty assistant reply");
   }
-  return { text: reply, threadId: posted.thread?.id || thread.id };
+  const meta = (posted.assistant?.metadata || {}) as Record<string, unknown>;
+  const targetAgent = typeof meta.targetAgent === "string" ? meta.targetAgent : undefined;
+  return {
+    text: reply,
+    threadId: posted.thread?.id || thread.id,
+    chips: collectedChips.length > 0 ? collectedChips : undefined,
+    targetAgent,
+  };
 }
 
 /**
@@ -149,6 +176,7 @@ export async function streamDesktopChat(opts: {
   namespace: string;
   text: string;
   onDelta?: (text: string) => void;
+  onChips?: (chips: ChatChip[]) => void;
 }): Promise<HarnessChatResult> {
   const text = opts.text.trim();
   if (!text) {
@@ -160,8 +188,15 @@ export async function streamDesktopChat(opts: {
       namespace: opts.namespace,
       text,
       onDelta: opts.onDelta,
+      onChips: opts.onChips,
     });
-    return { text: reply.text, source: "harness", threadId: reply.threadId };
+    return {
+      text: reply.text,
+      source: "harness",
+      threadId: reply.threadId,
+      chips: reply.chips,
+      targetAgent: reply.targetAgent,
+    };
   } catch (err) {
     return { text: `${NO_HARNESS_CHAT} (${formatTurnError(err)})`, source: "honest" };
   }

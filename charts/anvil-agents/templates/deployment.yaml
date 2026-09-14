@@ -53,6 +53,7 @@ spec:
             - --runner-image-openclaw={{ .Values.runnerImages.openClaw }}
             - --runner-image-grok-build={{ .Values.runnerImages.grokBuild }}
             - --runner-image-pi-agent={{ .Values.runnerImages.piAgent }}
+            - --runner-image-agy={{ .Values.runnerImages.agy }}
             {{- with .Values.archive.terminalRetention }}
             - --terminal-retention={{ . }}
             {{- end }}

@@ -50,7 +50,7 @@ type AgentDataVolumeCopyDestination struct {
 	// +optional
 	Size *resource.Quantity `json:"size,omitempty"`
 	// Backend overrides the destination backend label. Empty inherits the source.
-	// +kubebuilder:validation:Enum=codex;openCode;hermesAgent;openClaw;grokBuild;piAgent;custom
+	// +kubebuilder:validation:Enum=codex;openCode;hermesAgent;openClaw;grokBuild;piAgent;agy;custom
 	// +optional
 	Backend AgentRunHarnessBackendKind `json:"backend,omitempty"`
 	// Notes are stored on the destination AgentDataVolume when the controller creates it.

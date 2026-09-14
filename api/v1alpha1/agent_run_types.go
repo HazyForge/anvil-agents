@@ -50,6 +50,7 @@ const (
 	AgentRunHarnessBackendOpenClaw    AgentRunHarnessBackendKind = "openClaw"
 	AgentRunHarnessBackendGrokBuild   AgentRunHarnessBackendKind = "grokBuild"
 	AgentRunHarnessBackendPiAgent     AgentRunHarnessBackendKind = "piAgent"
+	AgentRunHarnessBackendAgy         AgentRunHarnessBackendKind = "agy"
 	AgentRunHarnessBackendCustom      AgentRunHarnessBackendKind = "custom"
 )
 
@@ -395,6 +396,23 @@ type AgentRunPiBackendSpec struct {
 	AdditionalArgs []string `json:"additionalArgs,omitempty"`
 }
 
+type AgentRunAgyBackendSpec struct {
+	// Model selects the agy model ID, for example gemini-3.8-flash or
+	// claude-sonnet-4.6. Empty uses the adapter default.
+	// +optional
+	Model string `json:"model,omitempty"`
+	// Mode selects agy output or execution mode.
+	// +kubebuilder:validation:Enum=print;stream-json;text
+	// +optional
+	Mode string `json:"mode,omitempty"`
+	// Thinking selects agy thinking level when supported.
+	// +optional
+	Thinking string `json:"thinking,omitempty"`
+	// AdditionalArgs appends raw arguments to the agy command.
+	// +optional
+	AdditionalArgs []string `json:"additionalArgs,omitempty"`
+}
+
 type AgentRunCustomBackendSpec struct {
 	// Command overrides the container entrypoint for a custom backend image.
 	// +optional
@@ -406,7 +424,7 @@ type AgentRunCustomBackendSpec struct {
 
 type AgentRunHarnessBackendSpec struct {
 	// Kind selects the harness backend adapter.
-	// +kubebuilder:validation:Enum=codex;openCode;hermesAgent;openClaw;grokBuild;piAgent;custom
+	// +kubebuilder:validation:Enum=codex;openCode;hermesAgent;openClaw;grokBuild;piAgent;agy;custom
 	// +optional
 	Kind AgentRunHarnessBackendKind `json:"kind,omitempty"`
 	// Image selects the agent container image. When empty, built-in backends use
@@ -458,6 +476,9 @@ type AgentRunHarnessBackendSpec struct {
 	// PiAgent configures the Pi coding agent adapter.
 	// +optional
 	PiAgent *AgentRunPiBackendSpec `json:"piAgent,omitempty"`
+	// Agy configures the Antigravity (agy) agent CLI adapter.
+	// +optional
+	Agy *AgentRunAgyBackendSpec `json:"agy,omitempty"`
 	// Custom configures an operator-owned container adapter.
 	// +optional
 	Custom *AgentRunCustomBackendSpec `json:"custom,omitempty"`

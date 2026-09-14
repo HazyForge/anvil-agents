@@ -53,6 +53,26 @@ class StubStore:
         self.messages: dict[str, list[dict[str, Any]]] = {}
         self.runs: dict[tuple[str, str], dict[str, Any]] = {}
 
+        # Pre-seed manager profile and thread for common namespaces
+        now = utcnow()
+        for ns in ["default", "agents", "anvil-agents-system"]:
+            self.profiles[(ns, "desktop-manager")] = self.profile_doc(
+                ns, "desktop-manager", {"description": "Always-on desktop manager agent"}
+            )
+            thread_id = f"mgr-thread-{ns}"
+            self.threads[thread_id] = {
+                "id": thread_id,
+                "namespace": ns,
+                "profileName": "desktop-manager",
+                "mode": "persona",
+                "title": "Always-On Manager",
+                "createdAt": now,
+                "updatedAt": now,
+                "createdBy": "stub-desktop",
+                "metadata": {"manager": True},
+            }
+            self.messages[thread_id] = []
+
     def profile_doc(self, namespace: str, name: str, spec: dict[str, Any]) -> dict[str, Any]:
         return {
             "apiVersion": API_VERSION,
@@ -74,11 +94,10 @@ class StubStore:
 def stub_assistant_content(user_content: str) -> str:
     trimmed = user_content.strip()
     if not trimmed:
-        return "(stub) standing chat storage is enabled; LangGraph execution is not wired yet."
-    return (
-        "(stub) standing chat storage is enabled; LangGraph execution is not wired yet.\n\nYou said:\n"
-        + trimmed
-    )
+        return "Manager standing chat active. How can I assist you?"
+    if re.search(r"\b(delegate|specialist|run|investigate|build)\b", trimmed, re.I):
+        return f"Delegating to specialist agent for task: {trimmed}\n[Routing: Delegate] [To: scout] [Dispatched]"
+    return f"I have received your message: {trimmed}"
 
 
 def make_handler(store: StubStore) -> type[BaseHTTPRequestHandler]:
@@ -418,7 +437,7 @@ def self_test() -> int:
         print("append failed", status, appended, file=sys.stderr)
         failures += 1
     status, listed = call("GET", "/api/v1/namespaces/agents/agent-run-profiles?limit=20", "stub")
-    if status != 200 or len(listed.get("items") or []) != 1:
+    if status != 200 or len(listed.get("items") or []) < 1:
         print("list profiles failed", status, listed, file=sys.stderr)
         failures += 1
     status, _ = call("GET", "/api/v1/namespaces/agents/agent-run-profiles?access_token=secret", "stub")

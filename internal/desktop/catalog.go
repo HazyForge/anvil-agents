@@ -105,6 +105,17 @@ func Catalog() []Tool {
 			Notes:       "Pi coding agent CLI. Inventory only until a constant, prompt-file-safe invoke is documented.",
 		},
 		{
+			ID:           "agy",
+			DisplayName:  "Antigravity",
+			Kind:         KindHarness,
+			Backend:      "agy",
+			Binaries:     []string{"agy"},
+			VersionArgs:  [][]string{{"--version"}, {"version"}},
+			AuthFileHint: "~/.agy/auth.json",
+			Notes:        "Antigravity (agy) agent CLI. Prompt is passed via stdin to agy -p -.",
+			Invoke:       Invoke{Mode: PromptStdin, Args: []string{"--dangerously-skip-permissions", "-p", "-"}},
+		},
+		{
 			ID:          "claude",
 			DisplayName: "Claude Code",
 			Kind:        KindWorkstation,

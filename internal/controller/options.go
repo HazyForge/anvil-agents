@@ -29,6 +29,7 @@ const (
 	openClawRunnerImageEnv          = "ANVIL_AGENTS_RUNNER_IMAGE_OPENCLAW"
 	grokBuildRunnerImageEnv         = "ANVIL_AGENTS_RUNNER_IMAGE_GROK_BUILD"
 	piAgentRunnerImageEnv           = "ANVIL_AGENTS_RUNNER_IMAGE_PI_AGENT"
+	agyRunnerImageEnv               = "ANVIL_AGENTS_RUNNER_IMAGE_AGY"
 )
 
 var defaultGitHubAPIAllowedHosts = []string{"api.github.com"}
@@ -62,6 +63,7 @@ type Options struct {
 	OpenClawRunnerImage          string
 	GrokBuildRunnerImage         string
 	PiAgentRunnerImage           string
+	AgyRunnerImage               string
 }
 
 func DefaultOptions() *Options {
@@ -83,6 +85,7 @@ func DefaultOptions() *Options {
 		OpenClawRunnerImage:          firstNonEmpty(strings.TrimSpace(os.Getenv(openClawRunnerImageEnv)), agentRunDefaultOpenClawImage),
 		GrokBuildRunnerImage:         firstNonEmpty(strings.TrimSpace(os.Getenv(grokBuildRunnerImageEnv)), agentRunDefaultGrokBuildImage),
 		PiAgentRunnerImage:           firstNonEmpty(strings.TrimSpace(os.Getenv(piAgentRunnerImageEnv)), agentRunDefaultPiAgentImage),
+		AgyRunnerImage:               firstNonEmpty(strings.TrimSpace(os.Getenv(agyRunnerImageEnv)), agentRunDefaultAgyImage),
 	}
 }
 

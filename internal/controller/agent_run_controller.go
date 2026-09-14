@@ -53,6 +53,7 @@ const (
 	agentRunDefaultOpenClawImage                   = "anvil-agent-run-openclaw:dev"
 	agentRunDefaultGrokBuildImage                  = "anvil-agent-run-grok-build:dev"
 	agentRunDefaultPiAgentImage                    = "anvil-agent-run-pi:dev"
+	agentRunDefaultAgyImage                        = "anvil-agent-run-agy:dev"
 	agentRunDefaultGitHubAPIBaseURL                = "https://api.github.com"
 	agentRunRemoteSkillMaxBytes                    = 256 * 1024
 	agentRunPayloadConfigMapMaxBytes               = 900 * 1024
@@ -1772,6 +1773,22 @@ func (r *AgentRunReconciler) agentRunEnv(obj *controlv1alpha1.AgentRun, dataVolu
 			}
 		}
 	}
+	if agentRunBackendKind(obj) == controlv1alpha1.AgentRunHarnessBackendAgy {
+		agy := obj.Spec.Harness.Backend.Agy
+		if agy == nil {
+			agy = &controlv1alpha1.AgentRunAgyBackendSpec{}
+		}
+		env = append(env,
+			corev1.EnvVar{Name: "ANVIL_AGY_MODEL", Value: strings.TrimSpace(agy.Model)},
+			corev1.EnvVar{Name: "ANVIL_AGY_MODE", Value: strings.TrimSpace(agy.Mode)},
+			corev1.EnvVar{Name: "ANVIL_AGY_THINKING", Value: strings.TrimSpace(agy.Thinking)},
+		)
+		if len(agy.AdditionalArgs) > 0 {
+			if raw, err := json.Marshal(agy.AdditionalArgs); err == nil {
+				env = append(env, corev1.EnvVar{Name: "ANVIL_AGY_ADDITIONAL_ARGS_JSON", Value: string(raw)})
+			}
+		}
+	}
 	env = append(env, obj.Spec.Harness.Execution.ExtraEnv...)
 	return env
 }
@@ -2596,6 +2613,7 @@ func agentRunMergeBackend(profile, run controlv1alpha1.AgentRunHarnessBackendSpe
 	out.OpenClaw = agentRunMergeOpenClawBackend(profile.OpenClaw, run.OpenClaw)
 	out.GrokBuild = agentRunMergeGrokBuildBackend(profile.GrokBuild, run.GrokBuild)
 	out.PiAgent = agentRunMergePiBackend(profile.PiAgent, run.PiAgent)
+	out.Agy = agentRunMergeAgyBackend(profile.Agy, run.Agy)
 	out.Custom = agentRunMergeCustomBackend(profile.Custom, run.Custom)
 	return out
 }
@@ -2787,6 +2805,30 @@ func agentRunMergePiBackend(profile, run *controlv1alpha1.AgentRunPiBackendSpec)
 	}
 	if run.NoSession {
 		out.NoSession = true
+	}
+	out.AdditionalArgs = append(out.AdditionalArgs, run.AdditionalArgs...)
+	return out
+}
+
+func agentRunMergeAgyBackend(profile, run *controlv1alpha1.AgentRunAgyBackendSpec) *controlv1alpha1.AgentRunAgyBackendSpec {
+	if profile == nil && run == nil {
+		return nil
+	}
+	out := &controlv1alpha1.AgentRunAgyBackendSpec{}
+	if profile != nil {
+		out = profile.DeepCopy()
+	}
+	if run == nil {
+		return out
+	}
+	if strings.TrimSpace(run.Model) != "" {
+		out.Model = run.Model
+	}
+	if strings.TrimSpace(run.Mode) != "" {
+		out.Mode = run.Mode
+	}
+	if strings.TrimSpace(run.Thinking) != "" {
+		out.Thinking = run.Thinking
 	}
 	out.AdditionalArgs = append(out.AdditionalArgs, run.AdditionalArgs...)
 	return out
@@ -3425,6 +3467,11 @@ func (r *AgentRunReconciler) agentRunBlockingValidation(obj *controlv1alpha1.Age
 			return controlv1alpha1.AgentRunPhaseNeedsHuman, "PiAgentImageNotConfigured", "A Pi AgentRun container image is required."
 		}
 		return "", "", ""
+	case controlv1alpha1.AgentRunHarnessBackendAgy:
+		if strings.TrimSpace(r.agentRunImage(obj)) == "" {
+			return controlv1alpha1.AgentRunPhaseNeedsHuman, "AgyImageNotConfigured", "An Agy AgentRun container image is required."
+		}
+		return "", "", ""
 	case controlv1alpha1.AgentRunHarnessBackendCustom:
 		if strings.TrimSpace(obj.Spec.Harness.Backend.Image) == "" {
 			return controlv1alpha1.AgentRunPhaseNeedsHuman, "CustomImageNotConfigured", "spec.harness.backend.image is required when backend.kind is custom."
@@ -3480,6 +3527,10 @@ func agentRunBackendModel(obj *controlv1alpha1.AgentRun) string {
 		if backend.PiAgent != nil {
 			return strings.TrimSpace(backend.PiAgent.Model)
 		}
+	case controlv1alpha1.AgentRunHarnessBackendAgy:
+		if backend.Agy != nil {
+			return strings.TrimSpace(backend.Agy.Model)
+		}
 	}
 	return ""
 }
@@ -3497,6 +3548,7 @@ func agentRunModelFromJob(job *batchv1.Job) string {
 		"ANVIL_OPENCLAW_MODEL",
 		"ANVIL_GROK_BUILD_MODEL",
 		"ANVIL_PI_MODEL",
+		"ANVIL_AGY_MODEL",
 	} {
 		if value := strings.TrimSpace(agentRunJobEnvValue(job, key)); value != "" {
 			return value
@@ -3582,6 +3634,8 @@ func agentRunImageWithOptions(obj *controlv1alpha1.AgentRun, options *Options) s
 		return strings.TrimSpace(options.GrokBuildRunnerImage)
 	case controlv1alpha1.AgentRunHarnessBackendPiAgent:
 		return strings.TrimSpace(options.PiAgentRunnerImage)
+	case controlv1alpha1.AgentRunHarnessBackendAgy:
+		return strings.TrimSpace(options.AgyRunnerImage)
 	default:
 		return ""
 	}
