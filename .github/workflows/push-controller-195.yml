@@ -1,0 +1,66 @@
+# One-shot GHCR publish for PR 195. The cloud-agent Cursor App token can
+# read HazyForge packages but cannot Write organization package; GitHub
+# Actions GITHUB_TOKEN can, matching publish.yaml and the PR 182 grok-build
+# push. Builds the cherry-pick commit (508ed26 + #181), not this workflow file.
+name: Push controller (PR 195)
+
+on:
+  push:
+    branches:
+      - cursor/181-live-extras-fa62
+    paths-ignore:
+      - '.hazyforge/**'
+      - 'docs/**'
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: push-controller-195
+  cancel-in-progress: true
+
+jobs:
+  controller:
+    runs-on: ubuntu-latest
+    env:
+      # Cherry-pick of #181 onto 508ed26; keep OCI revision/tag on that commit.
+      SOURCE_SHA: d58936cc3a5e86542e90b8734ceb8ec7025046cf
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: d58936cc3a5e86542e90b8734ceb8ec7025046cf
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and push controller
+        id: push
+        run: |
+          set -euo pipefail
+          got="$(git rev-parse HEAD)"
+          [[ "${got}" == "${SOURCE_SHA}" ]] || {
+            echo "expected ${SOURCE_SHA}, got ${got}" >&2
+            exit 1
+          }
+          short="$(git rev-parse --short=7 HEAD)"
+          prefix="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}"
+          ./hack/build-images.sh \
+            --component controller \
+            --prefix "${prefix}" \
+            --tag "sha-${short}" \
+            --platform linux/amd64 \
+            --push
+          ref="${prefix}/anvil-agents:sha-${short}"
+          digest="$(docker buildx imagetools inspect "${ref}" --format '{{.Manifest.Digest}}')"
+          echo "digest=${digest}" >> "${GITHUB_OUTPUT}"
+          printf '%s\n' "${ref}@${digest}" | tee digest.txt
+          echo "revision=${got}" >> "${GITHUB_STEP_SUMMARY}"
+          echo "Pushed ${ref}@${digest}" >> "${GITHUB_STEP_SUMMARY}"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: controller-digest
+          path: digest.txt
