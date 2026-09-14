@@ -34,7 +34,8 @@ in namespace `anvilhub`, without creating a profile.
 Both runs succeeded. The AGY home became Bound/Ready on its first consumer,
 and the second run also has a successful PostgreSQL archive receipt. Repeating
 the initial request ID returned the original turn
-`f1819a01-c85c-4c72-ac18-25d8388a86aa`, without a duplicate run or message.
+`f1819a01-c85c-4c72-ac18-25d8388a86aa`, without a duplicate run or message. The saved AGY conversation was also
+opened from the actual Desktop sidebar; both persisted replies were visible.
 
 ## Actual Desktop OpenCode proof
 
