@@ -13,12 +13,14 @@ type MemoryStore struct {
 	mu       sync.Mutex
 	threads  map[string]Thread
 	messages map[string][]Message
+	turns    map[string]Turn
 }
 
 func NewMemoryStore() *MemoryStore {
 	return &MemoryStore{
 		threads:  map[string]Thread{},
 		messages: map[string][]Message{},
+		turns:    map[string]Turn{},
 	}
 }
 

@@ -23,6 +23,7 @@ grok-build	ghcr.io/hazyforge/anvil-agent-run-grok-build@sha256:44444444444444444
 hermes	ghcr.io/hazyforge/anvil-agent-run-hermes@sha256:5555555555555555555555555555555555555555555555555555555555555555
 openclaw	ghcr.io/hazyforge/anvil-agent-run-openclaw@sha256:6666666666666666666666666666666666666666666666666666666666666666
 pi	ghcr.io/hazyforge/anvil-agent-run-pi@sha256:7777777777777777777777777777777777777777777777777777777777777777
+agy	ghcr.io/hazyforge/anvil-agent-run-agy@sha256:9999999999999999999999999999999999999999999999999999999999999999
 EOF
 : > "${tmp_dir}/dist/anvil-agents-9.8.7.tgz"
 
@@ -38,6 +39,7 @@ runnerImages:
   openClaw: ghcr.io/hazyforge/anvil-agent-run-openclaw@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
   grokBuild: ghcr.io/hazyforge/anvil-agent-run-grok-build@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
   piAgent: ghcr.io/hazyforge/anvil-agent-run-pi@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+  agy: ghcr.io/hazyforge/anvil-agent-run-agy@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 crds:
   install: true
 EOF

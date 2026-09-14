@@ -1,5 +1,8 @@
 helmChartPath: charts/anvil-agents
 
+# Preserve the existing Helm release resource names during direct upgrades.
+fullnameOverride: anvil-agents-system
+
 # Optional Hazy Forge consumer deployment discovered by the Anvil Primaris
 # remote Helm ApplicationSet. Portable installations do not depend on it.
 # Run one leader-elected controller in the system namespace. Agent workloads
@@ -9,7 +12,7 @@ serviceAccount:
   name: anvil-agents
 image:
   # Controller/API image embeds Anvil Agents Console SPA (served at /).
-  reference: ghcr.io/hazyforge/anvil-agents@sha256:80d8796ab2635a4b36a63f598259c6fb7f2e88ea097f3b9bae32004779edbb84
+  reference: ghcr.io/hazyforge/anvil-agents@sha256:e1dbafccfc7bb67702da00f66f1c32cb2aeef6742f7b5119b5ad8df4bede242a
   pullPolicy: IfNotPresent
 imagePullSecrets:
   - name: ghcr-creds
@@ -20,9 +23,7 @@ runnerImages:
   openCode: ghcr.io/hazyforge/anvil-agent-run-opencode@sha256:479cac35c6cc9f8cc5c6591e3bddacb5245ebea8f16f3f590a449df9214b2dc9
   hermesAgent: ghcr.io/hazyforge/anvil-agent-run-hermes@sha256:fd90b3c59cd98e9bd20f820c1d5e8bd27da5e3217f035de3b590192ca1235358
   openClaw: ghcr.io/hazyforge/anvil-agent-run-openclaw@sha256:7bd2164cc2b21fd2c2f2f20342ff2f2b45c90add452532e64c68c8823a4efc7e
-  # Repo-linked GHCR name: the historical org-root package is unlinked, so this
-  # VM and GITHUB_TOKEN cannot push ghcr.io/hazyforge/anvil-agent-run-grok-build.
-  grokBuild: ghcr.io/hazyforge/anvil-agents/anvil-agent-run-grok-build@sha256:5329ccd19acbfbcee0566dc95d6725e630299cd4aa92261bf02a74cb75dcdefa
+  grokBuild: ghcr.io/hazyforge/anvil-agent-run-grok-build@sha256:86b8d1a905c5e36af110fd880f2bb3db3efec5bc732bd16bff9ce8dc46f77f22
   piAgent: ghcr.io/hazyforge/anvil-agent-run-pi@sha256:1d41394c86d7c5ab66a7186d35097f9f1a6144cba7020e2410c1afdd3734e952
 crds:
   install: true
@@ -54,6 +55,21 @@ archive:
 # narrower anvil_agents_viewer role and read-only observer permissions.
 api:
   enabled: true
+  # Keep the currently deployed scheduling and isolation settings explicit.
+  replicaCount: 1
+  nodeSelector: {}
+  affinity: {}
+  tolerations: []
+  resources: {}
+  podSecurityContext:
+    runAsNonRoot: true
+    seccompProfile:
+      type: RuntimeDefault
+  securityContext:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop: [ALL]
+    readOnlyRootFilesystem: true
   config:
     oidc:
       issuer: https://hazyforge1-azsbgb.us1.zitadel.cloud
@@ -72,6 +88,13 @@ api:
     runs:
       # Append-only AgentRun create remains available for future run launch UI.
       createEnabled: true
+    # Keep existing live webhook receivers enabled through direct Helm upgrades.
+    externalTriggers:
+      enabled: true
+    chat:
+      # The API receives ANVIL_AGENTS_CHAT_DATABASE_URL via secretKeyRef from
+      # archive.databaseURLSecret above. No database URI belongs in this file.
+      enabled: true
     authorization:
       roleClaims: []
       roleObjectClaims:
@@ -99,6 +122,8 @@ api:
             - anvil-agents:composition:write
             - anvil-agents:controls:read
             - anvil-agents:controls:write
+            - anvil-agents:chat:read
+            - anvil-agents:chat:write
           namespaces:
             - anvilhub
             - hazy-trade
@@ -106,6 +131,10 @@ api:
       # Exact browser Origin for the console + API host (deny-by-default).
       allowedOrigins:
         - https://agents.anvil.hazyforge.io
+        - http://127.0.0.1:1738
+        - http://localhost:1738
+        - http://127.0.0.1:8400
+        - http://localhost:8400
     ui:
       productTitle: Anvil Agents Console
       defaultNamespaces:
@@ -114,6 +143,9 @@ api:
       oidc:
         # ZITADEL User-Agent app "Anvil Agents Console" on project Anvil Primaris.
         clientId: "383499920822362966"
+      desktop:
+        # Existing ZITADEL Native PKCE app; distinct from Console User-Agent.
+        oidcClientId: "390485194915767148"
   httpRoute:
     enabled: true
     parentRefs:
@@ -132,6 +164,17 @@ extraVolumeMounts:
     readOnly: true
 nodeSelector:
   kubernetes.io/arch: amd64
+affinity: {}
+tolerations: []
+podSecurityContext:
+  runAsNonRoot: true
+  seccompProfile:
+    type: RuntimeDefault
+securityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop: [ALL]
+  readOnlyRootFilesystem: true
 # Archive state is PostgreSQL-backed through the cluster Service; the
 # controller no longer needs the retired node-local archive-path colocation.
 # Omitting the control-plane affinity and toleration keeps it on an eligible
@@ -142,3 +185,185 @@ resources:
     memory: 512Mi
   limits:
     memory: 1Gi
+
+# User-interactive Desktop conversation defaults. These are ordinary profiles,
+# with no schedules, self-development fleet, or additional runtime authority.
+# Keep both in one application scope for explicitly enabled peer coordination.
+extraObjects:
+  - apiVersion: control.anvil.hazyforge.io/v1alpha1
+    kind: AgentRunProfile
+    metadata:
+      name: desktop-assistant
+      namespace: anvilhub
+      labels:
+        app.kubernetes.io/part-of: desktop-chat
+        control.anvil.hazyforge.io/application: desktop-chat
+        control.anvil.hazyforge.io/ownership: gitops
+    spec:
+      description: General assistant for user-initiated Desktop conversations.
+      scope:
+        applicationRef:
+          name: desktop-chat
+        summary: Answer the user's message and coordinate only with explicitly allowed peers.
+      harnessProfileRef:
+        name: anvil-primaris-opencode-observe
+      harness:
+        intent: observe
+        systemPrompt: |
+          Answer the user's message clearly and concisely. Work in text only.
+          Do not mutate files, repositories, services, or cluster resources;
+          do not execute shell commands, contact third-party services, or spend money.
+          When the user asks for a second opinion and this conversation explicitly
+          permits coordination, consult the allowed reviewer through the provided
+          peer coordination protocol. Distinguish your answer from the peer's answer.
+  - apiVersion: control.anvil.hazyforge.io/v1alpha1
+    kind: AgentRunProfile
+    metadata:
+      name: desktop-reviewer
+      namespace: anvilhub
+      labels:
+        app.kubernetes.io/part-of: desktop-chat
+        control.anvil.hazyforge.io/application: desktop-chat
+        control.anvil.hazyforge.io/ownership: gitops
+    spec:
+      description: Independent reviewer for user-initiated Desktop conversations.
+      scope:
+        applicationRef:
+          name: desktop-chat
+        summary: Provide an independent textual review of the supplied question or proposal.
+      harnessProfileRef:
+        name: anvil-primaris-opencode-observe
+      harness:
+        intent: observe
+        systemPrompt: |
+          Independently review the supplied question or proposal. Give a concise
+          answer, identify concrete mistakes, and distinguish facts from uncertainty.
+          Work in text only. Do not mutate files, repositories, services, or cluster
+          resources; do not execute shell commands, contact third-party services,
+          or spend money. Do not initiate additional peer work.
+  - apiVersion: external-secrets.io/v1
+    kind: ExternalSecret
+    metadata:
+      name: desktop-agy-auth
+      namespace: anvilhub
+      labels:
+        app.kubernetes.io/part-of: desktop-chat
+        control.anvil.hazyforge.io/ownership: gitops
+    spec:
+      refreshInterval: 1h
+      secretStoreRef:
+        kind: ClusterSecretStore
+        name: azurekv-cluster-secret-store
+      target:
+        name: desktop-agy-auth
+        creationPolicy: Owner
+        deletionPolicy: Retain
+      data:
+        - secretKey: ANVIL_AGY_NATIVE_OAUTH_TOKEN
+          remoteRef:
+            key: secret/anvil-agents-agy-native-oauth-token
+  - apiVersion: control.anvil.hazyforge.io/v1alpha1
+    kind: AgentDataVolume
+    metadata:
+      name: desktop-agy-home
+      namespace: anvilhub
+      labels:
+        app.kubernetes.io/part-of: desktop-chat
+        control.anvil.hazyforge.io/application: desktop-chat
+        control.anvil.hazyforge.io/ownership: gitops
+    spec:
+      applicationRef:
+        name: desktop-chat
+      agentName: desktop-agy
+      backend: agy
+      mountPath: /opt/anvil/agy
+      storageClassName: observability-local
+      size: 2Gi
+      accessModes: [ReadWriteOnce]
+      nodeSelector:
+        hazyforge.io/home-lab: "true"
+      extraEnv:
+        - name: ANVIL_AGY_HOME
+          value: /opt/anvil/agy
+      notes: Native Antigravity settings, session history, and refreshed credentials for user-initiated Desktop conversations.
+  - apiVersion: control.anvil.hazyforge.io/v1alpha1
+    kind: AgentHarnessProfile
+    metadata:
+      name: desktop-agy
+      namespace: anvilhub
+      labels:
+        app.kubernetes.io/part-of: desktop-chat
+        control.anvil.hazyforge.io/application: desktop-chat
+        control.anvil.hazyforge.io/ownership: gitops
+    spec:
+      description: Native Antigravity runtime with a dedicated writable home for Desktop conversations.
+      backend:
+        kind: agy
+        image: ghcr.io/hazyforge/anvil-agents/anvil-agent-run-agy@sha256:ba4bcf954552a0f898035af898243b59a7ed9a7d5693cebd578761b91448c86f
+        imagePullPolicy: IfNotPresent
+        agy:
+          mode: stream-json
+          additionalArgs: [--mode, plan]
+      execution:
+        serviceAccountName: anvil-opencode-observe
+        nodeSelector:
+          hazyforge.io/home-lab: "true"
+        imagePullSecrets:
+          - name: ghcr-creds
+        envSecretRefs:
+          - name: desktop-agy-auth
+        dataVolumeRefs:
+          - name: desktop-agy-home
+        extraEnv:
+          - name: ANVIL_AGENT_RUN_AUTO_CLONE_REPO
+            value: "false"
+          - name: ANVIL_AGY_TURN_TIMEOUT_SECONDS
+            value: "280"
+        resources:
+          requests:
+            cpu: 100m
+            memory: 256Mi
+            ephemeral-storage: 64Mi
+          limits:
+            cpu: "2"
+            memory: 2Gi
+            ephemeral-storage: 1Gi
+        podSecurityContext:
+          fsGroup: 10001
+          fsGroupChangePolicy: OnRootMismatch
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop: [ALL]
+          runAsNonRoot: true
+          runAsUser: 10001
+          runAsGroup: 10001
+          seccompProfile:
+            type: RuntimeDefault
+        workdir: /workspace
+        timeoutSeconds: 300
+        ttlSecondsAfterFinished: 86400
+  - apiVersion: control.anvil.hazyforge.io/v1alpha1
+    kind: AgentRunProfile
+    metadata:
+      name: desktop-agy
+      namespace: anvilhub
+      labels:
+        app.kubernetes.io/part-of: desktop-chat
+        control.anvil.hazyforge.io/application: desktop-chat
+        control.anvil.hazyforge.io/ownership: gitops
+    spec:
+      description: Antigravity assistant for user-initiated Desktop conversations.
+      scope:
+        applicationRef:
+          name: desktop-chat
+        summary: Answer user messages and coordinate with explicitly permitted peers.
+      harnessProfileRef:
+        name: desktop-agy
+      harness:
+        intent: observe
+        systemPrompt: |
+          Answer the user's message clearly and concisely. Work in text only.
+          Do not mutate files, repositories, services, or cluster resources;
+          do not execute shell commands, contact third-party services, or spend money.
+          Coordinate only with peers explicitly permitted by this conversation.

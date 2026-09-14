@@ -13,7 +13,7 @@ Usage:
   ./hack/pin-deploy-values-from-lock.sh --image-lock dist/images-vX.Y.Z.lock.tsv [options]
 
 Options:
-  --image-lock FILE  Seven-image release lock from publish-release.sh.
+  --image-lock FILE  Eight-image release lock from publish-release.sh.
   --values FILE      Values file to update. Default: first-party Anvil Primaris
                      deploy overlay.
   -h, --help         Show this help.
@@ -65,11 +65,11 @@ while IFS=$'\t' read -r key value extra; do
 	[[ -z "${extra:-}" ]] || { echo "invalid image lock row for ${key}" >&2; exit 2; }
 	case "${key}" in
 		schema) lock_schema="${value}" ;;
-		controller|codex|opencode|grok-build|hermes|openclaw|pi) refs["${key}"]="${value}" ;;
+		controller|codex|opencode|grok-build|hermes|openclaw|pi|agy) refs["${key}"]="${value}" ;;
 	esac
 done < "${image_lock}"
 [[ "${lock_schema}" == "anvil-agents-image-lock/v1" ]] || { echo "image lock has an unsupported schema" >&2; exit 2; }
-for component in controller codex opencode grok-build hermes openclaw pi; do
+for component in controller codex opencode grok-build hermes openclaw pi agy; do
 	[[ -n "${refs[${component}]:-}" ]] || { echo "image lock is missing component: ${component}" >&2; exit 2; }
 	[[ "${refs[${component}]}" == *@sha256:* ]] || { echo "${component} is not digest-pinned" >&2; exit 2; }
 done
@@ -83,6 +83,7 @@ awk \
 	-v hermes="${refs[hermes]}" \
 	-v openclaw="${refs[openclaw]}" \
 	-v grokbuild="${refs[grok-build]}" \
+	-v agy="${refs[agy]}" \
 	-v pi="${refs[pi]}" '
 BEGIN {
 	in_image = 0
@@ -94,6 +95,7 @@ BEGIN {
 	found_openclaw = 0
 	found_grokbuild = 0
 	found_pi = 0
+	found_agy = 0
 }
 /^image:$/ {
 	in_image = 1
@@ -141,6 +143,11 @@ in_runners && /^  piAgent:/ {
 	found_pi = 1
 	next
 }
+in_runners && /^  agy:/ {
+	print "  agy: " agy
+	found_agy = 1
+	next
+}
 in_runners && /^[^[:space:]]/ {
 	in_runners = 0
 }
@@ -148,7 +155,7 @@ in_runners && /^[^[:space:]]/ {
 	print
 }
 END {
-	if (!found_controller || !found_codex || !found_opencode || !found_hermes || !found_openclaw || !found_grokbuild || !found_pi) {
+	if (!found_controller || !found_codex || !found_opencode || !found_hermes || !found_openclaw || !found_grokbuild || !found_pi || !found_agy) {
 		exit 3
 	}
 }

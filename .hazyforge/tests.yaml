@@ -34,6 +34,7 @@ suites:
         - hermes-runner
         - openclaw-runner
         - pi-runner
+        - agy-runner
       sources: [primary]
     lanes:
       - name: verify

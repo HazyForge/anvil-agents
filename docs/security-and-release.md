@@ -27,14 +27,14 @@ Primaris only **installs** this operator:
 | Helm | `free · checkov / helm` | Checkov OSS (free) |
 | Secrets | `free · gitleaks / secrets` | Gitleaks free for public |
 | Workflows | `free · zizmor / workflows` | zizmor (free, advisory) |
-| Images ×7 | `free · image / <component>` | **Trivy + Grype + CycloneDX SBOM** |
+| Images ×8 | `free · image / <component>` | **Trivy + Grype + CycloneDX SBOM** |
 | Trust | `free · OpenSSF Scorecard` | Scorecard free for public |
 | Gate | `free · security-gate` | Requires the required jobs green |
 | Updates | Dependabot | Free alerts + PRs (gomod, npm, docker, actions, helm) |
 
 ### Containers (breadth of tooling)
 
-Each of the seven images gets its **own named free check run**:
+Each of the eight images gets its **own named free check run**:
 
 | Component | Image |
 | --- | --- |
@@ -45,6 +45,7 @@ Each of the seven images gets its **own named free check run**:
 | hermes | `anvil-agent-run-hermes` |
 | openclaw | `anvil-agent-run-openclaw` |
 | pi | `anvil-agent-run-pi` |
+| agy | `anvil-agent-run-agy` |
 
 Per image: Trivy (HIGH/CRITICAL), Grype (high+), CycloneDX SBOM artifact.
 

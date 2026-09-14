@@ -50,9 +50,9 @@ type Config struct {
 	// Controls gates AgentRunControl launch-gate read and pause/resume writes.
 	Controls ControlsConfig `json:"controls"`
 	// Runs gates append-only AgentRun create from the console/API.
-	Runs RunsConfig `json:"runs"`
+	Runs             RunsConfig             `json:"runs"`
 	ExternalTriggers ExternalTriggersConfig `json:"externalTriggers"`
-	Chat ChatConfig `json:"chat"`
+	Chat             ChatConfig             `json:"chat"`
 }
 
 // ExternalTriggersConfig controls opt-in inbound webhook receivers.

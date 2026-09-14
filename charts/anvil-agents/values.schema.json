@@ -3,6 +3,26 @@
   "type": "object",
   "additionalProperties": true,
   "properties": {
+    "extraObjects": {
+      "type": "array",
+      "description": "Additional explicit Kubernetes objects owned by this Helm release; no template evaluation.",
+      "items": {
+        "type": "object",
+        "required": ["apiVersion", "kind", "metadata"],
+        "properties": {
+          "apiVersion": { "type": "string", "minLength": 1 },
+          "kind": { "type": "string", "minLength": 1 },
+          "metadata": {
+            "type": "object",
+            "required": ["name"],
+            "properties": {
+              "name": { "type": "string", "minLength": 1 },
+              "namespace": { "type": "string", "minLength": 1 }
+            }
+          }
+        }
+      }
+    },
     "archive": {
       "type": "object",
       "additionalProperties": false,

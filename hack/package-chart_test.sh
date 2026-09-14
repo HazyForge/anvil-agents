@@ -28,7 +28,8 @@ for image in \
 	anvil-agent-run-grok-build \
 	anvil-agent-run-hermes \
 	anvil-agent-run-openclaw \
-	anvil-agent-run-pi; do
+	anvil-agent-run-pi \
+	anvil-agent-run-agy; do
 	rg -q "registry\.example\.com/team/${image}(:v0\.2\.3)?" "${tmp_dir}/tagged-values.yaml" ||
 		fail "development package did not reference version-tagged ${image}"
 done
@@ -48,6 +49,7 @@ lock="${tmp_dir}/images.lock.tsv"
 	printf 'hermes\tregistry.example.com/team/anvil-agent-run-hermes@sha256:%s\n' "$(digest 5)"
 	printf 'openclaw\tregistry.example.com/team/anvil-agent-run-openclaw@sha256:%s\n' "$(digest 6)"
 	printf 'pi\tregistry.example.com/team/anvil-agent-run-pi@sha256:%s\n' "$(digest 7)"
+	printf 'agy\tregistry.example.com/team/anvil-agent-run-agy@sha256:%s\n' "$(digest 8)"
 } > "${lock}"
 
 "${repo_root}/hack/package-chart.sh" \
@@ -72,7 +74,8 @@ for row in \
 	"anvil-agent-run-grok-build $(digest 4)" \
 	"anvil-agent-run-hermes $(digest 5)" \
 	"anvil-agent-run-openclaw $(digest 6)" \
-	"anvil-agent-run-pi $(digest 7)"; do
+	"anvil-agent-run-pi $(digest 7)" \
+	"anvil-agent-run-agy $(digest 8)"; do
 	read -r image expected_digest <<<"${row}"
 	rg -q "registry\.example\.com/team/${image}@sha256:${expected_digest}" "${tmp_dir}/values.yaml" ||
 		fail "packaged values did not digest-pin ${image}"

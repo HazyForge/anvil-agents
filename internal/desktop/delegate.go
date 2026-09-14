@@ -3,6 +3,7 @@ package desktop
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -123,6 +124,8 @@ func runDelegate(ctx context.Context, d Discoverer, tool Tool, target invokeTarg
 	switch tool.Invoke.Mode {
 	case PromptStdin:
 		stdin = strings.NewReader(prompt)
+	case PromptAgyStream:
+		stdin = agyPromptInput(prompt)
 	case PromptFile:
 		file, err := os.CreateTemp("", "anvil-desktop-prompt-*.txt")
 		if err != nil {
@@ -160,7 +163,12 @@ func runDelegate(ctx context.Context, d Discoverer, tool Tool, target invokeTarg
 	stderr.limit = maxDelegateCapture
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
-	err := cmd.Run()
+	var err error
+	if tool.Invoke.Mode == PromptAgyStream {
+		err = runAgyTurn(cmd, stdin)
+	} else {
+		err = cmd.Run()
+	}
 	result.Stdout = stdout.String()
 	result.Stderr = stderr.String()
 	if runCtx.Err() != nil && errors.Is(runCtx.Err(), context.DeadlineExceeded) {
@@ -228,4 +236,66 @@ func (c *cappedBuffer) String() string {
 		return text
 	}
 	return strings.ToValidUTF8(text, "")
+}
+
+// agyPromptInput uses Google's documented streaming input contract. -p - is
+// not a documented stdin sentinel and can send the literal dash as the prompt.
+func agyPromptInput(prompt string) io.Reader {
+	payload, _ := json.Marshal(struct {
+		Event   string `json:"event"`
+		Message struct {
+			Content string `json:"content"`
+		} `json:"message"`
+	}{Event: "user", Message: struct {
+		Content string `json:"content"`
+	}{Content: prompt}})
+	return bytes.NewReader(append(payload, '\n'))
+}
+
+// runAgyTurn retains the input pipe until AGY acknowledges a completed turn.
+// Closing stdin immediately can return SUCCESS with no response or token usage.
+func runAgyTurn(cmd *exec.Cmd, input io.Reader) error {
+	cmd.Stdin = nil
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		return err
+	}
+	defer stdin.Close()
+	cmd.Stdout = &agyResultWriter{dst: cmd.Stdout, closeInput: func() { _ = stdin.Close() }}
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	go func() { _, _ = io.Copy(stdin, input) }()
+	return cmd.Wait()
+}
+
+type agyResultWriter struct {
+	dst        io.Writer
+	pending    []byte
+	closeInput func()
+}
+
+func (w *agyResultWriter) Write(p []byte) (int, error) {
+	n, err := w.dst.Write(p)
+	if err != nil {
+		return n, err
+	}
+	w.pending = append(w.pending, p...)
+	for {
+		i := bytes.IndexByte(w.pending, '\n')
+		if i < 0 {
+			break
+		}
+		var event struct {
+			Event string `json:"event"`
+		}
+		if json.Unmarshal(w.pending[:i], &event) == nil && event.Event == "result" {
+			w.closeInput()
+		}
+		w.pending = w.pending[i+1:]
+	}
+	if len(w.pending) > 4<<20 {
+		return n, fmt.Errorf("Antigravity event exceeded 4 MiB")
+	}
+	return n, nil
 }

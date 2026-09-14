@@ -122,9 +122,10 @@ func fakeWSLDiscoverer(t *testing.T, binDir string) Discoverer {
 	t.Setenv("ANVIL_WSL_DEFAULT", "Ubuntu-24.04")
 	t.Setenv("ANVIL_WSL_PATH", binDir)
 	return Discoverer{
-		Target:  HarnessTargetWSL,
-		Distro:  "Ubuntu-24.04",
-		WSLPath: binDir,
+		Target:    HarnessTargetWSL,
+		Distro:    "Ubuntu-24.04",
+		WSLPath:   binDir,
+		InsideWSL: func() bool { return false },
 		LookPath: func(string) (string, error) {
 			return "", os.ErrNotExist
 		},

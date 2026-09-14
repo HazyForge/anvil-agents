@@ -27,13 +27,14 @@ type VersionFunc func(ctx context.Context, bin string, args []string) (string, e
 
 // Discoverer finds catalog CLIs on the local machine or inside WSL.
 type Discoverer struct {
-	Path     string
-	LookPath LookPathFunc
-	Version  VersionFunc
-	Target   string // native | wsl; empty means native
-	Distro   string // WSL distro when Target is wsl
-	WSLPath  string // extra PATH prefix inside WSL (tests / fixtures)
-	WSL      WSLRunner
+	Path      string
+	LookPath  LookPathFunc
+	Version   VersionFunc
+	Target    string // native | wsl; empty means native
+	Distro    string // WSL distro when Target is wsl
+	WSLPath   string // extra PATH prefix inside WSL (tests / fixtures)
+	WSL       WSLRunner
+	InsideWSL func() bool // optional platform probe override for deterministic tests
 }
 
 // Discovered is one catalog entry after PATH lookup.
@@ -168,10 +169,17 @@ func searchPATH(explicit string) string {
 	return strings.Join(parts, string(os.PathListSeparator))
 }
 
+func (d Discoverer) isInsideWSL() bool {
+	if d.InsideWSL != nil {
+		return d.InsideWSL()
+	}
+	return insideWSL()
+}
+
 func (d Discoverer) useWSL() bool {
 	// WSL-native Linux process: catalog PATH already is the distro PATH.
 	// Windows-hosted anvil-desktop.exe must go through wsl.exe --exec.
-	return strings.EqualFold(strings.TrimSpace(d.Target), HarnessTargetWSL) && !insideWSL()
+	return strings.EqualFold(strings.TrimSpace(d.Target), HarnessTargetWSL) && !d.isInsideWSL()
 }
 
 // Discover walks the catalog and reports which CLIs are present.
@@ -188,7 +196,7 @@ func (d Discoverer) Discover(ctx context.Context) []Discovered {
 		version = defaultVersion()
 	}
 	source := HarnessTargetNative
-	if strings.EqualFold(strings.TrimSpace(d.Target), HarnessTargetWSL) && insideWSL() {
+	if strings.EqualFold(strings.TrimSpace(d.Target), HarnessTargetWSL) && d.isInsideWSL() {
 		source = HarnessTargetWSL
 	}
 	catalog := Catalog()

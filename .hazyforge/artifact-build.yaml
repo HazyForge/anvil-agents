@@ -18,6 +18,7 @@ spec:
     - hermes-runner
     - openclaw-runner
     - pi-runner
+    - agy-runner
   actionPlan:
     nodes:
       - name: build-controller
@@ -166,6 +167,27 @@ spec:
             component:
               name: pi-runner
               location: ghcr.io/hazyforge/anvil-agent-run-pi
+              sourceRefs: [primary]
+            buildkit:
+              address: tcp://acer-buildkit.anvil-builders.svc.cluster.local:1234
+            platform: linux/amd64
+      - name: build-agy-runner
+        phase: BuildArtifact
+        producesComponents: [agy-runner]
+        sourceRefs: [primary]
+        invocation:
+          actionRef: *build-action
+          executorSelector:
+            agentRef:
+              id: acer-artifact-worker
+          credentialRefs: *registry-credential
+          inputs:
+            workdir: /workspace/anvil-agents
+            context: .
+            dockerfile: docker/agent-run-agy/Dockerfile
+            component:
+              name: agy-runner
+              location: ghcr.io/hazyforge/anvil-agent-run-agy
               sourceRefs: [primary]
             buildkit:
               address: tcp://acer-buildkit.anvil-builders.svc.cluster.local:1234

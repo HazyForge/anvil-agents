@@ -7,6 +7,7 @@ export type HarnessBackendKind =
   | "openClaw"
   | "grokBuild"
   | "piAgent"
+  | "agy"
   | "custom";
 
 export interface BackendKindOption {
@@ -69,6 +70,13 @@ export const BACKEND_KIND_OPTIONS: BackendKindOption[] = [
     modelHint: "Pi model id",
   },
   {
+    kind: "agy",
+    title: "Antigravity",
+    summary: "Google Antigravity CLI",
+    detail: "Native Antigravity model, effort, and streaming events. Google authentication is configured on the runner.",
+    modelHint: "Optional model from agy models",
+  },
+  {
     kind: "custom",
     title: "Custom image",
     summary: "Operator-owned container",
@@ -85,6 +93,9 @@ export interface HarnessForm {
   modelProvider: string;
   providerAuthMode: string;
   model: string;
+  agyMode: string;
+  agyThinking: string;
+  agyAdditionalArgs: string;
   codexSandbox: string;
   openCodeAuto: boolean;
   openCodePure: boolean;
@@ -111,6 +122,9 @@ export function emptyHarnessForm(): HarnessForm {
     modelProvider: "",
     providerAuthMode: "",
     model: "",
+    agyMode: "stream-json",
+    agyThinking: "",
+    agyAdditionalArgs: "[]",
     codexSandbox: "read-only",
     openCodeAuto: false,
     openCodePure: true,
@@ -171,6 +185,7 @@ export function formFromHarnessSpec(spec: Record<string, unknown>, name = ""): H
   const openClaw = asRecord(backend.openClaw);
   const grokBuild = asRecord(backend.grokBuild);
   const pi = asRecord(backend.piAgent);
+  const agy = asRecord(backend.agy);
 
   let model = "";
   switch (kind) {
@@ -189,6 +204,9 @@ export function formFromHarnessSpec(spec: Record<string, unknown>, name = ""): H
     case "grokBuild":
       model = String(grokBuild.model ?? "");
       break;
+    case "agy":
+      model = String(agy.model ?? "");
+      break;
     case "piAgent":
       model = String(pi.model ?? "");
       break;
@@ -204,6 +222,9 @@ export function formFromHarnessSpec(spec: Record<string, unknown>, name = ""): H
   form.modelProvider = String(backend.modelProvider ?? "");
   form.providerAuthMode = String(backend.providerAuthMode ?? "");
   form.model = model;
+  form.agyMode = "stream-json"; // print/text aliases already use the same native event transport
+  form.agyThinking = String(agy.thinking ?? "");
+  form.agyAdditionalArgs = JSON.stringify(agy.additionalArgs ?? [], null, 2);
   form.codexSandbox = String(codex.sandbox ?? "read-only");
   form.openCodeAuto = Boolean(openCode.auto);
   form.openCodePure = openCode.pure === undefined ? true : Boolean(openCode.pure);
@@ -253,7 +274,7 @@ export function buildHarnessSpec(form: HarnessForm): Record<string, unknown> {
     kind: form.backendKind,
   };
   setIf(backend, "image", form.image);
-  if (form.backendKind !== "openCode" && form.backendKind !== "custom") {
+  if (form.backendKind !== "openCode" && form.backendKind !== "custom" && form.backendKind !== "agy") {
     setIf(backend, "modelProvider", form.modelProvider);
     setIf(backend, "providerAuthMode", form.providerAuthMode);
   }
@@ -311,6 +332,15 @@ export function buildHarnessSpec(form: HarnessForm): Record<string, unknown> {
       if (Object.keys(pi).length) {
         backend.piAgent = pi;
       }
+      break;
+    }
+    case "agy": {
+      const agy: Record<string, unknown> = { mode: form.agyMode };
+      setIf(agy, "model", form.model);
+      setIf(agy, "thinking", form.agyThinking);
+      const args = agyArgs(form.agyAdditionalArgs);
+      if (args?.length) agy.additionalArgs = args;
+      backend.agy = agy;
       break;
     }
     case "custom": {
@@ -375,6 +405,13 @@ export function buildHarnessSpec(form: HarnessForm): Record<string, unknown> {
   return spec;
 }
 
+function agyArgs(raw: string): string[] | null {
+  try {
+    const value: unknown = JSON.parse(raw.trim() || "[]");
+    return Array.isArray(value) && value.every((arg) => typeof arg === "string") ? value : null;
+  } catch { return null; }
+}
+
 export function validateHarnessForm(form: HarnessForm, isCreate: boolean): string | null {
   if (isCreate && !form.name.trim()) {
     return "Name is required";
@@ -384,6 +421,11 @@ export function validateHarnessForm(form: HarnessForm, isCreate: boolean): strin
   }
   if (form.backendKind === "custom" && !form.image.trim()) {
     return "Custom backend requires a container image";
+  }
+  if (form.backendKind === "agy") {
+    if (!["", "low", "medium", "high"].includes(form.agyThinking)) return "Antigravity effort must be low, medium, or high";
+    if (form.agyMode !== "stream-json") return "Antigravity requires native streaming events";
+    if (agyArgs(form.agyAdditionalArgs) === null) return "Antigravity arguments must be a JSON array of strings";
   }
   if (form.timeoutSeconds.trim() && parseIntField(form.timeoutSeconds) === undefined) {
     return "Timeout must be a non-negative integer (seconds)";

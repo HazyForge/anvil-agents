@@ -383,7 +383,10 @@ cat "$file"
 `)
 	writeExec(t, filepath.Join(dir, "agy"), `#!/bin/sh
 if [ "$1" = "--version" ]; then echo "agy 1.2.2"; exit 0; fi
-cat
+IFS= read -r prompt
+printf '%s\n' "$prompt"
+printf '%s\n' '{"event":"result","result":{"status":"SUCCESS"}}'
+cat >/dev/null
 `)
 	t.Setenv("AUTHORIZATION", "Bearer should-not-leak")
 	t.Setenv("KUBECONFIG", "/tmp/should-not-leak")

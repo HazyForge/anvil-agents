@@ -2,7 +2,10 @@ package runapi
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -62,18 +65,24 @@ func TestChatThreadCreateListGetAndAppend(t *testing.T) {
 	request.Header.Set("Content-Type", "application/json")
 	response = httptest.NewRecorder()
 	server.routes().ServeHTTP(response, request)
-	if response.Code != http.StatusCreated {
+	if response.Code != http.StatusAccepted {
 		t.Fatalf("append status = %d %s", response.Code, response.Body.String())
 	}
 	var appended ChatAppendResponse
 	if err := json.Unmarshal(response.Body.Bytes(), &appended); err != nil {
 		t.Fatal(err)
 	}
-	if appended.User.Role != chat.RoleUser || appended.Assistant.Role != chat.RoleAssistant {
+	if appended.User.Role != chat.RoleUser || appended.Turn.RunName == "" {
 		t.Fatalf("append = %#v", appended)
 	}
-	if !strings.Contains(appended.Assistant.Content, "You said:") || !strings.Contains(appended.Assistant.Content, "hello standing chat") {
-		t.Fatalf("stub reply = %q", appended.Assistant.Content)
+	run := &agentsv1alpha1.AgentRun{}
+	if err := server.writes.Get(context.Background(), types.NamespacedName{Namespace: "agents", Name: appended.Turn.RunName}, run); err != nil {
+		t.Fatal(err)
+	}
+	run.Status.Phase = agentsv1alpha1.AgentRunPhaseSucceeded
+	run.Status.Output = "This is the actual harness reply"
+	if err := server.writes.Status().Update(context.Background(), run); err != nil {
+		t.Fatal(err)
 	}
 
 	request = httptest.NewRequest(http.MethodGet, "/api/v1/namespaces/agents/chat/threads/"+created.ID, nil)
@@ -151,9 +160,10 @@ func chatTestServer(t *testing.T, enabled bool) *Server {
 	config.OIDC.Issuer = "https://issuer.example"
 	config.OIDC.Audiences = []string{"anvil-agents-api"}
 	config.Chat.Enabled = enabled
+	config.Runs.CreateEnabled = true
 	permissions := []string{PermissionRunsRead, PermissionRunsStream}
 	if enabled {
-		permissions = append(permissions, PermissionChatRead, PermissionChatWrite)
+		permissions = append(permissions, PermissionChatRead, PermissionChatWrite, PermissionRunsCreate)
 	}
 	config.Authorization.Bindings = []AuthorizationBinding{{
 		Roles:       []string{"viewer"},
@@ -167,7 +177,7 @@ func chatTestServer(t *testing.T, enabled bool) *Server {
 	server, err := NewServer(config, staticAuthenticator{
 		ready:     true,
 		principal: testPrincipal(time.Now().Add(time.Hour)),
-	}, fake.NewClientBuilder().WithScheme(scheme).Build(), staticLogSource{}, logr.Discard())
+	}, fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(&agentsv1alpha1.AgentRun{}).WithObjects(&agentsv1alpha1.AgentRunProfile{ObjectMeta: metav1.ObjectMeta{Name: "grok45", Namespace: "agents"}}).Build(), staticLogSource{}, logr.Discard())
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -35,10 +35,11 @@ type WSLStatus struct {
 // WSLRequest is one wsl.exe invocation. Linux argv is never derived from the
 // OIDC token or from free-form prompt text.
 type WSLRequest struct {
-	Distro string
-	Argv   []string
-	Stdin  io.Reader
-	Env    []string // extra KEY=val for /usr/bin/env on the Linux side
+	Distro  string
+	Argv    []string
+	Stdin   io.Reader
+	AgyTurn bool     // keep native stream input open until the turn result
+	Env     []string // extra KEY=val for /usr/bin/env on the Linux side
 }
 
 // WSLResult is stdout/stderr from a WSL command. It never includes tokens.
@@ -169,7 +170,11 @@ func defaultWSLRun(look func() (string, error)) func(ctx context.Context, req WS
 		stderr.limit = maxDelegateCapture
 		cmd.Stdout = &stdout
 		cmd.Stderr = &stderr
-		err = cmd.Run()
+		if req.AgyTurn {
+			err = runAgyTurn(cmd, req.Stdin)
+		} else {
+			err = cmd.Run()
+		}
 		result := WSLResult{Stdout: stdout.String(), Stderr: stderr.String()}
 		if ctx.Err() != nil {
 			result.TimedOut = true
@@ -226,7 +231,7 @@ func (d Discoverer) wslRunner() WSLRunner {
 }
 
 func probeWSL(ctx context.Context, d Discoverer) WSLStatus {
-	status := WSLStatus{InsideWSL: insideWSL()}
+	status := WSLStatus{InsideWSL: d.isInsideWSL()}
 	if status.InsideWSL {
 		status.Available = true
 		status.DefaultDistro = strings.TrimSpace(os.Getenv("WSL_DISTRO_NAME"))
@@ -543,6 +548,8 @@ func (d Discoverer) runDelegateWSL(ctx context.Context, tool Tool, distro, promp
 	switch tool.Invoke.Mode {
 	case PromptStdin:
 		stdin = strings.NewReader(prompt)
+	case PromptAgyStream:
+		stdin = agyPromptInput(prompt)
 	case PromptFile:
 		tmp, err := d.wslMktemp(runCtx, distro)
 		if err != nil {
@@ -563,10 +570,11 @@ func (d Discoverer) runDelegateWSL(ctx context.Context, tool Tool, distro, promp
 
 	runner := d.wslRunner()
 	wslResult, err := runner.Run(runCtx, WSLRequest{
-		Distro: distro,
-		Argv:   linuxArgv,
-		Stdin:  stdin,
-		Env:    d.wslEnv(binName),
+		Distro:  distro,
+		Argv:    linuxArgv,
+		Stdin:   stdin,
+		AgyTurn: tool.Invoke.Mode == PromptAgyStream,
+		Env:     d.wslEnv(binName),
 	})
 	result.Stdout = wslResult.Stdout
 	result.Stderr = wslResult.Stderr

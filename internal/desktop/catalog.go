@@ -12,14 +12,15 @@ const (
 	KindHarness     = "harness"
 	KindWorkstation = "workstation"
 
-	PromptStdin = "stdin"
-	PromptFile  = "file"
+	PromptStdin     = "stdin"
+	PromptFile      = "file"
+	PromptAgyStream = "agy-stream-json"
 )
 
 // Invoke is a constant argv recipe for delegating a prompt to a catalog CLI.
 // The OIDC access token is never placed in argv, env, or the prompt file.
 type Invoke struct {
-	Mode     string   // stdin | file; empty means inventory-only
+	Mode     string   // stdin | file | agy-stream-json; empty means inventory-only
 	Args     []string // catalog constants; never derived from user input
 	FileFlag string   // e.g. --prompt-file (file mode only)
 }
@@ -38,7 +39,7 @@ type Tool struct {
 }
 
 func (t Tool) Delegatable() bool {
-	return t.Kind == KindHarness && (t.Invoke.Mode == PromptStdin || t.Invoke.Mode == PromptFile)
+	return t.Kind == KindHarness && (t.Invoke.Mode == PromptStdin || t.Invoke.Mode == PromptFile || t.Invoke.Mode == PromptAgyStream)
 }
 
 // Catalog is the ordered inventory shown in the desktop UI.
@@ -105,15 +106,14 @@ func Catalog() []Tool {
 			Notes:       "Pi coding agent CLI. Inventory only until a constant, prompt-file-safe invoke is documented.",
 		},
 		{
-			ID:           "agy",
-			DisplayName:  "Antigravity",
-			Kind:         KindHarness,
-			Backend:      "agy",
-			Binaries:     []string{"agy"},
-			VersionArgs:  [][]string{{"--version"}, {"version"}},
-			AuthFileHint: "~/.agy/auth.json",
-			Notes:        "Antigravity (agy) agent CLI. Prompt is passed via stdin to agy -p -.",
-			Invoke:       Invoke{Mode: PromptStdin, Args: []string{"--dangerously-skip-permissions", "-p", "-"}},
+			ID:          "agy",
+			DisplayName: "Antigravity",
+			Kind:        KindHarness,
+			Backend:     "agy",
+			Binaries:    []string{"agy"},
+			VersionArgs: [][]string{{"--version"}, {"version"}},
+			Notes:       "Antigravity (agy) agent CLI. Prompt is sent as a native stream-json user event on stdin; output retains native events.",
+			Invoke:      Invoke{Mode: PromptAgyStream, Args: []string{"--dangerously-skip-permissions", "--input-format", "stream-json", "--output-format", "stream-json"}},
 		},
 		{
 			ID:          "claude",

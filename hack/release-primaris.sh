@@ -2,7 +2,7 @@
 # Local Docker release path for Anvil Primaris — no GitHub Actions required.
 #
 # Modes:
-#   full  Versioned seven-image release (verify + kind-e2e by default), pin
+#   full  Versioned eight-image release (verify + kind-e2e by default), pin
 #         Primaris deploy.yaml, optional GitHub release page, optional deploy.
 #   fast  Same as full but skips kind-e2e (still runs make verify unless
 #         --skip-verification). Use for rapid console/API cutovers.
@@ -38,7 +38,7 @@ Usage:
   ./hack/release-primaris.sh --mode MODE [options]
 
 Modes:
-  full     VERSIONED release: tag at HEAD, verify+kind-e2e, build+push all 7
+  full     VERSIONED release: tag at HEAD, verify+kind-e2e, build+push all 8
            images via Docker Buildx, package/push OCI chart, pin Primaris
            deploy.yaml digests. Optional --deploy / --github.
   fast     Like full but skips Kind e2e (still make verify). Intended for
@@ -105,6 +105,7 @@ image_name() {
 		hermes) printf '%s\n' anvil-agent-run-hermes ;;
 		openclaw) printf '%s\n' anvil-agent-run-openclaw ;;
 		pi) printf '%s\n' anvil-agent-run-pi ;;
+		agy) printf '%s\n' anvil-agent-run-agy ;;
 		*) return 1 ;;
 	esac
 }
@@ -119,6 +120,7 @@ deploy_yaml_key_for_component() {
 		hermes) printf '%s\n' hermesAgent ;;
 		openclaw) printf '%s\n' openClaw ;;
 		pi) printf '%s\n' piAgent ;;
+		agy) printf '%s\n' agy ;;
 		*) return 1 ;;
 	esac
 }

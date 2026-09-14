@@ -1,134 +1,127 @@
-# Standing Chat Storage
+# Remote harness chat
 
-Standing chat is an **API feature**, not a Kubernetes custom resource. Threads
-are ChatGPT-style conversations bound to an `AgentRunProfile` (persona mode)
-or, later, a fleet/master mode. They persist in PostgreSQL. This repository
-does not add a Conversation CRD.
+Standing chat is an OIDC API feature backed by PostgreSQL. A conversation selects
+an existing AgentRunProfile, an existing AgentHarnessProfile, or a profile with a
+harness override. Harness-only conversations do not create profiles. Agent and
+Manager are roles on the same chat feature; neither fixes the model provider.
 
-The first cut stores threads and messages and exposes OIDC-gated HTTP routes on
-`anvil-agents-api`. LLM and tool execution are stubbed. The Anvil Agents Console
-includes a standing-chat UI gated by `ui-config` `chat.enabled`. LangGraph tools,
-agent-to-agent inbox, and injecting chat into live AgentRuns remain out of scope.
+Every accepted message creates one append-only AgentRun with the conversation
+history. The API saves the real assistant reply extracted from that runner's
+native output. This is turn-based execution, not a continuously running native
+CLI session. Running Jobs retain their original prompt. Native mid-generation
+steering and interruption are not implemented by this chat feature.
 
-## Storage
+## Desktop workflow
 
-Chat reuses the AgentRun archive database installation pattern. Every archive
-mode (`external`, `standalone`, `cloudnativepg`) already resolves to one
-Kubernetes Secret key containing a PostgreSQL URI. When standing chat is
-enabled, the API Pod mounts that same Secret as `ANVIL_AGENTS_CHAT_DATABASE_URL`
-unless `api.chatDatabaseURLSecret` overrides it.
+1. Sign in, open Chat, and select a namespace.
+2. Choose an agent or Harness only, then select the remote harness. An agent's
+   configured harness remains the default.
+3. Choose Agent or Manager. Optionally enable message delegation and select
+   allowed peers. The server restricts peers to the same namespace and
+   application scope.
+4. Send a message. The UI shows waiting/queued/running state and runner activity.
+   Replies and peer delivery receipts survive reloads and API restarts.
+5. Open a peer conversation to see that agent's independently generated reply.
 
-The API process never reads or writes Kubernetes Secret *values*. It only
-consumes the URI from its environment, the same way the controller consumes
-`ANVIL_AGENTS_ARCHIVE_DATABASE_URL`. Chat code has no Secret RBAC.
+New conversations can select a different harness. Existing conversations retain
+their selected identity and harness. Provider authentication and permissions come
+from the selected harness/profile, including its existing mounted home and
+service account. Selecting a harness does not authenticate its provider.
 
-Tables live in a dedicated schema `anvil_agents_chat` so they do not collide
-with `anvilhub_agent_run_archives` in `public`. The database role must be able
-to `CREATE SCHEMA` (the chart's standalone superuser and CloudNativePG
-application owner can). For a locked-down external role, pre-create the schema
-or grant `CREATE` on the database.
+## Coordination
 
-| Table | Purpose |
-| --- | --- |
-| `anvil_agents_chat.threads` | Conversation identity, namespace, profile, mode, title, creator subject, metadata |
-| `anvil_agents_chat.messages` | Ordered `system` / `user` / `assistant` / `tool` rows |
-| `anvil_agents_chat.checkpoints` | Empty placeholder for a future LangGraph checkpoint store |
+Coordination is opt-in for either role. Thread metadata contains:
 
-Persona threads require `profile_name`. Fleet threads may omit it.
-
-The API migrates the schema on process start. It does not copy archive rows,
-does not change archive retention, and does not delete GitOps-owned agents.
-
-## Chart knobs
-
-Chat is deny-by-default, matching `api.enabled` and the other API feature
-gates.
-
-```yaml
-api:
-  enabled: true
-  config:
-    chat:
-      enabled: true
-    authorization:
-      bindings:
-        - name: operators
-          roles: [anvil_agents_operator]
-          permissions:
-            - anvil-agents:runs:read
-            - anvil-agents:runs:stream
-            - anvil-agents:chat:read
-            - anvil-agents:chat:write
-          namespaces: [agents]
-  # Empty name reuses the archive Secret from archive.mode.
-  chatDatabaseURLSecret:
-    name: ""
-    key: ""
-archive:
-  mode: external
-  external:
-    databaseURLSecret:
-      name: agent-archive-database
-      key: url
+```json
+{"coordination":{"enabled":true,"allowedProfiles":["desktop-reviewer"]}}
 ```
 
-| Value | Default | Effect |
-| --- | --- | --- |
-| `api.config.chat.enabled` | `false` | Serve `/api/v1/namespaces/{namespace}/chat/*` |
-| `api.chatDatabaseURLSecret.name` | empty | Override Secret; empty shares the archive URI Secret |
-| `archive.mode` | disabled | Required unless an override Secret is set |
-| `archive.restartToken` | empty | Also annotates the API Pod when chat is enabled so URI rotation rolls both workloads |
+The selected harness receives a bounded inventory of actual active work for its
+allowed peers and may return:
 
-Grant `anvil-agents:chat:read` and `anvil-agents:chat:write` only after
-`api.config.chat.enabled=true`. The URI must not appear in the API ConfigMap.
-
-## API
-
-OIDC is the same as the rest of `anvil-agents-api`: bearer access tokens,
-exact issuer and audience, explicit bindings, namespace authorization, no
-query-string tokens.
-
-| Endpoint | Permission |
-| --- | --- |
-| `GET /api/v1/namespaces/{namespace}/chat/threads` | `anvil-agents:chat:read` |
-| `POST /api/v1/namespaces/{namespace}/chat/threads` | `anvil-agents:chat:write` |
-| `GET /api/v1/namespaces/{namespace}/chat/threads/{threadID}` | `anvil-agents:chat:read` |
-| `GET /api/v1/namespaces/{namespace}/chat/threads/{threadID}/messages` | `anvil-agents:chat:read` |
-| `POST /api/v1/namespaces/{namespace}/chat/threads/{threadID}/messages` | `anvil-agents:chat:write` |
-
-List accepts `profileName`, `mode`, and `limit`. Create is scoped to the path
-namespace. Append always stores a `user` message from the caller; the current
-assistant reply is a labeled echo stub (`metadata.stub=true`). Clients cannot
-spoof `assistant`, `system`, or `tool` roles through this API.
-
-`GET /ui-config.json` includes `chat.enabled`. When true, the console shows a
-**Standing chat** nav entry and routes:
-
-| Route | Purpose |
-| --- | --- |
-| `/chat` | Thread list + create for the active namespace (persona / `AgentRunProfile`) |
-| `/ns/{namespace}/chat` | Same hub scoped to that namespace |
-| `/ns/{namespace}/chat/{threadId}` | Thread detail, message history, and composer |
-
-The console uses the same OIDC bearer session as the rest of the SPA. Stub
-assistant replies (`metadata.stub=true`) render with a stub chip.
-
-## Non-goals
-
-- No Conversation (or other chat) CRD
-- No Kubernetes Secret byte access from chat code
-- No LangGraph microservice, gRPC worker, or tool allowlist
-- No agent-to-agent inbox
-- No soft-inject of chat history into live AgentRuns
-
-Follow-ups: a LangGraph worker that writes `anvil_agents_chat.checkpoints`, and a
-tool allowlist bound to the persona's `AgentToolSet`.
-
-## Verification
-
-Unit tests cover the in-process store and OIDC routes. The real PostgreSQL
-migration runs next to the archive integration check:
-
-```bash
-make archive-postgres-integration
+```json
+{"reply":"I asked the reviewer to check that.","messages":[{"profileName":"desktop-reviewer","content":"Review the supplied proposal."}]}
 ```
+
+The API validates the entire batch before dispatch. Each recipient runs its own
+configured harness. A parent turn can address up to four distinct allowed peers;
+the allowlist contains at most eight profiles. Deterministic delivery IDs prevent
+retries from starting the same peer work twice. Busy recipients wait durably.
+Delivery receipts link to the real peer conversation and run. Children do not
+inherit delegation permission, bounding fanout and preventing recursive loops.
+The manager can use the work inventory to avoid duplicate assignments; the
+service does not claim to detect all semantically duplicate tasks.
+
+Existing controller requestPeer/interruptDuplicate behavior remains separate.
+A chat delivery receipt is not evidence that a live generation was interrupted.
+
+## Persistence and recovery
+
+The API mounts `ANVIL_AGENTS_CHAT_DATABASE_URL` from the existing archive database
+Secret, or `api.chatDatabaseURLSecret` when explicitly configured. Chat does not
+read Kubernetes Secret values and adds no Secret RBAC.
+
+Schema `anvil_agents_chat` owns threads, ordered messages, and durable turn outbox
+records. Accepting a turn and its user message is one database transaction. The
+outbox freezes the execution intent before Kubernetes creation. Stable names and
+verified run identities prevent duplicate execution after ambiguous writes.
+Completion appends one assistant message atomically. A background worker resumes
+queued turns after restart; GET reconciliation also refreshes their state.
+
+Only one active turn is accepted for a conversation and its execution target.
+A retry with the same requestId/content returns the original accepted turn;
+reusing an ID with different content is rejected. Explicit peer deliveries wait
+for an occupied target instead of dropping the message.
+
+## Configuration and API
+
+Enable `api.enabled`, `api.config.chat.enabled` and
+`api.config.runs.createEnabled`. The database URI remains a Secret environment
+reference. Native Desktop authentication uses `api.config.ui.desktop.oidcClientId`.
+Use exact allowed loopback CORS origins and existing namespace-scoped OIDC
+bindings. Chat read/write permissions do not bypass runs:create. Coordination
+also requires runs:read for the current-work inventory.
+
+| Endpoint under `/api/v1/namespaces/{namespace}` | Behavior |
+| --- | --- |
+| `GET /chat/threads` | List saved conversations (chat:read) |
+| `POST /chat/threads` | Create profile/harness-bound conversation (chat:write) |
+| `GET /chat/threads/{id}` | Messages, turns, active turn and delegate receipts (chat:read) |
+| `GET /chat/threads/{id}/messages` | Ordered saved messages (chat:read) |
+| `POST /chat/threads/{id}/messages` | Accept a turn (chat:write and runs:create) |
+
+Create body: `profileName?`, `harnessProfileName?`, `mode` (`persona` or `fleet`),
+`title?`, `metadata?`. At least one execution selector is required. Append body:
+`content`, `requestId?` (UUID; clients should always send one for safe retries).
+The append response is HTTP 202 `{thread,user,turn}`. It does not contain an
+invented immediate assistant reply. Thread detail exposes `turns` and `activeTurn`.
+
+Threads are namespace-shared under the existing authorization model, not private
+per-user message storage. The creating subject is recorded. Changing a person's
+access affects subsequent HTTP requests; already accepted work retains its
+execution intent.
+
+## Validation
+
+`make verify` runs local source, chart and runner checks. Run
+`hack/test-archive-postgres.sh` for real PostgreSQL migration, outbox concurrency,
+idempotent completion and deferred-peer activation. Desktop browser contract
+checks are in `hack/desktop-remote-chat.browser-test.mjs`; set PLAYWRIGHT_MODULE to
+an installed Playwright module. These fixtures prove UI behavior, not provider
+authentication. Release verification separately records authenticated live API,
+actual runner replies and browser results.
+
+## Helm-owned Desktop profiles
+
+The Primaris overlay includes `desktop-assistant` and `desktop-reviewer` in
+`anvilhub`, with application scope `desktop-chat` and the existing
+`anvil-primaris-opencode-observe` harness. They have neutral text-only prompts
+and no autonomous schedules. The Desktop can override either harness on a new
+conversation. These are ordinary interactive profiles, not a self-development
+fleet or manager policy authority.
+
+The chart's optional `extraObjects` list renders literal Kubernetes objects
+without evaluating templated strings. Helm owns those objects: removing an entry
+on a subsequent Helm upgrade deletes it. Keep persistent volumes, credentials
+and unrelated existing resources out of this list. The API treats these
+GitOps-labeled profiles as read-only composition entries.

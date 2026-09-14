@@ -58,6 +58,10 @@ CREATE TABLE IF NOT EXISTS anvil_agents_chat.threads (
         mode <> 'persona' OR (profile_name IS NOT NULL AND profile_name <> '')
     )
 );
+ALTER TABLE anvil_agents_chat.threads DROP CONSTRAINT IF EXISTS threads_persona_profile_check;
+ALTER TABLE anvil_agents_chat.threads ADD CONSTRAINT threads_persona_profile_check CHECK (
+ mode <> 'persona' OR COALESCE(profile_name,'') <> '' OR COALESCE(metadata->>'harnessProfileName','') <> ''
+);
 CREATE INDEX IF NOT EXISTS threads_namespace_updated_idx
     ON anvil_agents_chat.threads (namespace, updated_at DESC);
 CREATE INDEX IF NOT EXISTS threads_namespace_profile_updated_idx
@@ -77,6 +81,24 @@ CREATE TABLE IF NOT EXISTS anvil_agents_chat.messages (
 CREATE INDEX IF NOT EXISTS messages_thread_sequence_idx
     ON anvil_agents_chat.messages (thread_id, sequence);
 
+CREATE TABLE IF NOT EXISTS anvil_agents_chat.turns (
+    id TEXT PRIMARY KEY,
+    thread_id TEXT NOT NULL REFERENCES anvil_agents_chat.threads(id),
+    namespace TEXT NOT NULL,
+    request_id TEXT NOT NULL,
+    status TEXT NOT NULL,
+    payload JSONB NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE(thread_id, request_id)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS turns_one_active_per_thread
+    ON anvil_agents_chat.turns(thread_id) WHERE status IN ('queued', 'running');
+
+CREATE UNIQUE INDEX IF NOT EXISTS turns_one_unfinished_per_thread
+ ON anvil_agents_chat.turns(thread_id) WHERE status IN ('waiting','queued','running');
+CREATE UNIQUE INDEX IF NOT EXISTS turns_one_active_per_profile
+ ON anvil_agents_chat.turns(namespace, (payload->>'profileName')) WHERE status IN ('queued','running');
+
 CREATE TABLE IF NOT EXISTS anvil_agents_chat.checkpoints (
     id TEXT PRIMARY KEY,
     thread_id TEXT NOT NULL REFERENCES anvil_agents_chat.threads (id) ON DELETE CASCADE,
@@ -90,6 +112,13 @@ CREATE TABLE IF NOT EXISTS anvil_agents_chat.checkpoints (
 `
 
 type Store interface {
+	QueueTurn(context.Context, Turn, Message) (Turn, Message, Thread, error)
+	ListTurns(context.Context, string, string) ([]Turn, error)
+	PendingTurns(context.Context, int) ([]Turn, error)
+	CompleteTurn(context.Context, Turn, Message) error
+	RecordRun(context.Context, Turn, string) error
+	ActivateTurn(context.Context, Turn) (bool, error)
+
 	CreateThread(ctx context.Context, thread Thread) (Thread, error)
 	ListThreads(ctx context.Context, filter ThreadFilter) ([]Thread, error)
 	GetThread(ctx context.Context, namespace, id string) (Thread, error)
@@ -449,7 +478,11 @@ func NormalizeThread(thread Thread, now time.Time) (Thread, error) {
 	if thread.CreatedBy == "" {
 		return Thread{}, fmt.Errorf("%w: createdBy is required", ErrInvalid)
 	}
-	if thread.Mode == ModePersona && thread.ProfileName == "" {
+	var target struct {
+		HarnessProfileName string `json:"harnessProfileName"`
+	}
+	_ = json.Unmarshal(thread.Metadata, &target)
+	if thread.Mode == ModePersona && thread.ProfileName == "" && strings.TrimSpace(target.HarnessProfileName) == "" {
 		return Thread{}, fmt.Errorf("%w: profileName is required for persona threads", ErrInvalid)
 	}
 	if thread.Title == "" {

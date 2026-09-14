@@ -9,7 +9,7 @@ chart_dir="${repo_root}/charts/anvil-agents"
 namespace="anvil-agents-system"
 # Matches the remote-helm ApplicationSet name pattern: <namespace-dir>-chart
 release_name="anvil-agents-system-chart"
-fullname_override="anvil-agents"
+fullname_override=""
 kube_context=""
 dry_run="false"
 wait="true"
@@ -35,7 +35,7 @@ Options:
   --namespace NS         Target namespace. Default: anvil-agents-system
   --release-name NAME    Helm release name. Default: anvil-agents-system-chart
                          (matches Argo remote-helm Application name)
-  --fullname-override N  Helm fullnameOverride. Default: anvil-agents
+  --fullname-override N  Helm fullnameOverride. Default: preserve the values file
   --context CTX          kubectl/helm --kube-context
   --timeout DURATION     Helm --timeout. Default: 15m
   --no-wait              Do not pass --wait
@@ -142,9 +142,11 @@ helm_args=(
 	--create-namespace
 	--values "${chart_dir}/values.yaml"
 	--values "${values_file}"
-	--set "fullnameOverride=${fullname_override}"
 	--timeout "${timeout}"
 )
+if [[ -n "${fullname_override}" ]]; then
+ helm_args+=(--set-string "fullnameOverride=${fullname_override}")
+fi
 if [[ -n "${kube_context}" ]]; then
 	helm_args+=(--kube-context "${kube_context}")
 fi
@@ -161,7 +163,7 @@ fi
 # Surface image pins for operators before helm mutates the cluster.
 if command -v rg >/dev/null 2>&1; then
 	echo "Deploying with image pins from ${values_file}:"
-	rg -n 'reference:|codex:|openCode:|hermesAgent:|openClaw:|grokBuild:|piAgent:|crds:' "${values_file}" || true
+	rg -n 'reference:|codex:|openCode:|hermesAgent:|openClaw:|grokBuild:|piAgent:|agy:|crds:' "${values_file}" || true
 fi
 
 printf '+ helm'

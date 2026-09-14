@@ -25,6 +25,7 @@ func TestPostgresStoreIntegration(t *testing.T) {
 		t.Fatalf("open PostgreSQL chat store: %v", err)
 	}
 	defer store.Close()
+	t.Run("durable turn outbox", func(t *testing.T) { exerciseTurnOutbox(t, store) })
 
 	namespace := "chat-integration"
 	profile := "grok45-" + strconv.FormatInt(time.Now().UnixNano(), 10)

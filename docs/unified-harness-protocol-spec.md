@@ -1,5 +1,12 @@
 # Unified Agent Harness Programmatic Protocol Specification
 
+Status: proposal plus an in-memory envelope/handler library in
+`internal/harnessprotocol`. There is no connected adapter daemon, transport,
+provider session control, or production interrupt implementation behind this
+library. Remote chat uses the persisted turn execution described in
+[standing-chat.md](standing-chat.md). The protocol matrix below is design
+research, not a claim of implemented or verified adapters.
+
 ## 1. Problem Statement & Motivation
 Currently, Anvil Agents interacts with runners primarily through static entrypoint bash scripts (`entrypoint.sh`) that invoke one-shot CLI commands (`codex exec`, `opencode run`, `hermes`, `openclaw agent`, `grok --prompt-file`, `pi -p @file`). 
 
@@ -9,7 +16,7 @@ While this model works for fire-and-forget headless jobs, it is inadequate for g
 - **Granular Inspection:** Querying active tools, thought processes, AST changes, and token consumption in real-time.
 - **Dynamic Tooling / Capability Injection:** Calling tools and dynamic RPCs programmatically over a defined protocol rather than relying on CLI arguments or environment variables.
 
-To make capabilities more granular across diverse agent harnesses (OpenCode, Hermes, OpenClaw, Grok, Pi, Codex, Claude Code, OpenHands, Aider, etc.), Anvil Agents implements a **Unified Programmatic Harness Protocol**.
+To make capabilities more granular across diverse agent harnesses (OpenCode, Hermes, OpenClaw, Grok, Pi, Codex, Claude Code, OpenHands, Aider, etc.), this proposal defines a **Unified Programmatic Harness Protocol**.
 
 ---
 

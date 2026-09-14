@@ -203,6 +203,38 @@ export function HarnessProfileForm({
         </div>
       ) : null}
 
+      {form.backendKind === "agy" ? (
+        <>
+          <div className="field-row">
+            <label className="field">
+              <span className="label">Response format</span>
+              <select className="select" value={form.agyMode} disabled={disabled}
+                onChange={(event) => onChange("agyMode", event.target.value)}>
+                <option value="stream-json">Streaming events</option>
+              </select>
+              <p className="field-help">Runs one turn and records response and tool events.</p>
+            </label>
+            <label className="field">
+              <span className="label">Reasoning effort</span>
+              <select className="select" value={form.agyThinking} disabled={disabled}
+                onChange={(event) => onChange("agyThinking", event.target.value)}>
+                <option value="">Model default</option>
+                <option value="low">Low</option>
+                <option value="medium">Medium</option>
+                <option value="high">High</option>
+              </select>
+            </label>
+          </div>
+          <label className="field">
+            <span className="label">Additional Antigravity arguments</span>
+            <textarea className="textarea mono" value={form.agyAdditionalArgs} disabled={disabled}
+              onChange={(event) => onChange("agyAdditionalArgs", event.target.value)}
+              placeholder={'["--mode", "plan"]'} />
+            <p className="field-help">A JSON array with one native CLI argument per item. Keep credentials in the runner authentication configuration.</p>
+          </label>
+        </>
+      ) : null}
+
       {kindMeta?.needsSharedProvider ? (
         <div className="field-row">
           <label className="field">

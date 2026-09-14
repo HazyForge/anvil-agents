@@ -2,6 +2,8 @@ package desktop
 
 import (
 	"fmt"
+	"net"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -11,8 +13,8 @@ import (
 
 func OpenWindow(target string) error {
 	target = strings.TrimSpace(target)
-	if target == "" {
-		return fmt.Errorf("open URL is empty")
+	if err := validateWindowURL(target); err != nil {
+		return err
 	}
 	if chrome := firstLookPath(chromeCandidates()...); chrome != "" {
 		args := []string{"--app=" + target, "--new-window"}
@@ -22,7 +24,7 @@ func OpenWindow(target string) error {
 		if dir := strings.TrimSpace(os.Getenv("ANVIL_DESKTOP_CHROME_USER_DATA_DIR")); dir != "" {
 			args = append(args, "--user-data-dir="+dir)
 		}
-		cmd := exec.Command(chrome, args...) // #nosec G204 -- chrome is LookPath of a known browser; URL is the loopback host; extra flags are env-controlled constants
+		cmd := exec.Command(chrome, args...) // #nosec G204 G702 -- fixed browser from LookPath, validated loopback URL, separate argv; no shell execution
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		return cmd.Start()
@@ -67,4 +69,17 @@ func firstLookPath(names ...string) string {
 		}
 	}
 	return ""
+}
+
+func validateWindowURL(target string) error {
+	parsed, err := url.Parse(target)
+	if err != nil || parsed == nil || parsed.User != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") {
+		return fmt.Errorf("desktop window requires a loopback HTTP URL")
+	}
+	host := parsed.Hostname()
+	ip := net.ParseIP(host)
+	if host != "localhost" && (ip == nil || !ip.IsLoopback()) {
+		return fmt.Errorf("desktop window requires a loopback HTTP URL")
+	}
+	return nil
 }

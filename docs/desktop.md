@@ -10,17 +10,12 @@ cluster context picker. The installed executable calls
 `https://agents.anvil.hazyforge.io` (Authorization Code + PKCE), then Chat and
 Wrapper use the same AgentRun API the browser console uses.
 
-Two functions, not mixed:
-
-1. **Main — Primaris agents.** Sign in, named-agent chat, Wrapper
-   (`create_agent` + `anvil-api` list/get/create). This is the point of the app.
-2. **Second — local harness.** The Local page activates already-installed
-   Codex, Grok, OpenClaw, OpenCode, or similar CLIs on native PATH or inside
-   WSL. It does not replace Chat/Wrapper. The OIDC token is never copied into
-   CLI argv, env, or prompt files.
-
-The **wrapper** is the entity in Desktop chat: it can spawn more profiles when
-asked. The PR 168 echo stub is not the wrapper reply.
+Chat selects an agent, a remote harness, and an optional Manager role. Both roles
+use the same persisted chat service. Explicit peer allowlists enable real message
+delegation; each recipient executes independently. See [Remote harness chat](standing-chat.md).
+The Local page separately discovers installed workstation CLIs on native PATH
+or in WSL. Local activation never copies the OIDC token into CLI arguments,
+environment variables or prompt files.
 
 ## Why Anvil Agents Desktop
 

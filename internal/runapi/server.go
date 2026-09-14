@@ -75,6 +75,9 @@ func NewServer(config Config, authenticator AccessTokenAuthenticator, runs clien
 }
 
 func (server *Server) Start(ctx context.Context) error {
+	if server.config.Chat.Enabled && server.chatStore != nil {
+		go server.runChatRecovery(ctx)
+	}
 	if starter, ok := server.authenticator.(interface{ Start(context.Context) }); ok {
 		go starter.Start(ctx)
 	}
@@ -163,7 +166,7 @@ func (server *Server) handleUIConfig(writer http.ResponseWriter, _ *http.Request
 			"createEnabled": server.config.Runs.CreateEnabled,
 		},
 		"externalTriggers": map[string]any{"enabled": server.config.ExternalTriggers.Enabled},
-		"chat": map[string]any{"enabled": server.config.Chat.Enabled},
+		"chat":             map[string]any{"enabled": server.config.Chat.Enabled},
 	}
 	if id := strings.TrimSpace(server.config.UI.Desktop.OIDCClientID); id != "" {
 		payload["desktop"] = map[string]any{"oidcClientId": id}

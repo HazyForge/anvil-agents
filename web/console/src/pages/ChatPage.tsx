@@ -8,7 +8,7 @@ import {
 } from "../api/chat";
 import { APIError } from "../api/client";
 import { listComposition } from "../api/composition";
-import type { ChatMessage, ChatThread } from "../api/types.chat";
+import type { ChatMessage, ChatThread, ChatTurn } from "../api/types.chat";
 import { formatTime } from "../utils/format";
 
 interface Props {
@@ -57,6 +57,8 @@ export function ChatPage({ token, namespace: activeNamespace, onViewNamespace }:
   const [detailLoading, setDetailLoading] = useState(false);
   const [creating, setCreating] = useState(false);
   const [sending, setSending] = useState(false);
+  const [activeTurn, setActiveTurn] = useState<ChatTurn | null>(null);
+  const pendingSend = useRef<{content: string; thread: string; id: string} | null>(null);
   const [listError, setListError] = useState<string | null>(null);
   const [detailError, setDetailError] = useState<string | null>(null);
   const [sendError, setSendError] = useState<string | null>(null);
@@ -165,6 +167,7 @@ export function ChatPage({ token, namespace: activeNamespace, onViewNamespace }:
         return;
       }
       const { messages: detailMessages, ...thread } = detail;
+      setActiveTurn(detail.activeTurn ?? null);
       setSelectedThread(thread);
       setMessages(detailMessages ?? []);
     } catch (err) {
@@ -185,7 +188,9 @@ export function ChatPage({ token, namespace: activeNamespace, onViewNamespace }:
 
   useEffect(() => {
     void loadDetail();
+    const timer = window.setInterval(() => void loadDetail(), 3000);
     return () => {
+      clearInterval(timer);
       detailRequestRef.current += 1;
     };
   }, [loadDetail]);
@@ -241,16 +246,19 @@ export function ChatPage({ token, namespace: activeNamespace, onViewNamespace }:
         return;
       }
       const content = draft.trim();
-      if (!content || sending) {
+      if (!content || sending || activeTurn) {
         return;
       }
       setSending(true);
       setSendError(null);
       try {
-        const result = await appendChatMessage(token, namespace, threadID, { content });
+        if (!pendingSend.current || pendingSend.current.content !== content || pendingSend.current.thread !== threadID) pendingSend.current = {content, thread: threadID, id: crypto.randomUUID()};
+        const result = await appendChatMessage(token, namespace, threadID, { content, requestId: pendingSend.current.id });
+        pendingSend.current = null;
+        setActiveTurn(result.turn);
         setDraft("");
         setSelectedThread(result.thread);
-        setMessages((prev) => [...prev, result.user, result.assistant]);
+        setMessages((prev) => [...prev.filter(m => m.id !== result.user.id), result.user]);
         setThreads((prev) => {
           const next = prev.filter((item) => item.id !== result.thread.id);
           return [result.thread, ...next];
@@ -263,7 +271,7 @@ export function ChatPage({ token, namespace: activeNamespace, onViewNamespace }:
         setSending(false);
       }
     },
-    [token, namespace, threadID, draft, sending],
+    [token, namespace, threadID, draft, sending, activeTurn],
   );
 
   const onComposerKeyDown = useCallback(
@@ -304,13 +312,12 @@ export function ChatPage({ token, namespace: activeNamespace, onViewNamespace }:
         </div>
         <div className="chip-row">
           <span className="chip">ChatGPT-style · AgentRunProfile</span>
-          <span className="chip chip-mute">assistant replies may be stubs</span>
+          <span className="chip chip-mute">remote harness execution</span>
         </div>
       </div>
 
       <div className="banner banner-info">
-        Threads persist in PostgreSQL for this namespace. LangGraph tools are not wired yet; the API may
-        return echo stubs labeled <span className="mono">metadata.stub=true</span>.
+        Threads and replies are saved. Each message starts the configured remote harness with the conversation history.
       </div>
 
       <div className="chat-layout">
@@ -494,9 +501,9 @@ export function ChatPage({ token, namespace: activeNamespace, onViewNamespace }:
                   />
                 </label>
                 <div className="chat-composer-actions">
-                  <span className="chat-composer-hint">Stored as role=user; API appends an assistant reply.</span>
-                  <button type="submit" className="btn btn-primary" disabled={sending || !draft.trim()}>
-                    {sending ? "Sending…" : "Send"}
+                  <span className="chat-composer-hint">{activeTurn ? `Remote harness: ${activeTurn.status}` : "Your message and the harness reply are saved."}</span>
+                  <button type="submit" className="btn btn-primary" disabled={sending || Boolean(activeTurn) || !draft.trim()}>
+                    {sending ? "Sending…" : activeTurn ? "Waiting for reply…" : "Send"}
                   </button>
                 </div>
               </form>

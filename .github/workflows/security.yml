@@ -422,6 +422,9 @@ jobs:
           - component: pi
             image: anvil-agent-run-pi
             role: "Pi runner + anvil-hotline"
+          - component: agy
+            image: anvil-agent-run-agy
+            role: "Antigravity runner + anvil-hotline"
     permissions:
       contents: read
       security-events: write

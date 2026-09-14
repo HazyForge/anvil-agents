@@ -31,6 +31,7 @@ runnerImages:
   openClaw: ghcr.io/hazyforge/anvil-agent-run-openclaw@sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
   grokBuild: ghcr.io/hazyforge/anvil-agent-run-grok-build@sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
   piAgent: ghcr.io/hazyforge/anvil-agent-run-pi@sha256:1111111111111111111111111111111111111111111111111111111111111111
+  agy: ghcr.io/hazyforge/anvil-agent-run-agy@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 crds:
   install: true
 EOF
@@ -48,6 +49,7 @@ grok-build	ghcr.io/hazyforge/anvil-agent-run-grok-build@sha256:55555555555555555
 hermes	ghcr.io/hazyforge/anvil-agent-run-hermes@sha256:6666666666666666666666666666666666666666666666666666666666666666
 openclaw	ghcr.io/hazyforge/anvil-agent-run-openclaw@sha256:7777777777777777777777777777777777777777777777777777777777777777
 pi	ghcr.io/hazyforge/anvil-agent-run-pi@sha256:8888888888888888888888888888888888888888888888888888888888888888
+agy	ghcr.io/hazyforge/anvil-agent-run-agy@sha256:9999999999999999999999999999999999999999999999999999999999999999
 EOF
 
 "${source_root}/hack/pin-deploy-values-from-lock.sh" \

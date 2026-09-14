@@ -21,15 +21,17 @@ const (
 )
 
 type CreateChatThreadRequest struct {
-	ProfileName string          `json:"profileName"`
-	Mode        string          `json:"mode"`
-	Title       string          `json:"title"`
-	Metadata    json.RawMessage `json:"metadata"`
+	HarnessProfileName string          `json:"harnessProfileName,omitempty"`
+	ProfileName        string          `json:"profileName"`
+	Mode               string          `json:"mode"`
+	Title              string          `json:"title"`
+	Metadata           json.RawMessage `json:"metadata"`
 }
 
 type AppendChatMessageRequest struct {
-	Content  string          `json:"content"`
-	Metadata json.RawMessage `json:"metadata"`
+	RequestID string          `json:"requestId,omitempty"`
+	Content   string          `json:"content"`
+	Metadata  json.RawMessage `json:"metadata"`
 }
 
 type ChatThreadListResponse struct {
@@ -38,13 +40,15 @@ type ChatThreadListResponse struct {
 
 type ChatThreadDetailResponse struct {
 	chat.Thread
-	Messages []chat.Message `json:"messages"`
+	Messages   []chat.Message `json:"messages"`
+	Turns      []chat.Turn    `json:"turns"`
+	ActiveTurn *chat.Turn     `json:"activeTurn,omitempty"`
 }
 
 type ChatAppendResponse struct {
-	Thread    chat.Thread  `json:"thread"`
-	User      chat.Message `json:"user"`
-	Assistant chat.Message `json:"assistant"`
+	Thread chat.Thread  `json:"thread"`
+	User   chat.Message `json:"user"`
+	Turn   chat.Turn    `json:"turn"`
 }
 
 func (server *Server) registerChatRoutes(mux *http.ServeMux) {
@@ -100,6 +104,41 @@ func (server *Server) handleCreateChatThread(writer http.ResponseWriter, request
 		writeAPIError(writer, http.StatusBadRequest, "invalid_body", err.Error())
 		return
 	}
+	if err := server.validateChatTarget(request.Context(), namespace, body.ProfileName, body.HarnessProfileName); err != nil {
+		writeAPIError(writer, http.StatusBadRequest, "invalid_target", err.Error())
+		return
+	}
+	// Execution selectors are server-controlled metadata. Caller metadata cannot
+	// replace them or turn a normal thread into a privileged manager.
+	metadata := map[string]any{}
+	if len(body.Metadata) > 0 {
+		if err := json.Unmarshal(body.Metadata, &metadata); err != nil || metadata == nil {
+			writeAPIError(writer, http.StatusBadRequest, "invalid_metadata", "metadata must be an object")
+			return
+		}
+	}
+	delete(metadata, "harnessProfileName")
+	delete(metadata, "applicationName")
+	delete(metadata, "sourceTurnId")
+	delete(metadata, "sourceThreadId")
+	delete(metadata, "sourceProfileName")
+	if body.HarnessProfileName != "" {
+		metadata["harnessProfileName"] = strings.TrimSpace(body.HarnessProfileName)
+	}
+	body.Metadata, _ = json.Marshal(metadata)
+	application, err := server.resolveChatApplication(request.Context(), chat.Thread{Namespace: namespace, ProfileName: body.ProfileName, Metadata: body.Metadata})
+	if err != nil {
+		writeAPIError(writer, http.StatusBadRequest, "invalid_target", err.Error())
+		return
+	}
+	if application != "" {
+		metadata["applicationName"] = application
+		body.Metadata, _ = json.Marshal(metadata)
+	}
+	if err := server.validateCoordination(request.Context(), chat.Thread{Namespace: namespace, ProfileName: body.ProfileName, Metadata: body.Metadata}); err != nil {
+		writeAPIError(writer, http.StatusBadRequest, "invalid_coordination", err.Error())
+		return
+	}
 	thread, err := server.chatStore.CreateThread(request.Context(), chat.Thread{
 		Namespace:   namespace,
 		ProfileName: body.ProfileName,
@@ -133,13 +172,25 @@ func (server *Server) handleGetChatThread(writer http.ResponseWriter, request *h
 		server.writeChatStoreError(writer, err, principal, namespace)
 		return
 	}
+	turns, err := server.reconcileChatThread(request.Context(), namespace, threadID)
+	if err != nil {
+		server.writeChatStoreError(writer, err, principal, namespace)
+		return
+	}
 	messages, err := server.chatStore.ListMessages(request.Context(), namespace, threadID)
 	if err != nil {
 		server.writeChatStoreError(writer, err, principal, namespace)
 		return
 	}
 	server.log.Info("chat thread read", "subject", principal.Subject, "namespace", namespace, "thread", thread.ID)
-	writeJSON(writer, http.StatusOK, ChatThreadDetailResponse{Thread: thread, Messages: messages})
+	response := ChatThreadDetailResponse{Thread: thread, Messages: messages, Turns: turns}
+	for i := range turns {
+		if chat.Active(turns[i]) {
+			response.ActiveTurn = &turns[i]
+			break
+		}
+	}
+	writeJSON(writer, http.StatusOK, response)
 }
 
 func (server *Server) handleListChatMessages(writer http.ResponseWriter, request *http.Request) {
@@ -165,36 +216,28 @@ func (server *Server) handleAppendChatMessage(writer http.ResponseWriter, reques
 		writeAPIError(writer, http.StatusBadRequest, "invalid_body", err.Error())
 		return
 	}
-	user := chat.Message{
-		Role:     chat.RoleUser,
-		Content:  body.Content,
-		Metadata: body.Metadata,
+	if !server.config.Runs.CreateEnabled || !server.authorizer.Allowed(principal, PermissionRunsCreate, namespace) {
+		writeAPIError(writer, http.StatusNotFound, "runs_create_disabled", "chat execution requires AgentRun create permission")
+		return
 	}
-	assistant := chat.Message{
-		Role:     chat.RoleAssistant,
-		Content:  stubAssistantContent(body.Content),
-		Metadata: json.RawMessage(`{"stub":true,"engine":"echo"}`),
-	}
-	stored, thread, err := server.chatStore.AppendMessages(request.Context(), namespace, request.PathValue("threadID"), []chat.Message{user, assistant})
+	thread, err := server.chatStore.GetThread(request.Context(), namespace, request.PathValue("threadID"))
 	if err != nil {
 		server.writeChatStoreError(writer, err, principal, namespace)
 		return
 	}
-	if len(stored) != 2 {
-		writeAPIError(writer, http.StatusInternalServerError, "chat_unavailable", "standing-chat append returned an unexpected result")
+	if coordinationConfig(thread).Enabled && !server.authorizer.Allowed(principal, PermissionRunsRead, namespace) {
+		writeAPIError(writer, http.StatusNotFound, "not_found", "resource not found")
 		return
 	}
-	server.log.Info("chat message append",
-		"subject", principal.Subject,
-		"namespace", namespace,
-		"thread", thread.ID,
-		"sequence", stored[0].Sequence,
-	)
-	writeJSON(writer, http.StatusCreated, ChatAppendResponse{
-		Thread:    thread,
-		User:      stored[0],
-		Assistant: stored[1],
-	})
+	if _, ok := server.writerClient(writer); !ok {
+		return
+	}
+	response, err := server.queueChatTurn(request.Context(), namespace, request.PathValue("threadID"), body)
+	if err != nil {
+		server.writeChatStoreError(writer, err, principal, namespace)
+		return
+	}
+	writeJSON(writer, http.StatusAccepted, response)
 }
 
 func (server *Server) authorizeChat(writer http.ResponseWriter, request *http.Request, permission string) (string, Principal, bool) {
@@ -221,6 +264,12 @@ func (server *Server) authorizeChat(writer http.ResponseWriter, request *http.Re
 
 func (server *Server) writeChatStoreError(writer http.ResponseWriter, err error, principal Principal, namespace string) {
 	switch {
+	case errors.Is(err, chat.ErrConversationChanged):
+		writeAPIError(writer, http.StatusConflict, "conversation_changed", err.Error())
+	case errors.Is(err, chat.ErrTurnActive):
+		writeAPIError(writer, http.StatusConflict, "turn_active", err.Error())
+	case errors.Is(err, chat.ErrRequestConflict):
+		writeAPIError(writer, http.StatusConflict, "request_conflict", err.Error())
 	case errors.Is(err, chat.ErrNotFound):
 		writeAPIError(writer, http.StatusNotFound, "not_found", "resource not found")
 	case errors.Is(err, chat.ErrInvalid):
@@ -229,14 +278,6 @@ func (server *Server) writeChatStoreError(writer http.ResponseWriter, err error,
 		server.log.Error(err, "standing-chat store", "subject", principal.Subject, "namespace", namespace)
 		writeAPIError(writer, http.StatusServiceUnavailable, "chat_unavailable", "standing-chat store is unavailable")
 	}
-}
-
-func stubAssistantContent(userContent string) string {
-	trimmed := strings.TrimSpace(userContent)
-	if trimmed == "" {
-		return "(stub) standing chat storage is enabled; LangGraph execution is not wired yet."
-	}
-	return "(stub) standing chat storage is enabled; LangGraph execution is not wired yet.\n\nYou said:\n" + trimmed
 }
 
 func readJSONBody[T any](request *http.Request, maxBytes int) (T, error) {

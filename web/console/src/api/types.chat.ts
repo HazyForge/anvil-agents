@@ -30,8 +30,12 @@ export type ChatThreadListResponse = {
   items: ChatThread[];
 };
 
+export type ChatTurn = {id: string; runName: string; status: string; error?: string};
+
 export type ChatThreadDetailResponse = ChatThread & {
   messages: ChatMessage[];
+  activeTurn?: ChatTurn;
+  turns?: ChatTurn[];
 };
 
 export type ChatMessageListResponse = {
@@ -41,7 +45,7 @@ export type ChatMessageListResponse = {
 export type ChatAppendResponse = {
   thread: ChatThread;
   user: ChatMessage;
-  assistant: ChatMessage;
+  turn: ChatTurn;
 };
 
 export type CreateChatThreadRequest = {
@@ -53,6 +57,7 @@ export type CreateChatThreadRequest = {
 
 export type AppendChatMessageRequest = {
   content: string;
+  requestId?: string;
   metadata?: unknown;
 };
 

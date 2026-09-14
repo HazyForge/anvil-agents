@@ -51,7 +51,7 @@ security-gosec:
 # Source-level security only (fast).
 security: security-govulncheck security-gosec
 
-# Per-container Trivy image scan (builds all seven images by default).
+# Per-container Trivy image scan (builds all eight images by default).
 # Same script as GHA matrix jobs "trivy / <component>".
 security-trivy:
 	./hack/security-trivy-images.sh \
@@ -222,6 +222,8 @@ kind-e2e: kind-upgrade-e2e
 	./hack/test-kind.sh
 
 verify-runner-contract:
+	@bash -n docker/agent-run-agy/entrypoint.sh
+	@docker/agent-run-agy/entrypoint_test.sh
 	@bash -n hack/build-images.sh
 	@bash -n hack/build-images_test.sh
 	@bash -n hack/publish-images.sh

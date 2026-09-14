@@ -61,6 +61,10 @@ spec:
       name: pi-runner
       source: {repository: primary, path: .}
       artifactNamespace: ghcr.io/hazyforge/anvil-agent-run-pi
+    - <<: *component
+      name: agy-runner
+      source: {repository: primary, path: .}
+      artifactNamespace: ghcr.io/hazyforge/anvil-agent-run-agy
   actionDefinitionRefs:
     - *build-action
   testContract:

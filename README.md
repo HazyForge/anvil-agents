@@ -168,7 +168,7 @@ make release-local-all VERSION=vX.Y.Z REGISTRY_PREFIX=registry.example.com/team
 make release-pin-deploy VERSION=vX.Y.Z
 ```
 
-`make images` builds the controller plus all six built-in runner images into
+`make images` builds the controller plus all seven built-in runner images into
 local Docker. The reusable script supports component selection, platforms,
 cache import/export, multiple tags, custom registries, and fork-aware OCI
 source metadata. Image pushes reject dirty worktrees unless explicitly
@@ -180,8 +180,8 @@ exists, and does not use GitHub Actions minutes. If you only need the registry
 and chart artifacts, run `make release-local`.
 
 `publish-release.sh` runs `make verify` and `make kind-e2e`, publishes all
-seven versioned images, verifies their immutable digests and source revision,
-writes a digest lock, and pushes an OCI chart whose seven default image
+eight versioned images, verifies their immutable digests and source revision,
+writes a digest lock, and pushes an OCI chart whose eight default image
 references are pinned to that lock. `make release-pin-deploy` updates the
 first-party Anvil Primaris overlay from that lock so the controller and built-in
 runner defaults move together.

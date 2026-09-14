@@ -293,3 +293,8 @@ securityContext:
 nodeSelector: {}
 tolerations: []
 affinity: {}
+
+# Additional explicit Kubernetes objects installed and owned by this Helm
+# release. Set metadata.namespace on every namespaced object. Values are not
+# evaluated as Go templates. Keep credentials in external Secret references.
+extraObjects: []

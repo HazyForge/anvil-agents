@@ -6,6 +6,7 @@ export type DataVolumeBackend =
   | "openClaw"
   | "grokBuild"
   | "piAgent"
+  | "agy"
   | "custom";
 
 export interface DataVolumeForm {
@@ -182,6 +183,13 @@ export const DATA_VOLUME_BACKENDS: {
     summary: "Pi agent home",
     defaultMount: "/opt/anvil/pi",
     homeEnvName: "PI_HOME",
+  },
+  {
+    value: "agy",
+    label: "Antigravity",
+    summary: "Native Antigravity settings and session home; authentication must be configured separately",
+    defaultMount: "/opt/anvil/agy",
+    homeEnvName: "ANVIL_AGY_HOME",
   },
   {
     value: "custom",
