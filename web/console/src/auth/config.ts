@@ -23,6 +23,9 @@ export type UIConfig = {
   externalTriggers?: {
     enabled: boolean;
   };
+  chat?: {
+    enabled: boolean;
+  };
 };
 
 let cached: UIConfig | null = null;
@@ -51,6 +54,7 @@ export async function loadUIConfig(force = false): Promise<UIConfig> {
     const controls = (body as UIConfig).controls;
     const runs = (body as UIConfig).runs;
     const externalTriggers = (body as UIConfig).externalTriggers;
+    const chat = (body as UIConfig).chat;
     cached = {
       productTitle: body.productTitle || "Anvil Agents Console",
       defaultNamespaces: Array.isArray(body.defaultNamespaces) ? body.defaultNamespaces : [],
@@ -76,6 +80,9 @@ export async function loadUIConfig(force = false): Promise<UIConfig> {
       },
       externalTriggers: {
         enabled: Boolean(externalTriggers?.enabled),
+      },
+      chat: {
+        enabled: Boolean(chat?.enabled),
       },
     };
     return cached;

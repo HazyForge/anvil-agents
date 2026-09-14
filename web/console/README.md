@@ -1,7 +1,9 @@
 # Anvil Agents Console
 
 Observer SPA for `anvil-agents-api` AgentRuns, plus an optional **composition
-library** for profiles, skill sets, tool sets, harness profiles, and volumes.
+library** for profiles, skill sets, tool sets, harness profiles, and volumes,
+and optional **standing chat** (Postgres threads) when `ui-config` reports
+`chat.enabled`.
 
 GitOps remains the source of truth: the API and UI lock objects owned by Argo
 CD / Flux / Helm and any object not labeled

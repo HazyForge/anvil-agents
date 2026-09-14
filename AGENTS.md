@@ -49,6 +49,8 @@ documentation.
   optional path tokens). Secret bytes must never appear in status, logs, or
   console/API JSON. Composition library may also include `AgentExternalTrigger`
   when that gate is on.
+  When `chat.enabled=true`, the API persists standing-chat threads and messages
+  in PostgreSQL using a mounted database URI. Chat grants no Secret access.
 - OIDC configuration must remain provider-neutral and deny by default. Require
   an exact issuer, audience, explicit claim binding, namespace authorization,
   and exact CORS origins. Never accept access tokens in query strings or allow

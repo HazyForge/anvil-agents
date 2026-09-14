@@ -20,6 +20,8 @@ const (
 	PermissionCompositionWrite = "anvil-agents:composition:write"
 	PermissionControlsRead     = "anvil-agents:controls:read"
 	PermissionControlsWrite    = "anvil-agents:controls:write"
+	PermissionChatRead         = "anvil-agents:chat:read"
+	PermissionChatWrite        = "anvil-agents:chat:write"
 )
 
 // knownPermissions is the closed set of OIDC permissions the API accepts.
@@ -31,6 +33,8 @@ var knownPermissions = map[string]struct{}{
 	PermissionCompositionWrite: {},
 	PermissionControlsRead:     {},
 	PermissionControlsWrite:    {},
+	PermissionChatRead:         {},
+	PermissionChatWrite:        {},
 }
 
 type Config struct {
@@ -47,17 +51,18 @@ type Config struct {
 	Controls ControlsConfig `json:"controls"`
 	// Runs gates append-only AgentRun create from the console/API.
 	Runs RunsConfig `json:"runs"`
-	// ExternalTriggers gates unauthenticated GitHub webhook receivers and the
-	// console Library surface for AgentExternalTrigger objects.
 	ExternalTriggers ExternalTriggersConfig `json:"externalTriggers"`
+	Chat ChatConfig `json:"chat"`
 }
 
-// ExternalTriggersConfig controls inbound AgentExternalTrigger webhooks.
-// Disabled by default. When enabled, the API may read same-namespace Secret
-// values only to verify HMAC signatures and optional path tokens; Secret bytes
-// are never returned in API responses, status, or logs.
+// ExternalTriggersConfig controls opt-in inbound webhook receivers.
 type ExternalTriggersConfig struct {
-	// Enabled serves POST /api/v1/external-triggers/... when true.
+	Enabled bool `json:"enabled"`
+}
+
+// ChatConfig controls persisted conversations. Database credentials are injected
+// into the process environment, never read through the Kubernetes API.
+type ChatConfig struct {
 	Enabled bool `json:"enabled"`
 }
 
@@ -330,6 +335,11 @@ func (config Config) Validate() error {
 				}
 				if permission == PermissionControlsWrite && !config.Controls.WriteEnabled {
 					return fmt.Errorf("authorization %s grants %s but controls.writeEnabled is false", name, permission)
+				}
+			}
+			if permission == PermissionChatRead || permission == PermissionChatWrite {
+				if !config.Chat.Enabled {
+					return fmt.Errorf("authorization %s grants %s but chat.enabled is false", name, permission)
 				}
 			}
 		}

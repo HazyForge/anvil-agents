@@ -330,6 +330,15 @@ If the board needs them without detail fetches:
 Pod-log streams are not a complete historical archive. Durable replay should
 later use Loki or the archive strategy.
 
+## Standing chat (console)
+
+When `GET /ui-config.json` reports `chat.enabled=true`, the console exposes
+ChatGPT-style standing-chat threads bound to an `AgentRunProfile` (persona
+mode). Routes live under `/chat` and `/ns/:namespace/chat/:threadId`. Persistence
+is PostgreSQL via the API (`docs/standing-chat.md`); there is no Conversation
+CRD. Assistant replies may still be API echo stubs until a LangGraph worker and
+tool allowlist land. Fleet/master mode UI can follow later.
+
 ## Non-Goals For Run Control
 
 The console must not add AgentRun control mutations.
@@ -345,6 +354,7 @@ Do not include:
 - Secret or credential inspection
 - schedule management UI
 - overriding GitOps-owned composition objects
+- LangGraph tool execution inside the SPA (standing chat only posts messages)
 
 Composition library edits are allowed only for objects stamped
 `control.anvil.hazyforge.io/managed-by=anvil-agents-console`. GitOps-owned

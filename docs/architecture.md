@@ -69,6 +69,8 @@ Fire-and-forget purposes never receive chat mailbox lines. Live queue / steer /
 interrupt uses a separate `purpose=interactive` session `AgentRun` and an
 API-owned mailbox; see [Chat delivery](chat-delivery.md). Built-in grok, Codex,
 and OpenCode CLIs have no generation-interrupt hook today.
+Durable operator chat lives in PostgreSQL behind the optional standing-chat
+API ([Standing Chat](standing-chat.md)).
 
 ## Composition Boundaries
 

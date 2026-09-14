@@ -28,7 +28,9 @@ for _ in {1..60}; do
     host_port="$(docker port "${container}" 5432/tcp | awk -F: 'NR == 1 { print $NF }')"
     ANVIL_AGENTS_TEST_ARCHIVE_DATABASE_URL="postgresql://anvil_agents:${password}@127.0.0.1:${host_port}/anvil_agents?sslmode=disable" \
       go test ./internal/archive -run '^TestPostgresAgentRunArchiveStoreIntegration$' -count=1
-    printf 'PostgreSQL archive migration/upsert integration passed\n'
+    ANVIL_AGENTS_TEST_ARCHIVE_DATABASE_URL="postgresql://anvil_agents:${password}@127.0.0.1:${host_port}/anvil_agents?sslmode=disable" \
+      go test ./internal/chat -run '^TestPostgresStoreIntegration$' -count=1
+    printf 'PostgreSQL archive and standing-chat migration/upsert integration passed\n'
     exit 0
   fi
   sleep 1

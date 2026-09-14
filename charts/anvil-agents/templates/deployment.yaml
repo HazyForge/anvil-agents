@@ -1,5 +1,6 @@
 {{- include "anvil-agents.validateArchive" . }}
 {{- include "anvil-agents.validateExternalTriggerHTTPRoute" . }}
+{{- include "anvil-agents.validateChat" . }}
 {{- $archiveMode := include "anvil-agents.archiveMode" . -}}
 apiVersion: apps/v1
 kind: Deployment

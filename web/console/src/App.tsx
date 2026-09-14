@@ -11,6 +11,7 @@ import { CompositionEditorPage } from "./pages/library/CompositionEditorPage";
 import { ControlsPage } from "./pages/ControlsPage";
 import { ProfileCardsPage } from "./pages/profiles/ProfileCardsPage";
 import { ProfileEditorPage } from "./pages/profiles/ProfileEditorPage";
+import { ChatPage } from "./pages/ChatPage";
 import { loadUIConfig } from "./auth/config";
 import { ensureAccessToken, logout } from "./auth/oidc";
 import { clearLegacyToken, loadSession } from "./auth/session";
@@ -35,6 +36,7 @@ export default function App() {
   const [controlsRead, setControlsRead] = useState(false);
   const [controlsWrite, setControlsWrite] = useState(false);
   const [externalTriggersEnabled, setExternalTriggersEnabled] = useState(false);
+  const [chatEnabled, setChatEnabled] = useState(false);
   /** Avoid catch-all redirect until /api/v1/ui-config finishes — deep links like /harness-profiles/new must not bounce to /. */
   const [configReady, setConfigReady] = useState(false);
 
@@ -53,6 +55,7 @@ export default function App() {
         setControlsRead(config.controls?.readEnabled ?? false);
         setControlsWrite(config.controls?.writeEnabled ?? false);
         setExternalTriggersEnabled(config.externalTriggers?.enabled ?? false);
+        setChatEnabled(config.chat?.enabled ?? false);
         if (config.defaultNamespaces.length > 0) {
           setNamespaces((prev) => {
             const next = uniqueNamespaces([...config.defaultNamespaces, ...prev]);
@@ -189,6 +192,7 @@ export default function App() {
                   compositionRead={compositionRead}
                   controlsRead={controlsRead}
                   externalTriggersEnabled={externalTriggersEnabled}
+                  chatEnabled={chatEnabled}
                   onSelectNamespace={onSelectNamespace}
                   onAddNamespace={onAddNamespace}
                   onRemoveNamespace={onRemoveNamespace}
@@ -200,6 +204,40 @@ export default function App() {
                       path="/ns/:namespace/runs/:name"
                       element={<RunPage token={token} onViewNamespace={onViewNamespace} />}
                     />
+                    {chatEnabled ? (
+                      <>
+                        <Route
+                          path="/chat"
+                          element={
+                            <ChatPage
+                              token={token}
+                              namespace={activeNamespace}
+                              onViewNamespace={onViewNamespace}
+                            />
+                          }
+                        />
+                        <Route
+                          path="/ns/:namespace/chat"
+                          element={
+                            <ChatPage
+                              token={token}
+                              namespace={activeNamespace}
+                              onViewNamespace={onViewNamespace}
+                            />
+                          }
+                        />
+                        <Route
+                          path="/ns/:namespace/chat/:threadId"
+                          element={
+                            <ChatPage
+                              token={token}
+                              namespace={activeNamespace}
+                              onViewNamespace={onViewNamespace}
+                            />
+                          }
+                        />
+                      </>
+                    ) : null}
                     {controlsRead ? (
                       <Route
                         path="/controls"

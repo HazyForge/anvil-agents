@@ -1,8 +1,12 @@
 package main
 
 import (
+	"context"
 	"flag"
+	"fmt"
 	"os"
+	"strings"
+	"time"
 
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes"
@@ -12,6 +16,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
 	agentsv1alpha1 "github.com/hazyforge/anvil-agents/api/v1alpha1"
+	"github.com/hazyforge/anvil-agents/internal/chat"
 	"github.com/hazyforge/anvil-agents/internal/runapi"
 )
 
@@ -61,10 +66,30 @@ func main() {
 		log.Error(err, "configure OIDC authentication")
 		os.Exit(1)
 	}
+	var chatStore chat.Store
+	if config.Chat.Enabled {
+		databaseURL := strings.TrimSpace(os.Getenv("ANVIL_AGENTS_CHAT_DATABASE_URL"))
+		if databaseURL == "" {
+			log.Error(fmt.Errorf("ANVIL_AGENTS_CHAT_DATABASE_URL is required when chat.enabled=true"), "configure standing-chat store")
+			os.Exit(1)
+		}
+		openCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		store, err := chat.OpenPostgresStore(openCtx, databaseURL)
+		cancel()
+		if err != nil {
+			log.Error(err, "open standing-chat store")
+			os.Exit(1)
+		}
+		defer store.Close()
+		chatStore = store
+	}
 	server, err := runapi.NewServer(config, authenticator, runClient, runapi.KubernetesLogSource{Client: clientset}, log)
 	if err != nil {
 		log.Error(err, "configure AgentRun API")
 		os.Exit(1)
+	}
+	if chatStore != nil {
+		server.SetChatStore(chatStore)
 	}
 	if err := server.Start(ctrl.SetupSignalHandler()); err != nil {
 		log.Error(err, "AgentRun API stopped")
