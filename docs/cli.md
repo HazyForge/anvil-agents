@@ -406,3 +406,9 @@ anvil-agentctl self report needsHuman --stage harness-auth --summary "Re-auth re
 This writes the existing JSONL status file and `ANVIL_AGENT_RUN_STATUS_JSON=`
 log lines. It never patches `AgentRun/status`. The historical
 `anvil-agent-status` shell wrapper remains for compatibility.
+
+## Anvil Agents Desktop
+
+**Anvil Agents Desktop** (`anvil-desktop`) is an OIDC client of the
+anvil-agents API plus local harness delegation. It does not use kubeconfig and
+does not replace `anvil-agentctl`. See [Anvil Agents Desktop](desktop.md).

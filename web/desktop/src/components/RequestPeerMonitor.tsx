@@ -1,0 +1,391 @@
+import { useEffect, useRef, useState } from "react";
+import {
+  createAgentRun,
+  getAgentRun,
+  isGrokBackend,
+  listAgentRuns,
+  resolveGrokPeerCreate,
+  type AgentRunView,
+  type CompositionDocument,
+} from "../api/client";
+import { openAgentRunStream } from "../api/stream";
+import { LiveStream } from "./LiveStream";
+import { AgentRunStatusCard } from "./AgentRunStatusCard";
+import { isRunningPhase } from "../wrapper/collaboration";
+import {
+  grokInterruptDuplicatePrompt,
+  parseRequestPeerFromLogLine,
+  STATUS_JSON_PREFIX,
+  type RequestPeerPayload,
+} from "../wrapper/requestPeer";
+import { stickAgentRunStatus } from "../wrapper/runStatus";
+
+const DESKTOP_PEER_PREFIX = "desktop-peer-";
+
+interface Props {
+  token: string;
+  namespace: string;
+  sourceRun: string;
+  createEnabled: boolean;
+  profiles: CompositionDocument[];
+}
+
+type PostedPeer = {
+  peerProfileName: string;
+  peerRunName: string;
+  backend?: string;
+  application?: string;
+  dataVolumes?: string[];
+  chosenBecause?: string;
+  at: string;
+};
+
+export function RequestPeerMonitor({ token, namespace, sourceRun, createEnabled, profiles }: Props) {
+  const [phase, setPhase] = useState("");
+  const [sourceStatus, setSourceStatus] = useState<AgentRunView | null>(null);
+  const [logHits, setLogHits] = useState<string[]>([]);
+  const [posted, setPosted] = useState<PostedPeer[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  const [streamStatus, setStreamStatus] = useState("connecting");
+  const fulfilled = useRef<Set<string>>(new Set());
+  const posting = useRef(false);
+  const profilesRef = useRef(profiles);
+  profilesRef.current = profiles;
+
+  useEffect(() => {
+    let cancelled = false;
+    setSourceStatus(null);
+    const pollPhase = async () => {
+      try {
+        const run = await getAgentRun(token, namespace, sourceRun);
+        if (!cancelled) {
+          setPhase(run.phase || "");
+          setSourceStatus((prev) => stickAgentRunStatus(prev, run));
+        }
+      } catch {
+        // keep last phase
+      }
+    };
+    void pollPhase();
+    const id = window.setInterval(() => void pollPhase(), 3000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+    };
+  }, [token, namespace, sourceRun]);
+
+  useEffect(() => {
+    setLogHits([]);
+    setPosted([]);
+    setError(null);
+    setStreamStatus("connecting");
+    fulfilled.current = new Set();
+    posting.current = false;
+
+    let cancelled = false;
+    void (async () => {
+      const existing = await lookupExistingPeer(token, namespace, sourceRun);
+      if (cancelled || !existing) {
+        return;
+      }
+      fulfilled.current.add(sourceRun);
+      setPosted([postedFromRun(existing, "already posted for this source run")]);
+    })();
+
+    const handle = openAgentRunStream(token, namespace, sourceRun, {
+      onEvent: (event, payload) => {
+        setStreamStatus(event);
+        if (event === "log" && payload.line) {
+          const line = payload.line;
+          const peer = parseRequestPeerFromLogLine(line);
+          if (peer) {
+            setLogHits((prev) => uniqueLines([...prev, line]));
+            void maybePostPeer(peer);
+          } else if (line.includes(STATUS_JSON_PREFIX) && line.includes("requestPeer")) {
+            setLogHits((prev) => uniqueLines([...prev, line]));
+            void maybePostPeer({ peerProfileName: "" });
+          }
+        }
+      },
+      onTransportError: (err) => setError(err.message),
+    });
+
+    async function maybePostPeer(peer: RequestPeerPayload) {
+      const key = sourceRun;
+      if (fulfilled.current.has(key) || posting.current) {
+        return;
+      }
+      if (!createEnabled) {
+        setError("AgentRun create is disabled — cannot POST peer run");
+        return;
+      }
+      let running = false;
+      for (let attempt = 0; attempt < 48; attempt += 1) {
+        try {
+          const run = await getAgentRun(token, namespace, sourceRun);
+          setPhase(run.phase || "");
+          setSourceStatus((prev) => stickAgentRunStatus(prev, run));
+          if (isRunningPhase(run.phase)) {
+            running = true;
+            break;
+          }
+        } catch (err) {
+          setError(err instanceof Error ? err.message : String(err));
+          return;
+        }
+        await sleep(2500);
+      }
+      if (!running) {
+        setError(`requestPeer seen but ${sourceRun} never reached Running`);
+        return;
+      }
+
+      let skip: { reason: string; existing: AgentRunView | null } | null;
+      try {
+        skip = await shouldSkipPeerPost(token, namespace, sourceRun);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err));
+        return;
+      }
+      if (skip) {
+        const existingForSource =
+          skip.existing && belongsToSource(skip.existing, sourceRun) ? skip.existing : null;
+        if (existingForSource) {
+          fulfilled.current.add(key);
+          rememberPeer(namespace, sourceRun, existingForSource.name);
+          setPosted((prev) =>
+            prev.some((item) => item.peerRunName === existingForSource.name)
+              ? prev
+              : [...prev, postedFromRun(existingForSource, skip.reason)],
+          );
+        }
+        setError(null);
+        setStreamStatus(skip.reason);
+        return;
+      }
+
+      posting.current = true;
+      fulfilled.current.add(key);
+      try {
+        const resolved = await resolveGrokPeerCreate(token, namespace, {
+          sourceRun,
+          requestedProfileName: peer.peerProfileName,
+          profiles: profilesRef.current,
+        });
+        const peerPrompt = grokInterruptDuplicatePrompt(sourceRun);
+        const created = await createAgentRun(token, namespace, {
+          generateName: DESKTOP_PEER_PREFIX,
+          profileName: resolved.profileName,
+          harnessProfileName: resolved.harnessProfileName,
+          application: resolved.application,
+          applicationName: resolved.application,
+          backend: resolved.backend,
+          prompt: peerPrompt,
+          peerPrompt,
+          sourceKind: "AgentRun",
+          sourceName: sourceRun,
+          sourceNamespace: namespace,
+        });
+        const name = created.name?.trim() || "unknown";
+        rememberPeer(namespace, sourceRun, name);
+        setPosted((prev) => [
+          ...prev,
+          {
+            peerProfileName: resolved.profileName,
+            peerRunName: name,
+            backend: created.backend || resolved.backend,
+            application: created.application || resolved.application,
+            dataVolumes: resolved.dataVolumes,
+            chosenBecause: resolved.chosenBecause,
+            at: new Date().toISOString(),
+          },
+        ]);
+        setError(null);
+      } catch (err) {
+        fulfilled.current.delete(key);
+        setError(err instanceof Error ? err.message : String(err));
+      } finally {
+        posting.current = false;
+      }
+    }
+
+    return () => {
+      cancelled = true;
+      handle.abort();
+    };
+  }, [token, namespace, sourceRun, createEnabled]);
+
+  const sawRequestPeer = logHits.some((line) => line.includes("requestPeer"));
+  const running = isRunningPhase(phase);
+  const latestPeer = posted[posted.length - 1];
+
+  return (
+    <section className="panel" style={{ marginTop: "0.75rem" }}>
+      <div className="panel-header">
+        <h2 className="panel-title">requestPeer · live stream</h2>
+        <span className={`chip ${running ? "chip-ok" : ""}`}>{phase || "—"}</span>
+        {sawRequestPeer ? <span className="chip chip-ok">requestPeer line</span> : null}
+        {posted.length > 0 ? <span className="chip chip-ok">grok peer posted</span> : null}
+      </div>
+      <div className="panel-body">
+        <p className="muted mono">{sourceRun}</p>
+        {sourceStatus ? <AgentRunStatusCard run={sourceStatus} label="A GET" /> : null}
+        {error ? <div className="banner banner-error">{error}</div> : null}
+        <p className="muted">Stream: {streamStatus}</p>
+        {logHits.length > 0 ? (
+          <pre className="hint">{logHits.join("\n")}</pre>
+        ) : (
+          <p className="muted">Waiting for {STATUS_JSON_PREFIX} with type requestPeer while Running…</p>
+        )}
+        {posted.length > 0 ? (
+          <ul className="collab-peer-notes">
+            {posted.map((item) => (
+              <li key={`${item.peerProfileName}-${item.at}`}>
+                POSTed grok peer {item.peerRunName} (profile {item.peerProfileName}
+                {item.backend ? `, backend ${item.backend}` : ""}
+                {item.application ? `, application ${item.application}` : ""}
+                {item.dataVolumes && item.dataVolumes.length > 0
+                  ? `, volumes ${item.dataVolumes.join(",")}`
+                  : ""}
+                {item.chosenBecause ? `; ${item.chosenBecause}` : ""})
+              </li>
+            ))}
+          </ul>
+        ) : null}
+        {latestPeer ? (
+          <div className="stream-dual" style={{ marginTop: "0.75rem" }}>
+            <LiveStream token={token} namespace={namespace} name={sourceRun} title={`${sourceRun} (A)`} />
+            <LiveStream
+              token={token}
+              namespace={namespace}
+              name={latestPeer.peerRunName}
+              title={`${latestPeer.peerRunName} (B grok)`}
+            />
+          </div>
+        ) : (
+          <LiveStream token={token} namespace={namespace} name={sourceRun} title={`${sourceRun} (A)`} />
+        )}
+      </div>
+    </section>
+  );
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
+function uniqueLines(lines: string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const line of lines) {
+    if (!line || seen.has(line)) {
+      continue;
+    }
+    seen.add(line);
+    out.push(line);
+  }
+  return out;
+}
+
+function isDesktopPeerRun(run: AgentRunView): boolean {
+  return (run.name || "").startsWith(DESKTOP_PEER_PREFIX);
+}
+
+function isGrokPeerRun(run: AgentRunView): boolean {
+  return isGrokBackend(run.backend) || !(run.backend || "").trim();
+}
+
+function isInFlightPeer(run: AgentRunView): boolean {
+  const phase = (run.phase || "").trim();
+  return phase === "Running" || phase === "Pending";
+}
+
+function peerStorageKey(namespace: string, sourceRun: string): string {
+  return `anvil-desktop.peer:${namespace}:${sourceRun}`;
+}
+
+function rememberPeer(namespace: string, sourceRun: string, peerName: string): void {
+  const name = peerName.trim();
+  if (!name) {
+    return;
+  }
+  try {
+    window.sessionStorage.setItem(peerStorageKey(namespace, sourceRun), name);
+  } catch {
+    // ignore quota / private mode
+  }
+}
+
+function recalledPeerName(namespace: string, sourceRun: string): string {
+  try {
+    return (window.sessionStorage.getItem(peerStorageKey(namespace, sourceRun)) || "").trim();
+  } catch {
+    return "";
+  }
+}
+
+function belongsToSource(run: AgentRunView, sourceRun: string): boolean {
+  return (run.source?.name || "").trim() === sourceRun;
+}
+
+async function listDesktopPeers(token: string, namespace: string): Promise<AgentRunView[]> {
+  const runs = await listAgentRuns(token, namespace, 50);
+  return runs.filter(isDesktopPeerRun);
+}
+
+async function lookupExistingPeer(
+  token: string,
+  namespace: string,
+  sourceRun: string,
+): Promise<AgentRunView | null> {
+  const recalled = recalledPeerName(namespace, sourceRun);
+  if (recalled) {
+    try {
+      return await getAgentRun(token, namespace, recalled);
+    } catch {
+      // fall through to list
+    }
+  }
+  try {
+    const peers = await listDesktopPeers(token, namespace);
+    return peers.find((run) => belongsToSource(run, sourceRun)) ?? null;
+  } catch {
+    return null;
+  }
+}
+
+async function shouldSkipPeerPost(
+  token: string,
+  namespace: string,
+  sourceRun: string,
+): Promise<{ reason: string; existing: AgentRunView | null } | null> {
+  const existing = await lookupExistingPeer(token, namespace, sourceRun);
+  if (existing) {
+    return { reason: `skip POST: ${existing.name} already exists for ${sourceRun}`, existing };
+  }
+  let peers: AgentRunView[] = [];
+  try {
+    peers = await listDesktopPeers(token, namespace);
+  } catch (err) {
+    throw err instanceof Error ? err : new Error(String(err));
+  }
+  const runningGrok = peers.find((run) => isInFlightPeer(run) && isGrokPeerRun(run));
+  if (runningGrok) {
+    return {
+      reason: `skip POST: ${runningGrok.name} already Running (phase ${runningGrok.phase || "—"})`,
+      existing: runningGrok,
+    };
+  }
+  return null;
+}
+
+function postedFromRun(run: AgentRunView, chosenBecause: string): PostedPeer {
+  return {
+    peerProfileName: run.resolvedComposition?.profileRef?.name || "desktop-peer",
+    peerRunName: run.name,
+    backend: run.backend,
+    application: run.application,
+    chosenBecause,
+    at: new Date().toISOString(),
+  };
+}

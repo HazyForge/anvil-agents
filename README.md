@@ -83,6 +83,10 @@ the certified submission contract.
   schedules (`schedule list|suspend|resume|run-now`), durable-home auth, volume
   copy, and in-pod status reporting. Private Primaris `anvilctl` has no
   `agent` subcommand; managers use the Hub HTTP API.
+- `anvil-desktop`: **Anvil Agents Desktop**, a loopback process that signs in
+  to the anvil-agents OIDC API (Anvil Primaris) and talks to cluster agents.
+  Chat and Wrapper are the product; Local harness activation is a second page
+  (see `web/desktop/` and [Anvil Agents Desktop](docs/desktop.md)).
 - Collector-neutral Job and Pod labels for external log and telemetry
   pipelines.
 
@@ -221,6 +225,8 @@ audience, and explicit namespace authorization bindings are configured. See
 - [AgentRun API reference](docs/agent-run.md)
 - [Chat mailbox contract (interactive purpose)](docs/chat-delivery.md)
 - [Create and diagnose runs with anvil-agentctl](docs/cli.md)
+- [Anvil Agents Desktop](docs/desktop.md)
+- [Install Anvil Agents Desktop](docs/desktop-install.md)
 - [Migration from Anvil Primaris](docs/migration-from-anvil-primaris.md)
 - [Third-party notices](THIRD_PARTY_NOTICES.md)
 

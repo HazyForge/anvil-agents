@@ -219,17 +219,17 @@ jobs:
             --scanners vuln \
             --exit-code 1 \
             --format table --output dist/security/fs/repo.txt \
-            --skip-dirs web/console --skip-dirs dist --skip-dirs .cate .
+            --skip-dirs web/console --skip-dirs web/desktop --skip-dirs dist --skip-dirs .cate .
           trivy fs --severity "${TRIVY_SEVERITY}" --ignore-unfixed \
             --scanners vuln,secret,misconfig --exit-code 0 \
             --format table --output dist/security/fs/repo-full.txt \
-            --skip-dirs web/console --skip-dirs dist --skip-dirs .cate . || true
+            --skip-dirs web/console --skip-dirs web/desktop --skip-dirs dist --skip-dirs .cate . || true
           trivy fs --severity "${TRIVY_SEVERITY}" --ignore-unfixed \
             --scanners vuln,secret,misconfig --exit-code 0 \
             --format sarif --output dist/security/fs/repo.sarif \
-            --skip-dirs web/console --skip-dirs dist --skip-dirs .cate . || true
+            --skip-dirs web/console --skip-dirs web/desktop --skip-dirs dist --skip-dirs .cate . || true
           trivy fs --format cyclonedx --output dist/security/fs/sbom.cdx.json \
-            --skip-dirs web/console --skip-dirs dist --skip-dirs .cate . || true
+            --skip-dirs web/console --skip-dirs web/desktop --skip-dirs dist --skip-dirs .cate . || true
       - if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:

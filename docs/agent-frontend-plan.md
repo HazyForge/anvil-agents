@@ -412,3 +412,10 @@ Phase 1 is board + detail + stream with multi-namespace UI selection and
 client-side filters. Verify until operators can observe `hazy-trade` AgentRuns
 without `kubectl`. Add the Failed-first attention queue and OIDC PKCE after the
 core observation loop works.
+
+## Related: Anvil Agents Desktop
+
+PATH discovery and local harness delegation cannot live in the OIDC console.
+See [Anvil Agents Desktop](desktop.md) for the `anvil-desktop` binary, which
+signs in to this API as a wrapper agent instead of forking console screens or
+talking to Kubernetes.

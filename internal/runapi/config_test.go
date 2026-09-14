@@ -40,6 +40,40 @@ stream:
 	}
 }
 
+func TestLoadConfigParsesDesktopOIDCClientID(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	contents := `
+bindAddress: ":9090"
+oidc:
+  issuer: https://issuer.example
+  audiences: [anvil-agents]
+authorization:
+  bindings:
+    - name: viewers
+      roles: [viewer]
+      permissions: [anvil-agents:runs:read]
+      namespaces: [agents]
+ui:
+  oidc:
+    clientId: console-client
+  desktop:
+    oidcClientId: " native-desktop-pkce "
+`
+	if err := os.WriteFile(path, []byte(contents), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	config, err := LoadConfig(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if config.UI.OIDC.ClientID != "console-client" {
+		t.Fatalf("console clientId = %q", config.UI.OIDC.ClientID)
+	}
+	if config.UI.Desktop.OIDCClientID != "native-desktop-pkce" {
+		t.Fatalf("desktop.oidcClientId = %q", config.UI.Desktop.OIDCClientID)
+	}
+}
+
 func TestLoadConfigRejectsUnknownField(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.yaml")
 	contents := `

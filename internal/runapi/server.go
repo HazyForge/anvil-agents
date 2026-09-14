@@ -138,7 +138,7 @@ func (server *Server) handleUIConfig(writer http.ResponseWriter, _ *http.Request
 	if title == "" {
 		title = "Anvil Agents Console"
 	}
-	writeJSON(writer, http.StatusOK, map[string]any{
+	payload := map[string]any{
 		"productTitle":      title,
 		"defaultNamespaces": namespaces,
 		"oidc": map[string]any{
@@ -158,7 +158,11 @@ func (server *Server) handleUIConfig(writer http.ResponseWriter, _ *http.Request
 		"runs": map[string]any{
 			"createEnabled": server.config.Runs.CreateEnabled,
 		},
-	})
+	}
+	if id := strings.TrimSpace(server.config.UI.Desktop.OIDCClientID); id != "" {
+		payload["desktop"] = map[string]any{"oidcClientId": id}
+	}
+	writeJSON(writer, http.StatusOK, payload)
 }
 
 func (server *Server) handleHealth(writer http.ResponseWriter, _ *http.Request) {
