@@ -20,6 +20,11 @@ function toolActivity(name: unknown, id: unknown): RunActivity {
   // command text, results, model reasoning, or status summary/detail fields.
   const safeName = typeof name === 'string' && /^[A-Za-z][A-Za-z0-9_.-]{0,47}$/.test(name) ? name : '';
   if (/^(read|read_file|readfile|view_file)$/i.test(safeName)) return activity('Reading files', 'work', id);
+  if (/^(write|write_file)$/i.test(safeName)) return activity('Writing files', 'work', id);
+  if (/^(edit|apply_patch)$/i.test(safeName)) return activity('Editing files', 'work', id);
+  if (/^(glob|grep)$/i.test(safeName)) return activity('Searching files', 'work', id);
+  if (/^(webfetch|web_fetch)$/i.test(safeName)) return activity('Reading a web page', 'work', id);
+  if (/^(websearch|web_search)$/i.test(safeName)) return activity('Searching the web', 'work', id);
   if (/^(bash|shell|execute|exec_command|run_command)$/i.test(safeName)) return activity('Running a command', 'work', id);
   return activity(safeName ? `Using tool ${safeName}` : 'Using a tool', 'work', id);
 }

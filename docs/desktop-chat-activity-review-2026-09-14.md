@@ -57,6 +57,52 @@ and shared conversations; the [Codex app](https://openai.com/index/introducing-t
 organizes parallel agent work by project. These inform the intended workflow,
 not a claim of equivalent functionality today.
 
-Review verdict: Approve the scoped activity/draft improvement after validation.
-Block a claim that the complete project coordinator workflow is finished: the
-inbox and automatic return of peer results remain HIGH product gaps.
+## Validation and rollout
+
+`make verify` passed, along with all seven native activity parser tests and all
+12 isolated browser scenarios. Browser coverage includes a slow create/send,
+lost accepted receipts with retries, draft/selection restoration, namespace
+isolation, denied-thread recovery, initial stream 404 recovery, public tool
+labels, terminal snapshots followed by log replay, and opening raw logs only
+on demand. Chart renders passed with API disabled and the complete Primaris
+API configuration enabled.
+
+Actual Chrome DevTools MCP drove the signed-in Desktop against Primaris:
+
+- Thread `a67e3a29-f319-4b02-bc13-08a6c8f6d2bd` created run
+  `chat-turn-da6bc9534d603b9c3fc984092aff1959e3e90c76`.
+- Immediate UI feedback showed `Saving conversation…`; the live stream showed
+  preparation, tool checks, `Starting harness`, `Composing answer`, and completion.
+- The message was accepted at 19:10:12 UTC, harness started around 19:10:20,
+  and the assistant reply was persisted at 19:10:42 (about 30 seconds total).
+- The observe-only OpenCode profile declined the requested read-only shell
+  time check under its configured instructions. This verifies a real model
+  reply and lifecycle events, not live execution of a tool. Native tool labels
+  were independently checked with isolated fixtures.
+- An unsent draft survived switching to the AGY conversation, returning, and
+  reloading. The reload assertion initially ran during auth initialization;
+  waiting for the actual conversation confirmed restoration. Only the test
+  draft was then cleared through the visible composer.
+- Visual inspection confirmed 15px conversation text and visible activity.
+
+The natural manager test was thread `994698be-8cca-42b5-b651-ea39a8f1fa21`,
+run `chat-turn-fd573d4317b95315ba3d98cc4b65f6440e083e42`. Its reviewer completed
+run `chat-turn-b1f097e65c5155974bdde41f1bd31a3f82160e06`, but the main thread
+still had only its initial promise to return. This is direct evidence of the
+automatic return gap described above.
+
+Source change `9b8cd7d` and image pin `56d65e0` were pushed to master with the
+operator's authorized bypass. Helm revision 13 is deployed with controller/API
+digest `sha256:4ecb770c90f0eaa3286032cc7ae534431ca4396d99acbcb050f93d2b87fe38a5`.
+Both deployments are 1/1 ready, health/readiness return 200, and the persisted
+chat remains readable after rollout. Argo automated sync remains unset. The
+local Desktop UI assets were updated in its existing cache without replacing
+preferences or credentials. Existing historical Codex failure receipts are
+unchanged; the new canned guidance is covered by backend tests and applies
+when a future failed turn is reconciled.
+
+Review verdict: Approve the scoped activity/draft improvement. The complete
+project coordinator workflow still has HIGH product gaps in its inbox and
+automatic return of peer results.
+
+Block

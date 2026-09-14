@@ -28,7 +28,7 @@ const errors = [], posts = [], creates = [], threads = new Map();
 let failNext = false, loseNextReceipt = false;
 let createGate = null, appendGate = null, receiptGate = null;
 const withheldDetails = new Map(), deniedDetails = new Map(), detailGets = new Map();
-const eventPlans = new Map(), eventGets = new Map();
+const eventPlans = new Map(), eventGets = new Map(), eventAuth = new Map(), heldDetailReads = new Map();
 page.on('pageerror', error => errors.push(error.message));
 await context.addInitScript(() => {
   sessionStorage.setItem('anvil-agents-desktop.accessToken', 'ui-contract-fixture-not-a-token');
@@ -44,7 +44,7 @@ await context.route('**/*', async route => {
   if(path==='/local/v1/snapshot') return reply(route,{productTitle:'Anvil Agents Desktop',prefs:{apiOrigin:origin},api:{origin,reachable:true},harnesses:[],wsl:{},harnessTarget:'native'});
   if(path==='/ui-config.json') return reply(route,config);
   if(!path.startsWith('/api/')) return route.continue();
-  assert.ok(['Bearer ui-contract-fixture-not-a-token','Bearer ui-contract-refreshed-not-a-token'].includes(request.headers().authorization));
+  assert.ok(['Bearer ui-contract-fixture-not-a-token','Bearer ui-contract-refreshed-not-a-token','Bearer ui-contract-stream-refreshed-not-a-token'].includes(request.headers().authorization));
   assert.equal(url.searchParams.has('access_token'),false);
   const m=path.match(/^\/api\/v1\/namespaces\/([^/]+)\/(.*)$/);
   if(!m) return reply(route,{},404);
@@ -68,7 +68,10 @@ await context.route('**/*', async route => {
     if(request.method()==='GET') {
       detailGets.set(t.id,(detailGets.get(t.id)||0)+1);
       if(deniedDetails.has(t.id)) return reply(route,{error:{code:'not_found',message:'Fixture access denied'}},deniedDetails.get(t.id));
-      return reply(route,withheldDetails.get(t.id)||t);
+      const snapshot=structuredClone(withheldDetails.get(t.id)||t);
+      const held=heldDetailReads.get(t.id);
+      if(held) {heldDetailReads.delete(t.id); held.started(); await held.gate;}
+      return reply(route,snapshot);
     }
     if(appendGate) await appendGate;
     const body=request.postDataJSON(); posts.push({thread:t.id,...body});
@@ -82,13 +85,17 @@ await context.route('**/*', async route => {
     }
     if(loseNextReceipt) {loseNextReceipt=false;return reply(route,{error:{code:'receipt_lost',message:'Fixture accepted receipt was lost'}},503);}
     withheldDetails.delete(t.id);
+    // Capture the actual accept-time response; later completion cannot mutate it.
+    const receipt=structuredClone({thread:t,user,turn});
     if(receiptGate) await receiptGate;
-    return reply(route,{thread:t,user,turn},202);
+    return reply(route,receipt,202);
   }
   const em=tail.match(/^agent-runs\/([^/]+)\/events$/);
   if(em) {
     const count=(eventGets.get(em[1])||0)+1; eventGets.set(em[1],count);
+    eventAuth.set(em[1],[...(eventAuth.get(em[1])||[]),request.headers().authorization]);
     const plans=eventPlans.get(em[1]); const plan=plans?.[Math.min(count-1,plans.length-1)];
+    if(plan?.refreshSession) await page.evaluate(()=>sessionStorage.setItem('anvil-agents-desktop.accessToken','ui-contract-stream-refreshed-not-a-token'));
     if(plan?.status===404) return reply(route,{error:{message:'Runner has not appeared yet'}},404);
     return route.fulfill({status:200,contentType:'text/event-stream',body:plan?.body||'event: complete\ndata: {}\n\n'});
   }
@@ -217,7 +224,31 @@ try {
   releaseReceipt(); receiptGate=null;
   await page.getByRole('button',{name:'Send',exact:true}).waitFor();
   assert.deepEqual((await page.locator('.chat-bubble-body').allTextContents()).slice(-2),['Slow accepted HTTP response','Fast reply before accepted HTTP response']);
-  console.log('PASS observed receipt clears uncertain state; late HTTP acceptance preserves message order without duplicates');
+  await page.getByLabel('Message',{exact:true}).fill('Next message remains sendable');
+  assert.equal(await page.getByRole('button',{name:'Send',exact:true}).isEnabled(),true);
+  console.log('PASS observed receipt clears uncertain state; stale queued202 preserves completed reply and enables next send');
+
+  let releaseStaleRead, staleReadStarted;
+  const staleReadStart=new Promise(resolve=>{staleReadStarted=resolve;});
+  const staleReadGate=new Promise(resolve=>{releaseStaleRead=resolve;});
+  heldDetailReads.set('thread-2',{started:staleReadStarted,gate:staleReadGate});
+  await page.clock.fastForward(3001);
+  await staleReadStart;
+  await page.getByLabel('Message',{exact:true}).fill('Accepted while an older read is in flight');
+  await page.getByRole('button',{name:'Send',exact:true}).click();
+  await page.getByRole('button',{name:'Waiting for reply…'}).waitFor();
+  const staleResponse=page.waitForResponse(r=>r.url().endsWith('/chat/threads/thread-2') && r.request().method()==='GET');
+  releaseStaleRead();
+  await staleResponse;
+  // Let React commit this response before checking the accepted view.
+  await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
+  assert.equal(await page.getByText('Accepted while an older read is in flight',{exact:true}).count(),1);
+  assert.equal(await page.getByRole('button',{name:'Waiting for reply…'}).isDisabled(),true);
+  await page.getByLabel('Message',{exact:true}).fill('Must wait for the active reply');
+  assert.equal(await page.getByRole('button',{name:'Waiting for reply…'}).isDisabled(),true);
+  complete('thread-2','Fixture reply after stale read');
+  await visible('Fixture reply after stale read');
+  console.log('PASS pre-send GET arriving after accepted POST preserves user bubble and active turn');
   const activityRun=`fixture-run-thread-2-${threads.get('thread-2').turns.length+1}`;
   const event=(name,body)=>`event: ${name}\ndata: ${JSON.stringify(body)}\n\n`;
   const terminalTail=event('snapshot',{run:{phase:'Succeeded'}})+
@@ -244,6 +275,21 @@ try {
   complete('thread-2','Fixture streamed reply');
   await visible('Fixture streamed reply');
   console.log('PASS real events endpoint retries initial404, shows safe tool labels, keeps terminal headline, and opens raw SSE only on demand');
+
+  const authRun=`fixture-run-thread-2-${threads.get('thread-2').turns.length+1}`;
+  eventPlans.set(authRun,[{refreshSession:true,body:event('error',{code:'token_expired'})},{body:event('snapshot',{run:{phase:'Succeeded'}})+event('complete',{})}]);
+  await page.getByLabel('Message',{exact:true}).fill('Reconnect activity with the refreshed session');
+  await page.getByRole('button',{name:'Send',exact:true}).click();
+  await visible('Refreshing your session to reconnect activity…');
+  await page.clock.fastForward(3001);
+  await activityRegion.getByRole('status').filter({hasText:'Harness finished; saving the reply'}).waitFor();
+  assert.deepEqual(eventAuth.get(authRun),[eventAuth.get(activityRun)[0],'Bearer ui-contract-stream-refreshed-not-a-token']);
+  assert.notEqual(eventAuth.get(authRun)[0],eventAuth.get(authRun)[1]);
+  complete('thread-2','Fixture refreshed activity reply');
+  await visible('Fixture refreshed activity reply');
+  await page.evaluate(()=>sessionStorage.setItem('anvil-agents-desktop.accessToken','ui-contract-refreshed-not-a-token'));
+  console.log('PASS token_expired activity reconnect uses refreshed stored session without App rerender');
+
 
 
 

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { openAgentRunStream } from '../api/stream';
 import { activityFromLog, type RunActivity } from '../api/runActivity';
 import type { RemoteTurn } from '../api/remoteChat';
+import { ensureAccessToken } from '../auth/oidc';
 
 interface Props {
   token: string;
@@ -36,6 +37,9 @@ export function RemoteTurnActivity({token, namespace, turn, agentLabel}: Props) 
     let handle: {abort: () => void} | undefined;
     const seen = new Set<string>();
     let latestLogTime = 0;
+    let streamToken = token;
+    let rejectedToken = '';
+    let refreshing: Promise<void> | undefined;
     const append = (item: RunActivity, timestamp?: string) => {
       if (cancelled || seen.has(item.key)) return;
       seen.add(item.key);
@@ -48,7 +52,7 @@ export function RemoteTurnActivity({token, namespace, turn, agentLabel}: Props) 
     };
     const connect = () => {
       if (cancelled || stopped) return;
-      handle = openAgentRunStream(token, namespace, runName, {
+      handle = openAgentRunStream(streamToken, namespace, runName, {
         onEvent: (event, payload) => {
           if (cancelled) return;
           if (event === 'snapshot' || event === 'status' || event === 'terminal') {
@@ -79,7 +83,20 @@ export function RemoteTurnActivity({token, namespace, turn, agentLabel}: Props) 
             const activity = activityFromLog(payload.line ?? '');
             if (activity) append(activity, payload.timestamp);
           } else if (event === 'error') {
-            if (payload.code === 'http_404' && !finished.current) {
+            if (['http_401', 'token_expired'].includes(payload.code ?? '') && rejectedToken !== streamToken) {
+              rejectedToken = streamToken;
+              setConnection('Refreshing your session to reconnect activity…');
+              refreshing = ensureAccessToken().then(access => {
+                if (cancelled) return;
+                if (access && access !== streamToken) streamToken = access;
+                else {
+                  stopped = true;
+                  setConnection('Sign in again to reconnect agent activity');
+                }
+              }).catch(() => {
+                if (!cancelled) { stopped = true; setConnection('Sign in again to reconnect agent activity'); }
+              });
+            } else if (payload.code === 'http_404' && !finished.current) {
               setConnection('Waiting for the remote runner to become available…');
             } else if (['http_401', 'http_403', 'http_404', 'token_expired'].includes(payload.code ?? '')) {
               stopped = true;
@@ -98,7 +115,10 @@ export function RemoteTurnActivity({token, namespace, turn, agentLabel}: Props) 
           if (!cancelled) setConnection('Connection interrupted; reconnecting to agent activity…');
         },
         onDone: () => {
-          if (!cancelled && !stopped && !finished.current) reconnect = setTimeout(connect, 3000);
+          void (async () => {
+            await refreshing;
+            if (!cancelled && !stopped && !finished.current) reconnect = setTimeout(connect, 3000);
+          })();
         },
       }, {tailLines: 200});
     };

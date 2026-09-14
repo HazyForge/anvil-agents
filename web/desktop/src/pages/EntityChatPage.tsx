@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import type { UIConfig } from '../auth/config';
 import { APIError, backendKindFromComposition, harnessRefFromRunProfile, listRunProfiles, type CompositionDocument } from '../api/client';
-import { createRemoteThread, getRemoteThread, listRemoteHarnesses, listRemoteThreads, sendRemoteMessage, threadHarness, type RemoteThread, type RemoteThreadDetail } from '../api/remoteChat';
+import { createRemoteThread, getRemoteThread, listRemoteHarnesses, listRemoteThreads, sendRemoteMessage, threadHarness, type RemoteThread, type RemoteThreadDetail, type RemoteTurn } from '../api/remoteChat';
 import { loadNamespace, saveNamespace } from '../state/namespace';
 import { readChatDraft, saveChatDraft, readSelectedChat, saveSelectedChat, readNewChatConfig, saveNewChatConfig, type NewChatConfig } from '../state/chatWorkspace';
 import { RemoteTurnActivity } from '../components/RemoteTurnActivity';
@@ -11,6 +11,20 @@ import { readPendingSend, rememberPendingSend, clearPendingSend } from '../api/p
 import { formatTurnError } from '../wrapper/turn';
 
 interface Props { token: string; config: UIConfig }
+
+const turnProgress = (turn: RemoteTurn) => ({waiting: 0, queued: 1, running: 2, succeeded: 3, failed: 3})[turn.status];
+const sameTurn = (a: RemoteTurn, b: RemoteTurn) => a.id === b.id || Boolean(a.requestId && a.requestId === b.requestId);
+const latestSequence = (detail: RemoteThreadDetail) => Math.max(0, ...detail.messages.map(message => message.sequence));
+// Reads and accepted POST receipts can arrive out of order. The append-only
+// transcript and monotonic turn states must never move the visible thread back.
+function regresses(next: RemoteThreadDetail, previous: RemoteThreadDetail | null) {
+  if (!previous || previous.id !== next.id) return false;
+  if (latestSequence(next) < latestSequence(previous)) return true;
+  const nextTurns = [...(next.turns ?? []), ...(next.activeTurn ? [next.activeTurn] : [])];
+  if (previous.activeTurn && !nextTurns.some(turn => sameTurn(turn, previous.activeTurn!))) return true;
+  return [...(previous.turns ?? []), ...(previous.activeTurn ? [previous.activeTurn] : [])].some(before =>
+    nextTurns.some(after => sameTurn(before, after) && turnProgress(after) < turnProgress(before)));
+}
 
 export function EntityChatPage({token, config}: Props) {
   const [namespace, setNamespace] = useState(() => loadNamespace(config.defaultNamespaces[0] || 'agents'));
@@ -95,7 +109,7 @@ export function EntityChatPage({token, config}: Props) {
       try {
         const next = await getRemoteThread(pollToken, namespace, threadID, controller.signal);
         if (controller.signal.aborted) return;
-        setDetail(next); applyThreadIdentity(next); setUnavailable(false);
+        setDetail(previous => regresses(next, previous) ? previous : next); applyThreadIdentity(next); setUnavailable(false);
         const unresolved = readPendingSend(namespace, threadID);
         if (unresolved && next.turns?.some(t => t.requestId === unresolved.id)) {
           clearPendingSend(namespace, threadID); pending.current = null; setError('');
@@ -192,9 +206,14 @@ export function EntityChatPage({token, config}: Props) {
       setDetail(previous => {
         const prior = previous?.id === result.thread.id ? previous : null;
         const messages = prior?.messages ?? [];
+        const observed = [...(prior?.turns ?? []), ...(prior?.activeTurn ? [prior.activeTurn] : [])].find(turn => sameTurn(turn, result.turn));
+        const accepted = observed && turnProgress(observed) >= turnProgress(result.turn) ? observed : result.turn;
+        const turns = (prior?.turns ?? []).map(turn => sameTurn(turn, accepted) ? accepted : turn);
+        if (!turns.some(turn => sameTurn(turn, accepted))) turns.push(accepted);
         return {...prior, ...result.thread,
           messages: messages.some(message => message.id === result.user.id) ? messages : [...messages, result.user].sort((a, b) => a.sequence - b.sequence),
-          activeTurn: ['waiting', 'queued', 'running'].includes(result.turn.status) ? result.turn : undefined,
+          turns,
+          activeTurn: turns.find(turn => ['waiting', 'queued', 'running'].includes(turn.status)),
         };
       });
     } catch (err) { setError(formatTurnError(err)); setSendPhase('unconfirmed'); }
