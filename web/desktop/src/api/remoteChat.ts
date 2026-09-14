@@ -2,6 +2,7 @@ import { apiFetch, APIError, type CompositionDocument } from './client';
 import type { ChatMessage, ChatThread } from './types.chat';
 
 export type RemoteTurn = {
+  createdAt?: string;
   id: string;
   runName: string;
   requestId?: string;

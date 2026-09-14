@@ -292,11 +292,7 @@ func (server *Server) reconcileChatTurn(ctx context.Context, turn *chat.Turn) er
 		}
 		return server.failChatTurn(ctx, turn, reason)
 	case agentsv1alpha1.AgentRunPhaseFailed:
-		reason := strings.TrimSpace(run.Status.Error)
-		if reason == "" {
-			reason = "The harness run failed"
-		}
-		return server.failChatTurn(ctx, turn, reason)
+		return server.failChatTurn(ctx, turn, server.chatFailure(ctx, run))
 	default:
 		if run.Status.Phase == agentsv1alpha1.AgentRunPhaseRunning {
 			turn.Status = "running"

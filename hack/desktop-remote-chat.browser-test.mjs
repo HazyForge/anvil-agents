@@ -26,7 +26,9 @@ await page.clock.install();
 page.setDefaultTimeout(10000);
 const errors = [], posts = [], creates = [], threads = new Map();
 let failNext = false, loseNextReceipt = false;
+let createGate = null, appendGate = null, receiptGate = null;
 const withheldDetails = new Map(), deniedDetails = new Map(), detailGets = new Map();
+const eventPlans = new Map(), eventGets = new Map();
 page.on('pageerror', error => errors.push(error.message));
 await context.addInitScript(() => {
   sessionStorage.setItem('anvil-agents-desktop.accessToken', 'ui-contract-fixture-not-a-token');
@@ -51,6 +53,7 @@ await context.route('**/*', async route => {
   if(tail==='agent-harness-profiles') return reply(route,{items:[harness('codex-standard','codex'),harness('agy-review','agy')]});
   if(tail==='chat/threads' && request.method()==='GET') return reply(route,{items:[...threads.values()].filter(t=>t.namespace===ns)});
   if(tail==='chat/threads' && request.method()==='POST') {
+    if(createGate) await createGate;
     const body=request.postDataJSON(); creates.push({ns,...body});
     const t={id:`thread-${threads.size+1}`,namespace:ns,...body,createdBy:'fixture',createdAt:new Date().toISOString(),updatedAt:new Date().toISOString(),messages:[],turns:[]};
     threads.set(t.id,t); return reply(route,t,201);
@@ -67,6 +70,7 @@ await context.route('**/*', async route => {
       if(deniedDetails.has(t.id)) return reply(route,{error:{code:'not_found',message:'Fixture access denied'}},deniedDetails.get(t.id));
       return reply(route,withheldDetails.get(t.id)||t);
     }
+    if(appendGate) await appendGate;
     const body=request.postDataJSON(); posts.push({thread:t.id,...body});
     if(failNext) {failNext=false;return reply(route,{error:{code:'temporarily_unavailable',message:'Fixture temporary transport failure'}},503);}
     if(loseNextReceipt) withheldDetails.set(t.id,structuredClone(t));
@@ -74,17 +78,24 @@ await context.route('**/*', async route => {
     let user=t.messages.find(x=>x.id===`user-${body.requestId}`);
     if(!turn) {
       user={id:`user-${body.requestId}`,threadId:t.id,role:'user',content:body.content,sequence:t.messages.length+1,createdAt:new Date().toISOString()};
-      turn={id:body.requestId,requestId:body.requestId,status:'queued',runName:`fixture-run-${t.turns.length+1}`}; t.messages.push(user); t.turns.push(turn); t.activeTurn=turn;
+      turn={id:body.requestId,requestId:body.requestId,status:'queued',runName:`fixture-run-${t.id}-${t.turns.length+1}`}; t.messages.push(user); t.turns.push(turn); t.activeTurn=turn;
     }
     if(loseNextReceipt) {loseNextReceipt=false;return reply(route,{error:{code:'receipt_lost',message:'Fixture accepted receipt was lost'}},503);}
     withheldDetails.delete(t.id);
+    if(receiptGate) await receiptGate;
     return reply(route,{thread:t,user,turn},202);
   }
-  // Runner activity is ancillary; retain a deterministic closed stream.
-  if(tail.includes('/stream')) return route.fulfill({status:200,contentType:'text/event-stream',body:'event: done\ndata: {}\n\n'});
+  const em=tail.match(/^agent-runs\/([^/]+)\/events$/);
+  if(em) {
+    const count=(eventGets.get(em[1])||0)+1; eventGets.set(em[1],count);
+    const plans=eventPlans.get(em[1]); const plan=plans?.[Math.min(count-1,plans.length-1)];
+    if(plan?.status===404) return reply(route,{error:{message:'Runner has not appeared yet'}},404);
+    return route.fulfill({status:200,contentType:'text/event-stream',body:plan?.body||'event: complete\ndata: {}\n\n'});
+  }
   return reply(route,{},404);
 });
 const visible = async text => page.getByText(text,{exact:true}).waitFor({state:'visible'});
+const draftVisible = async content => page.waitForFunction(value => { const input=document.querySelector('textarea[aria-label="Message"]'); return input && !input.disabled && input.value===value; }, content);
 const complete = (id,text,failed=false) => {
   const t=threads.get(id); const turn=t.activeTurn;
   turn.status=failed?'failed':'succeeded'; if(failed)turn.error=text;
@@ -93,6 +104,8 @@ const complete = (id,text,failed=false) => {
 };
 try {
   await page.goto(`${origin}/chat`);
+  await page.getByLabel('Agent',{exact:true}).locator('option').filter({hasText:'agent-alpha'}).waitFor({state:'attached'});
+  assert.equal(await page.getByLabel('Agent',{exact:true}).inputValue(),'');
   await page.getByLabel('Agent',{exact:true}).selectOption('agent-alpha');
   await page.getByLabel('Remote harness').selectOption('agy-review');
   await page.getByLabel('Role',{exact:true}).selectOption('fleet');
@@ -101,14 +114,26 @@ try {
   assert.equal(await page.getByRole('button',{name:'Send',exact:true}).isDisabled(),true);
   await page.getByLabel('agent-beta',{exact:true}).check();
   await page.getByLabel('Message',{exact:true}).fill('Coordinate the fixture agents');
+  let releaseCreate, releaseAppend;
+  createGate=new Promise(resolve=>{releaseCreate=resolve;});
+  appendGate=new Promise(resolve=>{releaseAppend=resolve;});
   await page.getByRole('button',{name:'Send',exact:true}).click();
-  await page.getByRole('status').filter({hasText:'Queued for the remote harness'}).waitFor();
+  await page.getByRole('article',{name:'Your pending message'}).getByText('Coordinate the fixture agents',{exact:true}).waitFor();
+  await page.getByRole('status').filter({hasText:'Saving conversation…'}).waitFor();
+  assert.equal(threads.size,0);
+  releaseCreate(); createGate=null;
+  await page.getByRole('status').filter({hasText:'Sending message…'}).waitFor();
+  assert.equal(posts.length,0);
+  assert.equal(await page.getByRole('article',{name:'Your pending message'}).count(),1);
+  releaseAppend(); appendGate=null;
+  await page.getByRole('status').filter({hasText:'Message received; waiting for the agent to start'}).waitFor();
   assert.deepEqual(creates[0],{ns:'anvilhub',profileName:'agent-alpha',harnessProfileName:'agy-review',mode:'fleet',title:'Manager · agent-alpha',metadata:{coordination:{enabled:true,allowedProfiles:['agent-beta']}}});
   assert.equal(await page.getByRole('button',{name:'Waiting for reply…'}).isDisabled(),true);
+  assert.equal(await page.getByText('Coordinate the fixture agents',{exact:true}).count(),1);
+  console.log('PASS slow create/append show immediate user bubble and honest saving/sending status');
   complete('thread-1','Fixture coordination response');
   await visible('Fixture coordination response');
   await page.reload();
-  await page.getByRole('button',{name:/Manager · agent-alpha/}).click();
   await visible('Fixture coordination response');
   assert.equal(await page.getByLabel('Remote harness').inputValue(),'agy-review');
   assert.equal(await page.getByLabel('Role',{exact:true}).inputValue(),'fleet');
@@ -135,14 +160,14 @@ try {
   await page.getByRole('alert').filter({hasText:'Fixture temporary transport failure'}).waitFor();
   assert.equal(await page.getByLabel('Message',{exact:true}).inputValue(),'Retry this fixture message');
   await page.getByRole('button',{name:'Send',exact:true}).click();
-  await page.getByRole('status').filter({hasText:'Queued for the remote harness'}).waitFor();
+  await page.getByRole('status').filter({hasText:'Message received; waiting for the agent to start'}).waitFor();
   assert.equal(posts.at(-1).requestId,posts.at(-2).requestId);
   assert.equal(threads.size,2); assert.equal(threads.get('thread-2').messages.length,1);
   complete('thread-2','Fixture runner failed',true);
   await visible('Turn failed: Fixture runner failed');
   await page.getByLabel('Message',{exact:true}).fill('Continue after runner failure');
   await page.getByRole('button',{name:'Send',exact:true}).click();
-  await page.getByRole('status').filter({hasText:'Queued for the remote harness'}).waitFor();
+  await page.getByRole('status').filter({hasText:'Message received; waiting for the agent to start'}).waitFor();
   assert.notEqual(posts.at(-1).requestId,posts.at(-2).requestId);
   complete('thread-2','Fixture second conversation response');
   await visible('Fixture second conversation response');
@@ -159,16 +184,68 @@ try {
   await page.getByRole('button',{name:'agent-beta agent-beta',exact:true}).click();
   assert.equal(await page.getByLabel('Message',{exact:true}).inputValue(),'Ambiguous accepted fixture message');
   await page.reload();
-  await page.getByRole('button',{name:'agent-beta agent-beta',exact:true}).click();
+  await visible('Fixture second conversation response');
   assert.equal(await page.getByLabel('Message',{exact:true}).inputValue(),'Ambiguous accepted fixture message');
   await page.getByRole('button',{name:'Send',exact:true}).click();
-  await page.getByRole('status').filter({hasText:'Queued for the remote harness'}).waitFor();
+  await page.getByRole('status').filter({hasText:'Message received; waiting for the agent to start'}).waitFor();
   assert.equal(posts.at(-1).requestId,ambiguousID);
   assert.equal(threads.get('thread-2').messages.length,priorMessages+1);
   assert.equal(threads.size,2);
   complete('thread-2','Fixture ambiguous receipt recovered');
   await visible('Fixture ambiguous receipt recovered');
   console.log('PASS lost accepted receipt retains draft and idempotency through sidebar and reload');
+  await page.getByLabel('Message',{exact:true}).fill('  Accepted receipt reconciled without retry  ');
+  loseNextReceipt=true;
+  await page.getByRole('button',{name:'Send',exact:true}).click();
+  await page.getByRole('alert').filter({hasText:'Fixture accepted receipt was lost'}).waitFor();
+  const countBeforeReceipt=posts.length;
+  withheldDetails.delete('thread-2');
+  await page.getByRole('article',{name:'Your pending message'}).waitFor({state:'hidden'});
+  assert.equal(await page.getByLabel('Message',{exact:true}).inputValue(),'');
+  assert.equal(await page.getByRole('alert').count(),0);
+  assert.equal(posts.length,countBeforeReceipt);
+  assert.equal(await page.getByText('Accepted receipt reconciled without retry',{exact:true}).count(),1);
+  complete('thread-2','Fixture receipt confirmed');
+  await visible('Fixture receipt confirmed');
+  let releaseReceipt;
+  receiptGate=new Promise(resolve=>{releaseReceipt=resolve;});
+  await page.getByLabel('Message',{exact:true}).fill('Slow accepted HTTP response');
+  await page.getByRole('button',{name:'Send',exact:true}).click();
+  await page.getByRole('status').filter({hasText:'Message received; waiting for the agent to start'}).waitFor();
+  complete('thread-2','Fast reply before accepted HTTP response');
+  await visible('Fast reply before accepted HTTP response');
+  releaseReceipt(); receiptGate=null;
+  await page.getByRole('button',{name:'Send',exact:true}).waitFor();
+  assert.deepEqual((await page.locator('.chat-bubble-body').allTextContents()).slice(-2),['Slow accepted HTTP response','Fast reply before accepted HTTP response']);
+  console.log('PASS observed receipt clears uncertain state; late HTTP acceptance preserves message order without duplicates');
+  const activityRun=`fixture-run-thread-2-${threads.get('thread-2').turns.length+1}`;
+  const event=(name,body)=>`event: ${name}\ndata: ${JSON.stringify(body)}\n\n`;
+  const terminalTail=event('snapshot',{run:{phase:'Succeeded'}})+
+    event('log',{timestamp:new Date().toISOString(),line:JSON.stringify({type:'tool_use',part:{id:'safe-read',tool:'read',state:{input:{path:'RAW_PRIVATE_PATH_SENTINEL'}}}})})+
+    event('log',{line:'UNKNOWN_PRIVATE_RAW_SENTINEL'})+event('complete',{});
+  eventPlans.set(activityRun,[{status:404},{body:terminalTail}]);
+  await page.getByLabel('Message',{exact:true}).fill('Observe the reported runner activity');
+  await page.getByRole('button',{name:'Send',exact:true}).click();
+  await visible('Waiting for the remote runner to become available…');
+  await page.clock.fastForward(3001);
+  const activityRegion=page.getByRole('region',{name:'Agent activity'});
+  await activityRegion.getByText('Reading files',{exact:true}).waitFor();
+  assert.equal(await activityRegion.getByRole('status').innerText(),'Harness finished; saving the reply');
+  assert.equal(await page.getByText(/RAW_PRIVATE_PATH_SENTINEL|UNKNOWN_PRIVATE_RAW_SENTINEL/).count(),0);
+  assert.equal(await page.getByText('Waiting for the remote runner to become available…',{exact:true}).count(),0);
+  assert.equal(eventGets.get(activityRun),2);
+  await page.clock.fastForward(6001);
+  assert.equal(eventGets.get(activityRun),2);
+  const rawRequest=page.waitForResponse(r=>r.url().includes(`/agent-runs/${activityRun}/events`));
+  await page.getByText('Runner activity',{exact:true}).click();
+  await rawRequest;
+  assert.equal(eventGets.get(activityRun),3);
+  await page.getByText('Runner activity',{exact:true}).click();
+  complete('thread-2','Fixture streamed reply');
+  await visible('Fixture streamed reply');
+  console.log('PASS real events endpoint retries initial404, shows safe tool labels, keeps terminal headline, and opens raw SSE only on demand');
+
+
 
   await page.getByRole('button',{name:/Manager · agent-alpha/}).click();
   await visible('Fixture coordination response');
@@ -176,12 +253,56 @@ try {
   await page.getByRole('button',{name:'agent-beta agent-beta',exact:true}).click();
   await visible('Fixture second conversation response');
   assert.equal(await page.getByText('Fixture coordination response',{exact:true}).count(),0);
+  await page.getByLabel('Message',{exact:true}).fill('Unsent beta draft');
+  await page.getByRole('button',{name:/Manager · agent-alpha/}).click();
+  await visible('Fixture coordination response');
+  await page.getByLabel('Message',{exact:true}).fill('Unsent alpha draft');
+  await page.getByRole('button',{name:'agent-beta agent-beta',exact:true}).click();
+  await draftVisible('Unsent beta draft');
+  assert.equal(await page.getByLabel('Message',{exact:true}).inputValue(),'Unsent beta draft');
+  await page.reload();
+  await visible('Fixture second conversation response');
+  await draftVisible('Unsent beta draft');
+  assert.equal(await page.getByLabel('Message',{exact:true}).inputValue(),'Unsent beta draft');
+  await page.getByRole('button',{name:'New conversation'}).click();
+  await page.getByLabel('Agent',{exact:true}).selectOption('');
+  await page.getByLabel('Remote harness').selectOption('agy-review');
+  await page.getByLabel('Message',{exact:true}).fill('Unsent new AGY conversation');
+  await page.getByRole('button',{name:/Manager · agent-alpha/}).click();
+  await draftVisible('Unsent alpha draft');
+  assert.equal(await page.getByLabel('Message',{exact:true}).inputValue(),'Unsent alpha draft');
+  await page.getByRole('button',{name:'New conversation'}).click();
+  await draftVisible('Unsent new AGY conversation');
+  assert.equal(await page.getByLabel('Message',{exact:true}).inputValue(),'Unsent new AGY conversation');
+  assert.equal(await page.getByLabel('Remote harness').inputValue(),'agy-review');
+  await page.reload();
+  await page.getByLabel('Remote harness').waitFor({state:'visible'});
+  await draftVisible('Unsent new AGY conversation');
+  assert.equal(await page.getByLabel('Message',{exact:true}).inputValue(),'Unsent new AGY conversation');
+  assert.equal(await page.getByLabel('Remote harness').inputValue(),'agy-review');
+  console.log('PASS independent thread drafts and unfinished new-conversation configuration survive sidebar/reload');
   await page.getByLabel('Namespace',{exact:true}).selectOption('hazy-trade');
   await page.getByLabel('Agent',{exact:true}).selectOption('agent-trade');
   assert.equal(await page.getByText('Fixture second conversation response',{exact:true}).count(),0);
+  await page.getByLabel('Message',{exact:true}).fill('Trade namespace draft');
+  await page.getByLabel('Namespace',{exact:true}).selectOption('anvilhub');
+  await page.getByLabel('Remote harness').waitFor({state:'visible'});
+  await draftVisible('Unsent new AGY conversation');
+  assert.equal(await page.getByLabel('Message',{exact:true}).inputValue(),'Unsent new AGY conversation');
+  await page.getByRole('button',{name:'agent-beta agent-beta',exact:true}).click();
+  await page.getByLabel('Namespace',{exact:true}).selectOption('hazy-trade');
+  await page.getByLabel('Agent',{exact:true}).waitFor({state:'visible'});
+  await draftVisible('Trade namespace draft');
+  assert.equal(await page.getByLabel('Message',{exact:true}).inputValue(),'Trade namespace draft');
+  await page.getByLabel('Namespace',{exact:true}).selectOption('anvilhub');
+  await visible('Fixture second conversation response');
+  await draftVisible('Unsent beta draft');
+  assert.equal(await page.getByLabel('Message',{exact:true}).inputValue(),'Unsent beta draft');
+  await page.getByLabel('Namespace',{exact:true}).selectOption('hazy-trade');
+  await page.getByLabel('Agent',{exact:true}).waitFor({state:'visible'});
   await page.getByLabel('Message',{exact:true}).fill('Namespace isolated fixture');
   await page.getByRole('button',{name:'Send',exact:true}).click();
-  await page.getByRole('status').filter({hasText:'Queued for the remote harness'}).waitFor();
+  await page.getByRole('status').filter({hasText:'Message received; waiting for the agent to start'}).waitFor();
   assert.equal(creates.at(-1).ns,'hazy-trade');
   assert.deepEqual(errors,[]);
   console.log('PASS two-thread isolation and namespace switch; no browser runtime errors');
@@ -190,18 +311,26 @@ try {
   await page.getByLabel('Remote harness').selectOption('codex-standard');
   await page.getByLabel('Message',{exact:true}).fill('Harness-only fixture');
   await page.getByRole('button',{name:'Send',exact:true}).click();
-  await page.getByRole('status').filter({hasText:'Queued for the remote harness'}).waitFor();
+  await page.getByRole('status').filter({hasText:'Message received; waiting for the agent to start'}).waitFor();
   assert.equal(creates.at(-1).profileName,undefined);
   assert.equal(creates.at(-1).harnessProfileName,'codex-standard');
   console.log('PASS standalone harness conversation; explicit manager peer selection survives reload');
   complete('thread-4','Fixture harness-only response');
   await visible('Fixture harness-only response');
+  await page.getByLabel('Message',{exact:true}).fill('Draft for unavailable conversation');
   deniedDetails.set('thread-4',404);
   await page.getByRole('alert').filter({hasText:'Fixture access denied'}).waitFor();
   const deniedCount=detailGets.get('thread-4');
   await page.clock.fastForward(10001);
   assert.equal(detailGets.get('thread-4'),deniedCount);
-  console.log('PASS denied404 stops polling until selection changes');
+  assert.equal(await page.getByLabel('Message',{exact:true}).inputValue(),'Draft for unavailable conversation');
+  assert.equal(await page.getByRole('button',{name:'Send',exact:true}).isDisabled(),true);
+  await page.reload();
+  await page.getByRole('alert').filter({hasText:'Fixture access denied'}).waitFor();
+  assert.equal(await page.getByLabel('Message',{exact:true}).inputValue(),'Draft for unavailable conversation');
+  await page.getByRole('button',{name:'New conversation'}).click();
+  assert.equal(await page.getByLabel('Message',{exact:true}).isDisabled(),false);
+  console.log('PASS denied404 stops polling, preserves draft on reload, and allows a new conversation');
   config.chat.enabled=false;
   await page.reload();
   await visible('Remote chat is not enabled on this server.');
