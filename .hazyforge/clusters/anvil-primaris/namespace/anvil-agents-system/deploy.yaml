@@ -12,13 +12,13 @@ serviceAccount:
   name: anvil-agents
 image:
   # Controller/API image embeds Anvil Agents Console SPA (served at /).
-  reference: ghcr.io/hazyforge/anvil-agents@sha256:e1dbafccfc7bb67702da00f66f1c32cb2aeef6742f7b5119b5ad8df4bede242a
+  reference: ghcr.io/hazyforge/anvil-agents@sha256:c6875e0cb87abb452395a465f41960ab38d0f2df3c508571e1e57d915fe043c6
   pullPolicy: IfNotPresent
 imagePullSecrets:
   - name: ghcr-creds
 runnerImages:
-  # Runner images are a separate compatibility surface. This controller-only
-  # adoption keeps the existing public runner set stable.
+  agy: ghcr.io/hazyforge/anvil-agents/anvil-agent-run-agy@sha256:ba4bcf954552a0f898035af898243b59a7ed9a7d5693cebd578761b91448c86f
+  # Preserve existing runners while adding the verified native AGY runner.
   codex: ghcr.io/hazyforge/anvil-agent-run-codex@sha256:4138fa74fd4328b6f736ea6c97ed2b4a0ba31a6f48b3e989fdfbbba680fb6ab8
   openCode: ghcr.io/hazyforge/anvil-agent-run-opencode@sha256:479cac35c6cc9f8cc5c6591e3bddacb5245ebea8f16f3f590a449df9214b2dc9
   hermesAgent: ghcr.io/hazyforge/anvil-agent-run-hermes@sha256:fd90b3c59cd98e9bd20f820c1d5e8bd27da5e3217f035de3b590192ca1235358
