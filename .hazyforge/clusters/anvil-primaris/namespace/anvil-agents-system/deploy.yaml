@@ -46,6 +46,7 @@ extraRBACRules:
     resources: [applicationreleases, artifactbuilds, iosbuilds, anviltasks, testruns]
     verbs: [get, list, watch]
 archive:
+  restartToken: standing-chat-20260914
   databaseURLSecret:
     name: anvilhub-inventory-database
     key: database-url
@@ -177,6 +178,7 @@ extraVolumeMounts:
     readOnly: true
 nodeSelector:
   kubernetes.io/arch: amd64
+  kubernetes.io/hostname: anvil-primaris-worker-hel1-1
 affinity: {}
 tolerations: []
 podSecurityContext:
@@ -188,10 +190,8 @@ securityContext:
   capabilities:
     drop: [ALL]
   readOnlyRootFilesystem: true
-# Archive state is PostgreSQL-backed through the cluster Service; the
-# controller no longer needs the retired node-local archive-path colocation.
-# Omitting the control-plane affinity and toleration keeps it on an eligible
-# worker and preserves memory for the single control-plane's static pods.
+# Both database consumers use the worker whose egress is admitted by Postgres.
+# The cordoned control-plane is not a runtime placement target.
 resources:
   requests:
     cpu: 50m

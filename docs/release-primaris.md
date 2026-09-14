@@ -169,3 +169,9 @@ Both passes use the same chart and complete values, and the second pass restores
 the desired extraObjects list. The live Primaris admission policy reserves
 `ownership=gitops` for Argo; directly managed objects use `ownership=helm` and
 remain defined in the checked-in overlay.
+
+The deploy helper uses Helm 4 `--wait=legacy`: normal workloads must become
+ready, while a new AgentDataVolume may remain Pending until its first consumer
+binds its PVC. Helm 4's default watcher would wait for that custom Ready
+condition before the first chat could be sent. Verify the volume binds during
+the native runner canary.

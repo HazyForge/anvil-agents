@@ -40,8 +40,9 @@ var (
 	ErrInvalid  = errors.New("invalid chat request")
 )
 
+const chatSchemaCreate = "CREATE SCHEMA IF NOT EXISTS anvil_agents_chat;"
+
 const chatSchema = `
-CREATE SCHEMA IF NOT EXISTS anvil_agents_chat;
 
 CREATE TABLE IF NOT EXISTS anvil_agents_chat.threads (
     id TEXT PRIMARY KEY,
@@ -201,7 +202,18 @@ func (s *PostgresStore) Ping(ctx context.Context) error {
 }
 
 func (s *PostgresStore) Migrate(ctx context.Context) error {
-	if _, err := s.pool.Exec(ctx, chatSchema); err != nil {
+	// PostgreSQL requires database CREATE even for CREATE SCHEMA IF NOT EXISTS
+	// when that schema already exists. Respect a separately provisioned schema
+	// owned by the application role without widening its database privileges.
+	var schemaExists bool
+	if err := s.pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM pg_namespace WHERE nspname=$1)`, SchemaName).Scan(&schemaExists); err != nil {
+		return fmt.Errorf("inspect standing-chat schema: %w", err)
+	}
+	statements := chatSchema
+	if !schemaExists {
+		statements = chatSchemaCreate + statements
+	}
+	if _, err := s.pool.Exec(ctx, statements); err != nil {
 		return fmt.Errorf("migrate standing-chat schema: %w", err)
 	}
 	return nil

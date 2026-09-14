@@ -151,7 +151,14 @@ if [[ -n "${kube_context}" ]]; then
 	helm_args+=(--kube-context "${kube_context}")
 fi
 if [[ "${wait}" == "true" ]]; then
-	helm_args+=(--wait)
+	# Helm 4's watcher also waits for custom-resource Ready conditions. A new
+	# AgentDataVolume with WaitForFirstConsumer stays Pending until a run uses it.
+	# Preserve Helm 3's workload readiness checks without that circular wait.
+	if [[ "$(helm version --template '{{.Version}}' 2>/dev/null || true)" == v4.* ]]; then
+		helm_args+=(--wait=legacy)
+	else
+		helm_args+=(--wait)
+	fi
 fi
 if [[ "${dry_run}" == "true" ]]; then
 	helm_args+=(--dry-run=client)
