@@ -130,7 +130,8 @@ export function LocalChatPage({snapshot, onBusyChange, signedIn = false, config,
           if (!['running', 'succeeded', 'failed'].includes(data.status || '')) return;
           const actionLabels: Record<string, string> = {list_agents: 'Listing agents', get_agent: 'Inspecting an agent', list_harnesses: 'Listing harnesses', list_runs: 'Checking agent work', get_run: 'Checking a run', get_thread: 'Reading an agent conversation', send_message: 'Sending an agent message', start_run: 'Starting agent work'};
           if (!data.action || !Object.hasOwn(actionLabels, data.action)) return;
-          const label = data.status === 'running' ? actionLabels[data.action] : data.status === 'succeeded' ? 'Anvil tool finished' : 'Anvil tool reported an error';
+          const finishedLabels: Record<string, string> = {list_agents: 'Agents listed', get_agent: 'Agent inspected', list_harnesses: 'Harnesses listed', list_runs: 'Agent work checked', get_run: 'Run checked', get_thread: 'Agent conversation read', send_message: 'Agent message accepted', start_run: 'Agent work accepted'};
+          const label = data.status === 'running' ? actionLabels[data.action] : data.status === 'succeeded' ? finishedLabels[data.action] : `${actionLabels[data.action]} failed`;
           reportedAt.current = Date.now(); setActivity(previous => [...previous, label].slice(-8)); setStatus(label);
         } else if (kind === 'stdout') {
           streamedOutput = `${streamedOutput}${data.line || ''}\n`.slice(-2 * 1024 * 1024);

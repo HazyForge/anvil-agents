@@ -1,13 +1,13 @@
 # Prime Agent and Desktop execution location
 
-Desktop Chat defaults to **Local WSL** (or this computer when outside WSL), with
+Desktop Chat defaults to **Local**, with WSL status inside Agent settings and
 **Prime Agent** selected. An explicit saved Primaris selection remains respected.
 The location selector appears above the conversation. The local path works
 without remote OIDC sign-in; Primaris conversations still require it.
 
 | Location | Harness process | Model and login | Files | History |
 | --- | --- | --- | --- | --- |
-| Local WSL / this computer | Installed catalog CLI on the Desktop host or selected WSL distro | Native harness configuration and provider login | Persistent local working folder, editable for a new conversation | Browser storage on this device, replayed into later turns |
+| Local | Installed catalog CLI on the Desktop host or selected WSL distro | Native harness configuration and provider login | Persistent local working folder, editable for a new conversation | Browser storage on this device, replayed into later turns |
 | Primaris | AgentRun Job in Kubernetes; Desktop profiles select home-lab nodes | Selected AgentHarnessProfile and existing Secret references | Temporary `/workspace` unless the profile mounts an AgentDataVolume | Durable API messages, replayed into later AgentRuns |
 
 When the Desktop wrapper is itself running in WSL, native process execution is
@@ -68,8 +68,8 @@ or exactly-once execution across browser/process crashes.
 Drafting a follow-up during work is supported. Sending bursts into a durable
 coordinator inbox, automatically incorporating peer completion in the manager
 conversation, and sharing project state between local and remote workers remain
-separate work. A local Prime conversation currently has its native tools and
-context; it does not automatically receive the remote API's peer allowlist.
+separate work. Signed-in local conversations receive the scoped Anvil tools
+described below; this does not create a durable coordinator inbox.
 
 ## Runtime evidence, 2026-09-14
 
@@ -133,3 +133,50 @@ The UI says Local, with WSL status inside Agent settings. Anvil tools enabled
 means the signed-in connection is configured for the next turn; Anvil connected
 appears after the wrapper confirms that turn's tool connection. Tool activity
 uses allowlisted labels without exposing commands, credentials or API bodies.
+
+## Connected-agent delivery, 2026-09-14
+
+Direct Helm revision **16** deployed the canonical-agent API from source
+`3de461e`, with controller/API digest
+`sha256:364f74c34c5c08bb0ab6a73cd5b46f5ccab8122b44a64b6e69be49fc29121cca`.
+Both deployments are 1/1 ready and public health/readiness return 200. The remote
+Desktop assistant is back on `desktop-opencode-workspace`; the Prime runner pin
+is unchanged. Source and pin landed directly on master with Actions skipped.
+The local wrapper additionally includes `259f208` for operation deadlines and
+stdin-based tool invocation; these local-only changes do not change the API image.
+
+The installed Desktop was driven through Chrome DevTools MCP in the user's
+existing signed-in browser. The existing Codex agent kept its ID, prior messages
+and working folder through migration/reload. Its live question about Primaris
+invoked agent, run and harness tools and returned an accurate answer in about
+70 seconds: both `desktop-assistant` and `desktop-reviewer` currently select
+`desktop-opencode-workspace`, while older runs retain their original resolved
+harnesses. The latest prior Prime run was reported failed and earlier work
+succeeded. Profile references and run states were independently compared with
+live Kubernetes metadata. This proves actual local-harness access through Anvil,
+not just an enabled badge. Prime's native defaults remain unchanged.
+
+An independent Grok review found a shorter discovery HTTP timeout leaking into
+tool operations and an underspecified JSON quoting example. The bridge now uses
+its operation context deadline and documents JSON stdin. Its proposed Windows
+session-path conversion was rejected: the invoked client remains a Windows
+executable, so it must receive its native Windows file path. Windows compilation
+passed; Windows-to-WSL execution has not been live-verified.
+
+The next live Codex turn sent a single message to `desktop-reviewer` and polled
+its returned standing thread. It retrieved the exact reply
+`ANVIL_PEER_CONNECTED_914` in about **44 seconds**. The remote run
+`chat-turn-04134f162bcde14344f3a8af186d7203997f6b54` independently reached
+Succeeded using OpenCode / `opencode/big-pickle` on node `acer`, from
+20:32:36Z to 20:32:54Z. The remote agent's own UI displayed the saved request and
+reply in standing thread `c0cd6f46-936e-401d-bfc2-6199553e23c4`; switching to
+Desktop Assistant, back to Reviewer, and reloading returned the same thread ID
+and reply. This is live request/reply retrieval within one local turn, not an
+automatic callback after the local turn ends.
+
+Final verification: `make verify`, scoped tool-operation tests, the signed-in
+connection browser fixture, and the production Desktop build pass. Prior
+PostgreSQL concurrency, remote roster, local recovery, race and visual checks
+are recorded in the UI review. Installed screenshots and browser snapshots were
+inspected, including Local labels, agent icons, preserved history, tool activity
+and the reviewer standing thread.

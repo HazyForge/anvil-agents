@@ -56,5 +56,31 @@ Runtime proof and rollout details are recorded in
 [Prime execution](desktop-prime-execution.md). A model provider timeout and a
 missing remote provider credential are not evidence that agent navigation failed.
 
-Review verdict will be finalized after the installed Desktop and deployed API
-are driven together.
+## Installed runtime review
+
+- The installed signed-in Desktop now says **Local**; WSL is shown with a check
+  inside Agent settings. Existing Codex and Prime histories migrated to stable
+  agent entries with icons. The existing working folder was explicitly rebound
+  after upgrading from an older record that lacked execution-location metadata.
+- Local Codex used Anvil tools to inspect real Primaris agents, current harness
+  profiles and recent work. Its 70-second answer matched live cluster metadata.
+- A second local turn sent Desktop Reviewer a message and retrieved its exact
+  reply in 44 seconds. Reviewer ran remotely on `acer` with OpenCode.
+- The remote agent roster opened Reviewer's standing conversation; the same
+  thread ID and saved reply survived agent switching and reload. Local history
+  also survived reload before the second canary.
+- Final `make verify`, Desktop build and connection browser fixture passed.
+  The independent review's operation-timeout and JSON-input findings were fixed.
+
+| Severity | Location | Before | After | Why |
+| --- | --- | --- | --- | --- |
+| HIGH | `internal/desktop/anvil_tool_bridge.go:128` | A local harness tried expired Kubernetes login and could not inspect remote agents | Anvil assistant context and scoped per-turn tools use the existing Desktop sign-in | Execution location and remote access work together |
+| MEDIUM | `web/desktop/src/App.tsx:159`, `web/desktop/src/pages/LocalChatPage.tsx:193` | Local WSL was a prominent product label | Local location label; WSL check inside settings | Technical detail stays available without dominating the conversation |
+| MEDIUM | `web/desktop/src/pages/LocalChatPage.tsx:131` | Completed tool activity lost its action identity | Specific labels such as Agents listed, Agent conversation read and Agent message accepted | Users can understand the work, and acceptance is distinct from a peer reply |
+
+**Approve** this agent-identity, local Anvil connection and activity UI pass.
+A fully autonomous coordinator inbox is still **Block**: queued human bursts,
+provider-native session steering and automatic peer-completion wakeups have not
+been implemented. Prime's provider-stream stall and missing remote credential
+remain separate runtime limitations. Animation-panel replay at 10% speed,
+physical touch hardware and Windows-hosted WSL execution: **Not verified**.
