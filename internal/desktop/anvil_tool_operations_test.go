@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 const toolTestRequestID = "c0e510a5-9a5b-4fa4-a7ef-ea7e1c46f102"
@@ -221,5 +222,22 @@ func TestAnvilToolRejectsCallerScopeAndUnsafeOrigin(t *testing.T) {
 	}
 	if calls != 0 {
 		t.Fatalf("invalid configuration reached API %d times", calls)
+	}
+}
+
+func TestAnvilToolUsesOperationDeadlineInsteadOfDiscoveryTimeout(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(30 * time.Millisecond)
+		fmt.Fprint(w, `{"items":[]}`)
+	}))
+	defer server.Close()
+	client := server.Client()
+	client.Timeout = time.Millisecond
+	got, err := executeAnvilTool(context.Background(), client, server.URL, "allowed", "fixture-token", "list_agents", json.RawMessage(`{}`))
+	if err != nil || string(got) != `{"items":[]}` {
+		t.Fatalf("result=%s err=%v", got, err)
+	}
+	if client.Timeout != time.Millisecond {
+		t.Fatal("shared discovery client was mutated")
 	}
 }

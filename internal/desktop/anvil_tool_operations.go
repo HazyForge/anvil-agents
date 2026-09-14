@@ -86,6 +86,8 @@ func executeAnvilTool(ctx context.Context, client *http.Client, apiOrigin, names
 	if client != nil {
 		upstream = *client
 	}
+	// The operation context owns the full deadline; discovery uses a shorter client timeout.
+	upstream.Timeout = 0
 	// Even same-host redirects are not part of the operation allowlist.
 	upstream.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	base := strings.TrimRight(apiOrigin, "/") + "/api/v1/namespaces/" + url.PathEscape(namespace) + "/"
