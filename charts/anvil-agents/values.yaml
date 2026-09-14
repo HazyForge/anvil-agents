@@ -146,6 +146,9 @@ service:
 # the controller. It is disabled until an issuer, audience, and explicit
 # authorization bindings are configured.
 api:
+  # Optional API-only mounts, including CA certificates referenced by the chat database URL.
+  extraVolumes: []
+  extraVolumeMounts: []
   enabled: false
   replicaCount: 1
   serviceAccount:

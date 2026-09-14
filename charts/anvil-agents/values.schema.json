@@ -132,7 +132,9 @@
       "type": "object",
       "additionalProperties": true,
       "properties": {
-        "chatDatabaseURLSecret": { "$ref": "#/definitions/databaseURLSecret" }
+        "chatDatabaseURLSecret": { "$ref": "#/definitions/databaseURLSecret" },
+        "extraVolumes": { "type": "array", "items": { "type": "object" } },
+        "extraVolumeMounts": { "type": "array", "items": { "type": "object" } }
       }
     }
   },

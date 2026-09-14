@@ -76,6 +76,9 @@ spec:
               mountPath: /etc/anvil-agents-api/oidc-ca
               readOnly: true
             {{- end }}
+            {{- with .Values.api.extraVolumeMounts }}
+{{ toYaml . | indent 12 }}
+            {{- end }}
       volumes:
         - name: config
           configMap:
@@ -87,6 +90,9 @@ spec:
             items:
               - key: {{ $.Values.api.oidcCA.key }}
                 path: ca.crt
+        {{- end }}
+        {{- with .Values.api.extraVolumes }}
+{{ toYaml . | indent 8 }}
         {{- end }}
       {{- with .Values.api.nodeSelector }}
       nodeSelector:

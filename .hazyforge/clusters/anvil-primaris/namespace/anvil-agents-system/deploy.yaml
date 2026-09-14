@@ -55,9 +55,22 @@ archive:
 # narrower anvil_agents_viewer role and read-only observer permissions.
 api:
   enabled: true
+  extraVolumes:
+    - name: chat-database-ca
+      secret:
+        secretName: anvilhub-inventory-database
+        items:
+          - key: ca.crt
+            path: ca.crt
+  extraVolumeMounts:
+    - name: chat-database-ca
+      mountPath: /etc/anvilhub/inventory-database
+      readOnly: true
   # Keep the currently deployed scheduling and isolation settings explicit.
   replicaCount: 1
-  nodeSelector: {}
+  # PostgreSQL admits this existing worker egress address.
+  nodeSelector:
+    kubernetes.io/hostname: anvil-primaris-worker-hel1-1
   affinity: {}
   tolerations: []
   resources: {}
@@ -198,7 +211,7 @@ extraObjects:
       labels:
         app.kubernetes.io/part-of: desktop-chat
         control.anvil.hazyforge.io/application: desktop-chat
-        control.anvil.hazyforge.io/ownership: gitops
+        control.anvil.hazyforge.io/ownership: helm
     spec:
       description: General assistant for user-initiated Desktop conversations.
       scope:
@@ -224,7 +237,7 @@ extraObjects:
       labels:
         app.kubernetes.io/part-of: desktop-chat
         control.anvil.hazyforge.io/application: desktop-chat
-        control.anvil.hazyforge.io/ownership: gitops
+        control.anvil.hazyforge.io/ownership: helm
     spec:
       description: Independent reviewer for user-initiated Desktop conversations.
       scope:
@@ -248,7 +261,7 @@ extraObjects:
       namespace: anvilhub
       labels:
         app.kubernetes.io/part-of: desktop-chat
-        control.anvil.hazyforge.io/ownership: gitops
+        control.anvil.hazyforge.io/ownership: helm
     spec:
       refreshInterval: 1h
       secretStoreRef:
@@ -270,7 +283,7 @@ extraObjects:
       labels:
         app.kubernetes.io/part-of: desktop-chat
         control.anvil.hazyforge.io/application: desktop-chat
-        control.anvil.hazyforge.io/ownership: gitops
+        control.anvil.hazyforge.io/ownership: helm
     spec:
       applicationRef:
         name: desktop-chat
@@ -294,7 +307,7 @@ extraObjects:
       labels:
         app.kubernetes.io/part-of: desktop-chat
         control.anvil.hazyforge.io/application: desktop-chat
-        control.anvil.hazyforge.io/ownership: gitops
+        control.anvil.hazyforge.io/ownership: helm
     spec:
       description: Native Antigravity runtime with a dedicated writable home for Desktop conversations.
       backend:
@@ -351,7 +364,7 @@ extraObjects:
       labels:
         app.kubernetes.io/part-of: desktop-chat
         control.anvil.hazyforge.io/application: desktop-chat
-        control.anvil.hazyforge.io/ownership: gitops
+        control.anvil.hazyforge.io/ownership: helm
     spec:
       description: Antigravity assistant for user-initiated Desktop conversations.
       scope:

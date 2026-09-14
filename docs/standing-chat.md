@@ -124,4 +124,14 @@ The chart's optional `extraObjects` list renders literal Kubernetes objects
 without evaluating templated strings. Helm owns those objects: removing an entry
 on a subsequent Helm upgrade deletes it. Keep persistent volumes, credentials
 and unrelated existing resources out of this list. The API treats these
-GitOps-labeled profiles as read-only composition entries.
+Helm-owned profiles as read-only composition entries because they are not
+console-managed. Their definitions stay in Git; they do not carry the
+Argo-exclusive `ownership=gitops` label.
+
+### PostgreSQL TLS mounts
+
+A database URL containing `sslrootcert=/path/ca.crt` requires that exact file in
+the API container. Configure `api.extraVolumes` and `api.extraVolumeMounts`;
+controller mounts are intentionally independent. The Primaris overlay projects
+only the existing Secret's `ca.crt` key into the API mount. Also verify PostgreSQL
+admits the API node's egress address before enabling chat.

@@ -153,3 +153,19 @@ VERSION=v0.1.14 make release-primaris-fast RELEASE_DEPLOY=true
 - Production still prefers digest pins in Git; hot deploys rewrite local
   `deploy.yaml` — commit that pin when the cutover is permanent.
 - Do not run the old embedded Primaris agent reconcilers alongside this chart.
+
+### Direct Helm adoption and new CRD values
+
+On Helm 4, previously applied Argo or kubectl fields can cause server-side apply
+conflicts. An explicitly authorized direct adoption can use `--force-conflicts`
+with `helm upgrade`; do not use resource replacement. Preserve the existing
+release name, fullname, values and image digests.
+
+When a release both extends a CRD enum and creates objects using the new value,
+upgrade once with `--set-json 'extraObjects=[]'` before the complete overlay.
+This schema-first step is for initial adoption when no extra objects are yet
+installed; do not clear an existing extraObjects list on subsequent releases.
+Both passes use the same chart and complete values, and the second pass restores
+the desired extraObjects list. The live Primaris admission policy reserves
+`ownership=gitops` for Argo; directly managed objects use `ownership=helm` and
+remain defined in the checked-in overlay.
