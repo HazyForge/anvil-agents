@@ -49,12 +49,14 @@ type issuerCache struct {
 
 // Server is the loopback desktop host.
 type Server struct {
-	opts       Options
-	mu         sync.Mutex
-	prefs      Prefs
-	issuer     issuerCache
-	httpClient *http.Client
-	mux        http.Handler
+	agentToolSessions map[string]*agentToolSession
+	chatWorkspaces    map[string]bool
+	opts              Options
+	mu                sync.Mutex
+	prefs             Prefs
+	issuer            issuerCache
+	httpClient        *http.Client
+	mux               http.Handler
 }
 
 func NewServer(opts Options) (*Server, error) {
@@ -111,6 +113,7 @@ func NewServer(opts Options) (*Server, error) {
 	mux.HandleFunc("POST /local/v1/prefs", server.handlePrefs)
 	mux.HandleFunc("POST /local/v1/delegate", server.handleDelegate)
 	mux.HandleFunc("POST /local/v1/chat/stream", server.handleChatStream)
+	mux.HandleFunc("POST /local/v1/agent-tool", server.handleAgentTool)
 	mux.HandleFunc("/ui-config.json", server.handleAPIProxy)
 	mux.HandleFunc("/api/", server.handleAPIProxy)
 	mux.HandleFunc("/", server.handleUI)

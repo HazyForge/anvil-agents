@@ -12,6 +12,7 @@ export interface StreamEnvelope {
   code?: string;
   message?: string;
   run?: {
+    runnerState?: import('./runnerState').RunnerState;
     name?: string;
     namespace?: string;
     phase?: string;

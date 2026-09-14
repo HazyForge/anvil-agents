@@ -3,6 +3,7 @@ import { openAgentRunStream } from '../api/stream';
 import { activityFromLog, type RunActivity } from '../api/runActivity';
 import type { RemoteTurn } from '../api/remoteChat';
 import { ensureAccessToken } from '../auth/oidc';
+import { runnerStateLabel } from '../api/runnerState';
 
 interface Props {
   token: string;
@@ -20,6 +21,7 @@ export function RemoteTurnActivity({token, namespace, turn, agentLabel}: Props) 
   const [now, setNow] = useState(Date.now());
   const [lastUpdate, setLastUpdate] = useState(Date.now());
   const [terminalPhase, setTerminalPhase] = useState('');
+  const [runnerBlocker, setRunnerBlocker] = useState<string | undefined>();
   const finished = useRef(done(turn?.status));
   const runName = turn?.runName;
   const status = turn?.status;
@@ -28,7 +30,7 @@ export function RemoteTurnActivity({token, namespace, turn, agentLabel}: Props) 
   finished.current = done(status);
 
   useEffect(() => {
-    setRows([]); setTerminalPhase(''); setConnection('Connecting to agent activity…');
+    setRows([]); setTerminalPhase(''); setRunnerBlocker(undefined); setConnection('Connecting to agent activity…');
     mountedAt.current = Date.now(); setLastUpdate(Date.now());
     if (!runName) return;
     let cancelled = false;
@@ -57,6 +59,7 @@ export function RemoteTurnActivity({token, namespace, turn, agentLabel}: Props) 
           if (cancelled) return;
           if (event === 'snapshot' || event === 'status' || event === 'terminal') {
             const phase = payload.run?.phase;
+            if (payload.run) setRunnerBlocker(runnerStateLabel(payload.run.runnerState));
             setConnection('Connected to agent activity');
             if (phase === 'Running') append({key: 'runner-preparing', label: 'Preparing the remote runner', kind: 'setup'});
             if (phase === 'Pending') append({key: 'runner-queued', label: 'Waiting for a remote runner', kind: 'setup'});
@@ -138,6 +141,7 @@ export function RemoteTurnActivity({token, namespace, turn, agentLabel}: Props) 
   const label = status === 'failed' || terminalPhase === 'Failed' || terminalPhase === 'NeedsHuman' ? 'Agent could not finish this turn'
     : status === 'succeeded' ? 'Reply received'
     : terminalPhase === 'Succeeded' ? 'Harness finished; saving the reply'
+    : runnerBlocker ? runnerBlocker
     : status === 'waiting' ? 'Message saved; waiting for this agent to become available'
     : latest?.label || (status === 'queued' ? 'Message received; waiting for the agent to start' : 'Preparing the remote runner');
   const quiet = !done(status) && now - lastUpdate > 15000;

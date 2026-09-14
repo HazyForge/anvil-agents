@@ -89,6 +89,7 @@ export function activityFromLog(line: string): RunActivity | null {
   // args/results can contain commands, credentials and model reasoning; only
   // the observed public tool name is eligible for an activity label.
   if (event.type === 'agent_start' || event.type === 'turn_start') return activity('Harness is working', 'work', event.id);
+  if (event.type === 'message_start' && record(event.message).role === 'assistant') return activity('Waiting for model output', 'work', record(event.message).id);
   if (event.type === 'tool_execution_start') return toolActivity(event.toolName, event.toolCallId);
   if (event.type === 'tool_execution_end') return activity(event.isError === true ? 'Tool reported an error' : 'Tool finished', event.isError === true ? 'error' : 'work', event.toolCallId);
   if (event.type === 'message_update' || event.type === 'message_end') {

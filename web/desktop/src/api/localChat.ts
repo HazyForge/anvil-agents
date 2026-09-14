@@ -1,14 +1,19 @@
 import { parseSSEChunk } from './stream';
 
-export type LocalChatEvent = {line?: string; workdir?: string; target?: string; wslDistro?: string; stdout?: string; stderr?: string; exitCode?: number; timedOut?: boolean; message?: string};
+export type LocalChatEvent = {anvilConnected?: boolean; remoteNamespace?: string; action?: string; status?: string; line?: string; workdir?: string; target?: string; wslDistro?: string; stdout?: string; stderr?: string; exitCode?: number; timedOut?: boolean; message?: string; stdoutTruncated?: boolean; stdoutEventsDropped?: boolean};
 
-export async function streamLocalChat(body: {harness: string; prompt: string; workdir?: string}, signal: AbortSignal, onEvent: (event: string, data: LocalChatEvent) => void) {
-  const response = await fetch('/local/v1/chat/stream', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({...body, timeoutSeconds: 300}), signal});
-  if (!response.ok || !response.body) {
+// An HTTP rejection confirms that this request never entered the stream.
+// Transport failures after admission provide no such execution guarantee.
+export class LocalChatRequestError extends Error {}
+
+export async function streamLocalChat(body: {harness: string; prompt: string; workdir?: string; remoteNamespace?: string}, signal: AbortSignal, onEvent: (event: string, data: LocalChatEvent) => void, accessToken?: string) {
+  const response = await fetch('/local/v1/chat/stream', {method: 'POST', headers: {'Content-Type': 'application/json', ...(body.remoteNamespace && accessToken ? {Authorization: `Bearer ${accessToken}`} : {})}, body: JSON.stringify({...body, timeoutSeconds: 300}), signal});
+  if (!response.ok) {
     let message = `Local harness request failed (${response.status})`;
     try { const error = await response.json(); message = error.message || message; } catch { /* Keep status. */ }
-    throw new Error(message);
+    throw new LocalChatRequestError(message);
   }
+  if (!response.body) throw new Error('The local connection has no response stream. Completion was not confirmed.');
   const reader = response.body.getReader(), decoder = new TextDecoder();
   let buffer = '';
   try {
@@ -31,6 +36,7 @@ export async function streamLocalChat(body: {harness: string; prompt: string; wo
 }
 
 const textBlocks = (content: unknown): string => typeof content === 'string' ? content : Array.isArray(content) ? content.filter(b => b?.type === 'text' && typeof b.text === 'string').map(b => b.text).join('\n') : '';
+const nativeTextBlocks = (content: unknown): string => Array.isArray(content) && content.every(b => b && typeof b === 'object' && !Array.isArray(b) && typeof b.type === 'string' && (b.text === undefined || typeof b.text === 'string')) ? textBlocks(content) : '';
 const nativeText = (value: unknown): string => typeof value === 'string' ? value : '';
 
 /** Read only public assistant envelopes; never turn thinking/tool output into replies. */
@@ -44,7 +50,7 @@ export function localReply(stdout: string, harness: string): string {
     if (harness === 'prime' || harness === 'pi') {
       if (e.type === 'message_end' && e.message?.role === 'assistant') {
         failed = ['error', 'aborted'].includes(e.message.stopReason);
-        final = ['stop', 'length'].includes(e.message.stopReason) ? textBlocks(e.message.content) : '';
+        final = ['stop', 'length'].includes(e.message.stopReason) ? nativeTextBlocks(e.message.content) : '';
       }
     } else if (harness === 'codex') {
       if (e.type === 'turn.failed') failed = true;
@@ -65,4 +71,17 @@ export function localReply(stdout: string, harness: string): string {
   }
   if (failed) return '';
   return final.trim() || parts.join('\n').trim() || (!structured && !['prime', 'pi', 'agy'].includes(harness) ? stdout.trim() : '');
+}
+
+/** Prefer a complete capture, including an unterminated final native line.
+ * Once that capture truncates, only the streamed tail can contain the answer;
+ * never fall back to an earlier reply when native events were dropped.
+ */
+export function completedLocalReply(streamedOutput: string, result: LocalChatEvent, harness: string): {reply: string; error?: string} {
+  const captured = result.stdout || '';
+  const truncated = result.stdoutTruncated || new TextEncoder().encode(captured).length >= 256 * 1024;
+  if (result.stdoutEventsDropped) {
+    return {reply: '', error: 'The local harness output was incomplete. Check its working folder and native session before sending more work.'};
+  }
+  return {reply: localReply(truncated ? streamedOutput : captured || streamedOutput, harness)};
 }

@@ -33,8 +33,10 @@ type streamLogDone struct {
 }
 
 type runStatusResult struct {
-	Run   *agentsv1alpha1.AgentRun
-	Error error
+	State      *RunnerStateView
+	StateKnown bool
+	Run        *agentsv1alpha1.AgentRun
+	Error      error
 }
 
 type streamEvent struct {
@@ -86,6 +88,8 @@ func (server *Server) handleRunEvents(writer http.ResponseWriter, request *http.
 		}
 	}
 	view := NewAgentRunView(run, true)
+	view.RunnerState, _ = server.readRunnerState(request.Context(), run)
+	runnerState := view.RunnerState
 	if err := sse.write("snapshot", "status:"+run.ResourceVersion, streamEvent{Type: "snapshot", Run: &view}); err != nil {
 		return
 	}
@@ -208,9 +212,15 @@ func (server *Server) handleRunEvents(writer http.ResponseWriter, request *http.
 				_ = sse.write("terminal", "", streamEvent{Type: "terminal", Code: "replaced", Message: "AgentRun was replaced by a different resource"})
 				return
 			}
-			if latest.ResourceVersion != run.ResourceVersion {
+			nextState := runnerState
+			if result.StateKnown {
+				nextState = result.State
+			}
+			if latest.ResourceVersion != run.ResourceVersion || !sameRunnerState(nextState, runnerState) {
+				runnerState = nextState
 				run = latest
 				statusView := NewAgentRunView(run, true)
+				statusView.RunnerState = runnerState
 				if err := sse.write("status", "status:"+run.ResourceVersion, streamEvent{Type: "status", Run: &statusView}); err != nil {
 					return
 				}
@@ -232,8 +242,11 @@ func (server *Server) pollRunStatus(ctx context.Context, key types.NamespacedNam
 			readCtx, cancel := context.WithTimeout(ctx, readTimeout)
 			latest := &agentsv1alpha1.AgentRun{}
 			err := server.runs.Get(readCtx, key, latest)
-			cancel()
 			result := runStatusResult{Run: latest, Error: err}
+			if err == nil {
+				result.State, result.StateKnown = server.readRunnerState(readCtx, latest)
+			}
+			cancel()
 			select {
 			case results <- result:
 			case <-ctx.Done():

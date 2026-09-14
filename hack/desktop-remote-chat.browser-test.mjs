@@ -27,6 +27,8 @@ page.setDefaultTimeout(10000);
 const errors = [], posts = [], creates = [], threads = new Map();
 let failNext = false, loseNextReceipt = false;
 let createGate = null, appendGate = null, receiptGate = null;
+const standing = new Map(), standingGates = new Map(), standingFailures = new Set();
+const ensures = [];
 const withheldDetails = new Map(), deniedDetails = new Map(), detailGets = new Map();
 const eventPlans = new Map(), eventGets = new Map(), eventAuth = new Map(), heldDetailReads = new Map();
 page.on('pageerror', error => errors.push(error.message));
@@ -52,11 +54,25 @@ await context.route('**/*', async route => {
   const [,ns,tail]=m;
   if(tail==='agent-run-profiles') return reply(route,{items:[profile(ns==='anvilhub'?'agent-alpha':'agent-trade'),profile('agent-beta')]});
   if(tail==='agent-harness-profiles') return reply(route,{items:[harness('codex-standard','codex'),harness('agy-review','agy')]});
-  if(tail==='chat/threads' && request.method()==='GET') return reply(route,{items:[...threads.values()].filter(t=>t.namespace===ns)});
+  if(tail==='chat/threads' && request.method()==='GET') return reply(route,{items:[...threads.values()].filter(t=>t.namespace===ns && (!url.searchParams.get('profileName') || t.profileName===url.searchParams.get('profileName')))});
   if(tail==='chat/threads' && request.method()==='POST') {
+    const body=request.postDataJSON();
+    if(body.standing) {
+      const key=`${ns}/${body.profileName}`; ensures.push(key);
+      if(standingGates.has(key)) await standingGates.get(key);
+      if(standingFailures.has(key)) return reply(route,{error:{code:'temporarily_unavailable',message:'Fixture agent could not be opened'}},503);
+      let id=standing.get(key), created=false;
+      if(!id) {
+        const eligible=[...threads.values()].reverse().find(t=>t.namespace===ns && t.profileName===body.profileName && !t.harnessProfileName && !t.metadata?.sourceThreadId);
+        id=eligible?.id || `standing-${ns}-${body.profileName}`;
+        if(!eligible) { threads.set(id,{id,namespace:ns,profileName:body.profileName,mode:'persona',title:body.profileName,createdBy:'fixture',createdAt:new Date().toISOString(),updatedAt:new Date().toISOString(),messages:[],turns:[]}); created=true; }
+        standing.set(key,id);
+      }
+      return reply(route,threads.get(id),created?201:200);
+    }
     if(createGate) await createGate;
-    const body=request.postDataJSON(); creates.push({ns,...body});
-    const t={id:`thread-${threads.size+1}`,namespace:ns,...body,createdBy:'fixture',createdAt:new Date().toISOString(),updatedAt:new Date().toISOString(),messages:[],turns:[]};
+    creates.push({ns,...body});
+    const t={id:`thread-${creates.length}`,namespace:ns,...body,createdBy:'fixture',createdAt:new Date().toISOString(),updatedAt:new Date().toISOString(),messages:[],turns:[]};
     threads.set(t.id,t); return reply(route,t,201);
   }
   const tm=tail.match(/^chat\/threads\/([^/]+)(\/messages)?$/);
@@ -104,6 +120,24 @@ await context.route('**/*', async route => {
 });
 const visible = async text => page.getByText(text,{exact:true}).waitFor({state:'visible'});
 const draftVisible = async content => page.waitForFunction(value => { const input=document.querySelector('textarea[aria-label="Message"]'); return input && !input.disabled && input.value===value; }, content);
+const openDetails = async name => {
+  const summary=page.locator('summary').filter({hasText:new RegExp(`^${name}$`)});
+  if(!await summary.evaluate(el=>el.parentElement.open)) await summary.click();
+};
+const configuration = () => openDetails('Conversation details');
+const harnessChat = async () => {await openDetails('Other chats'); await page.getByRole('button',{name:'Chat with a harness',exact:true}).click(); await configuration();};
+const newConversation = async () => {await configuration(); await page.getByRole('button',{name:'Start a separate conversation',exact:true}).click(); await configuration();};
+const openAgent = async name => {
+  await page.locator(`.agent-row[title="${name}"]`).click();
+  await page.waitForFunction(name=>document.querySelector('select[aria-label="Agent"]')?.value===name && !document.querySelector('textarea[aria-label="Message"]')?.disabled,name);
+};
+const openHistory = async id => {
+  await openAgent(threads.get(id).profileName);
+  await configuration();
+  await page.getByLabel('Conversation history',{exact:true}).selectOption(id);
+  await page.waitForFunction(()=>!document.querySelector('textarea[aria-label="Message"]')?.disabled);
+};
+const namespace = async name => {await openDetails('Workspace'); await page.getByLabel('Namespace',{exact:true}).selectOption(name); await page.waitForFunction(()=>!document.querySelector('textarea[aria-label="Message"]')?.disabled);};
 const complete = (id,text,failed=false) => {
   const t=threads.get(id); const turn=t.activeTurn;
   turn.status=failed?'failed':'succeeded'; if(failed)turn.error=text;
@@ -113,7 +147,10 @@ const complete = (id,text,failed=false) => {
 try {
   await page.goto(`${origin}/chat`);
   await page.getByLabel('Agent',{exact:true}).locator('option').filter({hasText:'agent-alpha'}).waitFor({state:'attached'});
-  assert.equal(await page.getByLabel('Agent',{exact:true}).inputValue(),'');
+  await draftVisible('');
+  assert.equal(await page.locator('.agent-row').count(),2);
+  assert.equal(standing.get('anvilhub/agent-alpha'),'standing-anvilhub-agent-alpha');
+  await newConversation();
   await page.getByLabel('Agent',{exact:true}).selectOption('agent-alpha');
   await page.getByLabel('Remote harness').selectOption('agy-review');
   await page.getByLabel('Role',{exact:true}).selectOption('fleet');
@@ -128,7 +165,7 @@ try {
   await page.getByRole('button',{name:'Send',exact:true}).click();
   await page.getByRole('article',{name:'Your pending message'}).getByText('Coordinate the fixture agents',{exact:true}).waitFor();
   await page.getByRole('status').filter({hasText:'Saving conversation…'}).waitFor();
-  assert.equal(threads.size,0);
+  assert.equal(creates.length,0);
   releaseCreate(); createGate=null;
   await page.getByRole('status').filter({hasText:'Sending message…'}).waitFor();
   assert.equal(posts.length,0);
@@ -157,7 +194,7 @@ try {
   assert.equal(await page.getByLabel('Agent',{exact:true}).inputValue(),'agent-alpha');
   console.log('PASS token refresh preserves selected conversation and history');
 
-  await page.getByRole('button',{name:'New conversation'}).click();
+  await newConversation();
   await page.getByLabel('Allow this agent to delegate messages').uncheck();
   await page.getByLabel('Agent',{exact:true}).selectOption('agent-beta');
   await page.getByLabel('Remote harness').selectOption('');
@@ -170,7 +207,7 @@ try {
   await page.getByRole('button',{name:'Send',exact:true}).click();
   await page.getByRole('status').filter({hasText:'Message received; waiting for the agent to start'}).waitFor();
   assert.equal(posts.at(-1).requestId,posts.at(-2).requestId);
-  assert.equal(threads.size,2); assert.equal(threads.get('thread-2').messages.length,1);
+  assert.equal(creates.length,2); assert.equal(threads.get('thread-2').messages.length,1);
   complete('thread-2','Fixture runner failed',true);
   await visible('Turn failed: Fixture runner failed');
   await page.getByLabel('Message',{exact:true}).fill('Continue after runner failure');
@@ -187,9 +224,9 @@ try {
   await page.getByRole('alert').filter({hasText:'Fixture accepted receipt was lost'}).waitFor();
   const ambiguousID=posts.at(-1).requestId;
   assert.equal(threads.get('thread-2').messages.length,priorMessages+1);
-  await page.getByRole('button',{name:/Manager · agent-alpha/}).click();
+  await openHistory('thread-1');
   await visible('Fixture coordination response');
-  await page.getByRole('button',{name:'agent-beta agent-beta',exact:true}).click();
+  await openAgent('agent-beta');
   assert.equal(await page.getByLabel('Message',{exact:true}).inputValue(),'Ambiguous accepted fixture message');
   await page.reload();
   await visible('Fixture second conversation response');
@@ -198,7 +235,7 @@ try {
   await page.getByRole('status').filter({hasText:'Message received; waiting for the agent to start'}).waitFor();
   assert.equal(posts.at(-1).requestId,ambiguousID);
   assert.equal(threads.get('thread-2').messages.length,priorMessages+1);
-  assert.equal(threads.size,2);
+  assert.equal(creates.length,2);
   complete('thread-2','Fixture ambiguous receipt recovered');
   await visible('Fixture ambiguous receipt recovered');
   console.log('PASS lost accepted receipt retains draft and idempotency through sidebar and reload');
@@ -294,31 +331,31 @@ try {
 
 
 
-  await page.getByRole('button',{name:/Manager · agent-alpha/}).click();
+  await openHistory('thread-1');
   await visible('Fixture coordination response');
   assert.equal(await page.getByText('Fixture second conversation response',{exact:true}).count(),0);
-  await page.getByRole('button',{name:'agent-beta agent-beta',exact:true}).click();
+  await openAgent('agent-beta');
   await visible('Fixture second conversation response');
   assert.equal(await page.getByText('Fixture coordination response',{exact:true}).count(),0);
   await page.getByLabel('Message',{exact:true}).fill('Unsent beta draft');
-  await page.getByRole('button',{name:/Manager · agent-alpha/}).click();
+  await openHistory('thread-1');
   await visible('Fixture coordination response');
   await page.getByLabel('Message',{exact:true}).fill('Unsent alpha draft');
-  await page.getByRole('button',{name:'agent-beta agent-beta',exact:true}).click();
+  await openAgent('agent-beta');
   await draftVisible('Unsent beta draft');
   assert.equal(await page.getByLabel('Message',{exact:true}).inputValue(),'Unsent beta draft');
   await page.reload();
   await visible('Fixture second conversation response');
   await draftVisible('Unsent beta draft');
   assert.equal(await page.getByLabel('Message',{exact:true}).inputValue(),'Unsent beta draft');
-  await page.getByRole('button',{name:'New conversation'}).click();
+  await newConversation();
   await page.getByLabel('Agent',{exact:true}).selectOption('');
   await page.getByLabel('Remote harness').selectOption('agy-review');
   await page.getByLabel('Message',{exact:true}).fill('Unsent new AGY conversation');
-  await page.getByRole('button',{name:/Manager · agent-alpha/}).click();
+  await openHistory('thread-1');
   await draftVisible('Unsent alpha draft');
   assert.equal(await page.getByLabel('Message',{exact:true}).inputValue(),'Unsent alpha draft');
-  await page.getByRole('button',{name:'New conversation'}).click();
+  await harnessChat();
   await draftVisible('Unsent new AGY conversation');
   assert.equal(await page.getByLabel('Message',{exact:true}).inputValue(),'Unsent new AGY conversation');
   assert.equal(await page.getByLabel('Remote harness').inputValue(),'agy-review');
@@ -328,24 +365,27 @@ try {
   assert.equal(await page.getByLabel('Message',{exact:true}).inputValue(),'Unsent new AGY conversation');
   assert.equal(await page.getByLabel('Remote harness').inputValue(),'agy-review');
   console.log('PASS independent thread drafts and unfinished new-conversation configuration survive sidebar/reload');
-  await page.getByLabel('Namespace',{exact:true}).selectOption('hazy-trade');
+  await namespace('hazy-trade');
+  await newConversation();
   await page.getByLabel('Agent',{exact:true}).selectOption('agent-trade');
   assert.equal(await page.getByText('Fixture second conversation response',{exact:true}).count(),0);
   await page.getByLabel('Message',{exact:true}).fill('Trade namespace draft');
-  await page.getByLabel('Namespace',{exact:true}).selectOption('anvilhub');
+  await namespace('anvilhub');
   await page.getByLabel('Remote harness').waitFor({state:'visible'});
   await draftVisible('Unsent new AGY conversation');
   assert.equal(await page.getByLabel('Message',{exact:true}).inputValue(),'Unsent new AGY conversation');
-  await page.getByRole('button',{name:'agent-beta agent-beta',exact:true}).click();
-  await page.getByLabel('Namespace',{exact:true}).selectOption('hazy-trade');
+  await openAgent('agent-beta');
+  await namespace('hazy-trade');
+  await configuration();
   await page.getByLabel('Agent',{exact:true}).waitFor({state:'visible'});
   await draftVisible('Trade namespace draft');
   assert.equal(await page.getByLabel('Message',{exact:true}).inputValue(),'Trade namespace draft');
-  await page.getByLabel('Namespace',{exact:true}).selectOption('anvilhub');
+  await namespace('anvilhub');
   await visible('Fixture second conversation response');
   await draftVisible('Unsent beta draft');
   assert.equal(await page.getByLabel('Message',{exact:true}).inputValue(),'Unsent beta draft');
-  await page.getByLabel('Namespace',{exact:true}).selectOption('hazy-trade');
+  await namespace('hazy-trade');
+  await configuration();
   await page.getByLabel('Agent',{exact:true}).waitFor({state:'visible'});
   await page.getByLabel('Message',{exact:true}).fill('Namespace isolated fixture');
   await page.getByRole('button',{name:'Send',exact:true}).click();
@@ -353,7 +393,7 @@ try {
   assert.equal(creates.at(-1).ns,'hazy-trade');
   assert.deepEqual(errors,[]);
   console.log('PASS two-thread isolation and namespace switch; no browser runtime errors');
-  await page.getByRole('button',{name:'New conversation'}).click();
+  await newConversation();
   await page.getByLabel('Agent',{exact:true}).selectOption('');
   await page.getByLabel('Remote harness').selectOption('codex-standard');
   await page.getByLabel('Message',{exact:true}).fill('Harness-only fixture');
@@ -375,9 +415,50 @@ try {
   await page.reload();
   await page.getByRole('alert').filter({hasText:'Fixture access denied'}).waitFor();
   assert.equal(await page.getByLabel('Message',{exact:true}).inputValue(),'Draft for unavailable conversation');
-  await page.getByRole('button',{name:'New conversation'}).click();
+  await newConversation();
   assert.equal(await page.getByLabel('Message',{exact:true}).isDisabled(),false);
   console.log('PASS denied404 stops polling, preserves draft on reload, and allows a new conversation');
+  await namespace('anvilhub');
+  await openAgent('agent-alpha');
+  assert.equal(await page.getByText('Fixture coordination response',{exact:true}).count(),0);
+  const alphaID=standing.get('anvilhub/agent-alpha');
+  await page.getByLabel('Message',{exact:true}).fill('Canonical standing identity');
+  await page.getByRole('button',{name:'Send',exact:true}).click();
+  await page.getByRole('button',{name:'Waiting for reply…'}).waitFor();
+  complete(alphaID,'Fixture standing brain reply');
+  await visible('Fixture standing brain reply');
+  await page.reload(); await visible('Fixture standing brain reply');
+  await openAgent('agent-beta'); await openAgent('agent-alpha'); await visible('Fixture standing brain reply');
+  assert.equal(standing.get('anvilhub/agent-alpha'),alphaID);
+  assert.equal(await page.locator('.agent-row').count(),2);
+  await openHistory('thread-1'); await visible('Fixture coordination response');
+  assert.equal(await page.getByLabel('Remote harness').inputValue(),'agy-review');
+  await openAgent('agent-alpha'); await visible('Fixture standing brain reply');
+  console.log('PASS roster lists agent identities; standing conversation survives reload and history keeps its configured harness');
+
+  await page.getByLabel('Message',{exact:true}).fill('Draft retained when another agent cannot open');
+  standingFailures.add('anvilhub/agent-beta');
+  await page.locator('.agent-row[title="agent-beta"]').click();
+  await page.getByRole('alert').filter({hasText:'Fixture agent could not be opened'}).waitFor();
+  await draftVisible('Draft retained when another agent cannot open');
+  await visible('Fixture standing brain reply');
+  assert.equal(await page.getByLabel('Agent',{exact:true}).inputValue(),'agent-alpha');
+  assert.equal(await page.getByRole('button',{name:'Send',exact:true}).isEnabled(),true);
+  standingFailures.delete('anvilhub/agent-beta');
+  console.log('PASS failed agent opening retains prior identity, history and editable draft');
+
+  let releaseAgent;
+  standingGates.set('anvilhub/agent-alpha',new Promise(resolve=>{releaseAgent=resolve;}));
+  const slowEnsure=page.waitForRequest(r=>r.method()==='POST' && r.postDataJSON()?.standing && r.postDataJSON()?.profileName==='agent-alpha');
+  await page.locator('.agent-row[title="agent-alpha"]').click(); await slowEnsure;
+  await openAgent('agent-beta');
+  releaseAgent(); standingGates.delete('anvilhub/agent-alpha');
+  await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
+  assert.equal(await page.getByLabel('Agent',{exact:true}).inputValue(),'agent-beta');
+  await visible('Fixture second conversation response');
+  await openAgent('agent-alpha'); await draftVisible('Draft retained when another agent cannot open');
+  assert.equal(standing.get('anvilhub/agent-alpha'),alphaID);
+  console.log('PASS rapid agent switching ignores late canonical responses without losing standing drafts');
   config.chat.enabled=false;
   await page.reload();
   await visible('Remote chat is not enabled on this server.');

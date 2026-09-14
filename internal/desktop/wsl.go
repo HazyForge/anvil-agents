@@ -35,20 +35,22 @@ type WSLStatus struct {
 // WSLRequest is one wsl.exe invocation. Linux argv is never derived from the
 // OIDC token or from free-form prompt text.
 type WSLRequest struct {
-	Distro  string
-	Stdout  io.Writer // optional streaming stdout observer; capture remains bounded
-	Argv    []string
-	Stdin   io.Reader
-	AgyTurn bool     // keep native stream input open until the turn result
-	Env     []string // extra KEY=val for /usr/bin/env on the Linux side
+	ManagedProcess bool // delegated command needs Linux-side process-tree cleanup
+	Distro         string
+	Stdout         io.Writer // optional streaming stdout observer; capture remains bounded
+	Argv           []string
+	Stdin          io.Reader
+	AgyTurn        bool     // keep native stream input open until the turn result
+	Env            []string // extra KEY=val for /usr/bin/env on the Linux side
 }
 
 // WSLResult is stdout/stderr from a WSL command. It never includes tokens.
 type WSLResult struct {
-	Stdout   string
-	Stderr   string
-	ExitCode int
-	TimedOut bool
+	StdoutTruncated bool
+	Stdout          string
+	Stderr          string
+	ExitCode        int
+	TimedOut        bool
 }
 
 // WSLRunner looks up wsl.exe and runs commands in a distro.
@@ -151,6 +153,9 @@ func linuxEnvArgv(env []string, linuxArgv []string) []string {
 
 func defaultWSLRun(look func() (string, error)) func(ctx context.Context, req WSLRequest) (WSLResult, error) {
 	return func(ctx context.Context, req WSLRequest) (WSLResult, error) {
+		if req.ManagedProcess {
+			return managedWSLRun(ctx, look, req)
+		}
 		exe, err := look()
 		if err != nil {
 			return WSLResult{}, fmt.Errorf("wsl.exe not found")
@@ -180,7 +185,7 @@ func defaultWSLRun(look func() (string, error)) func(ctx context.Context, req WS
 		} else {
 			err = cmd.Run()
 		}
-		result := WSLResult{Stdout: stdout.String(), Stderr: stderr.String()}
+		result := WSLResult{Stdout: stdout.String(), Stderr: stderr.String(), StdoutTruncated: stdout.truncated}
 		if ctx.Err() != nil {
 			result.TimedOut = true
 			result.ExitCode = -1
@@ -587,14 +592,16 @@ func (d Discoverer) runDelegateWSLWithOptions(ctx context.Context, tool Tool, di
 		env = append(env, "ANVIL_DESKTOP_WORKDIR="+options.Workdir)
 	}
 	wslResult, err := runner.Run(runCtx, WSLRequest{
-		Distro:  distro,
-		Argv:    linuxArgv,
-		Stdin:   stdin,
-		AgyTurn: tool.Invoke.Mode == PromptAgyStream,
-		Env:     env,
-		Stdout:  options.Stdout,
+		ManagedProcess: true,
+		Distro:         distro,
+		Argv:           linuxArgv,
+		Stdin:          stdin,
+		AgyTurn:        tool.Invoke.Mode == PromptAgyStream,
+		Env:            env,
+		Stdout:         options.Stdout,
 	})
 	result.Stdout = wslResult.Stdout
+	result.StdoutTruncated = wslResult.StdoutTruncated
 	result.Stderr = wslResult.Stderr
 	result.ExitCode = wslResult.ExitCode
 	result.TimedOut = wslResult.TimedOut

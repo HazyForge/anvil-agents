@@ -11,6 +11,7 @@ import { EntityChatPage } from "./pages/EntityChatPage";
 import { HarnessesPage } from "./pages/HarnessesPage";
 import { LocalChatPage } from "./pages/LocalChatPage";
 import { WrapperPage } from "./pages/WrapperPage";
+import { DesktopIcon } from "./components/AgentAvatar";
 import { PRODUCT_TITLE } from "./product";
 
 export default function App() {
@@ -130,6 +131,12 @@ export default function App() {
     [snapshot],
   );
 
+  const freshLocalAccessToken = useCallback(async () => {
+    const access = await ensureAccessToken();
+    setToken(access ?? '');
+    return access;
+  }, []);
+
   const originHost = snapshot?.api.origin?.replace(/^https?:\/\//, "") || "no API";
   const signedIn = Boolean(token);
   const onLocal = location.pathname === "/local";
@@ -159,21 +166,17 @@ export default function App() {
   );
   const chat = <>
     <div className="chat-location" role="group" aria-label="Chat execution location">
-      <span>Run assistant on</span>
-      <button className={`btn ${chatLocation === 'local' ? 'btn-primary' : 'btn-ghost'}`} disabled={localChatBusy} onClick={() => {setChatLocation('local'); try {localStorage.setItem('anvil-agents-desktop.chat-location', 'local');} catch { /* In-memory selection remains. */ }}}>{snapshot?.wsl.insideWSL || snapshot?.harnessTarget === 'wsl' ? 'Local WSL' : 'This computer'}</button>
-      <button className={`btn ${chatLocation === 'remote' ? 'btn-primary' : 'btn-ghost'}`} disabled={localChatBusy} onClick={() => {setChatLocation('remote'); try {localStorage.setItem('anvil-agents-desktop.chat-location', 'remote');} catch { /* In-memory selection remains. */ }}}>Primaris</button>
+      <span className="chat-location-label">Workspace</span>
+      <button aria-pressed={chatLocation === 'local'} className={`btn ${chatLocation === 'local' ? 'btn-primary' : 'btn-ghost'}`} disabled={localChatBusy} onClick={() => {setChatLocation('local'); try {localStorage.setItem('anvil-agents-desktop.chat-location', 'local');} catch { /* In-memory selection remains. */ }}}>Local</button>
+      <button aria-pressed={chatLocation === 'remote'} className={`btn ${chatLocation === 'remote' ? 'btn-primary' : 'btn-ghost'}`} disabled={localChatBusy} onClick={() => {setChatLocation('remote'); try {localStorage.setItem('anvil-agents-desktop.chat-location', 'remote');} catch { /* In-memory selection remains. */ }}}>Primaris</button>
     </div>
-    {chatLocation === 'local' ? snapshot ? <LocalChatPage snapshot={snapshot} onBusyChange={setLocalChatBusy}/> : <div className="empty">Loading local harnesses…</div> : remoteChat}
+    {chatLocation === 'local' ? snapshot ? <LocalChatPage snapshot={snapshot} onBusyChange={setLocalChatBusy} signedIn={signedIn} config={config} getAccessToken={freshLocalAccessToken}/> : <div className="empty">Loading local harnesses…</div> : remoteChat}
   </>;
 
   return (
-    <div className="desktop-shell">
+    <div className={`desktop-shell ${location.pathname === "/chat" ? "desktop-shell-chat" : ""}`}>
       <div className="titlebar">
-        <div className="traffic" aria-hidden="true">
-          <span />
-          <span />
-          <span />
-        </div>
+        <span className="desktop-brand-mark"><DesktopIcon kind="forge"/></span>
         <div className="titlebar-title">{snapshot?.productTitle ?? PRODUCT_TITLE}</div>
         <div className="titlebar-meta">
           <span className={`pill ${snapshot?.api.reachable ? "pill-ok" : "pill-mute"}`}>{originHost}</span>
@@ -206,13 +209,13 @@ export default function App() {
       </div>
       <nav className="rail" aria-label="Primary">
         <NavLink to="/chat" className={({ isActive }) => (isActive ? "rail-link active" : "rail-link")}>
-          Chat
+          <DesktopIcon kind="chat"/>Chat
         </NavLink>
         <NavLink to="/wrapper" aria-disabled={localChatBusy} onClick={e => {if(localChatBusy) e.preventDefault();}} className={({ isActive }) => (isActive ? "rail-link active" : "rail-link")}>
-          Runs
+          <DesktopIcon kind="activity"/>Activity
         </NavLink>
         <NavLink to="/local" aria-disabled={localChatBusy} onClick={e => {if(localChatBusy) e.preventDefault();}} className={({ isActive }) => (isActive ? "rail-link active" : "rail-link")}>
-          Local
+          <DesktopIcon kind="harness"/>Harnesses
           <span className="rail-count">{presentCount}</span>
         </NavLink>
       </nav>

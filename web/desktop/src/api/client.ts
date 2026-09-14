@@ -117,6 +117,7 @@ export type AgentRunCondition = {
 };
 
 export type AgentRunView = {
+  runnerState?: import('./runnerState').RunnerState;
   name: string;
   namespace: string;
   phase?: string;

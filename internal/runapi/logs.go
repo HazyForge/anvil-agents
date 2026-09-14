@@ -32,25 +32,12 @@ type KubernetesLogSource struct {
 }
 
 func (source KubernetesLogSource) Open(ctx context.Context, run *agentsv1alpha1.AgentRun, options corev1.PodLogOptions) (io.ReadCloser, *corev1.Pod, error) {
-	if source.Client == nil {
-		return nil, nil, fmt.Errorf("Kubernetes client is not configured")
-	}
-	if run == nil || run.Status.RunnerPodRef == nil || strings.TrimSpace(run.Status.RunnerPodRef.Name) == "" {
-		return nil, nil, ErrLogsPending
-	}
-	podNamespace := firstNonEmpty(run.Status.RunnerPodRef.Namespace, run.Namespace)
-	if podNamespace != run.Namespace {
-		return nil, nil, fmt.Errorf("runner pod reference crosses namespaces")
-	}
-	pod, err := source.Client.CoreV1().Pods(podNamespace).Get(ctx, run.Status.RunnerPodRef.Name, metav1.GetOptions{})
+	pod, err := source.verifiedRunnerPod(ctx, run)
 	if err != nil {
-		return nil, nil, fmt.Errorf("get runner pod: %w", err)
-	}
-	if err := source.validateOwnership(ctx, run, pod); err != nil {
 		return nil, nil, err
 	}
-	if !podHasContainer(pod, agentContainer) {
-		return nil, nil, fmt.Errorf("runner pod does not contain required %q container", agentContainer)
+	if pod.Status.Phase == corev1.PodPending {
+		return nil, pod, ErrLogsPending
 	}
 	options.Container = agentContainer
 	stream, err := source.Client.CoreV1().Pods(pod.Namespace).GetLogs(pod.Name, &options).Stream(ctx)
@@ -67,6 +54,31 @@ func (source KubernetesLogSource) Open(ctx context.Context, run *agentsv1alpha1.
 		return nil, nil, fmt.Errorf("runner pod was replaced while opening logs")
 	}
 	return stream, pod, nil
+}
+
+// verifiedRunnerPod shares the exact log ownership boundary for public startup state.
+func (source KubernetesLogSource) verifiedRunnerPod(ctx context.Context, run *agentsv1alpha1.AgentRun) (*corev1.Pod, error) {
+	if source.Client == nil {
+		return nil, fmt.Errorf("Kubernetes client is not configured")
+	}
+	if run == nil || run.Status.RunnerPodRef == nil || strings.TrimSpace(run.Status.RunnerPodRef.Name) == "" {
+		return nil, ErrLogsPending
+	}
+	podNamespace := firstNonEmpty(run.Status.RunnerPodRef.Namespace, run.Namespace)
+	if podNamespace != run.Namespace {
+		return nil, fmt.Errorf("runner pod reference crosses namespaces")
+	}
+	pod, err := source.Client.CoreV1().Pods(podNamespace).Get(ctx, run.Status.RunnerPodRef.Name, metav1.GetOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("get runner pod: %w", err)
+	}
+	if err := source.validateOwnership(ctx, run, pod); err != nil {
+		return nil, err
+	}
+	if !podHasContainer(pod, agentContainer) {
+		return nil, fmt.Errorf("runner pod does not contain required %q container", agentContainer)
+	}
+	return pod, nil
 }
 
 func (source KubernetesLogSource) validateOwnership(ctx context.Context, run *agentsv1alpha1.AgentRun, pod *corev1.Pod) error {

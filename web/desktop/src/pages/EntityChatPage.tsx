@@ -1,16 +1,18 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import type { UIConfig } from '../auth/config';
 import { APIError, backendKindFromComposition, harnessRefFromRunProfile, listRunProfiles, type CompositionDocument } from '../api/client';
-import { createRemoteThread, getRemoteThread, listRemoteHarnesses, listRemoteThreads, sendRemoteMessage, threadHarness, type RemoteThread, type RemoteThreadDetail, type RemoteTurn } from '../api/remoteChat';
+import { ensureRemoteStandingThread, createRemoteThread, getRemoteThread, listRemoteHarnesses, listRemoteThreads, sendRemoteMessage, threadHarness, type RemoteThread, type RemoteThreadDetail, type RemoteTurn } from '../api/remoteChat';
 import { loadNamespace, saveNamespace } from '../state/namespace';
 import { readChatDraft, saveChatDraft, readSelectedChat, saveSelectedChat, readNewChatConfig, saveNewChatConfig, type NewChatConfig } from '../state/chatWorkspace';
 import { RemoteTurnActivity } from '../components/RemoteTurnActivity';
+import { AgentAvatar } from '../components/AgentAvatar';
 import { LiveStream } from '../components/LiveStream';
 import { ensureAccessToken } from '../auth/oidc';
 import { readPendingSend, rememberPendingSend, clearPendingSend } from '../api/pendingChat';
 import { formatTurnError } from '../wrapper/turn';
 
 interface Props { token: string; config: UIConfig }
+const agentName = (name: string) => name.replace(/[-_]+/g, ' ').replace(/\bprimaris\b/gi, 'Primaris').replace(/\bagy\b/gi, 'AGY').replace(/\bprime\b/gi, 'Prime').replace(/^./, letter => letter.toUpperCase());
 
 const turnProgress = (turn: RemoteTurn) => ({waiting: 0, queued: 1, running: 2, succeeded: 3, failed: 3})[turn.status];
 const sameTurn = (a: RemoteTurn, b: RemoteTurn) => a.id === b.id || Boolean(a.requestId && a.requestId === b.requestId);
@@ -47,12 +49,16 @@ export function EntityChatPage({token, config}: Props) {
   const [optimistic, setOptimistic] = useState<{content: string; requestId?: string} | null>(null);
   const [sendPhase, setSendPhase] = useState<'saving' | 'sending' | 'unconfirmed'>('sending');
   const [rawActivityOpen, setRawActivityOpen] = useState(false);
+  const navigation = useRef(0);
+  const agentRequest = useRef<AbortController | null>(null);
+  const [standingIDs, setStandingIDs] = useState<Record<string, string>>({});
   const restoredNamespace = useRef('');
   const loadedNamespace = useRef('');
   const pending = useRef<{content: string; id: string; threadID: string} | null>(null);
   const end = useRef<HTMLDivElement>(null);
   const enabled = Boolean(config.chat?.enabled);
   const active = detail?.activeTurn ?? detail?.turns?.find(t => t.status === 'waiting' || t.status === 'queued' || t.status === 'running');
+  const roster = [...profiles].sort((a, b) => Number(b.metadata.name === 'desktop-assistant') - Number(a.metadata.name === 'desktop-assistant') || a.metadata.name.localeCompare(b.metadata.name));
   const selectedProfile = profiles.find(p => p.metadata.name === profile);
   const effectiveHarness = harness || harnessRefFromRunProfile(selectedProfile);
   const selectedHarness = harnesses.find(h => h.metadata.name === effectiveHarness);
@@ -65,6 +71,7 @@ export function EntityChatPage({token, config}: Props) {
     const namespaceChanged = loadedNamespace.current !== namespace;
     loadedNamespace.current = namespace;
     if (namespaceChanged) {
+      navigation.current++; agentRequest.current?.abort(); setStandingIDs({});
       restoredNamespace.current = '';
       setProfiles([]); setHarnesses([]); setThreads([]); setDetail(null); setThreadID('');
       setInitializing(true); setUnavailable(false); setOptimistic(null); setRawActivityOpen(false);
@@ -89,7 +96,12 @@ export function EntityChatPage({token, config}: Props) {
           };
           if (!ts.some(item => item.id === selected)) setThreads([thread, ...ts]);
           openThread(thread);
-        } else restoreNewChat(ps);
+        } else {
+          const saved = readNewChatConfig(namespace);
+          const preferred = ps.find(p => p.metadata.name === saved?.profile) ?? ps.find(p => p.metadata.name === 'desktop-assistant') ?? ps[0];
+          if (preferred && !saved) { void openAgent(preferred.metadata.name); return; }
+          restoreNewChat(ps);
+        }
       }
       setInitializing(false);
     }).catch(err => {
@@ -99,8 +111,9 @@ export function EntityChatPage({token, config}: Props) {
   }, [token, namespace, enabled]);
 
   useEffect(() => {
-    if (!threadID) return;
+    if (!threadID || initializing) return;
     const controller = new AbortController();
+    const epoch = navigation.current;
     let timer: ReturnType<typeof setTimeout>;
     let stopped = false;
     let pollToken = token;
@@ -108,7 +121,7 @@ export function EntityChatPage({token, config}: Props) {
     const poll = async () => {
       try {
         const next = await getRemoteThread(pollToken, namespace, threadID, controller.signal);
-        if (controller.signal.aborted) return;
+        if (controller.signal.aborted || navigation.current !== epoch) return;
         setDetail(previous => regresses(next, previous) ? previous : next); applyThreadIdentity(next); setUnavailable(false);
         const unresolved = readPendingSend(namespace, threadID);
         if (unresolved && next.turns?.some(t => t.requestId === unresolved.id)) {
@@ -121,7 +134,7 @@ export function EntityChatPage({token, config}: Props) {
         }
         setThreads(previous => [next, ...previous.filter(t => t.id !== next.id)]);
       } catch (err) {
-        if (!controller.signal.aborted) {
+        if (!controller.signal.aborted && navigation.current === epoch) {
           if (err instanceof APIError && err.status === 401 && !refreshed) {
             refreshed = true;
             const access = await ensureAccessToken();
@@ -138,7 +151,7 @@ export function EntityChatPage({token, config}: Props) {
     };
     void poll();
     return () => { controller.abort(); clearTimeout(timer); };
-  }, [token, namespace, threadID]);
+  }, [token, namespace, threadID, initializing]);
 
   useEffect(() => { end.current?.scrollIntoView({block: 'nearest'}); }, [detail?.messages.length, active?.status, optimistic?.content]);
 
@@ -148,8 +161,9 @@ export function EntityChatPage({token, config}: Props) {
     const coordination = (thread.metadata as {coordination?: {enabled?: boolean; allowedProfiles?: string[]}} | undefined)?.coordination;
     setCoordinate(Boolean(coordination?.enabled)); setPeers(coordination?.allowedProfiles ?? []);
   }
-  function openThread(thread: RemoteThread) {
-    if (thread.id === threadID) return;
+  function openThread(thread: RemoteThread, force = false) {
+    if (!force && thread.id === threadID) return;
+    navigation.current++; agentRequest.current?.abort(); setInitializing(false);
     saveSelectedChat(namespace, thread.id);
     setThreadID(thread.id); setDetail(null); setUnavailable(false); setRawActivityOpen(false); applyThreadIdentity(thread);
     pending.current = readPendingSend(namespace, thread.id);
@@ -157,6 +171,32 @@ export function EntityChatPage({token, config}: Props) {
     setSendPhase('unconfirmed'); setError('');
     setDraft(readChatDraft(namespace, thread.id) ?? pending.current?.content ?? '');
   }
+  async function openAgent(name: string) {
+    if (busy) return;
+    const epoch = ++navigation.current;
+    agentRequest.current?.abort();
+    const controller = new AbortController(); agentRequest.current = controller;
+    // Keep the current workspace intact until the destination is confirmed.
+    setInitializing(true); setError('');
+    try {
+      const thread = await ensureRemoteStandingThread(token, namespace, name, controller.signal);
+      if (controller.signal.aborted || navigation.current !== epoch) return;
+      setStandingIDs(previous => ({...previous, [name]: thread.id}));
+      setThreads(previous => [thread, ...previous.filter(item => item.id !== thread.id)]);
+      openThread(thread, true);
+      const selectedEpoch = navigation.current;
+      // Fetch this agent's history independently of the namespace's latest200.
+      void listRemoteThreads(token, namespace, undefined, name).then(history => {
+        if (navigation.current !== selectedEpoch) return;
+        setThreads(previous => [...previous.filter(item => item.profileName !== name || item.id === thread.id), ...history.filter(item => item.id !== thread.id)]);
+      }).catch(() => { /* Opening the standing conversation succeeded; existing history remains accessible. */ });
+    } catch (err) {
+      if (!controller.signal.aborted && navigation.current === epoch) {
+        setError(formatTurnError(err)); setInitializing(false);
+      }
+    }
+  }
+  useEffect(() => () => { navigation.current++; agentRequest.current?.abort(); }, []);
   function restoreNewChat(choices = profiles) {
     const saved = readNewChatConfig(namespace);
     setProfile(saved ? (choices.some(p => p.metadata.name === saved.profile) ? saved.profile : '') : (choices.some(p => p.metadata.name === 'desktop-assistant') ? 'desktop-assistant' : ''));
@@ -164,10 +204,13 @@ export function EntityChatPage({token, config}: Props) {
     setCoordinate(saved?.coordinate ?? false); setPeers((saved?.peers ?? []).filter(peer => choices.some(p => p.metadata.name === peer)));
     setDraft(readChatDraft(namespace, '') ?? '');
   }
-  function newChat() {
+  function newChat(harnessOnly = false) {
+    navigation.current++; agentRequest.current?.abort(); setInitializing(false);
     saveSelectedChat(namespace, '');
     setThreadID(''); setDetail(null); setError(''); setUnavailable(false); setOptimistic(null); setRawActivityOpen(false);
     pending.current = null; restoreNewChat();
+    if (!harnessOnly && profile) { setProfile(profile); setHarness(harness); setMode(mode); setCoordinate(coordinate); setPeers(peers); }
+    if (harnessOnly) { setProfile(''); setCoordinate(false); setPeers([]); }
   }
   function newConfig(): NewChatConfig { return {profile, harness, mode, coordinate, peers}; }
   function changeConfig(patch: Partial<NewChatConfig>) {
@@ -241,28 +284,51 @@ export function EntityChatPage({token, config}: Props) {
 
   return <div className="human-page">
     <div className="page-header"><div><h1 className="page-title">Chat</h1>
-      <p className="page-sub">Talk to a remote agent using its configured harness, or choose another harness for a new conversation.</p>
+      <p className="page-sub">Your agents, their work, and your ongoing conversations.</p>
     </div></div>
     {!enabled && <div className="banner banner-error">Remote chat is not enabled on this server.</div>}
     {error && <div className="banner banner-error" role="alert">{error}</div>}
     <div className="remote-chat-layout">
-      <aside className="panel remote-chat-sidebar" aria-label="Conversations">
-        <label className="field"><span className="label">Namespace</span><select className="input" aria-label="Namespace" value={namespace} disabled={busy} onChange={e => {saveNamespace(e.target.value); setThreadID(''); setDetail(null); setInitializing(true); setNamespace(e.target.value);}}>
+      <aside className="panel remote-chat-sidebar agent-roster" aria-label="Agents">
+        <h2 className="agent-roster-heading">Your agents</h2>
+        <details className="agent-settings"><summary>Workspace</summary>
+        <label className="field"><span className="label">Namespace</span><select className="input" aria-label="Namespace" value={namespace} disabled={busy} onChange={e => {if (e.target.value === namespace) return; navigation.current++; agentRequest.current?.abort(); saveNamespace(e.target.value); setThreadID(''); setDetail(null); setInitializing(true); setNamespace(e.target.value);}}>
           {namespaces.map(ns => <option key={ns}>{ns}</option>)}
-        </select></label>
-        <button className="btn" onClick={newChat} disabled={busy}>New conversation</button>
-        {threads.map(thread => <button className={`remote-thread ${thread.id === threadID ? 'remote-thread-selected' : ''}`} key={thread.id} onClick={() => openThread(thread)} disabled={busy}>
-          <strong>{thread.title || thread.profileName}</strong><small>{thread.profileName}{threadHarness(thread) ? ` · ${threadHarness(thread)}` : ''}</small>
-        </button>)}
-        {!threads.length && <p className="muted">{loading ? 'Loading conversations…' : 'Your conversations will appear here.'}</p>}
+        </select></label></details>
+        {roster.map(agent => {
+          const name = agent.metadata.name;
+          return <button type="button" className={`agent-row ${profile === name ? 'agent-row-selected' : ''}`} key={name} title={name} aria-pressed={profile === name} onClick={() => void openAgent(name)} disabled={busy || !enabled}>
+            <AgentAvatar name={agentName(name)} identity={`${namespace}/${name}`}/>
+            <span className="agent-row-copy"><span className="agent-name">{agentName(name)}</span><span className="agent-meta">{profile === name && initializing ? 'Opening conversation…' : 'Standing conversation'}</span></span>
+          </button>;
+        })}
+        {!profiles.length && <p className="agent-empty">{loading ? 'Loading agents…' : 'No agents are available in this namespace.'}</p>}
+        <details className="agent-settings"><summary>Other chats</summary>
+          <button type="button" className="btn btn-ghost" onClick={() => newChat(true)} disabled={busy || initializing}>Chat with a harness</button>
+        </details>
       </aside>
       <section className="panel entity-chat-main">
-        {threadID ? <details className="remote-chat-settings" key={threadID}>
-          <summary>{profile || 'Remote harness'} · {backend || effectiveHarness || 'Configured harness'} · {mode === 'fleet' ? 'Manager' : 'Agent'}</summary>
+        <header className="agent-chat-header">
+          <div className="agent-chat-identity"><AgentAvatar name={agentName(profile || harness || 'Harness')} identity={`${namespace}/${profile || harness || 'harness'}`} size="lg"/>
+            <div><h2 className="agent-name" title={profile || harness}>{profile || harness ? agentName(profile || harness) : 'Chat with a harness'}</h2><p className="agent-meta">{initializing ? 'Opening your conversation…' : profile ? (standingIDs[profile] === threadID ? 'Standing conversation' : 'Saved conversation') : 'Choose a remote harness below'}</p></div>
+          </div>
+        </header>
+        <details className="agent-settings" key={threadID || 'new'} open={!threadID && !profile}>
+          <summary>Conversation details</summary>
+          {profile && <button type="button" className="btn btn-ghost" disabled={busy || initializing || standingIDs[profile] === threadID} onClick={() => void openAgent(profile)}>Open standing conversation</button>}
+          {threads.some(thread => profile ? thread.profileName === profile : !thread.profileName) && <label className="field"><span className="label">Conversation history</span><select className="input" aria-label="Conversation history" value={threadID} disabled={busy || initializing} onChange={e => {const thread = threads.find(item => item.id === e.target.value); if (thread) openThread(thread);}}>
+            {!threadID && <option value="">Choose a previous conversation</option>}
+            {threads.filter(thread => profile ? thread.profileName === profile : !thread.profileName).map(thread => <option value={thread.id} key={thread.id}>{standingIDs[profile] === thread.id ? 'Standing · ' : ''}{thread.title || thread.profileName || threadHarness(thread)}</option>)}
+          </select></label>}
           {configuration}
-        </details> : configuration}
+          {threadID && <button type="button" className="btn btn-ghost" disabled={busy} onClick={() => newChat()}>Start a separate conversation</button>}
+        </details>
         <div className="chat-messages" aria-live="polite">
-          {!detail?.messages.length && !optimistic && <div className="empty">{unavailable ? 'This conversation is unavailable. Your draft is preserved; you can keep editing it or start a new conversation.' : threadID ? 'Loading conversation…' : 'Choose an agent and send a message.'}</div>}
+          {!detail?.messages.length && !optimistic && <div className="agent-empty">
+            <AgentAvatar name={agentName(profile || harness || 'Agent')} identity={`${namespace}/${profile || harness || 'harness'}`} size="lg"/>
+            <h3>{unavailable ? 'Conversation unavailable' : initializing || (threadID && !detail) ? 'Opening conversation…' : profile ? `Talk with ${agentName(profile)}` : 'Chat with a harness'}</h3>
+            <p>{unavailable ? 'Your draft is preserved. Select the agent to try again.' : profile ? 'Your messages and replies stay here as you work together.' : 'Choose a harness in Conversation details to begin.'}</p>
+          </div>}
           {detail?.messages.filter(m => m.role !== 'system').map(message => <article key={message.id} className={`chat-bubble ${message.role === 'user' ? 'chat-bubble-user' : 'chat-bubble-run'}`}>
             <header className="chat-bubble-header"><span className="chat-bubble-role">{message.role === 'user' ? ((message.metadata as {authorProfile?: string} | undefined)?.authorProfile || 'You') : message.role === 'tool' ? 'Coordination' : detail.profileName || 'Agent'}</span></header>
             <pre className="chat-bubble-body">{message.content}</pre>
@@ -280,7 +346,7 @@ export function EntityChatPage({token, config}: Props) {
         </div>
         <form className="chat-composer" onSubmit={e => void submit(e)}>
           <label className="field"><span className="label">Message</span><textarea className="textarea chat-composer-input" rows={3} aria-label="Message" value={draft} disabled={busy || !enabled || initializing} onChange={e => changeDraft(e.target.value)} onKeyDown={e => {if(e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {e.preventDefault(); void submit();}}} placeholder="Message this agent…"/></label>
-          <div className="chat-composer-actions"><button className="btn btn-primary" disabled={busy || Boolean(active) || unavailable || initializing || !draft.trim() || (!profile && !harness) || !enabled || (coordinate && !peers.length)}>{busy ? 'Sending…' : active ? 'Waiting for reply…' : 'Send'}</button></div>
+          <div className="chat-composer-actions"><span className="chat-composer-hint">Enter to send · Shift + Enter for a new line</span><button className="btn btn-primary" disabled={busy || Boolean(active) || unavailable || initializing || !draft.trim() || (!profile && !harness) || !enabled || (coordinate && !peers.length)}>{busy ? 'Sending…' : active ? 'Waiting for reply…' : 'Send'}</button></div>
         </form>
         {active?.runName && <details className="remote-run-details" open={rawActivityOpen} onToggle={e => setRawActivityOpen(e.currentTarget.open)}><summary>Runner activity</summary>{rawActivityOpen && <LiveStream token={token} namespace={namespace} name={active.runName}/>}</details>}
       </section>

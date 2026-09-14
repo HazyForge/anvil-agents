@@ -153,3 +153,22 @@ func catalogTool(id string) (Tool, bool) {
 	}
 	return Tool{}, false
 }
+
+// forLocalChat selects the CLI's native event format for the streaming chat UI.
+// Legacy delegate callers keep their existing output. These switches do not
+// change local provider, model, permissions, tools, or session configuration.
+func (t Tool) forLocalChat() Tool {
+	t.Invoke.Args = append([]string(nil), t.Invoke.Args...)
+	switch t.ID {
+	case "codex":
+		// codex exec --help: --json prints events to stdout as JSONL.
+		t.Invoke.Args = append(t.Invoke.Args, "--json")
+	case "grok":
+		// grok --help: Messages-format NDJSON; streaming-json uses ACP instead.
+		t.Invoke.Args = append(t.Invoke.Args, "--output-format", "streaming-messages-json")
+	case "opencode":
+		// https://opencode.ai/docs/cli/#run: json emits raw JSON events.
+		t.Invoke.Args = append(t.Invoke.Args, "--format", "json")
+	}
+	return t
+}

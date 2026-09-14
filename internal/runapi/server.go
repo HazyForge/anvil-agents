@@ -257,7 +257,9 @@ func (server *Server) handleGetRun(writer http.ResponseWriter, request *http.Req
 		return
 	}
 	server.log.Info("AgentRun read", "subject", principal.Subject, "issuer", principal.Issuer, "namespace", run.Namespace, "agentRun", run.Name)
-	writeJSON(writer, http.StatusOK, NewAgentRunView(run, true))
+	view := NewAgentRunView(run, true)
+	view.RunnerState, _ = server.readRunnerState(request.Context(), run)
+	writeJSON(writer, http.StatusOK, view)
 }
 
 func (server *Server) authorizedRun(writer http.ResponseWriter, request *http.Request, permissions ...string) (*agentsv1alpha1.AgentRun, Principal, bool) {

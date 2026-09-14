@@ -32,15 +32,17 @@ type DelegateRequest struct {
 
 // DelegateResult is the local-harness tool result. It never includes OIDC tokens.
 type DelegateResult struct {
-	Harness  string `json:"harness"`
-	Target   string `json:"target,omitempty"`
-	Distro   string `json:"wslDistro,omitempty"`
-	Path     string `json:"path,omitempty"`
-	ExitCode int    `json:"exitCode"`
-	Stdout   string `json:"stdout"`
-	Stderr   string `json:"stderr"`
-	TimedOut bool   `json:"timedOut"`
-	Workdir  string `json:"workdir,omitempty"`
+	StdoutTruncated     bool   `json:"stdoutTruncated,omitempty"`
+	StdoutEventsDropped bool   `json:"stdoutEventsDropped,omitempty"`
+	Harness             string `json:"harness"`
+	Target              string `json:"target,omitempty"`
+	Distro              string `json:"wslDistro,omitempty"`
+	Path                string `json:"path,omitempty"`
+	ExitCode            int    `json:"exitCode"`
+	Stdout              string `json:"stdout"`
+	Stderr              string `json:"stderr"`
+	TimedOut            bool   `json:"timedOut"`
+	Workdir             string `json:"workdir,omitempty"`
 }
 
 func (s *Server) resolveDelegate(ctx context.Context, harness string) (Tool, invokeTarget, error) {
@@ -191,6 +193,7 @@ func runDelegateWithOptions(ctx context.Context, d Discoverer, tool Tool, target
 		err = cmd.Run()
 	}
 	result.Stdout = stdout.String()
+	result.StdoutTruncated = stdout.truncated
 	result.Stderr = stderr.String()
 	if runCtx.Err() != nil && errors.Is(runCtx.Err(), context.DeadlineExceeded) {
 		result.TimedOut = true
@@ -235,16 +238,21 @@ func delegateEnv(env []string) []string {
 }
 
 type cappedBuffer struct {
-	buf   bytes.Buffer
-	limit int
+	truncated bool
+	buf       bytes.Buffer
+	limit     int
 }
 
 func (c *cappedBuffer) Write(p []byte) (int, error) {
 	remain := c.limit - c.buf.Len()
 	if remain <= 0 {
+		if len(p) > 0 {
+			c.truncated = true
+		}
 		return len(p), nil
 	}
 	if len(p) > remain {
+		c.truncated = true
 		_, _ = c.buf.Write(p[:remain])
 		return len(p), nil
 	}

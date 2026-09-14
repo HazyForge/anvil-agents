@@ -27,6 +27,7 @@ func TestPostgresStoreIntegration(t *testing.T) {
 	defer store.Close()
 	t.Run("preprovisioned schema without database CREATE", func(t *testing.T) { exercisePreprovisionedSchema(t, store) })
 	t.Run("durable turn outbox", func(t *testing.T) { exerciseTurnOutbox(t, store) })
+	t.Run("canonical standing conversation", func(t *testing.T) { exerciseStandingConversation(t, store) })
 
 	namespace := "chat-integration"
 	profile := "grok45-" + strconv.FormatInt(time.Now().UnixNano(), 10)

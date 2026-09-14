@@ -20,6 +20,9 @@ func main() {
 }
 
 func run(ctx context.Context, args []string) int {
+	if len(args) > 0 && args[0] == "agent-tool" {
+		return desktop.RunAgentTool(ctx, args[1:], os.Stdin, os.Stdout, os.Stderr)
+	}
 	flags := pflag.NewFlagSet("anvil-desktop", pflag.ContinueOnError)
 	listen := flags.String("listen", "127.0.0.1:1738", "Loopback address for Anvil Agents Desktop.")
 	uiDir := flags.String("ui-dir", "", "Directory of built web/desktop assets. Defaults to the embedded stub.")

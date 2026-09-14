@@ -82,7 +82,9 @@ test('unknown logs, reasoning, tool results and malformed frames never become ac
 
 test('Prime native IPython events expose tool activity but not Python or thought content', () => {
   const start = {type: 'tool_execution_start', toolCallId: 'call_1', toolName: 'ipython', args: {code: 'private-code'}};
-  assert.equal(from(start).label, 'Using tool ipython');
+  assert.equal(from(start).label, 'Running Python');
+  assert.equal(from({type: 'message_start', message: {role: 'assistant', content: []}}).label, 'Waiting for model output');
+  assert.equal(from({type: 'message_start', message: {role: 'user', content: 'private'}}), null);
   assert.deepEqual(from(start), from({...start, args: {code: 'different-code'}}));
   assert.equal(from({...start, type: 'tool_execution_end', isError: false, result: {text: 'secret'}}).label, 'Tool finished');
   assert.equal(from({...start, type: 'tool_execution_end', isError: true, result: {text: 'secret'}}).label, 'Tool reported an error');

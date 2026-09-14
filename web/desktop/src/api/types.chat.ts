@@ -45,6 +45,7 @@ export type ChatAppendResponse = {
 };
 
 export type CreateChatThreadRequest = {
+	standing?: boolean;
   profileName?: string;
   mode?: ChatMode | string;
   title?: string;

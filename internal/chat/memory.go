@@ -14,6 +14,7 @@ type MemoryStore struct {
 	threads  map[string]Thread
 	messages map[string][]Message
 	turns    map[string]Turn
+	standing map[string]string
 }
 
 func NewMemoryStore() *MemoryStore {

@@ -13,6 +13,7 @@ type AgentRunListResponse struct {
 }
 
 type AgentRunView struct {
+	RunnerState         *RunnerStateView                                  `json:"runnerState,omitempty"`
 	Name                string                                            `json:"name"`
 	Namespace           string                                            `json:"namespace"`
 	UID                 string                                            `json:"uid"`

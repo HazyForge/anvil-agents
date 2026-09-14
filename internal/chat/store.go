@@ -68,6 +68,13 @@ CREATE INDEX IF NOT EXISTS threads_namespace_updated_idx
 CREATE INDEX IF NOT EXISTS threads_namespace_profile_updated_idx
     ON anvil_agents_chat.threads (namespace, profile_name, updated_at DESC);
 
+CREATE TABLE IF NOT EXISTS anvil_agents_chat.standing_threads (
+    namespace TEXT NOT NULL,
+    profile_name TEXT NOT NULL,
+    thread_id TEXT NOT NULL REFERENCES anvil_agents_chat.threads(id) ON DELETE CASCADE,
+    PRIMARY KEY(namespace, profile_name)
+);
+
 CREATE TABLE IF NOT EXISTS anvil_agents_chat.messages (
     id TEXT PRIMARY KEY,
     thread_id TEXT NOT NULL REFERENCES anvil_agents_chat.threads (id) ON DELETE CASCADE,
@@ -121,6 +128,7 @@ type Store interface {
 	ActivateTurn(context.Context, Turn) (bool, error)
 
 	CreateThread(ctx context.Context, thread Thread) (Thread, error)
+	EnsureStandingThread(ctx context.Context, thread Thread) (Thread, bool, error)
 	ListThreads(ctx context.Context, filter ThreadFilter) ([]Thread, error)
 	GetThread(ctx context.Context, namespace, id string) (Thread, error)
 	ListMessages(ctx context.Context, namespace, threadID string) ([]Message, error)

@@ -23,8 +23,9 @@ async function json<T>(path: string, token: string, init?: RequestInit): Promise
   if (!response.ok) throw await APIError.fromResponse(response);
   return response.json() as Promise<T>;
 }
-export async function listRemoteThreads(token: string, ns: string, signal?: AbortSignal) {
-  return (await json<{items: RemoteThread[]}>(`${base(ns)}?limit=200`, token, {signal})).items ?? [];
+export async function listRemoteThreads(token: string, ns: string, signal?: AbortSignal, profileName?: string) {
+  const filter = profileName ? `&profileName=${encodeURIComponent(profileName)}` : '';
+  return (await json<{items: RemoteThread[]}>(`${base(ns)}?limit=200${filter}`, token, {signal})).items ?? [];
 }
 export function getRemoteThread(token: string, ns: string, id: string, signal?: AbortSignal) {
   return json<RemoteThreadDetail>(`${base(ns)}/${encodeURIComponent(id)}`, token, {signal});
@@ -34,6 +35,12 @@ export function createRemoteThread(token: string, ns: string, body: {
 }) {
   return json<RemoteThread>(base(ns), token, {
     method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body),
+  });
+}
+export function ensureRemoteStandingThread(token: string, ns: string, profileName: string, signal?: AbortSignal) {
+  return json<RemoteThread>(base(ns), token, {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({standing: true, profileName}), signal,
   });
 }
 export function sendRemoteMessage(token: string, ns: string, id: string, content: string, requestId: string) {

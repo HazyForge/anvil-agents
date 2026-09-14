@@ -12,11 +12,12 @@ serviceAccount:
   name: anvil-agents
 image:
   # Controller/API image embeds Anvil Agents Console SPA (served at /).
-  reference: ghcr.io/hazyforge/anvil-agents@sha256:4ecb770c90f0eaa3286032cc7ae534431ca4396d99acbcb050f93d2b87fe38a5
+  reference: ghcr.io/hazyforge/anvil-agents@sha256:db6da8c867b4c873b5438539413e1cdda49aa9cae95019d88a530b052bc841af
   pullPolicy: IfNotPresent
 imagePullSecrets:
   - name: ghcr-creds
 runnerImages:
+  primeAgent: ghcr.io/hazyforge/anvil-agent-run-prime@sha256:4313de2661a1c3fa94832eaafe91acff7895e3c80584e264bc027016d2489222
   agy: ghcr.io/hazyforge/anvil-agents/anvil-agent-run-agy@sha256:ba4bcf954552a0f898035af898243b59a7ed9a7d5693cebd578761b91448c86f
   # Preserve existing runners while adding the verified native AGY runner.
   codex: ghcr.io/hazyforge/anvil-agent-run-codex@sha256:4138fa74fd4328b6f736ea6c97ed2b4a0ba31a6f48b3e989fdfbbba680fb6ab8
@@ -319,13 +320,13 @@ extraObjects:
         control.anvil.hazyforge.io/application: desktop-chat
         control.anvil.hazyforge.io/ownership: helm
     spec:
-      description: Prime Agent assistant that uses workspace tools for user-initiated Desktop tasks.
+      description: Assistant that uses workspace tools for user-initiated Desktop tasks.
       scope:
         applicationRef:
           name: desktop-chat
         summary: Perform the user's workspace task and coordinate only with explicitly allowed peers.
       harnessProfileRef:
-        name: desktop-prime
+        name: desktop-opencode-workspace
       harness:
         intent: proposeChange
         systemPrompt: |

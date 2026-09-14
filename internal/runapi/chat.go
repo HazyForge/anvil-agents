@@ -21,6 +21,7 @@ const (
 )
 
 type CreateChatThreadRequest struct {
+	Standing           bool            `json:"standing,omitempty"`
 	HarnessProfileName string          `json:"harnessProfileName,omitempty"`
 	ProfileName        string          `json:"profileName"`
 	Mode               string          `json:"mode"`
@@ -104,6 +105,16 @@ func (server *Server) handleCreateChatThread(writer http.ResponseWriter, request
 		writeAPIError(writer, http.StatusBadRequest, "invalid_body", err.Error())
 		return
 	}
+	if body.Standing && (strings.TrimSpace(body.ProfileName) == "" || strings.TrimSpace(body.HarnessProfileName) != "" || len(body.Metadata) > 0) {
+		writeAPIError(writer, http.StatusBadRequest, "invalid_standing_target", "standing conversations require profileName and use the agent's existing identity and configured harness")
+		return
+	}
+	// Ensuring may return someone else's existing namespace-visible thread;
+	// preserve its read permission as well as the create permission above.
+	if body.Standing && !server.authorizer.Allowed(principal, PermissionChatRead, namespace) {
+		writeAPIError(writer, http.StatusNotFound, "not_found", "resource not found")
+		return
+	}
 	if err := server.validateChatTarget(request.Context(), namespace, body.ProfileName, body.HarnessProfileName); err != nil {
 		writeAPIError(writer, http.StatusBadRequest, "invalid_target", err.Error())
 		return
@@ -139,14 +150,21 @@ func (server *Server) handleCreateChatThread(writer http.ResponseWriter, request
 		writeAPIError(writer, http.StatusBadRequest, "invalid_coordination", err.Error())
 		return
 	}
-	thread, err := server.chatStore.CreateThread(request.Context(), chat.Thread{
+	seed := chat.Thread{
 		Namespace:   namespace,
 		ProfileName: body.ProfileName,
 		Mode:        body.Mode,
 		Title:       body.Title,
 		CreatedBy:   principal.Subject,
 		Metadata:    body.Metadata,
-	})
+	}
+	var thread chat.Thread
+	created := true
+	if body.Standing {
+		thread, created, err = server.chatStore.EnsureStandingThread(request.Context(), seed)
+	} else {
+		thread, err = server.chatStore.CreateThread(request.Context(), seed)
+	}
 	if err != nil {
 		server.writeChatStoreError(writer, err, principal, namespace)
 		return
@@ -158,7 +176,11 @@ func (server *Server) handleCreateChatThread(writer http.ResponseWriter, request
 		"profile", thread.ProfileName,
 		"mode", thread.Mode,
 	)
-	writeJSON(writer, http.StatusCreated, thread)
+	status := http.StatusCreated
+	if !created {
+		status = http.StatusOK
+	}
+	writeJSON(writer, status, thread)
 }
 
 func (server *Server) handleGetChatThread(writer http.ResponseWriter, request *http.Request) {
