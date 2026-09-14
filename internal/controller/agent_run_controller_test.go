@@ -29,6 +29,7 @@ import (
 
 	controlv1alpha1 "github.com/hazyforge/anvil-agents/api/v1alpha1"
 	"github.com/hazyforge/anvil-agents/internal/archive"
+	"github.com/hazyforge/anvil-agents/internal/chatmailbox"
 )
 
 type recordingAgentRunArchiveStore struct {
@@ -1061,6 +1062,39 @@ func TestAgentRunRejectsCrossNamespaceContextReferences(t *testing.T) {
 	}
 }
 
+func TestAgentRunBlockingValidationChatMailboxContract(t *testing.T) {
+	t.Parallel()
+
+	base := func() *controlv1alpha1.AgentRun {
+		return &controlv1alpha1.AgentRun{
+			ObjectMeta: metav1.ObjectMeta{Name: "run", Namespace: "agents"},
+			Spec: controlv1alpha1.AgentRunSpec{
+				SourceRef: controlv1alpha1.AgentRunSourceRef{Kind: "Manual", Name: "operator"},
+				Purpose:   controlv1alpha1.AgentRunPurposeManual,
+			},
+		}
+	}
+
+	labeled := base()
+	labeled.Labels = map[string]string{chatmailbox.ThreadLabel: "thread-1"}
+	if phase, reason, _ := agentRunBlockingValidation(labeled); phase != controlv1alpha1.AgentRunPhaseFailed || reason != chatmailbox.ReasonMailboxOnFireAndForget {
+		t.Fatalf("labeled manual = (%q, %q)", phase, reason)
+	}
+
+	stolen := base()
+	stolen.Spec.Purpose = controlv1alpha1.AgentRunPurposeScheduledHealthCheck
+	stolen.Spec.Scope.ApplicationRef = &controlv1alpha1.ApplicationReferenceSpec{Name: chatmailbox.ApplicationKey("agents", "release-council")}
+	if phase, reason, _ := agentRunBlockingValidation(stolen); phase != controlv1alpha1.AgentRunPhaseFailed || reason != chatmailbox.ReasonChatApplicationReserved {
+		t.Fatalf("scheduled chat key = (%q, %q)", phase, reason)
+	}
+
+	spoof := base()
+	spoof.Spec.Harness.Execution.ExtraEnv = []corev1.EnvVar{{Name: chatmailbox.EnvAgentRunUID, Value: "other"}}
+	if phase, reason, _ := agentRunBlockingValidation(spoof); phase != controlv1alpha1.AgentRunPhaseFailed || reason != chatmailbox.ReasonReservedIdentityEnv {
+		t.Fatalf("uid extraEnv = (%q, %q)", phase, reason)
+	}
+}
+
 func TestAgentRunChildValidationRejectsInjectedPayloadAndJob(t *testing.T) {
 	t.Parallel()
 
@@ -1622,6 +1656,7 @@ func TestAgentRunJobInjectsStatusToolEnv(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "platform-health",
 			Namespace: "anvil-system",
+			UID:       "run-uid-1",
 		},
 		Spec: controlv1alpha1.AgentRunSpec{
 			SourceRef: controlv1alpha1.AgentRunSourceRef{
@@ -1634,10 +1669,10 @@ func TestAgentRunJobInjectsStatusToolEnv(t *testing.T) {
 					Kind: controlv1alpha1.AgentRunHarnessBackendCodex,
 				},
 				Execution: controlv1alpha1.AgentRunHarnessExecutionSpec{
-					ExtraEnv: []corev1.EnvVar{{
-						Name:  "CUSTOM_SETTING",
-						Value: "enabled",
-					}},
+					ExtraEnv: []corev1.EnvVar{
+						{Name: "CUSTOM_SETTING", Value: "enabled"},
+						{Name: chatmailbox.EnvAgentRunUID, Value: "spoofed"},
+					},
 				},
 			},
 		},
@@ -1658,6 +1693,7 @@ func TestAgentRunJobInjectsStatusToolEnv(t *testing.T) {
 		"ANVIL_AGENT_RUN_PLATFORM_REPOSITORY":     agentRunPlatformRepository,
 		"ANVIL_AGENT_RUN_PLATFORM_REPOSITORY_URL": agentRunPlatformRepositoryURL,
 		"CUSTOM_SETTING":                          "enabled",
+		chatmailbox.EnvAgentRunUID:                "run-uid-1",
 	}
 	for key, want := range expected {
 		if got := env[key]; got != want {

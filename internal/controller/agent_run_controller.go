@@ -32,6 +32,7 @@ import (
 
 	controlv1alpha1 "github.com/hazyforge/anvil-agents/api/v1alpha1"
 	"github.com/hazyforge/anvil-agents/internal/archive"
+	"github.com/hazyforge/anvil-agents/internal/chatmailbox"
 )
 
 const (
@@ -59,43 +60,43 @@ const (
 	agentRunPodLogTailLines                  int64 = 10_000
 	agentRunPodLogMaxBytes                   int64 = 4 * 1024 * 1024
 
-	agentRunContainerName              = "agent"
-	agentRunPayloadVolume              = "agent-run-payload"
-	agentRunToolsVolume                = "agent-run-tools"
-	agentRunToolsMountPath             = "/opt/anvil/tools"
-	agentRunToolsDefaultFSGroup        = 10001
-	agentRunDataVolumePrefix           = "agent-data-"
-	agentRunSpiffeWorkloadAPIVolume    = "spiffe-workload-api"
-	agentRunSpiffeWorkloadAPIMountPath = "/spiffe-workload-api"
-	agentRunSpiffeWorkloadAPISocket    = "/spiffe-workload-api/spire-agent.sock"
-	agentRunSpiffeCSIDriver            = "csi.spiffe.io"
-	agentRunPayloadMountPath           = "/var/run/anvil-agent-run"
-	agentRunPromptFile                 = "prompt.md"
-	agentRunContextFile                = "source.json"
-	agentRunSkillFilePrefix            = "skill-"
-	agentRunToolFilePrefix             = "tool-"
-	agentRunStatusFile                 = "/tmp/anvil-agent-run-status/status.jsonl"
-	agentRunStatusLinePrefix           = "ANVIL_AGENT_RUN_STATUS_JSON="
-	agentRunPlatformRepository         = defaultPlatformRepository
-	agentRunPlatformRepositoryURL      = defaultPlatformRepositoryURL
-	agentRunLabel                      = "control.anvil.hazyforge.io/agent-run"
-	agentRunJobLabel                   = "control.anvil.hazyforge.io/agent-run-job"
-	agentRunLabelBackend               = "control.anvil.hazyforge.io/agent-run-backend"
-	agentRunLabelIntent                = "control.anvil.hazyforge.io/agent-run-intent"
-	agentRunLabelSourceKind            = "control.anvil.hazyforge.io/agent-run-source-kind"
-	agentRunLabelSourceName            = "control.anvil.hazyforge.io/agent-run-source-name"
-	agentRunLabelSpiffeWorkloadAPI     = "control.anvil.hazyforge.io/spiffe-workload-api"
-	agentRunLabelServiceAccount        = "control.anvil.hazyforge.io/agent-run-service-account"
-	agentRunAnnotationSourceUID        = "control.anvil.hazyforge.io/agent-run-source-uid"
-	agentRunAnnotationSourceHash       = "control.anvil.hazyforge.io/agent-run-source-hash"
-	agentRunAnnotationComposition      = "control.anvil.hazyforge.io/resolved-composition"
-	agentRunAnnotationRequestedTTL     = "control.anvil.hazyforge.io/requested-ttl-seconds-after-finished"
-	agentRunAnnotationPeerRun          = "control.anvil.hazyforge.io/peer-run"
-	agentRunAnnotationPeerOf           = "control.anvil.hazyforge.io/peer-of"
+	agentRunContainerName                = "agent"
+	agentRunPayloadVolume                = "agent-run-payload"
+	agentRunToolsVolume                  = "agent-run-tools"
+	agentRunToolsMountPath               = "/opt/anvil/tools"
+	agentRunToolsDefaultFSGroup          = 10001
+	agentRunDataVolumePrefix             = "agent-data-"
+	agentRunSpiffeWorkloadAPIVolume      = "spiffe-workload-api"
+	agentRunSpiffeWorkloadAPIMountPath   = "/spiffe-workload-api"
+	agentRunSpiffeWorkloadAPISocket      = "/spiffe-workload-api/spire-agent.sock"
+	agentRunSpiffeCSIDriver              = "csi.spiffe.io"
+	agentRunPayloadMountPath             = "/var/run/anvil-agent-run"
+	agentRunPromptFile                   = "prompt.md"
+	agentRunContextFile                  = "source.json"
+	agentRunSkillFilePrefix              = "skill-"
+	agentRunToolFilePrefix               = "tool-"
+	agentRunStatusFile                   = "/tmp/anvil-agent-run-status/status.jsonl"
+	agentRunStatusLinePrefix             = "ANVIL_AGENT_RUN_STATUS_JSON="
+	agentRunPlatformRepository           = defaultPlatformRepository
+	agentRunPlatformRepositoryURL        = defaultPlatformRepositoryURL
+	agentRunLabel                        = "control.anvil.hazyforge.io/agent-run"
+	agentRunJobLabel                     = "control.anvil.hazyforge.io/agent-run-job"
+	agentRunLabelBackend                 = "control.anvil.hazyforge.io/agent-run-backend"
+	agentRunLabelIntent                  = "control.anvil.hazyforge.io/agent-run-intent"
+	agentRunLabelSourceKind              = "control.anvil.hazyforge.io/agent-run-source-kind"
+	agentRunLabelSourceName              = "control.anvil.hazyforge.io/agent-run-source-name"
+	agentRunLabelSpiffeWorkloadAPI       = "control.anvil.hazyforge.io/spiffe-workload-api"
+	agentRunLabelServiceAccount          = "control.anvil.hazyforge.io/agent-run-service-account"
+	agentRunAnnotationSourceUID          = "control.anvil.hazyforge.io/agent-run-source-uid"
+	agentRunAnnotationSourceHash         = "control.anvil.hazyforge.io/agent-run-source-hash"
+	agentRunAnnotationComposition        = "control.anvil.hazyforge.io/resolved-composition"
+	agentRunAnnotationRequestedTTL       = "control.anvil.hazyforge.io/requested-ttl-seconds-after-finished"
+	agentRunAnnotationPeerRun            = "control.anvil.hazyforge.io/peer-run"
+	agentRunAnnotationPeerOf             = "control.anvil.hazyforge.io/peer-of"
 	agentRunAnnotationInterruptDuplicate = "control.anvil.hazyforge.io/interrupt-duplicate"
-	agentRunLabelPeerOf                = "control.anvil.hazyforge.io/peer-of"
-	agentRunDecisionRequestPeer        = "requestPeer"
-	agentRunDecisionInterruptDuplicate = "interruptDuplicate"
+	agentRunLabelPeerOf                  = "control.anvil.hazyforge.io/peer-of"
+	agentRunDecisionRequestPeer          = "requestPeer"
+	agentRunDecisionInterruptDuplicate   = "interruptDuplicate"
 )
 
 var agentRunSkillFileNameUnsafeChars = regexp.MustCompile(`[^A-Za-z0-9_.-]+`)
@@ -1564,8 +1565,8 @@ func (r *AgentRunReconciler) ensureTerminalAgentRunJobTTL(ctx context.Context, r
 func (r *AgentRunReconciler) agentRunEnv(obj *controlv1alpha1.AgentRun, dataVolumes []resolvedAgentRunDataVolume) []corev1.EnvVar {
 	platform := r.platformContext()
 	env := []corev1.EnvVar{
-		{Name: "ANVIL_AGENT_RUN", Value: obj.Name},
-		{Name: "ANVIL_AGENT_RUN_NAMESPACE", Value: obj.Namespace},
+		{Name: chatmailbox.EnvAgentRun, Value: obj.Name},
+		{Name: chatmailbox.EnvAgentRunNS, Value: obj.Namespace},
 		{Name: "ANVIL_AGENT_RUN_BACKEND", Value: string(agentRunBackendKind(obj))},
 		{Name: "ANVIL_AGENT_RUN_INTENT", Value: string(agentRunIntent(obj))},
 		{Name: "ANVIL_AGENT_RUN_SOURCE_KIND", Value: strings.TrimSpace(obj.Spec.SourceRef.Kind)},
@@ -1581,6 +1582,10 @@ func (r *AgentRunReconciler) agentRunEnv(obj *controlv1alpha1.AgentRun, dataVolu
 		{Name: "ANVIL_AGENT_RUN_PLATFORM_REPOSITORY_URL", Value: platform.RepositoryURL},
 		{Name: "ANVIL_AGENT_RUN_PLATFORM_DOCS", Value: strings.Join(platform.DocsPaths, ",")},
 	}
+	if uid := strings.TrimSpace(string(obj.UID)); uid != "" {
+		env = append(env, corev1.EnvVar{Name: chatmailbox.EnvAgentRunUID, Value: uid})
+	}
+	env = append(env, agentRunChatMailboxEnv(obj)...)
 	if obj.Spec.Harness.Execution.TimeoutSeconds > 0 {
 		env = append(env, corev1.EnvVar{Name: "ANVIL_AGENT_RUN_TIMEOUT_SECONDS", Value: strconv.Itoa(obj.Spec.Harness.Execution.TimeoutSeconds)})
 	}
@@ -1642,7 +1647,7 @@ func (r *AgentRunReconciler) agentRunEnv(obj *controlv1alpha1.AgentRun, dataVolu
 	}
 	if len(dataVolumes) > 0 {
 		for _, item := range dataVolumes {
-			env = append(env, item.ExtraEnv...)
+			env = append(env, filterAgentRunIdentityExtraEnv(item.ExtraEnv)...)
 		}
 		if raw, err := json.Marshal(agentRunDataVolumeStatuses(dataVolumes)); err == nil {
 			env = append(env, corev1.EnvVar{Name: "ANVIL_AGENT_RUN_DATA_VOLUMES_JSON", Value: string(raw)})
@@ -1772,8 +1777,61 @@ func (r *AgentRunReconciler) agentRunEnv(obj *controlv1alpha1.AgentRun, dataVolu
 			}
 		}
 	}
-	env = append(env, obj.Spec.Harness.Execution.ExtraEnv...)
+	env = append(env, filterAgentRunIdentityExtraEnv(obj.Spec.Harness.Execution.ExtraEnv)...)
 	return env
+}
+
+func agentRunChatMailboxEnv(obj *controlv1alpha1.AgentRun) []corev1.EnvVar {
+	if obj == nil || !chatmailbox.MayReceiveMailbox(string(obj.Spec.Purpose)) {
+		return nil
+	}
+	labels := obj.Labels
+	env := make([]corev1.EnvVar, 0, 4)
+	if thread := strings.TrimSpace(labels[chatmailbox.ThreadLabel]); thread != "" {
+		env = append(env, corev1.EnvVar{Name: chatmailbox.EnvChatThread, Value: thread})
+	}
+	if session := strings.TrimSpace(labels[chatmailbox.SessionLabel]); session != "" {
+		env = append(env, corev1.EnvVar{Name: chatmailbox.EnvChatSession, Value: session})
+	}
+	if council := strings.TrimSpace(labels[chatmailbox.CouncilLabel]); council != "" {
+		env = append(env, corev1.EnvVar{Name: chatmailbox.EnvChatCouncil, Value: council})
+	}
+	if role := strings.TrimSpace(labels[chatmailbox.CouncilRoleLabel]); role != "" {
+		env = append(env, corev1.EnvVar{Name: chatmailbox.EnvChatRole, Value: role})
+	}
+	return env
+}
+
+func filterAgentRunIdentityExtraEnv(items []corev1.EnvVar) []corev1.EnvVar {
+	if len(items) == 0 {
+		return nil
+	}
+	out := make([]corev1.EnvVar, 0, len(items))
+	for _, item := range items {
+		if chatmailbox.ReservedIdentityEnv(item.Name) {
+			continue
+		}
+		out = append(out, item)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func agentRunMailboxView(obj *controlv1alpha1.AgentRun) chatmailbox.RunView {
+	if obj == nil {
+		return chatmailbox.RunView{}
+	}
+	view := chatmailbox.RunView{
+		Purpose:   string(obj.Spec.Purpose),
+		Namespace: obj.Namespace,
+		Labels:    obj.Labels,
+	}
+	if obj.Spec.Scope.ApplicationRef != nil {
+		view.ApplicationName = strings.TrimSpace(obj.Spec.Scope.ApplicationRef.Name)
+	}
+	return view
 }
 
 func agentRunEnvFrom(obj *controlv1alpha1.AgentRun) []corev1.EnvFromSource {
@@ -3374,6 +3432,16 @@ func (r *AgentRunReconciler) agentRunBlockingValidation(obj *controlv1alpha1.Age
 		if strings.TrimSpace(subagent.Name) == "" {
 			return controlv1alpha1.AgentRunPhaseFailed, "InvalidSubagent", "spec.harness.subagents entries must set name."
 		}
+	}
+	if reason, message := chatmailbox.ValidateRun(agentRunMailboxView(obj)); reason != "" {
+		return controlv1alpha1.AgentRunPhaseFailed, reason, message
+	}
+	extraEnvNames := make([]string, 0, len(obj.Spec.Harness.Execution.ExtraEnv))
+	for _, item := range obj.Spec.Harness.Execution.ExtraEnv {
+		extraEnvNames = append(extraEnvNames, item.Name)
+	}
+	if reason, message := chatmailbox.ValidateExtraEnv(extraEnvNames); reason != "" {
+		return controlv1alpha1.AgentRunPhaseFailed, reason, message
 	}
 	for _, tool := range obj.Spec.Harness.Tools {
 		if strings.TrimSpace(tool.Name) == "" {

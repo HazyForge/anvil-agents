@@ -219,6 +219,7 @@ audience, and explicit namespace authorization bindings are configured. See
 - [PostgreSQL archive modes and retention](docs/archive.md)
 - [Design roadmap and known alpha boundaries](docs/design-roadmap.md)
 - [AgentRun API reference](docs/agent-run.md)
+- [Chat mailbox contract (identity, parking)](docs/chat-mailbox.md)
 - [Create and diagnose runs with anvil-agentctl](docs/cli.md)
 - [Migration from Anvil Primaris](docs/migration-from-anvil-primaris.md)
 - [Third-party notices](THIRD_PARTY_NOTICES.md)

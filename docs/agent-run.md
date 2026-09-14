@@ -75,6 +75,11 @@ changed after launch planning. A missing Job after the create-attempt receipt is
 ambiguous and fails closed; the controller never creates a replacement that
 could duplicate external side effects.
 
+The Job env includes `ANVIL_AGENT_RUN_UID` from the AgentRun object. extraEnv
+cannot spoof that identity or `ANVIL_CHAT_*` variables. Chat mailbox labels
+and `applicationRef.name` values prefixed `chat:` are reserved for
+interactive session runs; see [Chat mailbox](chat-mailbox.md).
+
 The backend adapters are `codex`, `openCode`, `hermesAgent`, `openClaw`,
 `grokBuild`, `piAgent`, and `custom`. Backend images are selected by each
 harness profile or run.
