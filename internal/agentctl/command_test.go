@@ -346,6 +346,19 @@ func TestRunCreateClientDryRunDoesNotLoadKubernetes(t *testing.T) {
 	}
 }
 
+func TestRunCreateRejectsInteractivePurpose(t *testing.T) {
+	var output strings.Builder
+	app := testApp(&fakeBackend{}, &output)
+	err := app.Run(context.Background(), []string{
+		"run", "create", "-n", "agents", "--generate-name", "chat-session-",
+		"--profile", "reviewer", "--prompt", "Stay in the room.", "--source-name", "chat",
+		"--purpose", "interactive",
+	})
+	if err == nil || !strings.Contains(err.Error(), "reserved for the chat session API") {
+		t.Fatalf("error = %v, want interactive reserved", err)
+	}
+}
+
 func TestRunCreateUsesCreateAndReportsGeneratedName(t *testing.T) {
 	backend := &fakeBackend{defaultNamespace: "ignored"}
 	var output strings.Builder

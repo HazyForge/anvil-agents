@@ -24,6 +24,12 @@ const (
 	AgentRunPurposeScheduledHealthCheck AgentRunPurpose = "scheduledHealthCheck"
 	// AgentRunPurposeChained is set on AgentRuns created by an AgentChain step.
 	AgentRunPurposeChained AgentRunPurpose = "chained"
+	// AgentRunPurposeInteractive marks a live chat-session Job. Only this
+	// purpose participates in the chat mailbox (queue / steer / interrupt).
+	// Fire-and-forget purposes ignore mailbox rows. The chat session API
+	// creates these runs; public console-card create and anvil-agentctl
+	// run create reject them.
+	AgentRunPurposeInteractive AgentRunPurpose = "interactive"
 )
 
 type AgentRunIntent string
@@ -842,8 +848,9 @@ type AgentRunNotificationSpec struct {
 }
 
 type AgentRunSpec struct {
-	// Purpose explains why this run exists.
-	// +kubebuilder:validation:Enum=manual;adverseSituation;scheduledHealthCheck;chained
+	// Purpose explains why this run exists. interactive is the live chat
+	// session medium; only that purpose participates in the chat mailbox.
+	// +kubebuilder:validation:Enum=manual;adverseSituation;scheduledHealthCheck;chained;interactive
 	// +optional
 	Purpose          AgentRunPurpose   `json:"purpose,omitempty"`
 	SourceRef        AgentRunSourceRef `json:"sourceRef,omitempty"`

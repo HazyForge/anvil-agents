@@ -123,7 +123,10 @@ printf '%s\n' "Inspect the failing release gate." | \
 ```
 
 `--purpose` accepts `manual`, `adverseSituation`, or
-`scheduledHealthCheck`. `--intent` is an optional explicit override accepting
+`scheduledHealthCheck`. `chained` is AgentChain-only. `interactive` is reserved
+for the chat session API (live mailbox); public `run create` rejects it. See
+[Chat delivery](chat-delivery.md). `--intent` is an optional explicit override
+accepting
 `observe`, `fixTransient`, `proposeChange`, or `cleanup`; omit it to retain the
 profile's declared intent.
 
@@ -387,7 +390,8 @@ the controller begins one instance at step 0. `chain cancel` resolves `*` to the
 exact current instance, stops further advancement, and retains Forbid ownership
 until the active run becomes terminal without deleting its Job. Step advancement
 is controller authority on terminal phases; runners do not create peer runs,
-and `purpose=chained` is rejected on public `run create`.
+and `purpose=chained` is rejected on public `run create`. `purpose=interactive`
+is also rejected there; it is reserved for the chat session API.
 
 ## In-Pod Status Reporting
 
