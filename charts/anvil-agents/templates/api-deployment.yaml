@@ -37,7 +37,7 @@ spec:
       {{- end }}
       containers:
         - name: api
-          image: {{ default (printf "%s:%s" .Values.image.repository .Values.image.tag) .Values.image.reference | quote }}
+          image: {{ default (default (printf "%s:%s" .Values.image.repository .Values.image.tag) .Values.image.reference) .Values.api.image.reference | quote }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           command:
             - /usr/local/bin/anvil-agents-api

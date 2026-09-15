@@ -121,6 +121,30 @@ if helm template "${release}" "${chart}" --set-string runnerImages.primeAgent= >
 fi
 
 helm template "${release}" "${chart}" "${api_args[@]}" >"${tmp_dir}/enabled.yaml"
+# An API-only image upgrade must leave the entire controller Deployment stable.
+# Empty overrides retain both legacy shared-image resolution paths.
+api_image="registry.example/anvil-api@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+for image_mode in tag reference; do
+  image_args=(--set-string image.repository=registry.example/anvil-shared --set-string image.tag=stable)
+  shared_image="registry.example/anvil-shared:stable"
+  if [[ "${image_mode}" == reference ]]; then
+    shared_image="registry.example/anvil-shared@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    image_args+=(--set-string "image.reference=${shared_image}")
+  fi
+  helm template "${release}" "${chart}" "${api_args[@]}" "${image_args[@]}" \
+    --show-only templates/api-deployment.yaml >"${tmp_dir}/api-image-${image_mode}.yaml"
+  grep -Fq "image: \"${shared_image}\"" "${tmp_dir}/api-image-${image_mode}.yaml" || fail "API did not inherit shared ${image_mode} image"
+  helm template "${release}" "${chart}" "${api_args[@]}" "${image_args[@]}" \
+    --set-string "api.image.reference=${api_image}" \
+    --show-only templates/api-deployment.yaml >"${tmp_dir}/api-image-${image_mode}-override.yaml"
+  grep -Fq "image: \"${api_image}\"" "${tmp_dir}/api-image-${image_mode}-override.yaml" || fail "API did not use its exact image override"
+  helm template "${release}" "${chart}" "${api_args[@]}" "${image_args[@]}" \
+    --show-only templates/deployment.yaml >"${tmp_dir}/controller-image-${image_mode}.yaml"
+  helm template "${release}" "${chart}" "${api_args[@]}" "${image_args[@]}" \
+    --set-string "api.image.reference=${api_image}" \
+    --show-only templates/deployment.yaml >"${tmp_dir}/controller-image-${image_mode}-override.yaml"
+  cmp -s "${tmp_dir}/controller-image-${image_mode}.yaml" "${tmp_dir}/controller-image-${image_mode}-override.yaml" || fail "API image override changed controller Deployment"
+done
 helm template "${release}" "${chart}" \
   --values "${root_dir}/examples/live-api/zitadel-values.yaml" >"${tmp_dir}/zitadel.yaml"
 for resource in \

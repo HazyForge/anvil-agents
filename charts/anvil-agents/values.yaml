@@ -147,6 +147,11 @@ service:
 # the controller. It is disabled until an issuer, audience, and explicit
 # authorization bindings are configured.
 api:
+  image:
+    # Optional complete API image reference for independent API rollouts.
+    # Empty inherits image.reference, or image.repository:image.tag when unset.
+    # The controller continues to use the top-level image configuration.
+    reference: ""
   # Optional API-only mounts, including CA certificates referenced by the chat database URL.
   extraVolumes: []
   extraVolumeMounts: []
