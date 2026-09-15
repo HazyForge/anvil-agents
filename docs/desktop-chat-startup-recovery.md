@@ -29,7 +29,8 @@ or lost quorum; this evidence does not justify restarting or deleting etcd data.
   original user message by the server's message ID and creates a fresh request.
   Lost response/reload recovery reuses that request ID. The current composer
   draft is preserved, including when it has the same content as the retry.
-  Arbitrary failures with possible prior side effects do not receive this action.
+  The later deterministic-recovery extension below also exposes an explicit
+  saved-message retry for other terminal failures; these never auto-replay.
 
 These changes do not implement persistent native sessions, automatic peer inbox
 wakeups, or cancellation of an already launched harness. Reasoning and retained
@@ -145,3 +146,33 @@ Verification includes package race tests, actual PostgreSQL 17 retry/concurrency
 integration, 24 Desktop browser scenarios, and repository `make verify`.
 Fixture tests establish recovery behavior; a native runner reply remains the
 required evidence for a live harness repair.
+
+
+## Native OpenClaw recovery
+
+After the GitHub bootstrap repair, a browser retry reached native OpenClaw and
+failed because xAI rejected its saved refresh token. The API now recognizes the
+exact terminal native failure and shows **OpenClaw authentication required for
+xAI**. Historical failures use the same verified Job/Pod log boundary. Arbitrary
+JSON, earlier retry diagnostics, other providers and embedded private strings
+cannot supply this classification. An authentication failure does not authorize
+automatic replay.
+
+The existing OpenClaw xAI login was renewed in a bounded temporary Helm Job on
+the agent's dedicated PVC, with native device authorization in the owner's
+browser. The temporary writer was removed before retry. No Grok Build auth was
+copied, no API key substituted, and the selected agent remains OpenClaw with
+`xai/grok-4.5`. The native login's global default change was restored.
+
+Browser retry `chat-turn-333441c79e2202e9c0bebc7707988e66250eff3e` completed
+Succeeded at 16:33:56Z. Its owned native output confirms xAI/Grok4.5 without
+fallback and identifies the code-slop auditor, including its current read-only
+GitHub limitation. This is provider proof, distinct from correct reply rendering.
+
+During the subsequent API rollout, new controller cache LISTs encountered
+HTTP/2 stream resets while the old healthy controller retained its lease.
+`DISABLE_HTTP2=true` was applied only to the controller through the Primaris
+Helm overlay, retaining `KUBE_FEATURE_WatchListClient=false`, cache warmup and
+leader fencing. Helm revision26 completed with the new controller ready, zero
+restarts and a renewing lease. This mitigates the observed transport failure;
+it does not establish why the Kubernetes API reset those connections.

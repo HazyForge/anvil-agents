@@ -12,7 +12,7 @@ serviceAccount:
   name: anvil-agents
 image:
   # Controller/API image embeds Anvil Agents Console SPA (served at /).
-  reference: ghcr.io/hazyforge/anvil-agents@sha256:a0aaf97aef284ddbc474874a3956b50b754dbfff7339f8c7f75805dd8e3949b2
+  reference: ghcr.io/hazyforge/anvil-agents@sha256:4105098d3fc4fa6b17c0c03d99d464c09e09d8eccf4b21c5941cb8f5250cdc00
   pullPolicy: IfNotPresent
 imagePullSecrets:
   - name: ghcr-creds
@@ -34,6 +34,9 @@ leaderElection: true
 extraEnv:
   - name: KUBE_FEATURE_WatchListClient
     value: "false"
+  # HTTP/2 stream resets also stalled ordinary cache LISTs during rollout.
+  - name: DISABLE_HTTP2
+    value: "true"
 applicationMaxConcurrentRuns: 4
 defaultStorageClass: observability-local
 externalSecrets:
@@ -61,6 +64,9 @@ archive:
 # retain explicit operator permissions, while dashboard-only users receive the
 # narrower anvil_agents_viewer role and read-only observer permissions.
 api:
+  # API-only chat fixes can roll independently of the healthy controller.
+  image:
+    reference: ghcr.io/hazyforge/anvil-agents@sha256:4105098d3fc4fa6b17c0c03d99d464c09e09d8eccf4b21c5941cb8f5250cdc00
   enabled: true
   extraVolumes:
     - name: chat-database-ca
