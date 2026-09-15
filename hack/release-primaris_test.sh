@@ -65,6 +65,25 @@ rg -q 'install: true' "${deploy}" || fail "crds.install lost"
 
 rg -q '^  primeAgent: ghcr.io/hazyforge/anvil-agent-run-prime@sha256:8888888888888888888888888888888888888888888888888888888888888888$' "${deploy}" || fail "Prime image digest was not pinned"
 
+# Existing API overrides follow full and hot controller releases. An empty
+# override continues to inherit the shared controller image.
+cat >> "${deploy}" <<'EOF'
+api:
+  enabled: true
+  image:
+    reference: registry.example/api:old
+EOF
+"${source_root}/hack/pin-deploy-values-from-lock.sh" --image-lock "${lock}" --values "${deploy}" >/dev/null
+rg -q '^    reference: ghcr.io/hazyforge/anvil-agents@sha256:2222222222222222222222222222222222222222222222222222222222222222$' "${deploy}" || fail "full API pin stale"
+source <(sed -n '/^pin_component_ref() {/,/^}/p' "${source_root}/hack/release-primaris.sh")
+deploy_yaml_key_for_component() { echo unused; }
+values_file="${deploy}"
+pin_component_ref controller 'registry.example/controller@sha256:hot' >/dev/null
+rg -q '^    reference: registry.example/controller@sha256:hot$' "${deploy}" || fail "hot API pin stale"
+sed -i 's|^    reference:.*|    reference: ""|' "${deploy}"
+pin_component_ref controller 'registry.example/controller@sha256:next' >/dev/null
+rg -q '^    reference: ""$' "${deploy}" || fail "empty API override changed"
+
 # Fake helm for deploy dry-run path
 mkdir -p "${tmp_dir}/bin"
 cat > "${tmp_dir}/bin/helm" <<'EOF'

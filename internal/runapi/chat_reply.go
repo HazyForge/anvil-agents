@@ -23,6 +23,9 @@ var chatANSI = regexp.MustCompile(`\x1b\[[0-?]*[ -/]*[@-~]`)
 // output, reasoning and runner diagnostics never become an assistant reply.
 func extractChatReply(backend agents.AgentRunHarnessBackendKind, output string) (string, error) {
 	output = chatANSI.ReplaceAllString(output, "")
+	if backend == agents.AgentRunHarnessBackendOpenClaw {
+		return extractOpenClawReply(output)
+	}
 	var parts []string
 	var plain []string
 	var final string
@@ -216,7 +219,25 @@ func safeChatMessages(messages []chat.Message) []chat.Message {
 			continue
 		}
 		var metadata map[string]any
-		if json.Unmarshal(safe[i].Metadata, &metadata) != nil || metadata["backend"] != string(agents.AgentRunHarnessBackendHermesAgent) || metadata["replyFormat"] == hermesReplyFormat {
+		if json.Unmarshal(safe[i].Metadata, &metadata) != nil {
+			continue
+		}
+		if metadata["backend"] == string(agents.AgentRunHarnessBackendOpenClaw) {
+			if metadata["replyFormat"] == openClawReplyFormat {
+				continue
+			}
+			if reply, err := extractChatReply(agents.AgentRunHarnessBackendOpenClaw, safe[i].Content); err == nil {
+				safe[i].Content = reply
+				metadata["replyFormat"] = openClawReplyFormat
+			} else {
+				safe[i].Role = chat.RoleSystem
+				safe[i].Content = legacyOpenClawReplyUnavailable
+				metadata["kind"] = "legacy_output_unavailable"
+			}
+			safe[i].Metadata, _ = json.Marshal(metadata)
+			continue
+		}
+		if metadata["backend"] != string(agents.AgentRunHarnessBackendHermesAgent) || metadata["replyFormat"] == hermesReplyFormat {
 			continue
 		}
 		safe[i].Role = chat.RoleSystem

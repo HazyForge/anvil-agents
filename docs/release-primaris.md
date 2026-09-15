@@ -175,3 +175,12 @@ ready, while a new AgentDataVolume may remain Pending until its first consumer
 binds its PVC. Helm 4's default watcher would wait for that custom Ready
 condition before the first chat could be sent. Verify the volume binds during
 the native runner canary.
+
+
+For a deliberate API-only rollout, build the normal controller/API image with
+`hack/build-images.sh --component controller`, pin only `api.image.reference`
+in the Primaris overlay, then run `make deploy-primaris`. The controller retains
+its existing image and Pod. An empty API reference inherits the shared image.
+Normal hot/full/fast controller releases update both the shared image and any
+existing nonempty API override so that console/API fixes cannot stay silently
+pinned to an older build.

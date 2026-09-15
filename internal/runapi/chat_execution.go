@@ -283,6 +283,9 @@ func (server *Server) reconcileChatTurn(ctx context.Context, turn *chat.Turn) er
 		if agentsv1alpha1.AgentRunHarnessBackendKind(run.Status.Backend) == agentsv1alpha1.AgentRunHarnessBackendHermesAgent {
 			metadata["replyFormat"] = hermesReplyFormat
 		}
+		if agentsv1alpha1.AgentRunHarnessBackendKind(run.Status.Backend) == agentsv1alpha1.AgentRunHarnessBackendOpenClaw {
+			metadata["replyFormat"] = openClawReplyFormat
+		}
 		meta, _ := json.Marshal(metadata)
 		return server.chatStore.CompleteTurn(ctx, *turn, chat.Message{Role: chat.RoleAssistant, Content: output, Metadata: meta})
 	case agentsv1alpha1.AgentRunPhaseNeedsHuman:

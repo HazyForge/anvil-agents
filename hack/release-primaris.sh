@@ -274,6 +274,15 @@ pin_component_ref() {
 	if [[ "${component}" == "controller" ]]; then
 		awk -v ref="${immutable_ref}" '
 			BEGIN { in_image=0 }
+			/^api:/ { in_api=1; in_api_image=0; print; next }
+			/^[^[:space:]]/ { in_api=0; in_api_image=0 }
+			in_api && /^  image:/ { in_api_image=1; print; next }
+			in_api && /^  [^[:space:]]/ { in_api_image=0 }
+			in_api_image && /^    reference:/ && $2 != "" && $2 != "\"\"" && $2 != "\047\047" && $2 != "null" && $2 != "~" && $2 !~ /^#/ {
+			    print "    reference: " ref
+			    next
+			}
+
 			/^image:/ { in_image=1; print; next }
 			in_image && /^[[:space:]]+reference:/ {
 				sub(/reference:[[:space:]].*/, "reference: " ref)

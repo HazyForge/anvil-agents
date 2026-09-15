@@ -221,6 +221,7 @@ func (server *Server) handleGetChatThread(writer http.ResponseWriter, request *h
 	}
 	if !recoveryPending && server.authorizer.Allowed(principal, PermissionRunsRead, namespace) {
 		server.enrichChatFailureView(request.Context(), namespace, turns, messages)
+		server.enrichOpenClawReplyView(request.Context(), namespace, turns, messages)
 	}
 	server.log.Info("chat thread read", "subject", principal.Subject, "namespace", namespace, "thread", thread.ID)
 	response := ChatThreadDetailResponse{Thread: thread, Messages: safeChatMessages(messages), Turns: turns, RecoveryPending: recoveryPending}
@@ -242,6 +243,12 @@ func (server *Server) handleListChatMessages(writer http.ResponseWriter, request
 	if err != nil {
 		server.writeChatStoreError(writer, err, principal, namespace)
 		return
+	}
+	if server.authorizer.Allowed(principal, PermissionRunsRead, namespace) {
+		turns, turnErr := server.chatStore.ListTurns(request.Context(), namespace, request.PathValue("threadID"))
+		if turnErr == nil {
+			server.enrichOpenClawReplyView(request.Context(), namespace, turns, messages)
+		}
 	}
 	writeJSON(writer, http.StatusOK, map[string]any{"items": safeChatMessages(messages)})
 }
