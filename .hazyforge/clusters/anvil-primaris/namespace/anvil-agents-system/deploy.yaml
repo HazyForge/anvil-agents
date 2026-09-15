@@ -22,7 +22,7 @@ runnerImages:
   # Preserve existing runners while adding the verified native AGY runner.
   codex: ghcr.io/hazyforge/anvil-agent-run-codex@sha256:4138fa74fd4328b6f736ea6c97ed2b4a0ba31a6f48b3e989fdfbbba680fb6ab8
   openCode: ghcr.io/hazyforge/anvil-agent-run-opencode@sha256:479cac35c6cc9f8cc5c6591e3bddacb5245ebea8f16f3f590a449df9214b2dc9
-  hermesAgent: ghcr.io/hazyforge/anvil-agent-run-hermes@sha256:f22e8c24ebc495360e072e34e15c90de068f6bcd057836a9a689abd44c3c6aef
+  hermesAgent: ghcr.io/hazyforge/anvil-agent-run-hermes@sha256:07cfd545c409110fd53093aaac24a92793d54e749b01a6d2640658435f82c1ea
   openClaw: ghcr.io/hazyforge/anvil-agent-run-openclaw@sha256:7bd2164cc2b21fd2c2f2f20342ff2f2b45c90add452532e64c68c8823a4efc7e
   grokBuild: ghcr.io/hazyforge/anvil-agent-run-grok-build@sha256:86b8d1a905c5e36af110fd880f2bb3db3efec5bc732bd16bff9ce8dc46f77f22
   piAgent: ghcr.io/hazyforge/anvil-agent-run-pi@sha256:1d41394c86d7c5ab66a7186d35097f9f1a6144cba7020e2410c1afdd3734e952
