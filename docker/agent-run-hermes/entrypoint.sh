@@ -26,6 +26,17 @@ mkdir -p "$(dirname "${status_file}")" "${hermes_home}" "${codex_home}" "${workd
 export ANVIL_AGENT_RUN_STATUS_FILE="${status_file}"
 export ANVIL_AGENT_RUN_STATUS_LOG_PREFIX="${ANVIL_AGENT_RUN_STATUS_LOG_PREFIX:-ANVIL_AGENT_RUN_STATUS_JSON=}"
 export HERMES_HOME="${hermes_home}"
+# Reuse compilation and module downloads across turns in this Hermes scope.
+# Explicit values (including GOCACHE=off) remain authoritative.
+if [[ -z "${GOCACHE:-}" ]]; then
+	GOCACHE="${HERMES_HOME}/cache/go-build"
+	mkdir -p "${GOCACHE}"
+fi
+if [[ -z "${GOMODCACHE:-}" ]]; then
+	GOMODCACHE="${HERMES_HOME}/cache/go-mod"
+	mkdir -p "${GOMODCACHE}"
+fi
+export GOCACHE GOMODCACHE
 export CODEX_HOME="${codex_home}"
 export PATH="/opt/hermes/bin:/opt/hermes/.venv/bin:${PATH}"
 

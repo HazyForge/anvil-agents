@@ -222,6 +222,8 @@ kind-e2e: kind-upgrade-e2e
 	./hack/test-kind.sh
 
 verify-runner-contract:
+	@bash -n docker/agent-run-hermes/entrypoint.sh
+	@docker/agent-run-hermes/entrypoint_test.sh
 	@python3 docker/agent-run-hermes/anvil_hermes_query_test.py
 	@bash -n docker/agent-run-prime/entrypoint.sh
 	@docker/agent-run-prime/entrypoint_test.sh
