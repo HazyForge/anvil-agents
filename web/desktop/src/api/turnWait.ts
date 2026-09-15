@@ -6,6 +6,10 @@ export function turnWaitFeedback(status: string | undefined, elapsedSeconds: num
   if (status === 'waiting') return elapsedSeconds >= 120
     ? {tone: 'delayed', label: 'Delivery is delayed; your message is still waiting', note: 'Your message is saved. Waiting for the server to make this agent available; no additional copy has been sent.'}
     : {tone: 'waiting'};
+  if (!workObserved && status === 'running' && elapsedSeconds >= 120) return {
+    tone: 'delayed', label: 'Agent setup is taking longer than expected',
+    note: 'The remote runner has started and is preparing to respond. No harness work has been reported yet. You can keep drafting while setup finishes.',
+  };
   if (!workObserved) return elapsedSeconds >= 120
     ? {tone: 'delayed', label: 'Agent startup is delayed; no harness work has been reported', note: 'Your message is saved. The server has not confirmed that this agent started work. You can keep drafting while waiting for its status to update.'}
     : {tone: 'waiting'};

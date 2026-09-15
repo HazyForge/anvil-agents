@@ -12,7 +12,10 @@ test('queued turns stay neutral and a restored 73-minute queue is explicitly del
 });
 
 test('runner Running alone does not prove native work started', () => {
-  assert.equal(turnWaitFeedback('running',180,1,false).tone,'delayed');
+  const setup = turnWaitFeedback('running',180,1,false);
+  assert.equal(setup.tone,'delayed');
+  assert.match(setup.label,/setup is taking longer/);
+  assert.match(setup.note,/remote runner has started/);
   assert.equal(turnWaitFeedback('running',180,1,true).tone,'working');
 });
 

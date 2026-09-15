@@ -69,3 +69,34 @@ Both startup expiry and launch-attempt persistence use optimistic locking.
 Regressions cover either side winning that race without resurrecting an expired
 turn or launching a duplicate. Additional tests exercise real controller-runtime
 warmup, follower fencing, failed sync, shutdown, and conflicting-scope isolation.
+
+## Applied rollout
+
+Direct Helm release `anvil-agents-system-chart` revision 23 pins controller/API
+`sha256:4997edcd572a69da75722dfa7492cb55a300ac9f6d4e653c7dccdc494c368677`.
+Source changes were pushed to master through `4b27f07`; no GitHub Actions or
+Argo reconciliation was used for the deployment. `make verify` passed with the
+local Go/Node toolchains on PATH and `GOFLAGS=-buildvcs=false` for local build
+validation; the canonical image builder supplies image source metadata.
+
+The original abandoned run and first retry
+`chat-turn-57a8ee9f4eb19184527868b4b477a0df4d958642` are terminal failures with
+zero owned Jobs. A second browser click of **Retry last message** created
+`chat-turn-182b359ea8137ba3ffdc1cc112eced4be457a9d6` at 14:16:01Z. Its runner
+container started on node `z400` at 14:16:20Z. The exact existing draft remained
+in the composer throughout reload and retries. No unsent draft was submitted.
+
+The final retry succeeded at 14:19:13Z (192 seconds after creation). Browser
+reload showed the saved assistant answer, **Reply received**, an enabled Send
+button and the untouched draft. The completed-turn reasoning/runner panel
+opened with retained output. Activity recorded repository preparation starting
+14:16:22Z, tool setup 14:17:08Z–14:18:45Z, and harness execution
+14:18:45Z–14:19:10Z. This repairs abandoned dispatch and recovery, not the
+remaining per-turn setup cost or persistent native-session requirement.
+
+Final UI wording distinguishes an unstarted queue from a known running runner
+still preparing tools. Both become amber when delayed; setup activity is not
+misrepresented as an unknown launch. Helper tests, final `make verify`, and
+live reload/draft/send/debug-panel checks passed. Earlier 21 browser regression
+scenarios passed for the full recovery flow; independent review found no
+blocking issues.
