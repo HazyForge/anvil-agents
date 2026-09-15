@@ -79,6 +79,7 @@ export function activityFromLog(line: string): RunActivity | null {
       case 'tool-setup': return null;
       case 'harness-start': return activity('Starting harness', 'setup', 'banner.START');
       case 'harness-complete': return activity('Finished', 'reply', 'banner.COMPLETE');
+      case 'github-readonly': return activity('GitHub writes unavailable; continuing chat with read-only access', 'setup', 'status.github-readonly');
       case 'inspect-source': return activity('Inspecting source', 'work', 'status.inspect-source');
       case 'poll': return activity('Checking for updates', 'work', 'status.poll');
       default: return null;

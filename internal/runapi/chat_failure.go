@@ -21,6 +21,7 @@ const codexChatAuthenticationFailure = "Codex could not authenticate with its mo
 const hermesChatAuthenticationFailure = "Hermes cannot authenticate with xAI. Renew authentication for the selected remote Hermes harness with `hermes model`, then start a new turn."
 const hermesChatProviderSetupFailure = "Hermes provider authentication or configuration is unavailable. Check the selected remote harness provider setup, then start a new turn."
 const conflictingToolsChatFailure = "The harness could not start because its selected skill sets or tool sets define conflicting tools. Correct the agent's tool configuration, then start a new turn."
+const chatWritePolicySetupFailure = "The agent's write-credential setup was blocked by the project's repository policy. Chat should remain available with read-only tools; the runner setup needs repair."
 
 var chatAuthentication401 = regexp.MustCompile(`(?i)\b401\s+unauthorized\b`)
 
@@ -76,6 +77,12 @@ func extractChatFailure(backend agents.AgentRunHarnessBackendKind, output string
 }
 
 func (server *Server) chatFailure(ctx context.Context, run *agents.AgentRun) string {
+	// A display-only classification, never evidence that replay is safe. Native
+	// log text cannot authorize a retry or change the project's write policy.
+	const policyBootstrapError = "Hazy Trade agent credential bootstrap failed: the Hazy Trade default branch lacks the reviewed approval-integrity or restricted-update rules"
+	if strings.TrimSpace(run.Status.Error) == policyBootstrapError || (strings.TrimSpace(run.Status.Output) == policyBootstrapError || strings.HasSuffix(strings.TrimSpace(run.Status.Output), "\n"+policyBootstrapError)) {
+		return chatWritePolicySetupFailure
+	}
 	if run.Status.JobRef == nil && run.Status.RunnerPodRef == nil {
 		for _, condition := range run.Status.Conditions {
 			if condition.Type == "Ready" && condition.Status == "False" && condition.Reason == "ConflictingToolName" {
@@ -126,7 +133,7 @@ func (server *Server) enrichChatFailureView(ctx context.Context, namespace strin
 		return
 	}
 	reason := server.chatFailure(ctx, run)
-	if reason != hermesChatProviderSetupFailure && reason != hermesChatAuthenticationFailure && reason != codexChatAuthenticationFailure && reason != conflictingToolsChatFailure {
+	if reason != hermesChatProviderSetupFailure && reason != hermesChatAuthenticationFailure && reason != codexChatAuthenticationFailure && reason != conflictingToolsChatFailure && reason != chatWritePolicySetupFailure {
 		return
 	}
 	turn.Error = reason

@@ -29,6 +29,8 @@ export function RemoteTurnActivity({token, namespace, turn, agentLabel, recovery
   const finished = useRef(done(turn?.status));
   const runName = turn?.runName;
   const status = turn?.status;
+  const retrying = !done(status) && (turn?.retryCount ?? 0) > 0;
+  const retrySeconds = Math.max(0, Math.ceil((Date.parse(turn?.retryAt || '') - now) / 1000)) || 0;
   const acceptedAt = turn?.createdAt ? Date.parse(turn.createdAt) : undefined;
   const mountedAt = useRef(Date.now());
   finished.current = done(status);
@@ -151,7 +153,7 @@ export function RemoteTurnActivity({token, namespace, turn, agentLabel, recovery
   const latest = rows.at(-1);
   const cannotCheck = recoveryPending && !done(status) && !terminalPhase;
   const wait = cannotCheck ? {tone: 'delayed', label: 'Cannot check agent progress right now. Your message is saved.', note: 'Waiting for the server to reconnect to the runner. Keep your draft; sending will become available when the server confirms this turn has finished.'} : turnWaitFeedback(terminalPhase === 'Succeeded' ? 'succeeded' : terminalPhase === 'Failed' || terminalPhase === 'NeedsHuman' ? 'failed' : status, elapsed, Math.max(0, (now - lastUpdate) / 1000), workObserved);
-  const label = status === 'failed' || terminalPhase === 'Failed' || terminalPhase === 'NeedsHuman' ? (chatFailureLabel(turn.error) || terminalLabel)
+  const label = retrying && status === 'queued' ? `Retrying startup${retrySeconds ? ` in ${retrySeconds}s` : ''} · attempt ${(turn?.retryCount ?? 0) + 1} of 3` : status === 'failed' || terminalPhase === 'Failed' || terminalPhase === 'NeedsHuman' ? (chatFailureLabel(turn.error) || terminalLabel)
     : status === 'succeeded' ? 'Reply received'
     : terminalPhase === 'Succeeded' ? 'Harness finished; saving the reply'
     : cannotCheck ? 'Cannot check agent progress right now. Your message is saved.'
@@ -160,7 +162,7 @@ export function RemoteTurnActivity({token, namespace, turn, agentLabel, recovery
     : status === 'waiting' ? 'Message saved; waiting for this agent to become available'
     : latest?.label || (status === 'queued' ? 'Message received; waiting for the agent to start' : 'Preparing the remote runner');
   const quiet = !done(status) && now - lastUpdate > 15000;
-  return <section className={`turn-activity${done(status) ? ' turn-activity-finished' : ''}${wait ? ` turn-activity-${wait.tone}` : ''}`} aria-label="Agent activity">
+  return <section className={`turn-activity${done(status) ? ' turn-activity-finished' : ''}${retrying ? ' turn-activity-delayed' : wait ? ` turn-activity-${wait.tone}` : ''}`} aria-label="Agent activity">
     <div className="turn-activity-heading">
       <span className={`turn-activity-indicator${status === 'failed' || terminalPhase === 'Failed' || terminalPhase === 'NeedsHuman' ? ' is-error' : ''}`} aria-hidden="true"/>
       <div><span className="turn-activity-agent">{agentLabel || 'Remote agent'}</span><p role="status">{label}</p></div>
@@ -169,8 +171,9 @@ export function RemoteTurnActivity({token, namespace, turn, agentLabel, recovery
     {rows.length > 0 && <ol className="turn-activity-events" aria-label="Reported actions">
       {rows.slice(-4).map(row => <li key={row.key} className={`activity-${row.kind}`}><span>{row.label}</span><time dateTime={new Date(row.at).toISOString()}>{new Date(row.at).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit', second: '2-digit'})}</time></li>)}
     </ol>}
-    {wait?.note && <p className="turn-activity-note">{wait.note}</p>}
-    {!wait?.note && !done(status) && (quiet || connection !== 'Connected to agent activity') && <p className="turn-activity-note">{quiet && connection === 'Connected to agent activity' ? 'No new activity reported recently. Waiting for the next update.' : connection}</p>}
+    {retrying && <p className="turn-activity-note">{turn?.recoveryReason || 'The previous runner did not start.'} Your saved message will continue automatically.</p>}
+    {!retrying && wait?.note && <p className="turn-activity-note">{wait.note}</p>}
+    {!retrying && !wait?.note && !done(status) && (quiet || connection !== 'Connected to agent activity') && <p className="turn-activity-note">{quiet && connection === 'Connected to agent activity' ? 'No new activity reported recently. Waiting for the next update.' : connection}</p>}
     {rows.length > 4 && <details className="turn-activity-history"><summary>Earlier activity ({rows.length - 4})</summary><ol>{rows.slice(0, -4).map(row => <li key={row.key}>{row.label}</li>)}</ol></details>}
   </section>;
 }

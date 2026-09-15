@@ -100,3 +100,48 @@ misrepresented as an unknown launch. Helper tests, final `make verify`, and
 live reload/draft/send/debug-panel checks passed. Earlier 21 browser regression
 scenarios passed for the full recovery flow; independent review found no
 blocking issues.
+
+## Deterministic startup recovery
+
+Accepted chat turns now retain one user message while retrying a controller-
+verified no-launch failure. The only automatic replay allowlist is a failed
+`ChatStartupDeadlineExceeded` condition for the current resource generation,
+with no Job creation attempt, Job reference/UID, Pod reference/UID, or start
+receipt. Provider failures, tool output, missing replies, policy rejections,
+and ambiguous execution are not automatic replay evidence.
+
+The durable turn keeps its request ID, frozen prompt, profile/harness, scope,
+and resource locks. Each retry creates a fresh append-only AgentRun under a
+deterministic attempt name. PostgreSQL atomically advances the attempt and
+retains previous run receipts; compare-and-swap guards reject stale completion
+and UID writers. Two retries use persisted 10-second and 30-second backoffs.
+Restarting the API or closing Desktop does not reset the budget or duplicate
+the original message. Previously terminal turns stay terminal.
+
+Desktop shows the retry countdown/attempt number, preserves the unsent draft,
+and rejects responses from an older attempt even when their execution status
+looks more advanced. Earlier startup attempts remain inspectable. Terminal
+failures expose an explicit Retry last message action that sends the saved
+message with a fresh request ID while retaining a separate composer draft.
+This explicit retry is distinct from automatic no-launch recovery.
+
+The Hazy Trade code-slop incident was a runner credential-bootstrap rejection
+before inference: repository publication rules no longer matched the write
+broker's prerequisites. Repeating that setup cannot repair policy drift.
+Its separately owned runner overlay now probes with read-only credentials and
+keeps ChatThread conversations available through a read-only broker when
+publication prerequisites cannot be established. The native prompt and public
+activity explain the reduced GitHub capability; scheduled write lanes retain
+their existing checks. No model, persona, branch rule or credential is changed
+by this recovery path.
+
+| Before | After | Why |
+| --- | --- | --- |
+| Generic failed Job ends every chat turn | Retry only proven unlaunched work, with bounded durable attempts | Recover transport/startup failures without replaying tool effects |
+| Retry progress could look like stale running state | Compare attempt number before execution phase | Keeps the visible recovery state forward through delayed responses |
+| Other terminal failures require retyping | Explicit saved-message retry preserves the unsent draft | Lets the operator retry after fixing configuration |
+
+Verification includes package race tests, actual PostgreSQL 17 retry/concurrency
+integration, 24 Desktop browser scenarios, and repository `make verify`.
+Fixture tests establish recovery behavior; a native runner reply remains the
+required evidence for a live harness repair.

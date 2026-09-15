@@ -63,7 +63,7 @@ func TestChatReadPreservesTranscriptAndLockWhenExecutionRefreshFails(t *testing.
 	}
 }
 
-func TestConfirmedChatStartupExpiryPreservesInputAndAllowsFreshRetry(t *testing.T) {
+func TestConfirmedChatStartupExpiryPreservesInputAndSchedulesAutomaticRetry(t *testing.T) {
 	s := chatTestServer(t, true)
 	ctx := context.Background()
 	thread := newExecutionThread(t, s, `{}`)
@@ -87,12 +87,19 @@ func TestConfirmedChatStartupExpiryPreservesInputAndAllowsFreshRetry(t *testing.
 		}
 	}
 	messages, err := s.chatStore.ListMessages(ctx, "agents", thread.ID)
-	if err != nil || len(messages) != 2 || messages[0].ID != accepted.User.ID || messages[1].Role != chat.RoleSystem {
-		t.Fatalf("expiry must preserve user and one failure receipt: %#v %v", messages, err)
+	if err != nil || len(messages) != 1 || messages[0].ID != accepted.User.ID {
+		t.Fatalf("automatic retry must preserve one user message: %#v %v", messages, err)
 	}
-	retried, err := s.queueChatTurn(ctx, "agents", thread.ID, AppendChatMessageRequest{Content: messages[0].Content, RequestID: uuid.NewString()})
-	if err != nil || retried.Turn.RunName == accepted.Turn.RunName {
-		t.Fatalf("fresh append-only retry: %#v %v", retried, err)
+	turns, err := s.chatStore.ListTurns(ctx, "agents", thread.ID)
+	if err != nil || len(turns) != 1 || turns[0].RetryCount != 1 || turns[0].RunName == accepted.Turn.RunName || turns[0].RetryAt == nil || !turns[0].RetryAt.After(time.Now()) || !chat.Active(turns[0]) {
+		t.Fatalf("durable automatic retry: %#v %v", turns, err)
+	}
+	runs := &agents.AgentRunList{}
+	if err := s.writes.List(ctx, runs); err != nil || len(runs.Items) != 1 {
+		t.Fatal("retry launched before its persisted backoff")
+	}
+	if _, err := s.queueChatTurn(ctx, "agents", thread.ID, AppendChatMessageRequest{Content: "competing work", RequestID: uuid.NewString()}); !errors.Is(err, chat.ErrTurnActive) {
+		t.Fatalf("automatic retry must retain its execution lock: %v", err)
 	}
 	if err := s.writes.Get(ctx, types.NamespacedName{Namespace: "agents", Name: accepted.Turn.RunName}, run); err != nil || run.Status.Phase != agents.AgentRunPhaseFailed {
 		t.Fatal("old terminal execution changed")

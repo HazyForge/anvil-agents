@@ -197,6 +197,9 @@ func (server *Server) reconcileChatTurn(ctx context.Context, turn *chat.Turn) er
 	if !chat.Active(*turn) {
 		return nil
 	}
+	if turn.RetryAt != nil && time.Now().Before(*turn.RetryAt) {
+		return nil
+	}
 	if turn.Status == "waiting" {
 		ok, err := server.chatStore.ActivateTurn(ctx, *turn)
 		if err != nil {
@@ -297,6 +300,9 @@ func (server *Server) reconcileChatTurn(ctx context.Context, turn *chat.Turn) er
 		}
 		return server.failChatTurn(ctx, turn, reason)
 	case agentsv1alpha1.AgentRunPhaseFailed:
+		if retried, retryErr := server.retryChatStartup(ctx, turn, run); retried {
+			return retryErr
+		}
 		return server.failChatTurn(ctx, turn, server.chatFailure(ctx, run))
 	default:
 		if run.Status.Phase == agentsv1alpha1.AgentRunPhaseRunning {

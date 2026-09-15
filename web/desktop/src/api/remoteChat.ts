@@ -9,6 +9,10 @@ export type RemoteTurn = {
   requestId?: string;
   status: 'waiting' | 'queued' | 'running' | 'succeeded' | 'failed';
   error?: string;
+  retryCount?: number;
+  retryAt?: string;
+  recoveryReason?: string;
+  attempts?: {runName: string; runUid?: string; error: string; completedAt: string}[];
   delegates?: {profileName: string; threadId: string; turnId: string; runName: string; status: string}[];
 };
 export type RemoteThread = ChatThread & { harnessProfileName?: string };

@@ -20,6 +20,7 @@ export function runnerFailureLabel(run?: {job?: unknown; runnerPod?: unknown; co
 
 /** Recognize only API-canned diagnostics; never display native error text. */
 export function chatFailureLabel(error?: string): string | undefined {
+  if (error === "The agent's write-credential setup was blocked by the project's repository policy. Chat should remain available with read-only tools; the runner setup needs repair.") return 'Chat startup blocked by repository tool setup';
   if (error === 'Hermes provider authentication or configuration is unavailable. Check the selected remote harness provider setup, then start a new turn.') return 'Hermes provider setup required';
   if (error === 'Hermes cannot authenticate with xAI. Renew authentication for the selected remote Hermes harness with `hermes model`, then start a new turn.') return 'Hermes authentication required for xAI';
   if (error === "The harness could not start because its selected skill sets or tool sets define conflicting tools. Correct the agent's tool configuration, then start a new turn.") return 'Harness could not start: conflicting tool configuration';

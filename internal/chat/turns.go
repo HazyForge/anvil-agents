@@ -35,7 +35,29 @@ type Turn struct {
 	UserMessageID    string          `json:"userMessageId"`
 	CreatedAt        time.Time       `json:"createdAt"`
 	RunJSON          json.RawMessage `json:"-"`
+	RetryCount       int             `json:"retryCount,omitempty"`
+	RetryAt          *time.Time      `json:"retryAt,omitempty"`
+	RecoveryReason   string          `json:"recoveryReason,omitempty"`
+	Attempts         []TurnAttempt   `json:"attempts,omitempty"`
 }
+
+// Attempts preserve the immutable execution receipts while one accepted user
+// message recovers from an execution that provably never launched.
+type TurnAttempt struct {
+	RunName     string    `json:"runName"`
+	RunUID      string    `json:"runUid,omitempty"`
+	Error       string    `json:"error"`
+	CompletedAt time.Time `json:"completedAt"`
+}
+
+type TurnRetry struct {
+	RunName string
+	RunJSON json.RawMessage
+	Reason  string
+	At      time.Time
+}
+
+const MaxTurnRetries = 2
 
 type Delegate struct {
 	ProfileName string `json:"profileName"`
@@ -228,7 +250,7 @@ func (s *PostgresStore) CompleteTurn(ctx context.Context, t Turn, m Message) err
 		return err
 	}
 	var raw []byte
-	if err = tx.QueryRow(ctx, `SELECT payload FROM anvil_agents_chat.turns WHERE id=$1 AND thread_id=$2`, t.ID, t.ThreadID).Scan(&raw); err != nil {
+	if err = tx.QueryRow(ctx, `SELECT payload FROM anvil_agents_chat.turns WHERE id=$1 AND thread_id=$2 FOR UPDATE`, t.ID, t.ThreadID).Scan(&raw); err != nil {
 		return err
 	}
 	old, err := decodeTurn(raw)
@@ -237,6 +259,9 @@ func (s *PostgresStore) CompleteTurn(ctx context.Context, t Turn, m Message) err
 	}
 	if !Active(old) {
 		return nil
+	}
+	if !sameTurnAttempt(old, t) {
+		return ErrRequestConflict
 	}
 	if _, err = insertTurnMessage(ctx, tx, thread, m); err != nil {
 		return err
@@ -336,6 +361,9 @@ func (s *MemoryStore) CompleteTurn(_ context.Context, t Turn, m Message) error {
 	if !Active(old) {
 		return nil
 	}
+	if !sameTurnAttempt(old, t) {
+		return ErrRequestConflict
+	}
 	if Active(t) {
 		return ErrInvalid
 	}
@@ -357,7 +385,7 @@ func (s *MemoryStore) CompleteTurn(_ context.Context, t Turn, m Message) error {
 
 // RecordRun binds the durable turn to the immutable Kubernetes execution UID.
 func (s *PostgresStore) RecordRun(ctx context.Context, t Turn, uid string) error {
-	result, err := s.pool.Exec(ctx, `UPDATE anvil_agents_chat.turns SET payload=jsonb_set(payload,'{runUid}',to_jsonb($1::text)) WHERE id=$2 AND status IN ('queued','running') AND (COALESCE(payload->>'runUid','')='' OR payload->>'runUid'=$1)`, uid, t.ID)
+	result, err := s.pool.Exec(ctx, `UPDATE anvil_agents_chat.turns SET payload=jsonb_set(payload,'{runUid}',to_jsonb($1::text)) WHERE id=$2 AND namespace=$3 AND thread_id=$4 AND status IN ('queued','running') AND payload->>'runName'=$5 AND COALESCE((payload->>'retryCount')::int,0)=$6 AND (COALESCE(payload->>'runUid','')='' OR payload->>'runUid'=$1)`, uid, t.ID, t.Namespace, t.ThreadID, t.RunName, t.RetryCount)
 	if err == nil && result.RowsAffected() != 1 {
 		return ErrRequestConflict
 	}
@@ -369,6 +397,9 @@ func (s *MemoryStore) RecordRun(_ context.Context, t Turn, uid string) error {
 	old, ok := s.turns[t.ID]
 	if !ok {
 		return ErrNotFound
+	}
+	if !Active(old) || !sameTurnAttempt(old, t) {
+		return ErrRequestConflict
 	}
 	if old.RunUID != "" && old.RunUID != uid {
 		return ErrInvalid

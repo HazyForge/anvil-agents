@@ -9,7 +9,6 @@ import { AgentAvatar } from '../components/AgentAvatar';
 import { ProjectSwitcher, remoteChatProjects, projectManagers } from '../components/ProjectSwitcher';
 import { LiveStream } from '../components/LiveStream';
 import { ensureAccessToken } from '../auth/oidc';
-import { chatStartupDeadlineError } from '../api/turnWait';
 import { type PendingChatSend, readPendingSend, rememberPendingSend, clearPendingSend } from '../api/pendingChat';
 import { formatTurnError } from '../wrapper/turn';
 
@@ -27,7 +26,8 @@ function regresses(next: RemoteThreadDetail, previous: RemoteThreadDetail | null
   const nextTurns = [...(next.turns ?? []), ...(next.activeTurn ? [next.activeTurn] : [])];
   if (previous.activeTurn && !nextTurns.some(turn => sameTurn(turn, previous.activeTurn!))) return true;
   return [...(previous.turns ?? []), ...(previous.activeTurn ? [previous.activeTurn] : [])].some(before =>
-    nextTurns.some(after => sameTurn(before, after) && turnProgress(after) < turnProgress(before)));
+    nextTurns.some(after => sameTurn(before, after) && ((after.retryCount ?? 0) < (before.retryCount ?? 0) ||
+      ((after.retryCount ?? 0) === (before.retryCount ?? 0) && turnProgress(after) < turnProgress(before)))));
 }
 
 export function EntityChatPage({token, config}: Props) {
@@ -63,7 +63,7 @@ export function EntityChatPage({token, config}: Props) {
   const enabled = Boolean(config.chat?.enabled);
   const lastTurn = detail?.turns?.at(-1);
   const latestFailed = !optimistic && lastTurn?.status === 'failed' ? lastTurn : undefined;
-  const retryMessage = latestFailed?.error === chatStartupDeadlineError ? detail?.messages.find(message => message.id === latestFailed.userMessageId && message.role === 'user') : undefined;
+  const retryMessage = latestFailed ? detail?.messages.find(message => message.id === latestFailed.userMessageId && message.role === 'user') : undefined;
   const retryPending = Boolean(optimistic && pending.current?.preserveDraft);
   const earlierFailures = detail?.turns?.filter(t => t.status === 'failed' && t.id !== latestFailed?.id) ?? [];
   const active = detail?.activeTurn ?? detail?.turns?.find(t => t.status === 'waiting' || t.status === 'queued' || t.status === 'running');
@@ -379,7 +379,8 @@ export function EntityChatPage({token, config}: Props) {
           <RemoteTurnActivity token={token} namespace={namespace} turn={active ?? (optimistic ? undefined : detail?.turns?.at(-1))} recoveryPending={detail?.recoveryPending} agentLabel={detail?.profileName || profile || harness}/>
 
           {detail?.turns?.flatMap(t => t.delegates ?? []).map(delivery => <div className="remote-turn-status" key={delivery.turnId}>{delivery.status === 'succeeded' ? `${delivery.profileName} replied.` : delivery.status === 'running' ? `${delivery.profileName} is working.` : delivery.status === 'failed' ? `${delivery.profileName} could not finish.` : `Message saved for ${delivery.profileName}.`} <button className="btn btn-ghost" disabled={busy} onClick={() => {const thread = threads.find(t => t.id === delivery.threadId); openThread(thread ?? {id: delivery.threadId, namespace, profileName: delivery.profileName, mode: 'persona', title: delivery.profileName, createdAt: '', updatedAt: '', createdBy: ''});}}>Open peer conversation</button></div>)}
-          {latestFailed && <div className="banner banner-error">Turn failed: {latestFailed.error || latestFailed.runName}{retryMessage && <button type="button" className="btn btn-ghost" disabled={busy || Boolean(active) || unavailable || initializing || !enabled} onClick={() => void submit(undefined, {content: retryMessage.content, forceNew: true})}>Retry last message</button>}</div>}
+          {latestFailed && <div className="banner banner-error"><span>Turn failed: {latestFailed.error || latestFailed.runName}</span>{retryMessage && <button type="button" className="btn btn-ghost" disabled={busy || Boolean(active) || unavailable || initializing || !enabled} onClick={() => void submit(undefined, {content: retryMessage.content, forceNew: true})}>Retry last message</button>}</div>}
+          {(active ?? lastTurn)?.attempts?.length ? <details className="remote-chat-caption"><summary>Earlier startup attempts ({(active ?? lastTurn)!.attempts!.length})</summary>{(active ?? lastTurn)!.attempts!.map(attempt => <p key={attempt.runName}>{attempt.error} <button type="button" className="btn btn-ghost" onClick={() => {setHistoricalOutput({runName: attempt.runName, backend}); setRawActivityOpen(true);}}>View attempt output</button></p>)}</details> : null}
           {earlierFailures.length > 0 && <details className="remote-chat-caption"><summary>Earlier failed turns ({earlierFailures.length})</summary>{earlierFailures.map(t => <p key={t.id}>Turn failed: {t.error || t.runName}</p>)}</details>}
           <div ref={end}/>
         </div>
