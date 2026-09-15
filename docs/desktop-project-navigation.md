@@ -41,3 +41,41 @@ the existing API already exposes both projects so no cluster rollout was needed.
 
 Approve. Physical touch-device interaction and a simultaneous second remote
 connection were not verified; no new animated motion was introduced.
+
+## Project manager conversations
+
+The designated manager appears in a separate Project manager section above
+Agents. Its existing avatar and standing thread remain its identity. The chat
+header adds a quiet role badge and a sentence about coordinating work,
+schedules, and agent instructions. The empty conversation suggests those
+requests; Conversation details explains that configured tools and project
+permissions govern changes and some changes require review.
+
+A profile can designate its presentation role with the source-owned label
+`control.anvil.hazyforge.io/chat-role: project-manager`. Explicit designations
+supersede the initial adapter's exact legacy identities:
+`anvilhub/anvil-primaris-agent-manager` and
+`hazy-trade/hazy-trade-agent-manager`. Any other nonempty chat-role on a legacy
+profile opts it out. Names merely containing manager do not qualify; a
+specialized book manager stays in Agents. Multiple explicit designations are
+shown under Project managers. Projects with no designation show only Agents.
+
+The first visit to a project opens its manager, then falls back to Desktop
+assistant or the available roster. Saved conversation selection or unfinished
+new-chat configuration always takes precedence. Selecting a manager only
+opens its standing conversation. It does not send a message, change harness,
+switch conversation mode, enable peer delegation, or grant any permissions.
+The designation is presentation metadata, never an authorization input.
+
+| Before | After | Why |
+| --- | --- | --- |
+| Manager mixed into alphabetic roster | Separate manager group above Agents | Makes the project's coordination entry obvious |
+| Same generic header for every agent | Small Project manager badge and role description | Explains who this conversation is with |
+| First visit chooses assistant or arbitrary profile | Prefer designated manager while retaining saved selection | Starts project conversations with the coordinator without losing drafts |
+
+Validation: production UI build, `make verify`, all 22 remote-chat browser
+scenarios including designation overrides, specialized-manager exclusion,
+first-visit selection, saved drafts, and unchanged conversation/delegation
+settings. Live Desktop inspection verified the Hazy Trade manager group and
+header; the previously selected agent was restored and no message was sent.
+This UI update needs no Helm rollout or change to fleet permissions.

@@ -37,6 +37,7 @@ await context.addInitScript(() => {
   sessionStorage.setItem('anvil-agents-desktop.accessToken', 'ui-contract-fixture-not-a-token');
   sessionStorage.setItem('anvil-agents-desktop.expiresAt', String(Date.now()+3600000));
 });
+const projectRosters = new Map();
 const profile = name => ({apiVersion:'control.anvil.hazyforge.io/v1alpha1',kind:'AgentRunProfile',metadata:{name},spec:{harnessProfileRef:{name:'codex-standard'}}});
 const harness = (name, kind) => ({kind:'AgentHarnessProfile',metadata:{name},spec:{backend:{kind}}});
 const config = {defaultNamespaces:['anvilhub','hazy-trade'],oidc:{issuer:'https://fixture.invalid',clientId:'fixture-console',audiences:['fixture'],scopes:['openid']},desktop:{oidcClientId:'fixture-native'},composition:{readEnabled:true,writeEnabled:true},runs:{createEnabled:true},chat:{enabled:true}};
@@ -52,7 +53,7 @@ await context.route('**/*', async route => {
   const m=path.match(/^\/api\/v1\/namespaces\/([^/]+)\/(.*)$/);
   if(!m) return reply(route,{},404);
   const [,ns,tail]=m;
-  if(tail==='agent-run-profiles') return reply(route,{items:[profile(ns==='anvilhub'?'agent-alpha':'agent-trade'),profile('agent-beta')]});
+  if(tail==='agent-run-profiles') return reply(route,{items:projectRosters.get(ns) || [profile(ns==='anvilhub'?'agent-alpha':'agent-trade'),profile('agent-beta')]});
   if(tail==='agent-harness-profiles') return reply(route,{items:[harness('codex-standard','codex'),harness('agy-review','agy')]});
   if(tail==='chat/threads' && request.method()==='GET') return reply(route,{items:[...threads.values()].filter(t=>t.namespace===ns && (!url.searchParams.get('profileName') || t.profileName===url.searchParams.get('profileName')))});
   if(tail==='chat/threads' && request.method()==='POST') {
@@ -556,6 +557,40 @@ try {
   await draftVisible('Draft while startup is delayed');
   assert.equal(await page.getByRole('button',{name:'Send',exact:true}).isEnabled(),true);
   console.log('PASS confirmed no-launch retry resends matching original with fresh key, preserves draft, and survives lost receipt/reload without duplicate execution');
+  const postsBeforeManager = posts.length;
+  const manager = profile('anvil-primaris-agent-manager');
+  const specialist = profile('aster-book-manager');
+  projectRosters.set('anvilhub',[profile('desktop-assistant'),profile('agent-alpha'),manager,specialist]);
+  await page.reload();
+  await draftVisible('Draft while startup is delayed');
+  assert.equal(await page.locator('.agent-row-selected').getAttribute('title'),'agent-alpha');
+  assert.equal(await page.getByRole('region',{name:'Project manager',exact:true}).locator('.agent-row').getAttribute('title'),manager.metadata.name);
+  assert.equal(await page.getByRole('region',{name:'Agents',exact:true}).locator('.agent-row[title="aster-book-manager"]').count(),1);
+  assert.equal(await page.locator('.agent-role-badge').count(),0);
+  // First visits prefer the designated manager; saved selections above win.
+  await page.evaluate(()=>{
+    sessionStorage.removeItem('anvil-agents-desktop.chat.selected.'+JSON.stringify(['anvilhub','']));
+    sessionStorage.removeItem('anvil-agents-desktop.chat.new-config.'+JSON.stringify(['anvilhub','']));
+  });
+  await page.reload(); await draftVisible('');
+  assert.equal(await page.locator('.agent-row-selected').getAttribute('title'),manager.metadata.name);
+  assert.equal(await page.locator('.agent-role-badge').textContent(),'Project manager');
+  await configuration();
+  assert.equal(await page.getByLabel('Role',{exact:true}).inputValue(),'persona');
+  assert.equal(await page.getByLabel('Allow this agent to delegate messages',{exact:true}).isChecked(),false);
+  await openAgent('agent-alpha'); await draftVisible('Draft while startup is delayed');
+  // Explicit metadata supersedes the legacy identity, regardless of its name.
+  const custom = profile('project-guide');
+  custom.metadata.labels={'control.anvil.hazyforge.io/chat-role':'project-manager'};
+  projectRosters.set('anvilhub',[profile('agent-alpha'),manager,custom,specialist]);
+  await page.reload(); await draftVisible('Draft while startup is delayed');
+  assert.equal(await page.getByRole('region',{name:'Project manager',exact:true}).locator('.agent-row').getAttribute('title'),'project-guide');
+  assert.equal(await page.getByRole('region',{name:'Agents',exact:true}).locator('.agent-row[title="anvil-primaris-agent-manager"]').count(),1);
+  await openAgent('project-guide'); await draftVisible('');
+  assert.equal(await page.locator('.agent-role-badge').textContent(),'Project manager');
+  assert.equal(posts.length,postsBeforeManager);
+  assert.deepEqual(errors,[]);
+  console.log('PASS manager grouping, exact legacy designation, explicit override, first-visit default, retained drafts, and unchanged delegation authority');
   config.chat.enabled=false;
   await page.reload();
   await visible('Remote chat is not enabled on this server.');

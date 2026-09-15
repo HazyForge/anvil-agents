@@ -6,7 +6,7 @@ import { loadNamespace, saveNamespace } from '../state/namespace';
 import { readChatDraft, saveChatDraft, readSelectedChat, saveSelectedChat, readNewChatConfig, saveNewChatConfig, type NewChatConfig } from '../state/chatWorkspace';
 import { RemoteTurnActivity } from '../components/RemoteTurnActivity';
 import { AgentAvatar } from '../components/AgentAvatar';
-import { ProjectSwitcher, remoteChatProjects } from '../components/ProjectSwitcher';
+import { ProjectSwitcher, remoteChatProjects, projectManagers } from '../components/ProjectSwitcher';
 import { LiveStream } from '../components/LiveStream';
 import { ensureAccessToken } from '../auth/oidc';
 import { chatStartupDeadlineError } from '../api/turnWait';
@@ -68,6 +68,8 @@ export function EntityChatPage({token, config}: Props) {
   const earlierFailures = detail?.turns?.filter(t => t.status === 'failed' && t.id !== latestFailed?.id) ?? [];
   const active = detail?.activeTurn ?? detail?.turns?.find(t => t.status === 'waiting' || t.status === 'queued' || t.status === 'running');
   const roster = [...profiles].sort((a, b) => Number(b.metadata.name === 'desktop-assistant') - Number(a.metadata.name === 'desktop-assistant') || a.metadata.name.localeCompare(b.metadata.name));
+  const managers = projectManagers(roster, namespace);
+  const isManager = managers.some(agent => agent.metadata.name === profile);
   const selectedProfile = profiles.find(p => p.metadata.name === profile);
   const effectiveHarness = harness || harnessRefFromRunProfile(selectedProfile);
   const selectedHarness = harnesses.find(h => h.metadata.name === effectiveHarness);
@@ -115,7 +117,7 @@ export function EntityChatPage({token, config}: Props) {
           openThread(thread);
         } else {
           const saved = readNewChatConfig(namespace);
-          const preferred = ps.find(p => p.metadata.name === saved?.profile) ?? ps.find(p => p.metadata.name === 'desktop-assistant') ?? ps[0];
+          const preferred = ps.find(p => p.metadata.name === saved?.profile) ?? projectManagers(ps, namespace)[0] ?? ps.find(p => p.metadata.name === 'desktop-assistant') ?? ps[0];
           if (preferred && !saved) { void openAgent(preferred.metadata.name); return; }
           restoreNewChat(ps);
         }
@@ -316,14 +318,19 @@ export function EntityChatPage({token, config}: Props) {
           setThreadID(''); setDetail(null); setDraft(''); setOptimistic(null); setError('');
           setInitializing(true); setNamespace(next);
         }}/>
-        <h2 className="agent-roster-heading">Your agents</h2>
-        {roster.map(agent => {
-          const name = agent.metadata.name;
-          return <button type="button" className={`agent-row ${profile === name ? 'agent-row-selected' : ''}`} key={name} title={name} aria-pressed={profile === name} onClick={() => void openAgent(name)} disabled={busy || !enabled}>
-            <AgentAvatar name={agentName(name)} identity={`${namespace}/${name}`}/>
-            <span className="agent-row-copy"><span className="agent-name">{agentName(name)}</span><span className="agent-meta">{profile === name && initializing ? 'Opening conversation…' : 'Standing conversation'}</span></span>
-          </button>;
-        })}
+        {[
+          {label: managers.length > 1 ? 'Project managers' : 'Project manager', agents: managers, manager: true},
+          {label: 'Agents', agents: roster.filter(agent => !managers.includes(agent)), manager: false},
+        ].filter(group => group.agents.length).map(group => <section key={group.label} className={`agent-roster-group ${group.manager ? 'agent-manager-group' : ''}`} aria-label={group.label}>
+          <h2 className="agent-roster-heading">{group.label}</h2>
+          {group.agents.map(agent => {
+            const name = agent.metadata.name;
+            return <button type="button" className={`agent-row ${profile === name ? 'agent-row-selected' : ''}`} key={name} title={name} aria-pressed={profile === name} onClick={() => void openAgent(name)} disabled={busy || !enabled}>
+              <AgentAvatar name={agentName(name)} identity={`${namespace}/${name}`}/>
+              <span className="agent-row-copy"><span className="agent-name">{agentName(name)}</span><span className="agent-meta">{profile === name && initializing ? 'Opening conversation…' : group.manager ? 'Coordinates this project' : 'Standing conversation'}</span></span>
+            </button>;
+          })}
+        </section>)}
         {!profiles.length && <p className="agent-empty">{loading ? 'Loading agents…' : `No agents are available in ${selectedProject?.name || 'this project'}.`}</p>}
         <details className="agent-settings"><summary>Other chats</summary>
           <button type="button" className="btn btn-ghost" onClick={() => newChat(true)} disabled={busy || initializing}>Chat with a harness</button>
@@ -332,12 +339,13 @@ export function EntityChatPage({token, config}: Props) {
       <section className="panel entity-chat-main">
         <header className="agent-chat-header">
           <div className="agent-chat-identity"><AgentAvatar name={agentName(profile || harness || 'Harness')} identity={`${namespace}/${profile || harness || 'harness'}`} size="lg"/>
-            <div><h2 className="agent-name" title={profile || harness}>{profile || harness ? agentName(profile || harness) : 'Chat with a harness'}</h2><p className="agent-meta">{initializing ? 'Opening your conversation…' : profile ? (standingIDs[profile] === threadID ? 'Standing conversation' : 'Saved conversation') : 'Choose a remote harness below'}</p></div>
+            <div>{isManager && <span className="agent-role-badge">Project manager</span>}<h2 className="agent-name" title={profile || harness}>{profile || harness ? agentName(profile || harness) : 'Chat with a harness'}</h2><p className="agent-meta">{initializing ? 'Opening your conversation…' : profile ? (standingIDs[profile] === threadID ? 'Standing conversation' : 'Saved conversation') : 'Choose a remote harness below'}</p>{isManager && <p className="agent-manager-description">Coordinates work, schedules, and agent instructions for {selectedProject?.name || 'this project'}.</p>}</div>
           </div>
         </header>
         <details className="agent-settings" key={threadID || 'new'} open={!threadID && !profile}>
           <summary>Conversation details</summary>
           <p className="remote-chat-caption">Project: {selectedProject?.name}. Namespace: <code>{namespace}</code></p>
+          {isManager && <p className="remote-chat-caption">Changes follow this agent’s configured tools and project permissions. Some changes may require review.</p>}
           {profile && <button type="button" className="btn btn-ghost" disabled={busy || initializing || standingIDs[profile] === threadID} onClick={() => void openAgent(profile)}>Open standing conversation</button>}
           {threads.some(thread => profile ? thread.profileName === profile : !thread.profileName) && <label className="field"><span className="label">Conversation history</span><select className="input" aria-label="Conversation history" value={threadID} disabled={busy || initializing} onChange={e => {const thread = threads.find(item => item.id === e.target.value); if (thread) openThread(thread);}}>
             {!threadID && <option value="">Choose a previous conversation</option>}
@@ -350,7 +358,7 @@ export function EntityChatPage({token, config}: Props) {
           {!detail?.messages.length && !optimistic && <div className="agent-empty">
             <AgentAvatar name={agentName(profile || harness || 'Agent')} identity={`${namespace}/${profile || harness || 'harness'}`} size="lg"/>
             <h3>{unavailable ? 'Conversation unavailable' : initializing || (threadID && !detail) ? 'Opening conversation…' : profile ? `Talk with ${agentName(profile)}` : 'Chat with a harness'}</h3>
-            <p>{unavailable ? 'Your draft is preserved. Select the agent to try again.' : profile ? 'Your messages and replies stay here as you work together.' : 'Choose a harness in Conversation details to begin.'}</p>
+            <p>{unavailable ? 'Your draft is preserved. Select the agent to try again.' : isManager ? 'Plan work, review what your agents are doing, or ask for changes to their schedules and instructions.' : profile ? 'Your messages and replies stay here as you work together.' : 'Choose a harness in Conversation details to begin.'}</p>
           </div>}
           {detail?.messages.map(message => {
             if (message.role === 'system') {

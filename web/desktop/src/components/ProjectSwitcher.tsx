@@ -1,3 +1,4 @@
+import type { CompositionDocument } from '../api/client';
 import { DesktopIcon } from './AgentAvatar';
 
 export type ChatProject = {id: string; name: string};
@@ -23,4 +24,18 @@ export function ProjectSwitcher({projects, selected, disabled, onChange}: {
       </select>
     </span>
   </label>;
+}
+
+// Presentation metadata only; execution permissions remain with the Hub policy.
+// Exact legacy identities bridge existing installations until their source-owned
+// profiles adopt the label. A specialized "manager" name is not a designation.
+export function projectManagers(profiles: CompositionDocument[], project: string): CompositionDocument[] {
+  const roleLabel = 'control.anvil.hazyforge.io/chat-role';
+  const designated = profiles.filter(profile => profile.metadata.labels?.[roleLabel] === 'project-manager');
+  if (designated.length) return designated;
+  const legacy: Record<string, string> = {
+    anvilhub: 'anvil-primaris-agent-manager',
+    'hazy-trade': 'hazy-trade-agent-manager',
+  };
+  return profiles.filter(profile => profile.metadata.name === legacy[project] && !profile.metadata.labels?.[roleLabel]);
 }
