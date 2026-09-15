@@ -21,6 +21,7 @@ cross-project aggregate rosters are not implemented by this UI pass.
 
 | Severity | Location | Before | After | Why |
 | --- | --- | --- | --- | --- |
+| High | remoteChat.ts empty history | New standing chats could receive null messages and render a blank page | Normalize empty messages/turns to arrays | Makes first project conversations usable |
 | Medium | EntityChatPage.tsx sidebar | Namespace buried in collapsed Workspace | Visible Project selector above agents | Makes Hazy Trade discoverable |
 | Low | App.tsx location switch | Workspace ambiguously described Local/Primaris | Location labels execution placement | Keeps project grouping distinct |
 | Low | EntityChatPage.tsx project transition | Previous roster retained until effect | Clear roster and conversation immediately | Avoids showing the wrong project's agents |
@@ -33,8 +34,9 @@ implementation persists drafts on input (not in a namespace/draft effect), and
 browser tests plus live round trips verified draft restoration and spacing.
 
 Validation: `make verify`, all 21 remote-chat browser fixtures, production UI
-build, live authorized Hazy Trade roster, Anvil-to-Hazy-Trade round trips and
-preserved existing Anvil draft. The local installed UI was updated directly;
+build, nullable empty-history fixtures, live authorized Hazy Trade roster, Anvil-to-Hazy-Trade round trips and
+preserved existing Anvil draft. A final reload verified the Hazy Trade manager
+empty chat is ready to receive a message. The local installed UI was updated directly;
 the existing API already exposes both projects so no cluster rollout was needed.
 
 Approve. Physical touch-device interaction and a simultaneous second remote

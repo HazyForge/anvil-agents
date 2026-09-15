@@ -29,8 +29,11 @@ export async function listRemoteThreads(token: string, ns: string, signal?: Abor
   const filter = profileName ? `&profileName=${encodeURIComponent(profileName)}` : '';
   return (await json<{items: RemoteThread[]}>(`${base(ns)}?limit=200${filter}`, token, {signal})).items ?? [];
 }
-export function getRemoteThread(token: string, ns: string, id: string, signal?: AbortSignal) {
-  return json<RemoteThreadDetail>(`${base(ns)}/${encodeURIComponent(id)}`, token, {signal});
+export async function getRemoteThread(token: string, ns: string, id: string, signal?: AbortSignal) {
+  const detail = await json<RemoteThreadDetail>(`${base(ns)}/${encodeURIComponent(id)}`, token, {signal});
+  // Empty persisted Go slices may be encoded as null. Consumers need an empty
+  // transcript for a new standing conversation, not a render-time exception.
+  return {...detail, messages: detail.messages ?? [], turns: detail.turns ?? []};
 }
 export function createRemoteThread(token: string, ns: string, body: {
   profileName?: string; harnessProfileName?: string; metadata?: {coordination: {enabled: boolean; allowedProfiles: string[]}}; mode: 'persona' | 'fleet'; title: string;

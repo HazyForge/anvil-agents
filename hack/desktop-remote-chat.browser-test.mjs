@@ -86,6 +86,9 @@ await context.route('**/*', async route => {
       detailGets.set(t.id,(detailGets.get(t.id)||0)+1);
       if(deniedDetails.has(t.id)) return reply(route,{error:{code:'not_found',message:'Fixture access denied'}},deniedDetails.get(t.id));
       const snapshot=structuredClone(withheldDetails.get(t.id)||t);
+      // Match the live API's empty persisted Go slices for new standing chats.
+      if(snapshot.messages.length===0) snapshot.messages=null;
+      if(snapshot.turns.length===0) snapshot.turns=null;
       const held=heldDetailReads.get(t.id);
       if(held) {heldDetailReads.delete(t.id); held.started(); await held.gate;}
       return reply(route,snapshot);
