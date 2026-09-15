@@ -12,8 +12,8 @@ export function AgentAvatar({name, identity = name, size = 'sm'}: {name: string;
   </span>;
 }
 
-export function DesktopIcon({kind}: {kind: 'chat' | 'activity' | 'harness' | 'forge'}) {
+export function DesktopIcon({kind}: {kind: 'chat' | 'activity' | 'harness' | 'forge' | 'project'}) {
   return <svg className="desktop-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-    {kind === 'chat' ? <><path d="M5 4h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H9l-6 3V6a2 2 0 0 1 2-2Z"/><path d="M8 9h8M8 13h5"/></> : kind === 'activity' ? <><path d="M3 12h4l3-7 4 14 3-7h4"/></> : kind === 'harness' ? <><path d="m8 7-5 5 5 5m8-10 5 5-5 5m-3-13-2 18"/></> : <><path d="M3 5h18v4l-6 3H9L3 9ZM10 12v5l-4 3h12l-4-3v-5"/></>}
+    {kind === 'project' ? <path d="M3 7V5a1 1 0 0 1 1-1h5l2 3h9a1 1 0 0 1 1 1v11a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1Z"/> : kind === 'chat' ? <><path d="M5 4h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H9l-6 3V6a2 2 0 0 1 2-2Z"/><path d="M8 9h8M8 13h5"/></> : kind === 'activity' ? <><path d="M3 12h4l3-7 4 14 3-7h4"/></> : kind === 'harness' ? <><path d="m8 7-5 5 5 5m8-10 5 5-5 5m-3-13-2 18"/></> : <><path d="M3 5h18v4l-6 3H9L3 9ZM10 12v5l-4 3h12l-4-3v-5"/></>}
   </svg>;
 }

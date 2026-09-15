@@ -6,6 +6,7 @@ import { loadNamespace, saveNamespace } from '../state/namespace';
 import { readChatDraft, saveChatDraft, readSelectedChat, saveSelectedChat, readNewChatConfig, saveNewChatConfig, type NewChatConfig } from '../state/chatWorkspace';
 import { RemoteTurnActivity } from '../components/RemoteTurnActivity';
 import { AgentAvatar } from '../components/AgentAvatar';
+import { ProjectSwitcher, remoteChatProjects } from '../components/ProjectSwitcher';
 import { LiveStream } from '../components/LiveStream';
 import { ensureAccessToken } from '../auth/oidc';
 import { chatStartupDeadlineError } from '../api/turnWait';
@@ -78,7 +79,8 @@ export function EntityChatPage({token, config}: Props) {
   // Opening a different thread/turn must not carry an expanded raw log panel
   // into new work. Completed turns keep the same run and remain inspectable.
   useEffect(() => { setRawActivityOpen(false); setHistoricalOutput(undefined); }, [namespace, threadID, currentOutputRun]);
-  const namespaces = [...new Set([...config.defaultNamespaces, namespace])];
+  const projects = remoteChatProjects(config.defaultNamespaces, namespace);
+  const selectedProject = projects.find(project => project.id === namespace);
   const optimisticVisible = optimistic && !detail?.turns?.some(turn => optimistic.requestId && turn.requestId === optimistic.requestId);
 
   useEffect(() => {
@@ -307,11 +309,14 @@ export function EntityChatPage({token, config}: Props) {
     {error && <div className="banner banner-error" role="alert">{error}</div>}
     <div className="remote-chat-layout">
       <aside className="panel remote-chat-sidebar agent-roster" aria-label="Agents">
+        <ProjectSwitcher projects={projects} selected={namespace} disabled={busy} onChange={next => {
+          if (next === namespace) return;
+          navigation.current++; agentRequest.current?.abort(); saveNamespace(next);
+          setProfiles([]); setHarnesses([]); setThreads([]); setProfile(''); setHarness('');
+          setThreadID(''); setDetail(null); setDraft(''); setOptimistic(null); setError('');
+          setInitializing(true); setNamespace(next);
+        }}/>
         <h2 className="agent-roster-heading">Your agents</h2>
-        <details className="agent-settings"><summary>Workspace</summary>
-        <label className="field"><span className="label">Namespace</span><select className="input" aria-label="Namespace" value={namespace} disabled={busy} onChange={e => {if (e.target.value === namespace) return; navigation.current++; agentRequest.current?.abort(); saveNamespace(e.target.value); setThreadID(''); setDetail(null); setInitializing(true); setNamespace(e.target.value);}}>
-          {namespaces.map(ns => <option key={ns}>{ns}</option>)}
-        </select></label></details>
         {roster.map(agent => {
           const name = agent.metadata.name;
           return <button type="button" className={`agent-row ${profile === name ? 'agent-row-selected' : ''}`} key={name} title={name} aria-pressed={profile === name} onClick={() => void openAgent(name)} disabled={busy || !enabled}>
@@ -319,7 +324,7 @@ export function EntityChatPage({token, config}: Props) {
             <span className="agent-row-copy"><span className="agent-name">{agentName(name)}</span><span className="agent-meta">{profile === name && initializing ? 'Opening conversation…' : 'Standing conversation'}</span></span>
           </button>;
         })}
-        {!profiles.length && <p className="agent-empty">{loading ? 'Loading agents…' : 'No agents are available in this namespace.'}</p>}
+        {!profiles.length && <p className="agent-empty">{loading ? 'Loading agents…' : `No agents are available in ${selectedProject?.name || 'this project'}.`}</p>}
         <details className="agent-settings"><summary>Other chats</summary>
           <button type="button" className="btn btn-ghost" onClick={() => newChat(true)} disabled={busy || initializing}>Chat with a harness</button>
         </details>
@@ -332,6 +337,7 @@ export function EntityChatPage({token, config}: Props) {
         </header>
         <details className="agent-settings" key={threadID || 'new'} open={!threadID && !profile}>
           <summary>Conversation details</summary>
+          <p className="remote-chat-caption">Project: {selectedProject?.name}. Namespace: <code>{namespace}</code></p>
           {profile && <button type="button" className="btn btn-ghost" disabled={busy || initializing || standingIDs[profile] === threadID} onClick={() => void openAgent(profile)}>Open standing conversation</button>}
           {threads.some(thread => profile ? thread.profileName === profile : !thread.profileName) && <label className="field"><span className="label">Conversation history</span><select className="input" aria-label="Conversation history" value={threadID} disabled={busy || initializing} onChange={e => {const thread = threads.find(item => item.id === e.target.value); if (thread) openThread(thread);}}>
             {!threadID && <option value="">Choose a previous conversation</option>}

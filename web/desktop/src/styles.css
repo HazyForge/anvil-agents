@@ -712,6 +712,14 @@ a { color: var(--teal); text-decoration: none; }
 .agent-roster .field { padding: 0 10px; }
 .agent-roster .label { text-transform: none; letter-spacing: 0; font-size: 12px; color: var(--text-dim); }
 .agent-roster .input { background: transparent; border-color: var(--border); border-radius: 7px; min-height: 36px; }
+.chat-project-switcher { display: grid; gap: 7px; padding: 0 8px 16px; margin-bottom: 4px; border-bottom: 1px solid var(--border); }
+.chat-project-label { color: var(--text-dim); font-size: 12px; padding-left: 2px; }
+.chat-project-control { position: relative; display: flex; align-items: center; min-width: 0; }
+.chat-project-control > .desktop-icon { position: absolute; left: 12px; width: 18px; height: 18px; color: var(--text-dim); pointer-events: none; }
+.chat-project-control select { width: 100%; min-width: 0; min-height: 44px; padding: 9px 12px 9px 38px; border: 1px solid var(--border); border-radius: 9px; background: var(--bg-hover); color: var(--text); font: inherit; font-size: 14px; font-weight: 500; cursor: pointer; }
+.chat-project-control select:focus-visible { outline: 2px solid var(--emerald); outline-offset: 2px; }
+.chat-project-control select:disabled { cursor: wait; opacity: .6; }
+.chat-project-control option { background: var(--bg-base); color: var(--text); }
 .agent-roster .btn { font-size: 12px; text-transform: none; letter-spacing: 0; border-radius: 7px; text-align: left; min-height: 36px; color: var(--text-dim); }
 .agent-row { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 68px; padding: 12px; border: 1px solid transparent; border-radius: 12px; background: transparent; color: var(--text); text-align: left; transition: background-color 120ms ease, color 120ms ease, border-color 120ms ease; }
 .agent-row-selected { background: rgba(61, 255, 168, .065); border-color: rgba(61, 255, 168, .18); }

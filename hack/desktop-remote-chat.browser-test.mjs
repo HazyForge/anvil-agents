@@ -137,7 +137,7 @@ const openHistory = async id => {
   await page.getByLabel('Conversation history',{exact:true}).selectOption(id);
   await page.waitForFunction(()=>!document.querySelector('textarea[aria-label="Message"]')?.disabled);
 };
-const namespace = async name => {await openDetails('Workspace'); await page.getByLabel('Namespace',{exact:true}).selectOption(name); await page.waitForFunction(()=>!document.querySelector('textarea[aria-label="Message"]')?.disabled);};
+const namespace = async name => {await page.getByLabel('Project',{exact:true}).selectOption(name); await page.waitForFunction(()=>!document.querySelector('textarea[aria-label="Message"]')?.disabled);};
 const complete = (id,text,failed=false) => {
   const t=threads.get(id); const turn=t.activeTurn;
   turn.status=failed?'failed':'succeeded'; if(failed)turn.error=text;
@@ -370,7 +370,10 @@ try {
   assert.equal(await page.getByLabel('Message',{exact:true}).inputValue(),'Unsent new AGY conversation');
   assert.equal(await page.getByLabel('Remote harness').inputValue(),'agy-review');
   console.log('PASS independent thread drafts and unfinished new-conversation configuration survive sidebar/reload');
+  await page.getByLabel('Project',{exact:true}).waitFor({state:'visible'});
+  assert.deepEqual(await page.getByLabel('Project',{exact:true}).locator('option').allTextContents(),['Anvil','Hazy Trade']);
   await namespace('hazy-trade');
+  assert.equal(await page.getByRole('button',{name:'Agent alpha Standing conversation',exact:true}).count(),0);
   await newConversation();
   await page.getByLabel('Agent',{exact:true}).selectOption('agent-trade');
   assert.equal(await page.getByText('Fixture second conversation response',{exact:true}).count(),0);

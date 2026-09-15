@@ -166,7 +166,7 @@ export default function App() {
   );
   const chat = <>
     <div className="chat-location" role="group" aria-label="Chat execution location">
-      <span className="chat-location-label">Workspace</span>
+      <span className="chat-location-label">Location</span>
       <button aria-pressed={chatLocation === 'local'} className={`btn ${chatLocation === 'local' ? 'btn-primary' : 'btn-ghost'}`} disabled={localChatBusy} onClick={() => {setChatLocation('local'); try {localStorage.setItem('anvil-agents-desktop.chat-location', 'local');} catch { /* In-memory selection remains. */ }}}>Local</button>
       <button aria-pressed={chatLocation === 'remote'} className={`btn ${chatLocation === 'remote' ? 'btn-primary' : 'btn-ghost'}`} disabled={localChatBusy} onClick={() => {setChatLocation('remote'); try {localStorage.setItem('anvil-agents-desktop.chat-location', 'remote');} catch { /* In-memory selection remains. */ }}}>Primaris</button>
     </div>
