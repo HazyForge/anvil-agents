@@ -245,3 +245,16 @@ session files and runner logs serve separate execution/debugging purposes.
 A successful model exit is not itself proof that an answer is durably saved.
 Recovery must commit the verified answer before claiming the completed history
 is repaired; it must not turn a history read into a fresh model execution.
+
+
+The durable repair is deployed via direct Helm revision 29, API image
+`sha256:7e85685edacae5dd34c923977260b6ab737956ba4eeba5c58b3875c01f4cfa3e`
+(source `4db442e`). The healthy controller remained unchanged. In the actual
+authenticated Desktop, three full reloads each retained the identical 1,013-
+character answer through ten seconds of automatic refreshes, with four existing
+user messages and an enabled composer. The original successful
+`chat-turn-333441c79e2202e9c0bebc7707988e66250eff3e` is still the newest run.
+No new execution or duplicate assistant message was created for recovery.
+`make verify`, package race tests, real PostgreSQL concurrency tests, and all
+25 browser fixture scenarios passed. A bounded Grok review timed out without
+a result; it is not counted as passing independent review.

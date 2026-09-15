@@ -70,7 +70,7 @@ api:
       value: "true"
   # API-only chat fixes can roll independently of the healthy controller.
   image:
-    reference: ghcr.io/hazyforge/anvil-agents@sha256:5c7217e2ab0b951792a7692031c146c9675d8770aae7d411e3f6078c8ea7f39f
+    reference: ghcr.io/hazyforge/anvil-agents@sha256:7e85685edacae5dd34c923977260b6ab737956ba4eeba5c58b3875c01f4cfa3e
   enabled: true
   extraVolumes:
     - name: chat-database-ca
