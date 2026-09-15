@@ -494,6 +494,10 @@ try {
   assert.equal(eventGets.get('legacy-hermes-run'),1);
   assert.equal(await page.locator('.chat-bubble').filter({hasText:debugMarker}).count(),0);
   await page.getByText('Reasoning and runner output',{exact:true}).click();
+  // Native details closes before its queued toggle event updates React. Wait
+  // for unmount as well as hiding: closing must stop the raw log subscriber.
+  await page.getByText(debugMarker,{exact:true}).waitFor({state:'hidden'});
+  await page.getByText(debugMarker,{exact:true}).waitFor({state:'detached'});
   assert.equal(await page.getByText(debugMarker,{exact:true}).count(),0);
   console.log('PASS completed turns and legacy Hermes reasoning stay inspectable only in explicitly opened authenticated runner output');
   config.chat.enabled=false;
