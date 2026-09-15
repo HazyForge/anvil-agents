@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { turnWaitFeedback } from '../api/turnWait';
 import { openAgentRunStream } from '../api/stream';
 import { activityFromLog, type RunActivity } from '../api/runActivity';
 import type { RemoteTurn } from '../api/remoteChat';
@@ -10,13 +11,15 @@ interface Props {
   namespace: string;
   turn?: RemoteTurn;
   agentLabel?: string;
+  recoveryPending?: boolean;
 }
 type ActivityRow = RunActivity & { at: number };
 const done = (status?: string) => status === 'succeeded' || status === 'failed';
 
 /** Public runner events, kept separate from the agent's answer. */
-export function RemoteTurnActivity({token, namespace, turn, agentLabel}: Props) {
+export function RemoteTurnActivity({token, namespace, turn, agentLabel, recoveryPending}: Props) {
   const [rows, setRows] = useState<ActivityRow[]>([]);
+  const [workObserved, setWorkObserved] = useState(false);
   const [connection, setConnection] = useState('Connecting to agent activity…');
   const [now, setNow] = useState(Date.now());
   const [lastUpdate, setLastUpdate] = useState(Date.now());
@@ -31,8 +34,8 @@ export function RemoteTurnActivity({token, namespace, turn, agentLabel}: Props) 
   finished.current = done(status);
 
   useEffect(() => {
-    setRows([]); setTerminalPhase(''); setTerminalLabel('Agent could not finish this turn'); setRunnerBlocker(undefined); setConnection('Connecting to agent activity…');
-    mountedAt.current = Date.now(); setLastUpdate(Date.now());
+    setRows([]); setWorkObserved(false); setTerminalPhase(''); setTerminalLabel('Agent could not finish this turn'); setRunnerBlocker(undefined); setConnection('Connecting to agent activity…');
+    mountedAt.current = Date.now(); setNow(Date.now()); setLastUpdate(Number.isFinite(acceptedAt) ? Math.min(acceptedAt!, Date.now()) : Date.now());
     if (!runName) return;
     let cancelled = false;
     let stopped = false;
@@ -50,7 +53,6 @@ export function RemoteTurnActivity({token, namespace, turn, agentLabel}: Props) 
       if (seen.size > 400) seen.delete(seen.values().next().value!);
       const parsed = timestamp ? Date.parse(timestamp) : NaN;
       const at = Number.isFinite(parsed) && parsed > 0 ? parsed : Date.now();
-      setLastUpdate(Date.now());
       setRows(previous => [...previous, {...item, at}].slice(-80));
     };
     const connect = () => {
@@ -86,7 +88,14 @@ export function RemoteTurnActivity({token, namespace, turn, agentLabel}: Props) 
             if (Number.isFinite(logTime) && logTime > 0 && logTime < latestLogTime) return;
             if (Number.isFinite(logTime) && logTime > 0) latestLogTime = logTime;
             const activity = activityFromLog(payload.line ?? '');
-            if (activity) append(activity, payload.timestamp);
+            if (activity) {
+              if (activity.kind === 'work' || activity.kind === 'reply') setWorkObserved(true);
+              // A repeated native activity is still evidence of liveness, while
+              // replayed timestamped tails must not appear newly active.
+              const at = Number.isFinite(logTime) && logTime > 0 ? Math.min(logTime, Date.now()) : Date.now();
+              setLastUpdate(previous => Math.max(previous, at));
+              append(activity, payload.timestamp);
+            }
           } else if (event === 'error') {
             if (['http_401', 'token_expired'].includes(payload.code ?? '') && rejectedToken !== streamToken) {
               rejectedToken = streamToken;
@@ -140,14 +149,18 @@ export function RemoteTurnActivity({token, namespace, turn, agentLabel}: Props) 
   if (!turn) return null;
   const elapsed = Math.max(0, Math.floor((now - (Number.isFinite(acceptedAt) ? acceptedAt! : mountedAt.current)) / 1000));
   const latest = rows.at(-1);
+  const cannotCheck = recoveryPending && !done(status) && !terminalPhase;
+  const wait = cannotCheck ? {tone: 'delayed', label: 'Cannot check agent progress right now. Your message is saved.', note: 'Waiting for the server to reconnect to the runner. Keep your draft; sending will become available when the server confirms this turn has finished.'} : turnWaitFeedback(terminalPhase === 'Succeeded' ? 'succeeded' : terminalPhase === 'Failed' || terminalPhase === 'NeedsHuman' ? 'failed' : status, elapsed, Math.max(0, (now - lastUpdate) / 1000), workObserved);
   const label = status === 'failed' || terminalPhase === 'Failed' || terminalPhase === 'NeedsHuman' ? (chatFailureLabel(turn.error) || terminalLabel)
     : status === 'succeeded' ? 'Reply received'
     : terminalPhase === 'Succeeded' ? 'Harness finished; saving the reply'
+    : cannotCheck ? 'Cannot check agent progress right now. Your message is saved.'
     : runnerBlocker ? runnerBlocker
+    : wait?.label ? wait.label
     : status === 'waiting' ? 'Message saved; waiting for this agent to become available'
     : latest?.label || (status === 'queued' ? 'Message received; waiting for the agent to start' : 'Preparing the remote runner');
   const quiet = !done(status) && now - lastUpdate > 15000;
-  return <section className={`turn-activity${done(status) ? ' turn-activity-finished' : ''}`} aria-label="Agent activity">
+  return <section className={`turn-activity${done(status) ? ' turn-activity-finished' : ''}${wait ? ` turn-activity-${wait.tone}` : ''}`} aria-label="Agent activity">
     <div className="turn-activity-heading">
       <span className={`turn-activity-indicator${status === 'failed' || terminalPhase === 'Failed' || terminalPhase === 'NeedsHuman' ? ' is-error' : ''}`} aria-hidden="true"/>
       <div><span className="turn-activity-agent">{agentLabel || 'Remote agent'}</span><p role="status">{label}</p></div>
@@ -156,7 +169,8 @@ export function RemoteTurnActivity({token, namespace, turn, agentLabel}: Props) 
     {rows.length > 0 && <ol className="turn-activity-events" aria-label="Reported actions">
       {rows.slice(-4).map(row => <li key={row.key} className={`activity-${row.kind}`}><span>{row.label}</span><time dateTime={new Date(row.at).toISOString()}>{new Date(row.at).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit', second: '2-digit'})}</time></li>)}
     </ol>}
-    {!done(status) && (quiet || connection !== 'Connected to agent activity') && <p className="turn-activity-note">{quiet && connection === 'Connected to agent activity' ? 'No new activity reported recently. Waiting for the next update.' : connection}</p>}
+    {wait?.note && <p className="turn-activity-note">{wait.note}</p>}
+    {!wait?.note && !done(status) && (quiet || connection !== 'Connected to agent activity') && <p className="turn-activity-note">{quiet && connection === 'Connected to agent activity' ? 'No new activity reported recently. Waiting for the next update.' : connection}</p>}
     {rows.length > 4 && <details className="turn-activity-history"><summary>Earlier activity ({rows.length - 4})</summary><ol>{rows.slice(0, -4).map(row => <li key={row.key}>{row.label}</li>)}</ol></details>}
   </section>;
 }

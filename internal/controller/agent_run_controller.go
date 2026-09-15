@@ -192,6 +192,11 @@ func (r *AgentRunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		obj.Status = status
 		return r.patchAgentRunStatus(ctx, original, obj, false)
 	}
+	if job == nil {
+		if handled, result, err := r.reconcileAgentRunChatStartupDeadline(ctx, original, obj, &status, now); handled {
+			return result, err
+		}
+	}
 	jobNeedsValidation := job != nil && status.JobRef == nil
 	if job != nil && status.JobUID == "" && agentRunLaunchReceiptComplete(&status) {
 		if status.JobCreateAttemptedAt == nil {
@@ -486,6 +491,11 @@ func (r *AgentRunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		}
 		if err := validateAgentRunLaunchPlan(&status, desiredJob, payload, promptHash, resolvedComposition, dataVolumes); err != nil {
 			return ctrl.Result{}, err
+		}
+		// Preflight can span the deadline. Reconcile again to perform the
+		// authoritative absence check before persisting any create attempt.
+		if agentRunChatStartupExpired(obj, &status, time.Now()) {
+			return ctrl.Result{Requeue: true}, nil
 		}
 		if status.JobCreateAttemptedAt == nil {
 			attemptedAt := now

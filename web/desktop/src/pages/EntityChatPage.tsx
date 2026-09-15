@@ -8,7 +8,8 @@ import { RemoteTurnActivity } from '../components/RemoteTurnActivity';
 import { AgentAvatar } from '../components/AgentAvatar';
 import { LiveStream } from '../components/LiveStream';
 import { ensureAccessToken } from '../auth/oidc';
-import { readPendingSend, rememberPendingSend, clearPendingSend } from '../api/pendingChat';
+import { chatStartupDeadlineError } from '../api/turnWait';
+import { type PendingChatSend, readPendingSend, rememberPendingSend, clearPendingSend } from '../api/pendingChat';
 import { formatTurnError } from '../wrapper/turn';
 
 interface Props { token: string; config: UIConfig }
@@ -55,11 +56,14 @@ export function EntityChatPage({token, config}: Props) {
   const [standingIDs, setStandingIDs] = useState<Record<string, string>>({});
   const restoredNamespace = useRef('');
   const loadedNamespace = useRef('');
-  const pending = useRef<{content: string; id: string; threadID: string} | null>(null);
+  const pending = useRef<PendingChatSend | null>(null);
+  const submitting = useRef(false);
   const end = useRef<HTMLDivElement>(null);
   const enabled = Boolean(config.chat?.enabled);
   const lastTurn = detail?.turns?.at(-1);
   const latestFailed = !optimistic && lastTurn?.status === 'failed' ? lastTurn : undefined;
+  const retryMessage = latestFailed?.error === chatStartupDeadlineError ? detail?.messages.find(message => message.id === latestFailed.userMessageId && message.role === 'user') : undefined;
+  const retryPending = Boolean(optimistic && pending.current?.preserveDraft);
   const earlierFailures = detail?.turns?.filter(t => t.status === 'failed' && t.id !== latestFailed?.id) ?? [];
   const active = detail?.activeTurn ?? detail?.turns?.find(t => t.status === 'waiting' || t.status === 'queued' || t.status === 'running');
   const roster = [...profiles].sort((a, b) => Number(b.metadata.name === 'desktop-assistant') - Number(a.metadata.name === 'desktop-assistant') || a.metadata.name.localeCompare(b.metadata.name));
@@ -139,7 +143,7 @@ export function EntityChatPage({token, config}: Props) {
           clearPendingSend(namespace, threadID); pending.current = null; setError('');
           setOptimistic(previous => previous?.requestId === unresolved.id ? null : previous);
           setDraft(previous => {
-            if (previous.trim() !== unresolved.content) return previous;
+            if (unresolved.preserveDraft || previous.trim() !== unresolved.content) return previous;
             saveChatDraft(namespace, threadID, ''); return '';
           });
         }
@@ -234,10 +238,11 @@ export function EntityChatPage({token, config}: Props) {
     setDraft(content); saveChatDraft(namespace, threadID, content);
     if (!threadID) saveNewChatConfig(namespace, newConfig());
   }
-  async function submit(event?: FormEvent) {
+  async function submit(event?: FormEvent, retry?: {content: string; forceNew?: boolean}) {
     event?.preventDefault();
-    const content = draft.trim();
-    if (!content || busy || active || unavailable || initializing || (!profile && !harness) || !enabled || (coordinate && !peers.length)) return;
+    const content = (retry?.content ?? draft).trim();
+    if (!content || busy || submitting.current || (retryPending && !retry) || active || unavailable || initializing || (!profile && !harness) || !enabled || (coordinate && !peers.length)) return;
+    submitting.current = true;
     setBusy(true); setError(''); setOptimistic({content}); setSendPhase(threadID ? 'sending' : 'saving');
     let target = threadID;
     try {
@@ -251,12 +256,13 @@ export function EntityChatPage({token, config}: Props) {
         saveChatDraft(namespace, target, draft); saveChatDraft(namespace, '', '');
         setThreads(previous => [thread, ...previous]);
       }
-      if (!pending.current || pending.current.content !== content || pending.current.threadID !== target) {
-        pending.current = rememberPendingSend(namespace, target, content);
+      if (retry?.forceNew || !pending.current || pending.current.content !== content || pending.current.threadID !== target) {
+        pending.current = rememberPendingSend(namespace, target, content, {preserveDraft: Boolean(retry), forceNew: retry?.forceNew});
       }
       setOptimistic({content, requestId: pending.current.id}); setSendPhase('sending');
       const result = await sendRemoteMessage(token, namespace, target, content, pending.current.id);
-      setDraft(''); saveChatDraft(namespace, target, ''); clearPendingSend(namespace, target); pending.current = null; setOptimistic(null);
+      if (!retry) { setDraft(''); saveChatDraft(namespace, target, ''); }
+      clearPendingSend(namespace, target); pending.current = null; setOptimistic(null);
       setDetail(previous => {
         const prior = previous?.id === result.thread.id ? previous : null;
         const messages = prior?.messages ?? [];
@@ -271,7 +277,7 @@ export function EntityChatPage({token, config}: Props) {
         };
       });
     } catch (err) { setError(formatTurnError(err)); setSendPhase('unconfirmed'); }
-    finally { setBusy(false); }
+    finally { submitting.current = false; setBusy(false); }
   }
 
   const configuration = (
@@ -355,17 +361,17 @@ export function EntityChatPage({token, config}: Props) {
             <header className="chat-bubble-header"><span className="chat-bubble-role">You</span></header>
             <pre className="chat-bubble-body">{optimistic.content}</pre>
           </article>}
-          {optimistic && <div className="remote-turn-status" role="status">{busy ? (sendPhase === 'saving' ? 'Saving conversation…' : 'Sending message…') : 'Message not confirmed. Retry to check delivery.'}</div>}
-          <RemoteTurnActivity token={token} namespace={namespace} turn={active ?? (optimistic ? undefined : detail?.turns?.at(-1))} agentLabel={detail?.profileName || profile || harness}/>
+          {optimistic && <div className="remote-turn-status" role="status">{busy ? (sendPhase === 'saving' ? 'Saving conversation…' : 'Sending message…') : 'Message not confirmed. Retry to check delivery.'}{retryPending && !busy && <button type="button" className="btn btn-ghost" disabled={Boolean(active) || unavailable || initializing} onClick={() => {if (pending.current) void submit(undefined, {content: pending.current.content});}}>Check retry delivery</button>}</div>}
+          <RemoteTurnActivity token={token} namespace={namespace} turn={active ?? (optimistic ? undefined : detail?.turns?.at(-1))} recoveryPending={detail?.recoveryPending} agentLabel={detail?.profileName || profile || harness}/>
 
           {detail?.turns?.flatMap(t => t.delegates ?? []).map(delivery => <div className="remote-turn-status" key={delivery.turnId}>{delivery.status === 'succeeded' ? `${delivery.profileName} replied.` : delivery.status === 'running' ? `${delivery.profileName} is working.` : delivery.status === 'failed' ? `${delivery.profileName} could not finish.` : `Message saved for ${delivery.profileName}.`} <button className="btn btn-ghost" disabled={busy} onClick={() => {const thread = threads.find(t => t.id === delivery.threadId); openThread(thread ?? {id: delivery.threadId, namespace, profileName: delivery.profileName, mode: 'persona', title: delivery.profileName, createdAt: '', updatedAt: '', createdBy: ''});}}>Open peer conversation</button></div>)}
-          {latestFailed && <div className="banner banner-error">Turn failed: {latestFailed.error || latestFailed.runName}</div>}
+          {latestFailed && <div className="banner banner-error">Turn failed: {latestFailed.error || latestFailed.runName}{retryMessage && <button type="button" className="btn btn-ghost" disabled={busy || Boolean(active) || unavailable || initializing || !enabled} onClick={() => void submit(undefined, {content: retryMessage.content, forceNew: true})}>Retry last message</button>}</div>}
           {earlierFailures.length > 0 && <details className="remote-chat-caption"><summary>Earlier failed turns ({earlierFailures.length})</summary>{earlierFailures.map(t => <p key={t.id}>Turn failed: {t.error || t.runName}</p>)}</details>}
           <div ref={end}/>
         </div>
         <form className="chat-composer" onSubmit={e => void submit(e)}>
           <label className="field"><span className="label">Message</span><textarea className="textarea chat-composer-input" rows={3} aria-label="Message" value={draft} disabled={busy || !enabled || initializing} onChange={e => changeDraft(e.target.value)} onKeyDown={e => {if(e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {e.preventDefault(); void submit();}}} placeholder="Message this agent…"/></label>
-          <div className="chat-composer-actions"><span className="chat-composer-hint">Enter to send · Shift + Enter for a new line</span><button className="btn btn-primary" disabled={busy || Boolean(active) || unavailable || initializing || !draft.trim() || (!profile && !harness) || !enabled || (coordinate && !peers.length)}>{busy ? 'Sending…' : active ? 'Waiting for reply…' : 'Send'}</button></div>
+          <div className="chat-composer-actions"><span className="chat-composer-hint">Enter to send · Shift + Enter for a new line</span><button className="btn btn-primary" disabled={busy || retryPending || Boolean(active) || unavailable || initializing || !draft.trim() || (!profile && !harness) || !enabled || (coordinate && !peers.length)}>{busy ? 'Sending…' : active ? 'Waiting for reply…' : 'Send'}</button></div>
         </form>
         {outputRun && <details className="remote-run-details" open={rawActivityOpen} onToggle={e => setRawActivityOpen(e.currentTarget.open)}><summary>{outputBackend === 'hermesAgent' ? 'Reasoning and runner output' : 'Runner activity'}</summary>{rawActivityOpen && <><p className="remote-chat-caption">Original runner output for {outputRun}. Access uses your current run-read permissions; older logs may no longer be retained.</p>{historicalOutput && currentOutputRun && currentOutputRun !== outputRun && <button type="button" className="btn btn-ghost" onClick={() => {setHistoricalOutput(undefined); setRawActivityOpen(false);}}>Back to latest turn output</button>}<LiveStream token={token} namespace={namespace} name={outputRun}/></>}</details>}
       </section>

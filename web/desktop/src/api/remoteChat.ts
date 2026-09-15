@@ -3,6 +3,7 @@ import type { ChatMessage, ChatThread } from './types.chat';
 
 export type RemoteTurn = {
   createdAt?: string;
+  userMessageId?: string;
   id: string;
   runName: string;
   requestId?: string;
@@ -13,6 +14,7 @@ export type RemoteTurn = {
 export type RemoteThread = ChatThread & { harnessProfileName?: string };
 export type RemoteThreadDetail = RemoteThread & {
   messages: ChatMessage[];
+  recoveryPending?: boolean;
   turns?: RemoteTurn[];
   activeTurn?: RemoteTurn;
 };

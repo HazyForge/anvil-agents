@@ -1,6 +1,7 @@
 package runapi
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -8,6 +9,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	apiValidation "k8s.io/apimachinery/pkg/api/validation"
 
@@ -44,6 +46,9 @@ type ChatThreadDetailResponse struct {
 	Messages   []chat.Message `json:"messages"`
 	Turns      []chat.Turn    `json:"turns"`
 	ActiveTurn *chat.Turn     `json:"activeTurn,omitempty"`
+	// RecoveryPending means execution progress could not be refreshed. The
+	// returned transcript and turns are durable records, not a failed execution.
+	RecoveryPending bool `json:"recoveryPending,omitempty"`
 }
 
 type ChatAppendResponse struct {
@@ -194,21 +199,31 @@ func (server *Server) handleGetChatThread(writer http.ResponseWriter, request *h
 		server.writeChatStoreError(writer, err, principal, namespace)
 		return
 	}
-	turns, err := server.reconcileChatThread(request.Context(), namespace, threadID)
+	recoveryCtx, cancel := context.WithTimeout(request.Context(), 3*time.Second)
+	turns, err := server.reconcileChatThread(recoveryCtx, namespace, threadID)
+	cancel()
+	recoveryPending := err != nil
 	if err != nil {
-		server.writeChatStoreError(writer, err, principal, namespace)
-		return
+		// A Kubernetes outage must not hide a healthy persisted conversation or
+		// pretend to complete its execution. Background recovery retains the
+		// original run identity and resource locks until a terminal receipt.
+		server.log.Error(err, "chat execution refresh unavailable", "namespace", namespace, "thread", threadID)
+		turns, err = server.chatStore.ListTurns(request.Context(), namespace, threadID)
+		if err != nil {
+			server.writeChatStoreError(writer, err, principal, namespace)
+			return
+		}
 	}
 	messages, err := server.chatStore.ListMessages(request.Context(), namespace, threadID)
 	if err != nil {
 		server.writeChatStoreError(writer, err, principal, namespace)
 		return
 	}
-	if server.authorizer.Allowed(principal, PermissionRunsRead, namespace) {
+	if !recoveryPending && server.authorizer.Allowed(principal, PermissionRunsRead, namespace) {
 		server.enrichChatFailureView(request.Context(), namespace, turns, messages)
 	}
 	server.log.Info("chat thread read", "subject", principal.Subject, "namespace", namespace, "thread", thread.ID)
-	response := ChatThreadDetailResponse{Thread: thread, Messages: safeChatMessages(messages), Turns: turns}
+	response := ChatThreadDetailResponse{Thread: thread, Messages: safeChatMessages(messages), Turns: turns, RecoveryPending: recoveryPending}
 	for i := range turns {
 		if chat.Active(turns[i]) {
 			response.ActiveTurn = &turns[i]
