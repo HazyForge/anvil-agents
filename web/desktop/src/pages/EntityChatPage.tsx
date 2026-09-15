@@ -49,6 +49,7 @@ export function EntityChatPage({token, config}: Props) {
   const [optimistic, setOptimistic] = useState<{content: string; requestId?: string} | null>(null);
   const [sendPhase, setSendPhase] = useState<'saving' | 'sending' | 'unconfirmed'>('sending');
   const [rawActivityOpen, setRawActivityOpen] = useState(false);
+  const [historicalOutput, setHistoricalOutput] = useState<{runName: string; backend: string} | undefined>();
   const navigation = useRef(0);
   const agentRequest = useRef<AbortController | null>(null);
   const [standingIDs, setStandingIDs] = useState<Record<string, string>>({});
@@ -66,6 +67,13 @@ export function EntityChatPage({token, config}: Props) {
   const effectiveHarness = harness || harnessRefFromRunProfile(selectedProfile);
   const selectedHarness = harnesses.find(h => h.metadata.name === effectiveHarness);
   const backend = backendKindFromComposition(selectedHarness) || backendKindFromComposition(selectedProfile);
+  const currentOutputRun = active?.runName || lastTurn?.runName;
+  const outputRun = historicalOutput?.runName || currentOutputRun;
+  const outputMessage = detail?.messages.find(message => (message.metadata as {runName?: string} | undefined)?.runName === outputRun);
+  const outputBackend = historicalOutput?.backend || (outputMessage?.metadata as {backend?: string} | undefined)?.backend || backend;
+  // Opening a different thread/turn must not carry an expanded raw log panel
+  // into new work. Completed turns keep the same run and remain inspectable.
+  useEffect(() => { setRawActivityOpen(false); setHistoricalOutput(undefined); }, [namespace, threadID, currentOutputRun]);
   const namespaces = [...new Set([...config.defaultNamespaces, namespace])];
   const optimisticVisible = optimistic && !detail?.turns?.some(turn => optimistic.requestId && turn.requestId === optimistic.requestId);
 
@@ -332,10 +340,17 @@ export function EntityChatPage({token, config}: Props) {
             <h3>{unavailable ? 'Conversation unavailable' : initializing || (threadID && !detail) ? 'Opening conversation…' : profile ? `Talk with ${agentName(profile)}` : 'Chat with a harness'}</h3>
             <p>{unavailable ? 'Your draft is preserved. Select the agent to try again.' : profile ? 'Your messages and replies stay here as you work together.' : 'Choose a harness in Conversation details to begin.'}</p>
           </div>}
-          {detail?.messages.filter(m => m.role !== 'system').map(message => <article key={message.id} className={`chat-bubble ${message.role === 'user' ? 'chat-bubble-user' : 'chat-bubble-run'}`}>
+          {detail?.messages.map(message => {
+            if (message.role === 'system') {
+              const metadata = message.metadata as {kind?: string; backend?: string; runName?: string} | undefined;
+              if (metadata?.kind !== 'legacy_output_unavailable' || metadata.backend !== 'hermesAgent') return null;
+              return <aside key={message.id} className="remote-chat-caption" aria-label="Earlier reply unavailable"><strong>Earlier reply unavailable</strong><p>An older Hermes runner did not separate its final answer from internal output. The original message has been preserved. Reasoning and original output can be inspected in the runner output while its logs are retained.</p>{metadata.runName && /^[a-z0-9]([a-z0-9.-]{0,251}[a-z0-9])?$/.test(metadata.runName) && <button type="button" className="btn btn-ghost" onClick={() => {setHistoricalOutput({runName: metadata.runName!, backend: 'hermesAgent'}); setRawActivityOpen(true);}}>View original runner output</button>}</aside>;
+            }
+            return <article key={message.id} className={`chat-bubble ${message.role === 'user' ? 'chat-bubble-user' : 'chat-bubble-run'}`}>
             <header className="chat-bubble-header"><span className="chat-bubble-role">{message.role === 'user' ? ((message.metadata as {authorProfile?: string} | undefined)?.authorProfile || 'You') : message.role === 'tool' ? 'Coordination' : detail.profileName || 'Agent'}</span></header>
             <pre className="chat-bubble-body">{message.content}</pre>
-          </article>)}
+          </article>;
+          })}
           {optimisticVisible && <article className="chat-bubble chat-bubble-user" aria-label="Your pending message">
             <header className="chat-bubble-header"><span className="chat-bubble-role">You</span></header>
             <pre className="chat-bubble-body">{optimistic.content}</pre>
@@ -352,7 +367,7 @@ export function EntityChatPage({token, config}: Props) {
           <label className="field"><span className="label">Message</span><textarea className="textarea chat-composer-input" rows={3} aria-label="Message" value={draft} disabled={busy || !enabled || initializing} onChange={e => changeDraft(e.target.value)} onKeyDown={e => {if(e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {e.preventDefault(); void submit();}}} placeholder="Message this agent…"/></label>
           <div className="chat-composer-actions"><span className="chat-composer-hint">Enter to send · Shift + Enter for a new line</span><button className="btn btn-primary" disabled={busy || Boolean(active) || unavailable || initializing || !draft.trim() || (!profile && !harness) || !enabled || (coordinate && !peers.length)}>{busy ? 'Sending…' : active ? 'Waiting for reply…' : 'Send'}</button></div>
         </form>
-        {active?.runName && <details className="remote-run-details" open={rawActivityOpen} onToggle={e => setRawActivityOpen(e.currentTarget.open)}><summary>Runner activity</summary>{rawActivityOpen && <LiveStream token={token} namespace={namespace} name={active.runName}/>}</details>}
+        {outputRun && <details className="remote-run-details" open={rawActivityOpen} onToggle={e => setRawActivityOpen(e.currentTarget.open)}><summary>{outputBackend === 'hermesAgent' ? 'Reasoning and runner output' : 'Runner activity'}</summary>{rawActivityOpen && <><p className="remote-chat-caption">Original runner output for {outputRun}. Access uses your current run-read permissions; older logs may no longer be retained.</p>{historicalOutput && currentOutputRun && currentOutputRun !== outputRun && <button type="button" className="btn btn-ghost" onClick={() => {setHistoricalOutput(undefined); setRawActivityOpen(false);}}>Back to latest turn output</button>}<LiveStream token={token} namespace={namespace} name={outputRun}/></>}</details>}
       </section>
     </div>
   </div>;

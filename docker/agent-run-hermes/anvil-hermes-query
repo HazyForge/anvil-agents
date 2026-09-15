@@ -9,8 +9,9 @@ visible to other processes on the node via `ps` / `/proc`.
 This helper keeps only the prompt *path* on argv. The query body is read from
 disk and passed into Hermes in-process via `cli.main(query=..., quiet=True)`,
 matching the path used by `hermes_cli.main.cmd_chat` after argparse. The native
-run_conversation result supplies the final answer; terminal display output is
-suppressed and stdout contains only a versioned anvil.hermes.final envelope.
+run_conversation result supplies the final answer. Native terminal output remains
+available for debugging; a versioned anvil.hermes.final envelope identifies the
+answer separately from reasoning and tool output.
 
 Usage:
   anvil-hermes-query <prompt-file>
@@ -24,7 +25,6 @@ Optional environment:
 
 from __future__ import annotations
 
-import contextlib
 import functools
 import json
 import os
@@ -153,25 +153,11 @@ def main() -> int:
     return _run_native(kwargs)
 
 
-@contextlib.contextmanager
-def _discard_native_stdout():
-    """Discard display output, including cached console streams and child FD 1.
-
-    This is suppression, not parsing terminal text for a guessed final answer.
-    Keep stderr available for native operational diagnostics.
-    """
+def _emit_envelope(value: dict[str, Any]) -> None:
+    # Flush native text first and always start a new line: a console callback
+    # may have printed its final progress fragment without a trailing newline.
     sys.stdout.flush()
-    saved_fd = os.dup(1)
-    try:
-        with open(os.devnull, "w", encoding="utf-8") as sink:
-            os.dup2(sink.fileno(), 1)
-            with contextlib.redirect_stdout(sink):
-                yield
-                sys.stdout.flush()
-    finally:
-        sys.stdout.flush()
-        os.dup2(saved_fd, 1)
-        os.close(saved_fd)
+    print("\n" + json.dumps(value, ensure_ascii=False), flush=True)
 
 
 def _run_native(kwargs: dict[str, Any]) -> int:
@@ -187,45 +173,41 @@ def _run_native(kwargs: dict[str, Any]) -> int:
     code = 0
     provider_unavailable = False
     try:
-        with _discard_native_stdout():
-            import cli
+        import cli
 
-            original_cli = cli.HermesCLI
+        original_cli = cli.HermesCLI
 
-            class FinalAnswerCLI(original_cli):
-                def _ensure_runtime_credentials(self):
-                    nonlocal provider_unavailable
-                    ready = super()._ensure_runtime_credentials()
-                    provider_unavailable = not ready
-                    return ready
+        class FinalAnswerCLI(original_cli):
+            def _ensure_runtime_credentials(self):
+                nonlocal provider_unavailable
+                ready = super()._ensure_runtime_credentials()
+                provider_unavailable = not ready
+                return ready
 
-                def _init_agent(self, *args, **init_kwargs):
-                    initialized = super()._init_agent(*args, **init_kwargs)
-                    if initialized and self.agent is not None and id(self.agent) not in observed_agents:
-                        observed_agents.add(id(self.agent))
-                        native_run = self.agent.run_conversation
-                        # quiet mode already disables text/tool display callbacks;
-                        # Hermes leaves its reasoning display callback connected.
-                        self.agent.reasoning_callback = None
+            def _init_agent(self, *args, **init_kwargs):
+                initialized = super()._init_agent(*args, **init_kwargs)
+                if initialized and self.agent is not None and id(self.agent) not in observed_agents:
+                    observed_agents.add(id(self.agent))
+                    native_run = self.agent.run_conversation
 
-                        @functools.wraps(native_run)
-                        def observe_final(*run_args, **run_kwargs):
-                            result = native_run(*run_args, **run_kwargs)
-                            completion.clear()
-                            if isinstance(result, dict):
-                                text = result.get("final_response")
-                                if isinstance(text, str) and text.strip() and not result.get("failed") and not result.get("partial"):
-                                    completion["text"] = text
-                            return result
+                    @functools.wraps(native_run)
+                    def observe_final(*run_args, **run_kwargs):
+                        result = native_run(*run_args, **run_kwargs)
+                        completion.clear()
+                        if isinstance(result, dict):
+                            text = result.get("final_response")
+                            if isinstance(text, str) and text.strip() and not result.get("failed") and not result.get("partial"):
+                                completion["text"] = text
+                        return result
 
-                        self.agent.run_conversation = observe_final
-                    return initialized
+                    self.agent.run_conversation = observe_final
+                return initialized
 
-            cli.HermesCLI = FinalAnswerCLI
-            try:
-                cli.main(**kwargs)
-            finally:
-                cli.HermesCLI = original_cli
+        cli.HermesCLI = FinalAnswerCLI
+        try:
+            cli.main(**kwargs)
+        finally:
+            cli.HermesCLI = original_cli
     except SystemExit as exc:
         code = exc.code if isinstance(exc.code, int) else (0 if exc.code is None else 1)
     except KeyboardInterrupt:
@@ -235,14 +217,14 @@ def _run_native(kwargs: dict[str, Any]) -> int:
         return 1
 
     if provider_unavailable:
-        print(json.dumps({"type": "anvil.hermes.error", "version": 1, "code": "provider_configuration_unavailable"}), flush=True)
+        _emit_envelope({"type": "anvil.hermes.error", "version": 1, "code": "provider_configuration_unavailable"})
         return code or 1
     if code != 0:
         return code
     if "text" not in completion:
         print("anvil-hermes-query: Hermes returned no complete final answer", file=sys.stderr)
         return 1
-    print(json.dumps({"type": "anvil.hermes.final", "version": 1, "role": "assistant", "text": completion["text"]}, ensure_ascii=False), flush=True)
+    _emit_envelope({"type": "anvil.hermes.final", "version": 1, "role": "assistant", "text": completion["text"]})
     return 0
 
 

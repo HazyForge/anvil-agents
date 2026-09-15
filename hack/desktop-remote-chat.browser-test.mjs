@@ -464,6 +464,38 @@ try {
   await openAgent('agent-alpha'); await draftVisible('Draft retained when another agent cannot open');
   assert.equal(standing.get('anvilhub/agent-alpha'),alphaID);
   console.log('PASS rapid agent switching ignores late canonical responses without losing standing drafts');
+  const canonical=threads.get(alphaID);
+  for (const [index,metadata] of [
+    {kind:'legacy_output_unavailable',backend:'hermesAgent',runName:'legacy-hermes-run'},
+    {kind:'internal_diagnostic',backend:'hermesAgent'},
+    {kind:'legacy_output_unavailable',backend:'codex'},
+  ].entries()) canonical.messages.push({id:`safe-system-${index}`,threadId:alphaID,role:'system',content:`PRIVATE_SYSTEM_CONTENT_${index}`,metadata,sequence:canonical.messages.length+1,createdAt:new Date().toISOString()});
+  const legacyNotice=page.getByRole('complementary',{name:'Earlier reply unavailable'});
+  await legacyNotice.waitFor({state:'visible'});
+  assert.equal(await legacyNotice.count(),1);
+  assert.equal(await legacyNotice.locator('.chat-bubble').count(),0);
+  assert.equal(await page.getByText(/PRIVATE_SYSTEM_CONTENT_/).count(),0);
+  await visible('Fixture standing brain reply');
+  console.log('PASS legacy Hermes reply gets neutral unavailable notice without exposing arbitrary system content');
+  const completedRun=canonical.turns.at(-1).runName;
+  const completedReads=eventGets.get(completedRun)||0;
+  const completedOutput=page.waitForResponse(r=>r.url().includes(`/agent-runs/${completedRun}/events`));
+  await page.getByText('Runner activity',{exact:true}).click();
+  await completedOutput;
+  assert.equal(eventGets.get(completedRun),completedReads+1);
+  await page.getByText('Runner activity',{exact:true}).click();
+  const debugMarker='EXPLICIT_HERMES_REASONING_DEBUG_FIXTURE';
+  eventPlans.set('legacy-hermes-run',[{body:event('log',{line:debugMarker})+event('complete',{})}]);
+  assert.equal(eventGets.get('legacy-hermes-run'),undefined);
+  assert.equal(await page.getByText(debugMarker,{exact:true}).count(),0);
+  await legacyNotice.getByRole('button',{name:'View original runner output'}).click();
+  await page.getByText('Reasoning and runner output',{exact:true}).waitFor();
+  await visible(debugMarker);
+  assert.equal(eventGets.get('legacy-hermes-run'),1);
+  assert.equal(await page.locator('.chat-bubble').filter({hasText:debugMarker}).count(),0);
+  await page.getByText('Reasoning and runner output',{exact:true}).click();
+  assert.equal(await page.getByText(debugMarker,{exact:true}).count(),0);
+  console.log('PASS completed turns and legacy Hermes reasoning stay inspectable only in explicitly opened authenticated runner output');
   config.chat.enabled=false;
   await page.reload();
   await visible('Remote chat is not enabled on this server.');

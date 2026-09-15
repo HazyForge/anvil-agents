@@ -25,13 +25,16 @@ persistent native chat sessions or automatic inbox wakeups.
 ## Output correctness
 
 That real-browser test also exposed Hermes reasoning text mixed into the saved
-assistant message. Hermes quiet mode disabled some display callbacks but still
-printed reasoning. The API's generic plain-output fallback accepted those logs.
+assistant message. Hermes quiet mode prints reasoning and other terminal output. The API's
+generic plain-output fallback incorrectly accepted those logs as the answer.
 The repair requires an explicit versioned final-answer envelope from the owned
 Hermes adapter and rejects unstructured Hermes logs as replies. Existing legacy
 Hermes messages without verified final-answer provenance remain stored, but are
 withheld from chat display and subsequent model history. No heuristic attempts
-to split reasoning text from an answer are used.
+to split reasoning text from an answer are used. The operator explicitly wants
+reasoning available for debugging: native reasoning and runner logs are retained
+and can be expanded separately from the assistant answer, including after a turn
+finishes. They are not replayed as assistant messages.
 
 ## Error presentation
 
