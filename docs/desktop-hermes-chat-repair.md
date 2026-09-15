@@ -51,8 +51,8 @@ failed turns stay available in collapsed history after a successful retry.
 
 The API/controller is deployed at
 `sha256:37e4baa44a87ca14070d8dfa22e812d3c93846870d66958fd4c4065956e7ad33`.
-The final Hermes runner is
-`sha256:07cfd545c409110fd53093aaac24a92793d54e749b01a6d2640658435f82c1ea`.
+The final Hermes runner, including persistent Go caches, is
+`sha256:161860b11fccca46779a5d75a59f672b2cc84e83f411e40cd48b411ade33c322`.
 The selected Delivery Steward harness is an existing private Primaris resource,
 so a one-resource Helm release adopts it while preserving its UID and every
 spec field except the image. The private `deploy/delivery-steward/` helper checks
@@ -89,3 +89,35 @@ preserves explicit GOCACHE/GOMODCACHE values, including GOCACHE=off. The actual
 entrypoint fixture verifies export to both setup and harness, cache reuse
 between turns, and explicit overrides. This reduces repeated compilation when
 the selected home is persistent; it does not implement native session reuse.
+
+The final cache image passed tests against its installed entrypoint and native
+Hermes helper as the non-root runtime user with networking disabled and a
+read-only filesystem. The live compiler environment was inspected using only
+GOCACHE/GOMODCACHE keys and confirmed both directories under this agent's
+persistent home. Helm revisions are 20 for anvil-agents-system-chart and 4 for
+anvil-primaris-delivery-steward. The policy's observed generation matches its
+current generation with no type-check warnings.
+
+The cache-enabled image's first live browser turn,
+`chat-turn-fe3f3cd91605c05a07cdc6276808434977369a0e`, succeeded on `z400`
+with the exact final digest. Browser receipt took 454 seconds while populating
+the persistent cache. Native Hermes ran 04:38:37Z–04:38:55Z; the rest was
+startup and reply delivery. Both clean final reply and separate completed-turn
+debug output were visible.
+
+The immediate follow-up used a new runner and the same persistent home:
+`chat-turn-d6ec2aec08b7c1169ade9ce39ea4550550147acc`. It also succeeded on
+the exact final digest, receiving a clean one-sentence identity/capability
+answer in 167 seconds (2m47s), compared with 454 seconds (7m34s) for the empty
+cache. Logs contained no Go download events; tool setup took 91 seconds
+(04:40:21Z–04:41:52Z), and Hermes took 18 seconds (through 04:42:10Z).
+This is evidence of improved repeated startup, not a fast-chat or native
+keep-alive result. The remaining repository/setup and scheduling cost is still
+too high for the intended interactive experience.
+
+Validation: make verify; all 19 remote-chat browser fixtures; installed-image
+nonroot Go compilation, entrypoint cache contract, and five native Hermes
+contract checks; live API health/readiness 200; both deployments Ready; exact
+Helm image/UID checks; and the two same-conversation live browser turns above.
+Native session reuse, durable automatic peer inbox wakeups, and the separate
+independent-reviewer conflicting-tool configuration remain outstanding.
