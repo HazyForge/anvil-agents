@@ -80,6 +80,8 @@ COPY docker/agent-run-hermes/anvil-hermes-query /usr/local/bin/anvil-hermes-quer
 COPY --from=agent-feedback-builder /out/anvil-hotline /usr/local/bin/anvil-hotline
 COPY --from=agent-feedback-builder /out/anvil-agent-feedback /usr/local/bin/anvil-agent-feedback
 COPY --from=agent-feedback-builder /out/anvil-agentctl /usr/local/bin/anvil-agentctl
+# Runtime tool setups compile their own tools with this public Go toolchain.
+COPY --from=agent-feedback-builder /usr/local/go /usr/local/go
 
 RUN chmod 0755 /usr/local/bin/anvil-agent-run-hermes \
 	&& chmod 0755 /usr/local/bin/anvil-hermes-query \
@@ -93,7 +95,7 @@ RUN chmod 0755 /usr/local/bin/anvil-agent-run-hermes \
 	&& chmod 0644 /opt/anvil-agent-run/AGENTS.md \
 	&& find /opt/anvil-agent-run/static-prompts /opt/anvil-agent-run/skills -type f -name '*.md' -exec chmod 0644 {} +
 
-ENV PATH=/opt/hermes/bin:/opt/hermes/.venv/bin:${PATH}
+ENV PATH=/usr/local/go/bin:/opt/hermes/bin:/opt/hermes/.venv/bin:${PATH}
 ENV HERMES_HOME=/opt/anvil/hermes
 ENV CODEX_HOME=/opt/anvil/codex
 ENV ANVIL_AGENT_RUN_AGENTS_FILE=/opt/anvil-agent-run/AGENTS.md
@@ -107,5 +109,8 @@ ENV ANVIL_OBSERVABILITY_TOOL=anvil-observability
 
 USER 10000:10000
 WORKDIR /workspace
+
+# Validate the runtime PATH and executable as the actual runner user.
+RUN test "$(id -u)" = 10000 && GOTOOLCHAIN=local go version
 
 ENTRYPOINT ["/usr/local/bin/anvil-agent-run-hermes"]
