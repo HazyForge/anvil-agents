@@ -3,7 +3,7 @@ import { openAgentRunStream } from '../api/stream';
 import { activityFromLog, type RunActivity } from '../api/runActivity';
 import type { RemoteTurn } from '../api/remoteChat';
 import { ensureAccessToken } from '../auth/oidc';
-import { runnerStateLabel } from '../api/runnerState';
+import { chatFailureLabel, runnerFailureLabel, runnerStateLabel } from '../api/runnerState';
 
 interface Props {
   token: string;
@@ -21,6 +21,7 @@ export function RemoteTurnActivity({token, namespace, turn, agentLabel}: Props) 
   const [now, setNow] = useState(Date.now());
   const [lastUpdate, setLastUpdate] = useState(Date.now());
   const [terminalPhase, setTerminalPhase] = useState('');
+  const [terminalLabel, setTerminalLabel] = useState('Agent could not finish this turn');
   const [runnerBlocker, setRunnerBlocker] = useState<string | undefined>();
   const finished = useRef(done(turn?.status));
   const runName = turn?.runName;
@@ -30,7 +31,7 @@ export function RemoteTurnActivity({token, namespace, turn, agentLabel}: Props) 
   finished.current = done(status);
 
   useEffect(() => {
-    setRows([]); setTerminalPhase(''); setRunnerBlocker(undefined); setConnection('Connecting to agent activity…');
+    setRows([]); setTerminalPhase(''); setTerminalLabel('Agent could not finish this turn'); setRunnerBlocker(undefined); setConnection('Connecting to agent activity…');
     mountedAt.current = Date.now(); setLastUpdate(Date.now());
     if (!runName) return;
     let cancelled = false;
@@ -71,7 +72,8 @@ export function RemoteTurnActivity({token, namespace, turn, agentLabel}: Props) 
             if (phase === 'Failed' || phase === 'NeedsHuman') {
               stopped = true;
               setTerminalPhase(phase);
-              append({key: 'runner-failed', label: 'The harness stopped with an error', kind: 'error'});
+              setTerminalLabel(runnerFailureLabel(payload.run));
+              append({key: 'runner-failed', label: runnerFailureLabel(payload.run), kind: 'error'});
             }
             if (event === 'terminal' && (payload.code === 'deleted' || payload.code === 'replaced')) {
               setConnection('Runner activity is no longer available');
@@ -138,7 +140,7 @@ export function RemoteTurnActivity({token, namespace, turn, agentLabel}: Props) 
   if (!turn) return null;
   const elapsed = Math.max(0, Math.floor((now - (Number.isFinite(acceptedAt) ? acceptedAt! : mountedAt.current)) / 1000));
   const latest = rows.at(-1);
-  const label = status === 'failed' || terminalPhase === 'Failed' || terminalPhase === 'NeedsHuman' ? 'Agent could not finish this turn'
+  const label = status === 'failed' || terminalPhase === 'Failed' || terminalPhase === 'NeedsHuman' ? (chatFailureLabel(turn.error) || terminalLabel)
     : status === 'succeeded' ? 'Reply received'
     : terminalPhase === 'Succeeded' ? 'Harness finished; saving the reply'
     : runnerBlocker ? runnerBlocker

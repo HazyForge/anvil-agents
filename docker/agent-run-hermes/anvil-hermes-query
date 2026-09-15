@@ -8,7 +8,9 @@ visible to other processes on the node via `ps` / `/proc`.
 
 This helper keeps only the prompt *path* on argv. The query body is read from
 disk and passed into Hermes in-process via `cli.main(query=..., quiet=True)`,
-matching the path used by `hermes_cli.main.cmd_chat` after argparse.
+matching the path used by `hermes_cli.main.cmd_chat` after argparse. The native
+run_conversation result supplies the final answer; terminal display output is
+suppressed and stdout contains only a versioned anvil.hermes.final envelope.
 
 Usage:
   anvil-hermes-query <prompt-file>
@@ -22,6 +24,8 @@ Optional environment:
 
 from __future__ import annotations
 
+import contextlib
+import functools
 import json
 import os
 import sys
@@ -146,27 +150,99 @@ def main() -> int:
     kwargs["query"] = query
     kwargs["quiet"] = True
 
+    return _run_native(kwargs)
+
+
+@contextlib.contextmanager
+def _discard_native_stdout():
+    """Discard display output, including cached console streams and child FD 1.
+
+    This is suppression, not parsing terminal text for a guessed final answer.
+    Keep stderr available for native operational diagnostics.
+    """
+    sys.stdout.flush()
+    saved_fd = os.dup(1)
     try:
-        from cli import main as cli_main
-    except ImportError as exc:
-        print(
-            f"anvil-hermes-query: Hermes cli module unavailable: {exc}",
-            file=sys.stderr,
-        )
+        with open(os.devnull, "w", encoding="utf-8") as sink:
+            os.dup2(sink.fileno(), 1)
+            with contextlib.redirect_stdout(sink):
+                yield
+                sys.stdout.flush()
+    finally:
+        sys.stdout.flush()
+        os.dup2(saved_fd, 1)
+        os.close(saved_fd)
+
+
+def _run_native(kwargs: dict[str, Any]) -> int:
+    """Observe only the CLI's own native conversation completion boundary.
+
+    Hermes v2026.7.7.2 quiet mode calls its initialized agent's
+    run_conversation(), reads final_response, then exits with the native status.
+    Wrapping that one instance preserves native routing, credentials, skills,
+    sessions, tools and cleanup without capturing independent child agents.
+    """
+    completion: dict[str, Any] = {}
+    observed_agents: set[int] = set()
+    code = 0
+    provider_unavailable = False
+    try:
+        with _discard_native_stdout():
+            import cli
+
+            original_cli = cli.HermesCLI
+
+            class FinalAnswerCLI(original_cli):
+                def _ensure_runtime_credentials(self):
+                    nonlocal provider_unavailable
+                    ready = super()._ensure_runtime_credentials()
+                    provider_unavailable = not ready
+                    return ready
+
+                def _init_agent(self, *args, **init_kwargs):
+                    initialized = super()._init_agent(*args, **init_kwargs)
+                    if initialized and self.agent is not None and id(self.agent) not in observed_agents:
+                        observed_agents.add(id(self.agent))
+                        native_run = self.agent.run_conversation
+                        # quiet mode already disables text/tool display callbacks;
+                        # Hermes leaves its reasoning display callback connected.
+                        self.agent.reasoning_callback = None
+
+                        @functools.wraps(native_run)
+                        def observe_final(*run_args, **run_kwargs):
+                            result = native_run(*run_args, **run_kwargs)
+                            completion.clear()
+                            if isinstance(result, dict):
+                                text = result.get("final_response")
+                                if isinstance(text, str) and text.strip() and not result.get("failed") and not result.get("partial"):
+                                    completion["text"] = text
+                            return result
+
+                        self.agent.run_conversation = observe_final
+                    return initialized
+
+            cli.HermesCLI = FinalAnswerCLI
+            try:
+                cli.main(**kwargs)
+            finally:
+                cli.HermesCLI = original_cli
+    except SystemExit as exc:
+        code = exc.code if isinstance(exc.code, int) else (0 if exc.code is None else 1)
+    except KeyboardInterrupt:
+        code = 130
+    except Exception:
+        print("anvil-hermes-query: native Hermes execution failed", file=sys.stderr)
         return 1
 
-    try:
-        cli_main(**kwargs)
-    except SystemExit as exc:
-        code = exc.code
-        if code is None:
-            return 0
-        if isinstance(code, int):
-            return code
+    if provider_unavailable:
+        print(json.dumps({"type": "anvil.hermes.error", "version": 1, "code": "provider_configuration_unavailable"}), flush=True)
+        return code or 1
+    if code != 0:
+        return code
+    if "text" not in completion:
+        print("anvil-hermes-query: Hermes returned no complete final answer", file=sys.stderr)
         return 1
-    except ValueError as exc:
-        print(f"anvil-hermes-query: {exc}", file=sys.stderr)
-        return 1
+    print(json.dumps({"type": "anvil.hermes.final", "version": 1, "role": "assistant", "text": completion["text"]}, ensure_ascii=False), flush=True)
     return 0
 
 

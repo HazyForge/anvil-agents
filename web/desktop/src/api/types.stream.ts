@@ -12,6 +12,8 @@ export interface StreamEnvelope {
   code?: string;
   message?: string;
   run?: {
+    job?: {name?: string};
+    runnerPod?: {name?: string};
     runnerState?: import('./runnerState').RunnerState;
     name?: string;
     namespace?: string;

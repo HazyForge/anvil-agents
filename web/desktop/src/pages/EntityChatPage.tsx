@@ -57,6 +57,9 @@ export function EntityChatPage({token, config}: Props) {
   const pending = useRef<{content: string; id: string; threadID: string} | null>(null);
   const end = useRef<HTMLDivElement>(null);
   const enabled = Boolean(config.chat?.enabled);
+  const lastTurn = detail?.turns?.at(-1);
+  const latestFailed = !optimistic && lastTurn?.status === 'failed' ? lastTurn : undefined;
+  const earlierFailures = detail?.turns?.filter(t => t.status === 'failed' && t.id !== latestFailed?.id) ?? [];
   const active = detail?.activeTurn ?? detail?.turns?.find(t => t.status === 'waiting' || t.status === 'queued' || t.status === 'running');
   const roster = [...profiles].sort((a, b) => Number(b.metadata.name === 'desktop-assistant') - Number(a.metadata.name === 'desktop-assistant') || a.metadata.name.localeCompare(b.metadata.name));
   const selectedProfile = profiles.find(p => p.metadata.name === profile);
@@ -341,7 +344,8 @@ export function EntityChatPage({token, config}: Props) {
           <RemoteTurnActivity token={token} namespace={namespace} turn={active ?? (optimistic ? undefined : detail?.turns?.at(-1))} agentLabel={detail?.profileName || profile || harness}/>
 
           {detail?.turns?.flatMap(t => t.delegates ?? []).map(delivery => <div className="remote-turn-status" key={delivery.turnId}>{delivery.status === 'succeeded' ? `${delivery.profileName} replied.` : delivery.status === 'running' ? `${delivery.profileName} is working.` : delivery.status === 'failed' ? `${delivery.profileName} could not finish.` : `Message saved for ${delivery.profileName}.`} <button className="btn btn-ghost" disabled={busy} onClick={() => {const thread = threads.find(t => t.id === delivery.threadId); openThread(thread ?? {id: delivery.threadId, namespace, profileName: delivery.profileName, mode: 'persona', title: delivery.profileName, createdAt: '', updatedAt: '', createdBy: ''});}}>Open peer conversation</button></div>)}
-          {detail?.turns?.filter(t => t.status === 'failed').map(t => <div key={t.id} className="banner banner-error">Turn failed: {t.error || t.runName}</div>)}
+          {latestFailed && <div className="banner banner-error">Turn failed: {latestFailed.error || latestFailed.runName}</div>}
+          {earlierFailures.length > 0 && <details className="remote-chat-caption"><summary>Earlier failed turns ({earlierFailures.length})</summary>{earlierFailures.map(t => <p key={t.id}>Turn failed: {t.error || t.runName}</p>)}</details>}
           <div ref={end}/>
         </div>
         <form className="chat-composer" onSubmit={e => void submit(e)}>

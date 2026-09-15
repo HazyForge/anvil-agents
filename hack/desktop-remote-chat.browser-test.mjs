@@ -216,7 +216,12 @@ try {
   assert.notEqual(posts.at(-1).requestId,posts.at(-2).requestId);
   complete('thread-2','Fixture second conversation response');
   await visible('Fixture second conversation response');
-  console.log('PASS transient failure retry reuses idempotency key; runner failure accepts a new turn');
+  const earlierFailure = page.getByText('Turn failed: Fixture runner failed',{exact:true});
+  assert.equal(await earlierFailure.isVisible(),false);
+  await page.getByText('Earlier failed turns (1)',{exact:true}).click();
+  await earlierFailure.waitFor({state:'visible'});
+  await page.getByText('Earlier failed turns (1)',{exact:true}).click();
+  console.log('PASS transient failure retry reuses idempotency key; runner failure accepts a new turn and earlier errors collapse');
   const priorMessages=threads.get('thread-2').messages.length;
   await page.getByLabel('Message',{exact:true}).fill('Ambiguous accepted fixture message');
   loseNextReceipt=true;

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	agents "github.com/hazyforge/anvil-agents/api/v1alpha1"
+	"github.com/hazyforge/anvil-agents/internal/chat"
 )
 
 var errChatOutputPending = errors.New("completed harness output is not available yet")
@@ -46,6 +47,16 @@ func extractChatReply(backend agents.AgentRunHarnessBackendKind, output string) 
 		structured = true
 		typ, name := replyString(event["type"]), replyString(event["event"])
 		switch backend {
+		case agents.AgentRunHarnessBackendHermesAgent:
+			// The owned Hermes adapter emits this only from its successful native
+			// final_response. Generic stdout can contain reasoning and tool output.
+			if typ == "anvil.hermes.final" {
+				final = ""
+				var version int
+				if len(event) == 4 && json.Unmarshal(event["version"], &version) == nil && version == 1 && replyString(event["role"]) == "assistant" {
+					final = strings.TrimSpace(replyString(event["text"]))
+				}
+			}
 		case agents.AgentRunHarnessBackendPrimeAgent:
 			// Prime v0.9.4 JSON mode emits complete native message_end events.
 			// The last assistant completion owns the reply; tool-use preambles,
@@ -126,7 +137,7 @@ func extractChatReply(backend agents.AgentRunHarnessBackendKind, output string) 
 	if text := strings.TrimSpace(strings.Join(parts, "\n")); text != "" {
 		return text, nil
 	}
-	if !structured && backend != agents.AgentRunHarnessBackendCodex && backend != agents.AgentRunHarnessBackendAgy && backend != agents.AgentRunHarnessBackendPrimeAgent {
+	if !structured && backend != agents.AgentRunHarnessBackendHermesAgent && backend != agents.AgentRunHarnessBackendCodex && backend != agents.AgentRunHarnessBackendAgy && backend != agents.AgentRunHarnessBackendPrimeAgent {
 		if text := strings.TrimSpace(strings.Join(plain, "\n")); text != "" {
 			return text, nil
 		}
@@ -190,4 +201,28 @@ func (server *Server) chatReply(ctx context.Context, run *agents.AgentRun) (stri
 		return "", pending()
 	}
 	return extractChatReply(backend, string(raw))
+}
+
+const hermesReplyFormat = "anvil.hermes.final/v1"
+const legacyHermesReplyUnavailable = "This older Hermes reply is unavailable because its runner did not separate the final answer from internal output. Send a new message after the updated Hermes runner is deployed."
+
+// Legacy Hermes messages were derived from undifferentiated stdout. Never
+// guess which text was public: hide the entire legacy answer in read views and
+// replayed prompts. The original database record remains untouched.
+func safeChatMessages(messages []chat.Message) []chat.Message {
+	safe := append([]chat.Message(nil), messages...)
+	for i := range safe {
+		if safe[i].Role != chat.RoleAssistant {
+			continue
+		}
+		var metadata map[string]any
+		if json.Unmarshal(safe[i].Metadata, &metadata) != nil || metadata["backend"] != string(agents.AgentRunHarnessBackendHermesAgent) || metadata["replyFormat"] == hermesReplyFormat {
+			continue
+		}
+		safe[i].Role = chat.RoleSystem
+		safe[i].Content = legacyHermesReplyUnavailable
+		metadata["kind"] = "legacy_output_unavailable"
+		safe[i].Metadata, _ = json.Marshal(metadata)
+	}
+	return safe
 }

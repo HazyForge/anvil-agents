@@ -133,6 +133,7 @@ func (server *Server) queueChatTurnAttempt(ctx context.Context, ns, id string, b
 }
 
 func buildChatPrompt(thread chat.Thread, messages []chat.Message, content string) (string, error) {
+	messages = safeChatMessages(messages)
 	// JSON framing preserves speaker/content boundaries. The configured profile
 	// supplies identity, skills, model, credentials and execution authority.
 	history := make([]map[string]string, 0, len(messages)+1)
@@ -275,7 +276,11 @@ func (server *Server) reconcileChatTurn(ctx context.Context, turn *chat.Turn) er
 			return err
 		}
 		turn.Status = "succeeded"
-		meta, _ := json.Marshal(map[string]string{"runName": turn.RunName, "turnId": turn.ID, "profileName": turn.ProfileName, "backend": string(run.Status.Backend)})
+		metadata := map[string]string{"runName": turn.RunName, "turnId": turn.ID, "profileName": turn.ProfileName, "backend": string(run.Status.Backend)}
+		if agentsv1alpha1.AgentRunHarnessBackendKind(run.Status.Backend) == agentsv1alpha1.AgentRunHarnessBackendHermesAgent {
+			metadata["replyFormat"] = hermesReplyFormat
+		}
+		meta, _ := json.Marshal(metadata)
 		return server.chatStore.CompleteTurn(ctx, *turn, chat.Message{Role: chat.RoleAssistant, Content: output, Metadata: meta})
 	case agentsv1alpha1.AgentRunPhaseNeedsHuman:
 		reason := strings.TrimSpace(run.Status.Error)

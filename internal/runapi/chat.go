@@ -204,8 +204,11 @@ func (server *Server) handleGetChatThread(writer http.ResponseWriter, request *h
 		server.writeChatStoreError(writer, err, principal, namespace)
 		return
 	}
+	if server.authorizer.Allowed(principal, PermissionRunsRead, namespace) {
+		server.enrichChatFailureView(request.Context(), namespace, turns, messages)
+	}
 	server.log.Info("chat thread read", "subject", principal.Subject, "namespace", namespace, "thread", thread.ID)
-	response := ChatThreadDetailResponse{Thread: thread, Messages: messages, Turns: turns}
+	response := ChatThreadDetailResponse{Thread: thread, Messages: safeChatMessages(messages), Turns: turns}
 	for i := range turns {
 		if chat.Active(turns[i]) {
 			response.ActiveTurn = &turns[i]
@@ -225,7 +228,7 @@ func (server *Server) handleListChatMessages(writer http.ResponseWriter, request
 		server.writeChatStoreError(writer, err, principal, namespace)
 		return
 	}
-	writeJSON(writer, http.StatusOK, map[string]any{"items": messages})
+	writeJSON(writer, http.StatusOK, map[string]any{"items": safeChatMessages(messages)})
 }
 
 func (server *Server) handleAppendChatMessage(writer http.ResponseWriter, request *http.Request) {
