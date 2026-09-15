@@ -30,6 +30,20 @@ function regresses(next: RemoteThreadDetail, previous: RemoteThreadDetail | null
       ((after.retryCount ?? 0) === (before.retryCount ?? 0) && turnProgress(after) < turnProgress(before)))));
 }
 
+// A delayed pre-repair response must not remove a verified answer already read.
+function retainRecoveredReplies(next: RemoteThreadDetail, previous: RemoteThreadDetail | null): RemoteThreadDetail {
+  if (!previous || previous.id !== next.id) return next;
+  const prior = new Map(previous.messages.map(message => [message.id, message]));
+  return {...next, messages: next.messages.map(message => {
+    const before = prior.get(message.id);
+    const oldMeta = before?.metadata as {backend?: string; replyFormat?: string; runName?: string} | undefined;
+    const newMeta = message.metadata as {backend?: string; replyFormat?: string; runName?: string; kind?: string} | undefined;
+    return before?.role === 'assistant' && oldMeta?.backend === 'openClaw' && oldMeta.replyFormat === 'openclaw.payloads/v1'
+      && newMeta?.backend === 'openClaw' && newMeta.runName === oldMeta.runName
+      && newMeta.replyFormat !== oldMeta.replyFormat && newMeta.kind === 'legacy_output_unavailable' ? before : message;
+  })};
+}
+
 export function EntityChatPage({token, config}: Props) {
   const [namespace, setNamespace] = useState(() => loadNamespace(config.defaultNamespaces[0] || 'agents'));
   const [profiles, setProfiles] = useState<CompositionDocument[]>([]);
@@ -141,7 +155,7 @@ export function EntityChatPage({token, config}: Props) {
       try {
         const next = await getRemoteThread(pollToken, namespace, threadID, controller.signal);
         if (controller.signal.aborted || navigation.current !== epoch) return;
-        setDetail(previous => regresses(next, previous) ? previous : next); applyThreadIdentity(next); setUnavailable(false);
+        setDetail(previous => regresses(next, previous) ? previous : retainRecoveredReplies(next, previous)); applyThreadIdentity(next); setUnavailable(false);
         const unresolved = readPendingSend(namespace, threadID);
         if (unresolved && next.turns?.some(t => t.requestId === unresolved.id)) {
           clearPendingSend(namespace, threadID); pending.current = null; setError('');
@@ -363,8 +377,8 @@ export function EntityChatPage({token, config}: Props) {
           {detail?.messages.map(message => {
             if (message.role === 'system') {
               const metadata = message.metadata as {kind?: string; backend?: string; runName?: string} | undefined;
-              if (metadata?.kind !== 'legacy_output_unavailable' || metadata.backend !== 'hermesAgent') return null;
-              return <aside key={message.id} className="remote-chat-caption" aria-label="Earlier reply unavailable"><strong>Earlier reply unavailable</strong><p>An older Hermes runner did not separate its final answer from internal output. The original message has been preserved. Reasoning and original output can be inspected in the runner output while its logs are retained.</p>{metadata.runName && /^[a-z0-9]([a-z0-9.-]{0,251}[a-z0-9])?$/.test(metadata.runName) && <button type="button" className="btn btn-ghost" onClick={() => {setHistoricalOutput({runName: metadata.runName!, backend: 'hermesAgent'}); setRawActivityOpen(true);}}>View original runner output</button>}</aside>;
+              if (metadata?.kind !== 'legacy_output_unavailable' || !['hermesAgent', 'openClaw'].includes(metadata.backend || '')) return null;
+              return <aside key={message.id} className="remote-chat-caption" aria-label="Earlier reply unavailable"><strong>Earlier reply unavailable</strong><p>{metadata.backend === 'openClaw' ? 'This older answer could not be recovered from its runner output yet. Your message is saved. The answer will be saved permanently when recovery succeeds.' : 'An older Hermes runner did not separate its final answer from internal output. The original message has been preserved. Reasoning and original output can be inspected in the runner output while its logs are retained.'}</p>{metadata.runName && /^[a-z0-9]([a-z0-9.-]{0,251}[a-z0-9])?$/.test(metadata.runName) && <button type="button" className="btn btn-ghost" onClick={() => {setHistoricalOutput({runName: metadata.runName!, backend: metadata.backend!}); setRawActivityOpen(true);}}>View original runner output</button>}</aside>;
             }
             return <article key={message.id} className={`chat-bubble ${message.role === 'user' ? 'chat-bubble-user' : 'chat-bubble-run'}`}>
             <header className="chat-bubble-header"><span className="chat-bubble-role">{message.role === 'user' ? ((message.metadata as {authorProfile?: string} | undefined)?.authorProfile || 'You') : message.role === 'tool' ? 'Coordination' : detail.profileName || 'Agent'}</span></header>

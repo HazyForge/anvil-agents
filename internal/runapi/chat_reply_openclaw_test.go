@@ -95,7 +95,7 @@ func TestOpenClawStatusTailRecoversOwnedPayloadAndPersistsFormat(t *testing.T) {
 	}
 }
 
-func TestOpenClawLegacyViewsRecoverWithoutAnotherRunOrTranscriptRewrite(t *testing.T) {
+func TestOpenClawLegacyRecoveryPersistsWithoutAnotherRun(t *testing.T) {
 	ctx := context.Background()
 	s := chatTestServer(t, true)
 	thread := newExecutionThread(t, s, `{}`)
@@ -129,6 +129,14 @@ func TestOpenClawLegacyViewsRecoverWithoutAnotherRunOrTranscriptRewrite(t *testi
 		t.Fatal(err)
 	}
 	s.logs = staticLogSource{contents: openClawFinalFixture}
+	before, _ := s.chatStore.ListMessages(ctx, "agents", thread.ID)
+	wrongTurns, _ := s.chatStore.ListTurns(ctx, "agents", thread.ID)
+	wrongTurns[0].RunUID = "different-run"
+	s.enrichOpenClawReplyView(ctx, "agents", wrongTurns, before)
+	unchanged, _ := s.chatStore.ListMessages(ctx, "agents", thread.ID)
+	if unchanged[1].Content != "PRIVATE_LEGACY_PROMPT" {
+		t.Fatal("mismatched run UID repaired persisted history")
+	}
 	for _, suffix := range []string{"", "/messages"} {
 		request := httptest.NewRequest(http.MethodGet, "/api/v1/namespaces/agents/chat/threads/"+thread.ID+suffix, nil)
 		request.Header.Set("Authorization", "Bearer valid")
@@ -137,10 +145,13 @@ func TestOpenClawLegacyViewsRecoverWithoutAnotherRunOrTranscriptRewrite(t *testi
 		if response.Code != 200 || strings.Contains(response.Body.String(), "PRIVATE_") || !strings.Contains(response.Body.String(), openClawPublicReply) {
 			t.Fatalf("view %s not repaired status=%d body=%s", suffix, response.Code, response.Body.String())
 		}
+		// Simulate log retention/network loss immediately after the first read.
+		s.logs = nil
+		s.runs = nil
 	}
 	messages, _ := s.chatStore.ListMessages(ctx, "agents", thread.ID)
-	if messages[1].Content != "PRIVATE_LEGACY_PROMPT" {
-		t.Fatal("stored legacy record changed")
+	if messages[1].Content != openClawPublicReply || !strings.Contains(string(messages[1].Metadata), openClawReplyFormat) {
+		t.Fatal("verified answer was not durably repaired")
 	}
 	prompt, err := buildChatPrompt(thread, messages, "continue")
 	if err != nil || strings.Contains(prompt, "PRIVATE_") {
@@ -150,10 +161,7 @@ func TestOpenClawLegacyViewsRecoverWithoutAnotherRunOrTranscriptRewrite(t *testi
 	if err = s.writes.List(ctx, runs); err != nil || len(runs.Items) != 1 {
 		t.Fatal("view repair created another execution")
 	}
-	turns, _ := s.chatStore.ListTurns(ctx, "agents", thread.ID)
-	turns[0].RunUID = "different-run"
-	s.enrichOpenClawReplyView(ctx, "agents", turns, messages)
-	if safeChatMessages(messages)[1].Content != legacyOpenClawReplyUnavailable {
-		t.Fatal("mismatched run UID accepted")
+	if messages[0].Content != "hello" || len(messages) != 2 {
+		t.Fatal("user message or transcript order changed")
 	}
 }

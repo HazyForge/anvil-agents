@@ -153,8 +153,8 @@ func openClawEnvelopePrefix(output string) (string, bool) {
 }
 
 // Recover at most one historical reply per read, within a single three-second
-// budget. No transcript or AgentRun writes occur. If original logs have expired,
-// safeChatMessages hides the contaminated legacy content instead.
+// budget. Persist the verified correction before displaying it, so subsequent
+// reads and replay no longer depend on runner logs. AgentRuns remain unchanged.
 func (server *Server) enrichOpenClawReplyView(ctx context.Context, namespace string, turns []chat.Turn, messages []chat.Message) {
 	if server.runs == nil {
 		return
@@ -176,9 +176,18 @@ func (server *Server) enrichOpenClawReplyView(ctx context.Context, namespace str
 				return
 			}
 			if reply, err := server.chatReply(recoveryCtx, run); err == nil && reply != "" && len(reply) <= 64*1024 {
-				message.Content = reply
-				metadata["replyFormat"] = openClawReplyFormat
-				message.Metadata, _ = json.Marshal(metadata)
+				repaired, saveErr := server.chatStore.RepairAssistantReply(recoveryCtx, namespace, *message, reply, openClawReplyFormat)
+				if saveErr == nil {
+					*message = repaired
+				} else if saved, readErr := server.chatStore.ListMessages(recoveryCtx, namespace, turn.ThreadID); readErr == nil {
+					// Another reader may have already committed the same recovery.
+					for _, candidate := range saved {
+						if candidate.ID == message.ID {
+							*message = candidate
+							break
+						}
+					}
+				}
 			}
 			return
 		}

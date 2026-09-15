@@ -28,6 +28,7 @@ func TestPostgresStoreIntegration(t *testing.T) {
 	t.Run("preprovisioned schema without database CREATE", func(t *testing.T) { exercisePreprovisionedSchema(t, store) })
 	t.Run("durable turn outbox", func(t *testing.T) { exerciseTurnOutbox(t, store) })
 	t.Run("durable bounded turn retries", func(t *testing.T) { exerciseTurnRetry(t, store) })
+	t.Run("durable reply repair", func(t *testing.T) { exerciseReplyRepair(t, store) })
 	t.Run("canonical standing conversation", func(t *testing.T) { exerciseStandingConversation(t, store) })
 
 	namespace := "chat-integration"

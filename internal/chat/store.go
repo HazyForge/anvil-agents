@@ -133,6 +133,7 @@ type Store interface {
 	ListThreads(ctx context.Context, filter ThreadFilter) ([]Thread, error)
 	GetThread(ctx context.Context, namespace, id string) (Thread, error)
 	ListMessages(ctx context.Context, namespace, threadID string) ([]Message, error)
+	RepairAssistantReply(ctx context.Context, namespace string, original Message, content string, format string) (Message, error)
 	AppendMessages(ctx context.Context, namespace, threadID string, messages []Message) ([]Message, Thread, error)
 	Ping(ctx context.Context) error
 	Close()

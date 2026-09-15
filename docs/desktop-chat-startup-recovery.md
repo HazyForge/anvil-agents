@@ -189,18 +189,20 @@ text does not reset framing. Truncated status uses bounded owned runner logs.
 New turns persist clean replies with `openclaw.payloads/v1` provenance. For
 legacy contaminated messages, thread/message reads can recover the latest
 answer from its original succeeded run with matching UID, thread/turn labels
-and ChatThread source. This view-only repair uses one three-second budget and
-creates no AgentRun or transcript rewrite. If original logs have expired, the
-legacy diagnostic body is hidden with an explicit unavailable notice; it is
-never replayed into a later prompt. Retained debug output remains separately
-inspectable. This limitation applies to legacy records, not newly persisted
-native replies.
+and ChatThread source. Recovery uses one three-second budget and atomically persists the verified
+public answer into the existing assistant message before displaying it. A
+compare-and-swap on the original body and metadata rejects stale/concurrent
+repairs. The message ID, sequence, timestamp, user messages and AgentRun are
+unchanged. Once saved, history and future prompts no longer depend on runner
+logs. If logs expire before any successful repair, an explicit unavailable
+notice replaces the legacy diagnostic body. Retained debug output remains
+separately inspectable.
 
 Validation: exact owned native canary output and its truncated status recovered
 the expected answer; package race tests and `make verify` passed. Tests cover
 malformed debug metadata, nested tool envelopes, aborted results, marker text,
 clean reply persistence, legacy GET thread/messages repair, wrong run UID,
-unchanged transcript and zero additional executions. API-only deployment uses
+retained message identity and zero additional executions. API-only deployment uses
 the chart's `api.image.reference`, preserving the healthy controller process.
 
 
@@ -218,3 +220,28 @@ shows the native public answer, **Reply received**, and an enabled composer.
 The same successful AgentRun remains the newest run; reply recovery created no
 additional execution. Hazy Trade's schedule remains suspended. Its runner
 continues with read-only GitHub tools when publication prerequisites are absent.
+
+
+### Follow-up: answer disappearing during refresh
+
+The owner observed the recovered answer briefly and then only user messages.
+The first legacy recovery implementation corrected the response view but left
+the malformed database record intact. A subsequent runner-log timeout returned
+an unavailable system message, which Desktop also failed to display for
+OpenClaw. A single successful browser reload was insufficient verification.
+
+Recovery now persists the exact verified answer with native-format provenance
+before returning it. Tests exercise real PostgreSQL storage, concurrent readers,
+wrong namespace, stale overwrites, unchanged user messages/order, and subsequent
+reads with both runner access and logs removed. Desktop retains a verified reply
+when an older unavailable response arrives late, and shows an explicit notice
+for an answer not yet recovered. No agent message is re-sent for this repair.
+
+
+The architectural boundary is PostgreSQL-backed conversation history: accepted
+user messages, execution intent, completed assistant answers and their run
+references survive a harness stopping or its logs expiring. Harness-native
+session files and runner logs serve separate execution/debugging purposes.
+A successful model exit is not itself proof that an answer is durably saved.
+Recovery must commit the verified answer before claiming the completed history
+is repaired; it must not turn a history read into a fresh model execution.
