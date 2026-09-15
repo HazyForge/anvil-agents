@@ -42,3 +42,30 @@ tests and all 21 remote-chat browser scenarios passed. Tests cover existing Job
 and launch-receipt races, legacy/mismatched/non-chat identity, terminal stickiness,
 API outage with preserved history and locks, delayed queue presentation,
 confirmed-expiry retry, lost-response idempotency, and retained composer drafts.
+
+## Controller recovery findings
+
+Replacing the Pod alone did not recover dispatch: initial watch caches timed
+out after two minutes while the leader lease kept renewing. Primaris uses
+Kubernetes v1.36.1. Ordinary list reads (55 Jobs, 214 AgentRuns) were fast, and
+an external initial-events watch completed. A direct Helm trial of
+`KUBE_FEATURE_WatchListClient=false` restored all 16 workers with sustained
+lease renewal. This is a verified operational mitigation; the exact cause of
+the in-cluster streaming startup stall remains unproven. Keep leader election
+and the existing timeout enabled; no etcd restart or data deletion was needed.
+
+Readiness now uses controller-runtime v0.23.3's native controller warmup and
+requires every registered controller's watch sources to sync. Followers warm
+caches while reconciliation remains leader-only. Liveness remains independent.
+
+The first retry exposed a separate concurrency isolation bug: an unrelated
+release-lab run with conflicting explicit/profile application scopes caused
+the global concurrency scan to reject valid Delivery Steward work. The scan
+now conservatively counts that run against BOTH possible applications and
+allows unrelated applications to proceed. The invalid run's own scope remains
+rejected; transient scope lookup failures are still propagated.
+
+Both startup expiry and launch-attempt persistence use optimistic locking.
+Regressions cover either side winning that race without resurrecting an expired
+turn or launching a duplicate. Additional tests exercise real controller-runtime
+warmup, follower fencing, failed sync, shutdown, and conflicting-scope isolation.

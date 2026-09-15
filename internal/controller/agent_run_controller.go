@@ -501,7 +501,7 @@ func (r *AgentRunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 			attemptedAt := now
 			status.JobCreateAttemptedAt = &attemptedAt
 			obj.Status = status
-			if err := r.Status().Patch(ctx, obj, client.MergeFrom(original)); err != nil {
+			if err := r.Status().Patch(ctx, obj, client.MergeFromWithOptions(original, client.MergeFromWithOptimisticLock{})); err != nil {
 				if apierrors.IsConflict(err) {
 					return ctrl.Result{Requeue: true}, nil
 				}
@@ -3289,11 +3289,11 @@ func (r *AgentRunReconciler) agentRunQueuedBehindApplication(ctx context.Context
 		if agentRunPhaseTerminal(run.Status.Phase) {
 			continue
 		}
-		runApplicationName, err := r.agentRunApplicationName(ctx, run)
+		matches, err := agentRunMayUseApplication(ctx, r.Client, run, applicationName)
 		if err != nil {
 			return nil, err
 		}
-		if runApplicationName != applicationName {
+		if !matches {
 			continue
 		}
 		if !agentRunPrecedes(run, obj) {

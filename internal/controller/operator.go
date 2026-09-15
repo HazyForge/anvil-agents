@@ -9,6 +9,7 @@ import (
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
+	controllerconfig "sigs.k8s.io/controller-runtime/pkg/config"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
@@ -40,7 +41,11 @@ func Run(ctx context.Context, options *Options) error {
 		}
 	}
 
+	// Synchronize watched sources on leaders and followers before readiness;
+	// controller-runtime still starts reconcilers only after leader election.
+	warmup := true
 	managerOptions := ctrl.Options{
+		Controller:             controllerconfig.Controller{EnableWarmup: &warmup},
 		Scheme:                 scheme,
 		Metrics:                server.Options{BindAddress: options.MetricsBindAddress},
 		HealthProbeBindAddress: options.HealthProbeBindAddress,
@@ -71,6 +76,8 @@ func Run(ctx context.Context, options *Options) error {
 	if err != nil {
 		return fmt.Errorf("create controller manager: %w", err)
 	}
+	readiness := &managerReadiness{parent: ctx}
+	mgr = &readinessManager{Manager: mgr, readiness: readiness}
 	archiveStore, err := NewAgentRunArchiveStore(ctx, options)
 	if err != nil {
 		return fmt.Errorf("configure AgentRun archive: %w", err)
@@ -116,7 +123,7 @@ func Run(ctx context.Context, options *Options) error {
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
 		return fmt.Errorf("register health check: %w", err)
 	}
-	if err := mgr.AddReadyzCheck("readyz", healthz.Ping); err != nil {
+	if err := mgr.AddReadyzCheck("readyz", readiness.Check); err != nil {
 		return fmt.Errorf("register readiness check: %w", err)
 	}
 	return mgr.Start(ctx)

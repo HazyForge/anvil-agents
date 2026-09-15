@@ -258,3 +258,72 @@ func TestChatStartupDeadlineIdentityAndBoundary(t *testing.T) {
 		}
 	}
 }
+
+func TestChatLaunchReceiptDoesNotOverwriteConcurrentStartupExpiry(t *testing.T) {
+	ctx := context.Background()
+	run := startupChatRun()
+	// The launching reconciliation began before its deadline. A concurrent
+	// reconciliation reaches the deadline while the launch receipt is in flight.
+	run.CreationTimestamp = metav1.Now()
+	r := startupTestReconciler(t, run)
+	req := ctrl.Request{NamespacedName: client.ObjectKeyFromObject(run)}
+	// Persist the immutable launch plan without attempting Job creation yet.
+	if _, err := r.Reconcile(ctx, req); err != nil {
+		t.Fatal(err)
+	}
+	prepared := &controlv1alpha1.AgentRun{}
+	if err := r.Get(ctx, req.NamespacedName, prepared); err != nil {
+		t.Fatal(err)
+	}
+	if !agentRunLaunchReceiptComplete(&prepared.Status) || prepared.Status.JobCreateAttemptedAt != nil {
+		t.Fatal("expected a planned, unattempted launch")
+	}
+	expiredBeforeReceipt := false
+	r.Client = interceptor.NewClient(r.Client.(client.WithWatch), interceptor.Funcs{SubResourcePatch: func(ctx context.Context, c client.Client, subresource string, obj client.Object, patch client.Patch, opts ...client.SubResourcePatchOption) error {
+		attempted, ok := obj.(*controlv1alpha1.AgentRun)
+		if subresource == "status" && ok && attempted.Status.JobCreateAttemptedAt != nil && !expiredBeforeReceipt {
+			expiredBeforeReceipt = true
+			latest := &controlv1alpha1.AgentRun{}
+			if err := c.Get(ctx, req.NamespacedName, latest); err != nil {
+				return err
+			}
+			winner := &AgentRunReconciler{Client: c, Scheme: r.Scheme}
+			winner.APIReader = c
+			deadline := metav1.NewTime(run.CreationTimestamp.Add(agentRunChatStartupBudget))
+			handled, result, err := winner.reconcileAgentRunChatStartupDeadline(ctx, latest.DeepCopy(), latest, &latest.Status, deadline)
+			if err != nil {
+				return err
+			}
+			if !handled || result.Requeue || latest.Status.Phase != controlv1alpha1.AgentRunPhaseFailed {
+				t.Fatal("concurrent deadline did not win before receipt persistence")
+			}
+		}
+		return c.SubResource(subresource).Patch(ctx, obj, patch, opts...)
+	}})
+	result, err := r.Reconcile(ctx, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !expiredBeforeReceipt || !result.Requeue {
+		t.Fatalf("expected stale launch to requeue after concurrent expiry; injected=%v result=%#v", expiredBeforeReceipt, result)
+	}
+	// Retrying the conflicted reconciliation must observe the terminal state.
+	if _, err := r.Reconcile(ctx, req); err != nil {
+		t.Fatal(err)
+	}
+	got := &controlv1alpha1.AgentRun{}
+	if err := r.Get(ctx, req.NamespacedName, got); err != nil {
+		t.Fatal(err)
+	}
+	condition := apimeta.FindStatusCondition(got.Status.Conditions, agentRunReady)
+	if got.Status.Phase != controlv1alpha1.AgentRunPhaseFailed || got.Status.JobCreateAttemptedAt != nil || got.Status.JobRef != nil || condition == nil || condition.Reason != agentRunChatStartupReason || got.Status.Error != agentRunChatStartupMessage {
+		t.Fatalf("concurrent terminal expiry was overwritten: %#v", got.Status)
+	}
+	jobs := &batchv1.JobList{}
+	if err := r.List(ctx, jobs); err != nil {
+		t.Fatal(err)
+	}
+	if len(jobs.Items) != 0 {
+		t.Fatalf("stale reconciliation launched %d Jobs after expiry", len(jobs.Items))
+	}
+}

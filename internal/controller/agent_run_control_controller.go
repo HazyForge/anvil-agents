@@ -303,7 +303,7 @@ func resolveAgentRunSpecApplicationNameWithProfilePolicy(ctx context.Context, c 
 		profileApplication = strings.TrimSpace(profile.Spec.Scope.ApplicationRef.Name)
 	}
 	if direct != "" && profileApplication != "" && direct != profileApplication {
-		return "", fmt.Errorf("run scope applicationRef %q conflicts with AgentRunProfile applicationRef %q", direct, profileApplication)
+		return "", &agentRunScopeConflict{direct: direct, profile: profileApplication}
 	}
 	return firstNonEmpty(direct, profileApplication), nil
 }
