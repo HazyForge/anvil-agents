@@ -147,6 +147,8 @@ service:
 # the controller. It is disabled until an issuer, audience, and explicit
 # authorization bindings are configured.
 api:
+  # API-only process environment; independent of controller extraEnv.
+  extraEnv: []
   image:
     # Optional complete API image reference for independent API rollouts.
     # Empty inherits image.reference, or image.repository:image.tag when unset.

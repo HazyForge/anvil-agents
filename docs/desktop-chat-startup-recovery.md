@@ -165,7 +165,7 @@ copied, no API key substituted, and the selected agent remains OpenClaw with
 `xai/grok-4.5`. The native login's global default change was restored.
 
 Browser retry `chat-turn-333441c79e2202e9c0bebc7707988e66250eff3e` completed
-Succeeded at 16:33:56Z. Its owned native output confirms xAI/Grok4.5 without
+Succeeded at 16:33:56Z. Its owned native output confirms xAI/Grok 4.5 without
 fallback and identifies the code-slop auditor, including its current read-only
 GitHub limitation. This is provider proof, distinct from correct reply rendering.
 
@@ -173,6 +173,48 @@ During the subsequent API rollout, new controller cache LISTs encountered
 HTTP/2 stream resets while the old healthy controller retained its lease.
 `DISABLE_HTTP2=true` was applied only to the controller through the Primaris
 Helm overlay, retaining `KUBE_FEATURE_WatchListClient=false`, cache warmup and
-leader fencing. Helm revision26 completed with the new controller ready, zero
+leader fencing. Helm revision 26 completed with the new controller ready, zero
 restarts and a renewing lease. This mitigates the observed transport failure;
 it does not establish why the Kubernetes API reset those connections.
+
+
+OpenClaw replies now use only the native top-level public `payloads[].text`,
+with provider/model identity and a non-aborted result. Plain stdout, tool
+envelopes and private `meta` fields cannot become assistant messages. Native
+async diagnostics can corrupt JSON inside debug metadata; the parser validates
+the public prefix without interpreting the corrupted private tail. Later native
+failed results invalidate an earlier complete reply, and quoted runner-marker
+text does not reset framing. Truncated status uses bounded owned runner logs.
+
+New turns persist clean replies with `openclaw.payloads/v1` provenance. For
+legacy contaminated messages, thread/message reads can recover the latest
+answer from its original succeeded run with matching UID, thread/turn labels
+and ChatThread source. This view-only repair uses one three-second budget and
+creates no AgentRun or transcript rewrite. If original logs have expired, the
+legacy diagnostic body is hidden with an explicit unavailable notice; it is
+never replayed into a later prompt. Retained debug output remains separately
+inspectable. This limitation applies to legacy records, not newly persisted
+native replies.
+
+Validation: exact owned native canary output and its truncated status recovered
+the expected answer; package race tests and `make verify` passed. Tests cover
+malformed debug metadata, nested tool envelopes, aborted results, marker text,
+clean reply persistence, legacy GET thread/messages repair, wrong run UID,
+unchanged transcript and zero additional executions. API-only deployment uses
+the chart's `api.image.reference`, preserving the healthy controller process.
+
+
+Final live verification: Helm revision 28 is deployed. The controller remains
+on `sha256:4105098d3fc4fa6b17c0c03d99d464c09e09d8eccf4b21c5941cb8f5250cdc00`;
+the API uses
+`sha256:5c7217e2ab0b951792a7692031c146c9675d8770aae7d411e3f6078c8ea7f39f`.
+Both processes are ready with zero restarts. The API also needs
+`DISABLE_HTTP2=true` on this deployment: before that setting, bounded owned-log
+reads timed out and the legacy answer stayed hidden; after it, the original
+answer loads cleanly. The setting is supplied through API-only `extraEnv`.
+
+Authenticated Desktop reload on the existing Hazy Trade code-slop conversation
+shows the native public answer, **Reply received**, and an enabled composer.
+The same successful AgentRun remains the newest run; reply recovery created no
+additional execution. Hazy Trade's schedule remains suspended. Its runner
+continues with read-only GitHub tools when publication prerequisites are absent.

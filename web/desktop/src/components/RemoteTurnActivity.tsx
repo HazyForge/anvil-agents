@@ -71,7 +71,7 @@ export function RemoteTurnActivity({token, namespace, turn, agentLabel, recovery
             if (phase === 'Succeeded') {
               stopped = true;
               setTerminalPhase(phase);
-              append({key: 'runner-complete', label: 'Harness finished; saving the reply', kind: 'reply'});
+              append({key: 'runner-complete', label: 'Harness finished', kind: 'reply'});
             }
             if (phase === 'Failed' || phase === 'NeedsHuman') {
               stopped = true;

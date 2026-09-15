@@ -121,6 +121,12 @@ if helm template "${release}" "${chart}" --set-string runnerImages.primeAgent= >
 fi
 
 helm template "${release}" "${chart}" "${api_args[@]}" >"${tmp_dir}/enabled.yaml"
+helm template "${release}" "${chart}" "${api_args[@]}" \
+  --set-string 'api.extraEnv[0].name=DISABLE_HTTP2' \
+  --set-string 'api.extraEnv[0].value=true' \
+  --show-only templates/api-deployment.yaml >"${tmp_dir}/api-env.yaml"
+grep -q 'name: DISABLE_HTTP2' "${tmp_dir}/api-env.yaml" || fail "API process environment missing with chat disabled"
+if grep -q 'ANVIL_AGENTS_CHAT_DATABASE_URL' "${tmp_dir}/api-env.yaml"; then fail "API environment enabled chat implicitly"; fi
 # An API-only image upgrade must leave the entire controller Deployment stable.
 # Empty overrides retain both legacy shared-image resolution paths.
 api_image="registry.example/anvil-api@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
@@ -406,9 +412,12 @@ helm template "${release}" "${chart}" "${api_args[@]}" \
   --set-string archive.external.databaseURLSecret.name=managed-archive \
   --set-string archive.external.databaseURLSecret.key=uri \
   --set-string archive.restartToken=rotation-2 \
+  --set-string 'api.extraEnv[0].name=DISABLE_HTTP2' \
+  --set-string 'api.extraEnv[0].value=true' \
   --set-string 'api.config.authorization.bindings[0].permissions[2]=anvil-agents:chat:read' \
   --set-string 'api.config.authorization.bindings[0].permissions[3]=anvil-agents:chat:write' \
   >"${tmp_dir}/chat-archive.yaml"
+grep -q 'name: DISABLE_HTTP2' "${tmp_dir}/chat-archive.yaml" || fail "API process environment missing with chat enabled"
 grep -A5 'ANVIL_AGENTS_CHAT_DATABASE_URL' "${tmp_dir}/chat-archive.yaml" | grep -Eq 'name: "?managed-archive"?' || fail "chat did not reuse the archive Secret name"
 grep -A5 'ANVIL_AGENTS_CHAT_DATABASE_URL' "${tmp_dir}/chat-archive.yaml" | grep -Eq 'key: "?uri"?' || fail "chat did not reuse the archive Secret key"
 grep -q 'control.anvil.hazyforge.io/archive-restart: "rotation-2"' "${tmp_dir}/chat-archive.yaml" || fail "chat-enabled API pod did not inherit archive restart token"

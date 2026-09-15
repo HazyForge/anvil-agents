@@ -64,9 +64,13 @@ archive:
 # retain explicit operator permissions, while dashboard-only users receive the
 # narrower anvil_agents_viewer role and read-only observer permissions.
 api:
+  # Avoid Kubernetes API HTTP/2 stream resets when recovering owned logs.
+  extraEnv:
+    - name: DISABLE_HTTP2
+      value: "true"
   # API-only chat fixes can roll independently of the healthy controller.
   image:
-    reference: ghcr.io/hazyforge/anvil-agents@sha256:4105098d3fc4fa6b17c0c03d99d464c09e09d8eccf4b21c5941cb8f5250cdc00
+    reference: ghcr.io/hazyforge/anvil-agents@sha256:5c7217e2ab0b951792a7692031c146c9675d8770aae7d411e3f6078c8ea7f39f
   enabled: true
   extraVolumes:
     - name: chat-database-ca
