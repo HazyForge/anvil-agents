@@ -20,6 +20,7 @@ const codexChatAuthenticationFailure = "Codex could not authenticate with its mo
 
 const hermesChatAuthenticationFailure = "Hermes cannot authenticate with xAI. Renew authentication for the selected remote Hermes harness with `hermes model`, then start a new turn."
 const hermesChatProviderSetupFailure = "Hermes provider authentication or configuration is unavailable. Check the selected remote harness provider setup, then start a new turn."
+const openClawChatAuthenticationFailure = "OpenClaw cannot refresh its xAI authentication. Re-authenticate xAI for the selected remote OpenClaw harness, then start a new turn."
 const conflictingToolsChatFailure = "The harness could not start because its selected skill sets or tool sets define conflicting tools. Correct the agent's tool configuration, then start a new turn."
 const chatWritePolicySetupFailure = "The agent's write-credential setup was blocked by the project's repository policy. Chat should remain available with read-only tools; the runner setup needs repair."
 
@@ -31,6 +32,31 @@ var chatAuthentication401 = regexp.MustCompile(`(?i)\b401\s+unauthorized\b`)
 func extractChatFailure(backend agents.AgentRunHarnessBackendKind, output string) string {
 	if int64(len(output)) > chatFailureLogLimit {
 		return ""
+	}
+	if backend == agents.AgentRunHarnessBackendOpenClaw {
+		// OpenClaw's terminal FailoverError may concatenate the same refresh
+		// failure at multiple native wrapper levels. Accept only this exact final
+		// diagnostic and its known duplicates, never nested JSON or earlier retry
+		// output. This changes display only; it cannot authorize replay.
+		const native = "xAI OAuth refresh failed (400): Invalid or unknown refresh token"
+		const wrapped = "OAuth token refresh failed for xai: " + native
+		const complete = wrapped + ". Please try again or re-authenticate."
+		lines := strings.Split(strings.TrimSpace(chatANSI.ReplaceAllString(output, "")), "\n")
+		last := lines[len(lines)-1]
+		const prefix = "FailoverError: "
+		if !strings.HasPrefix(last, prefix) {
+			return ""
+		}
+		parts := strings.Split(strings.TrimPrefix(last, prefix), " | ")
+		if parts[0] != complete {
+			return ""
+		}
+		for _, part := range parts[1:] {
+			if part != complete && part != wrapped && part != native {
+				return ""
+			}
+		}
+		return openClawChatAuthenticationFailure
 	}
 	if backend == agents.AgentRunHarnessBackendHermesAgent {
 		// Hermes's adapter exits before inference with this exact two-line native
@@ -96,7 +122,7 @@ func (server *Server) chatFailure(ctx context.Context, run *agents.AgentRun) str
 	}
 	// Status output may truncate a terminal event. Use the same source as reply
 	// recovery, which verifies this run's Job/Pod ownership and agent container.
-	if (backend == agents.AgentRunHarnessBackendCodex || backend == agents.AgentRunHarnessBackendHermesAgent) && server.logs != nil {
+	if (backend == agents.AgentRunHarnessBackendCodex || backend == agents.AgentRunHarnessBackendHermesAgent || backend == agents.AgentRunHarnessBackendOpenClaw) && server.logs != nil {
 		logCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
 		defer cancel()
 		limit, tail := chatFailureLogLimit, int64(5000)
@@ -133,7 +159,7 @@ func (server *Server) enrichChatFailureView(ctx context.Context, namespace strin
 		return
 	}
 	reason := server.chatFailure(ctx, run)
-	if reason != hermesChatProviderSetupFailure && reason != hermesChatAuthenticationFailure && reason != codexChatAuthenticationFailure && reason != conflictingToolsChatFailure && reason != chatWritePolicySetupFailure {
+	if reason != hermesChatProviderSetupFailure && reason != hermesChatAuthenticationFailure && reason != openClawChatAuthenticationFailure && reason != codexChatAuthenticationFailure && reason != conflictingToolsChatFailure && reason != chatWritePolicySetupFailure {
 		return
 	}
 	turn.Error = reason
