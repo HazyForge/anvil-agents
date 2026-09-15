@@ -46,3 +46,46 @@ reused; no new Secret permission or raw-error rendering is introduced.
 
 A prelaunch tool-name conflict now says the harness could not start. Earlier
 failed turns stay available in collapsed history after a successful retry.
+
+## Direct Helm rollout and runtime tool setup
+
+The API/controller is deployed at
+`sha256:37e4baa44a87ca14070d8dfa22e812d3c93846870d66958fd4c4065956e7ad33`.
+The final Hermes runner is
+`sha256:07cfd545c409110fd53093aaac24a92793d54e749b01a6d2640658435f82c1ea`.
+The selected Delivery Steward harness is an existing private Primaris resource,
+so a one-resource Helm release adopts it while preserving its UID and every
+spec field except the image. The private `deploy/delivery-steward/` helper checks
+source/live agreement, a persisted exact-Application Argo hold, and the scoped
+admin image-only admission exception. Helm server-side apply transfers field
+ownership from the paused Argo controller without replacing the profile.
+
+A first new-image canary (`chat-turn-302c7921d36988136e8d00bc0490826e2ab9b51b`)
+caught a second pre-inference failure: the selected tool setup compiles its
+repository's `anvilctl`, but the standard Hermes runtime lacked Go. The final
+runner includes the pinned public Go toolchain from its existing build stage,
+with no private source or private CLI bundled into this repository. The image
+checks Go as UID 10000; `docker/agent-run-hermes/image_test.sh` exercises offline
+compilation as that user. No agent tool, model, scope or credential configuration
+was removed to make the greeting pass.
+
+The deployment admission exception also passed Kubernetes' actual type checker
+against all nine served resource schemas after making its map comparisons
+dynamic; the live policy reports no expression warnings.
+
+## Verified browser result and setup latency
+
+Run `chat-turn-050d266053259e320ab55817c945020302e01786` succeeded on the
+Go-capable runner. The actual browser received a clean saved assistant reply
+identifying Delivery Steward, Hermes and Grok 4.5, with
+`replyFormat: anvil.hermes.final/v1`. The expanded completed-turn debug view
+showed the separate original native output and final envelope.
+
+Tool preparation ran from 04:21:28Z to 04:27:23Z on 2026-09-15; native Hermes
+completed at 04:27:44Z. Most delay came from cold repository/tool setup, with
+Go downloads and compilation stored in the disposable container filesystem.
+The entrypoint now defaults Go caches beneath the selected HERMES_HOME and
+preserves explicit GOCACHE/GOMODCACHE values, including GOCACHE=off. The actual
+entrypoint fixture verifies export to both setup and harness, cache reuse
+between turns, and explicit overrides. This reduces repeated compilation when
+the selected home is persistent; it does not implement native session reuse.
