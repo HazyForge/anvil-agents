@@ -29,6 +29,11 @@ runnerImages:
 crds:
   install: true
 leaderElection: true
+# Primaris initial streaming-list sync stalled during the 2026-09-15 incident.
+# Use ordinary LIST/WATCH while verifying the in-cluster transport failure.
+extraEnv:
+  - name: KUBE_FEATURE_WatchListClient
+    value: "false"
 applicationMaxConcurrentRuns: 4
 defaultStorageClass: observability-local
 externalSecrets:
