@@ -12,6 +12,7 @@ import { openAgentRunStream } from "../api/stream";
 import { LiveStream } from "./LiveStream";
 import { AgentRunStatusCard } from "./AgentRunStatusCard";
 import { isRunningPhase } from "../wrapper/collaboration";
+import { createAgentRequestFromPeer, requestedCreateChips, type CreateAgentRequest } from "../wrapper/createAgent";
 import {
   grokInterruptDuplicatePrompt,
   parseRequestPeerFromLogLine,
@@ -46,6 +47,7 @@ export function RequestPeerMonitor({ token, namespace, sourceRun, createEnabled,
   const [sourceStatus, setSourceStatus] = useState<AgentRunView | null>(null);
   const [logHits, setLogHits] = useState<string[]>([]);
   const [posted, setPosted] = useState<PostedPeer[]>([]);
+  const [createRequests, setCreateRequests] = useState<CreateAgentRequest[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [streamStatus, setStreamStatus] = useState("connecting");
   const fulfilled = useRef<Set<string>>(new Set());
@@ -78,6 +80,7 @@ export function RequestPeerMonitor({ token, namespace, sourceRun, createEnabled,
   useEffect(() => {
     setLogHits([]);
     setPosted([]);
+    setCreateRequests([]);
     setError(null);
     setStreamStatus("connecting");
     fulfilled.current = new Set();
@@ -101,6 +104,13 @@ export function RequestPeerMonitor({ token, namespace, sourceRun, createEnabled,
           const peer = parseRequestPeerFromLogLine(line);
           if (peer) {
             setLogHits((prev) => uniqueLines([...prev, line]));
+            const createReq = createAgentRequestFromPeer(peer);
+            if (createReq) {
+              setCreateRequests((prev) =>
+                prev.some((item) => item.name === createReq.name) ? prev : [...prev, createReq],
+              );
+              return;
+            }
             void maybePostPeer(peer);
           } else if (line.includes(STATUS_JSON_PREFIX) && line.includes("requestPeer")) {
             setLogHits((prev) => uniqueLines([...prev, line]));
@@ -228,6 +238,7 @@ export function RequestPeerMonitor({ token, namespace, sourceRun, createEnabled,
         <h2 className="panel-title">requestPeer · live stream</h2>
         <span className={`chip ${running ? "chip-ok" : ""}`}>{phase || "—"}</span>
         {sawRequestPeer ? <span className="chip chip-ok">requestPeer line</span> : null}
+        {createRequests.length > 0 ? <span className="chip chip-warn">requested create</span> : null}
         {posted.length > 0 ? <span className="chip chip-ok">grok peer posted</span> : null}
       </div>
       <div className="panel-body">
@@ -235,6 +246,23 @@ export function RequestPeerMonitor({ token, namespace, sourceRun, createEnabled,
         {sourceStatus ? <AgentRunStatusCard run={sourceStatus} label="A GET" /> : null}
         {error ? <div className="banner banner-error">{error}</div> : null}
         <p className="muted">Stream: {streamStatus}</p>
+        {createRequests.length > 0 ? (
+          <div className="chip-row" aria-label="Peer create-agent requests">
+            {createRequests.flatMap((request) =>
+              requestedCreateChips(request).map((chip) => (
+                <span key={`${request.name}-${chip.id}`} className={`chip chat-chip chat-chip-${chip.type}`}>
+                  {chip.label}
+                </span>
+              )),
+            )}
+          </div>
+        ) : null}
+        {createRequests.length > 0 ? (
+          <p className="muted">
+            Peer requested create-agent. This monitor does not POST AgentRunProfiles. Fulfill from Chat (manager) or
+            Runs create-agent (Wrapper).
+          </p>
+        ) : null}
         {logHits.length > 0 ? (
           <pre className="hint">{logHits.join("\n")}</pre>
         ) : (

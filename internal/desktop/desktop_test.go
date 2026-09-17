@@ -187,7 +187,7 @@ func TestSnapshotAndPrefsHTTP(t *testing.T) {
 	for _, tool := range snap.Wrapper.Tools {
 		ids[tool.ID] = struct{}{}
 	}
-	for _, id := range []string{"create_agent", "anvil-api", "local-harness"} {
+	for _, id := range []string{"create-agent", "anvil-api", "local-harness"} {
 		if _, ok := ids[id]; !ok {
 			t.Fatalf("missing wrapper tool %q in %#v", id, snap.Wrapper.Tools)
 		}

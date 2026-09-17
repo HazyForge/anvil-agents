@@ -155,6 +155,7 @@ export type CreateAgentRunProfileRequest = {
   description?: string;
   systemPrompt?: string;
   intent?: string;
+  harnessProfileName?: string;
 };
 
 export async function listAgentRuns(
@@ -830,6 +831,9 @@ export async function createAgentRunProfile(
   }
   if (Object.keys(harness).length > 0) {
     spec.harness = harness;
+  }
+  if (body.harnessProfileName?.trim()) {
+    spec.harnessProfileRef = { name: body.harnessProfileName.trim() };
   }
   const response = await apiFetch(`/api/v1/namespaces/${encodeURIComponent(namespace)}/agent-run-profiles`, token, {
     method: "POST",

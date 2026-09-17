@@ -23,6 +23,7 @@ import { AgentRunStatusCard } from "../components/AgentRunStatusCard";
 import { LiveStream } from "../components/LiveStream";
 import { personaLabel } from "../names";
 import { loadNamespace, saveNamespace } from "../state/namespace";
+import { CreateAgentPanel } from "../components/CreateAgentPanel";
 import { WRAPPER_PROFILE_NAME } from "../wrapper/intent";
 import { grokRequestPeerProofPrompt } from "../wrapper/requestPeer";
 import { stickAgentRunStatus } from "../wrapper/runStatus";
@@ -285,11 +286,31 @@ export function WrapperPage({ token, config }: Props) {
       <div className="page-header">
         <div>
           <h1 className="page-title">Runs</h1>
-          <p className="page-sub">Cluster work. See what is running, or start a run.</p>
+          <p className="page-sub">Cluster work. Wrapper create-agent is the skill that POSTs AgentRunProfiles. See what is running, or start a run.</p>
         </div>
       </div>
 
       {error ? <div className="banner banner-error">{error}</div> : null}
+
+      <CreateAgentPanel
+        token={token}
+        namespace={namespace}
+        principal={WRAPPER_PROFILE_NAME}
+        writeEnabled={Boolean(config.composition.writeEnabled)}
+        chatEnabled={Boolean(config.chat?.enabled)}
+        onCreated={(result) => {
+          if (result.ok) {
+            void (async () => {
+              try {
+                const items = await listRunProfiles(token, namespace);
+                setProfiles(items);
+              } catch {
+                /* roster refresh is optional */
+              }
+            })();
+          }
+        }}
+      />
 
       <section className="panel">
         <div className="panel-header">

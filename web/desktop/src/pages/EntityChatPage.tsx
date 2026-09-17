@@ -8,6 +8,7 @@ import { RemoteTurnActivity } from '../components/RemoteTurnActivity';
 import { AgentAvatar } from '../components/AgentAvatar';
 import { ProjectSwitcher, remoteChatProjects, projectManagers } from '../components/ProjectSwitcher';
 import { LiveStream } from '../components/LiveStream';
+import { CreateAgentPanel } from '../components/CreateAgentPanel';
 import { ensureAccessToken } from '../auth/oidc';
 import { type PendingChatSend, readPendingSend, rememberPendingSend, clearPendingSend } from '../api/pendingChat';
 import { formatTurnError } from '../wrapper/turn';
@@ -319,10 +320,25 @@ export function EntityChatPage({token, config}: Props) {
 
   return <div className="human-page">
     <div className="page-header"><div><h1 className="page-title">Chat</h1>
-      <p className="page-sub">Your agents, their work, and your ongoing conversations.</p>
+      <p className="page-sub">Your agents, their work, and your ongoing conversations. create-agent is a Wrapper/manager skill.</p>
     </div></div>
     {!enabled && <div className="banner banner-error">Remote chat is not enabled on this server.</div>}
     {error && <div className="banner banner-error" role="alert">{error}</div>}
+    {enabled ? (
+      <CreateAgentPanel
+        token={token}
+        namespace={namespace}
+        principal={profile || managers[0]?.metadata.name || ''}
+        writeEnabled={Boolean(config.composition.writeEnabled)}
+        chatEnabled={Boolean(config.chat?.enabled)}
+        threadId={threadID || undefined}
+        onCreated={(result) => {
+          if (result.ok) {
+            void listRunProfiles(token, namespace).then(setProfiles).catch(() => { /* roster refresh is optional */ });
+          }
+        }}
+      />
+    ) : null}
     <div className="remote-chat-layout">
       <aside className="panel remote-chat-sidebar agent-roster" aria-label="Agents">
         <ProjectSwitcher projects={projects} selected={namespace} disabled={busy} onChange={next => {

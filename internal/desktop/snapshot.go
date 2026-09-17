@@ -50,9 +50,9 @@ func defaultWrapper() WrapperInfo {
 	return WrapperInfo{
 		Tools: []WrapperTool{
 			{
-				ID:          "create_agent",
-				DisplayName: "create agent",
-				Notes:       "POST /api/v1/namespaces/{ns}/agent-run-profiles when composition.writeEnabled. That is how Desktop creates agents. The wrapper entity can spawn more profiles when asked in chat. GitOps-owned objects stay read-only; the API stamps managed-by=anvil-agents-console.",
+				ID:          "create-agent",
+				DisplayName: "create-agent",
+				Notes:       "Baked-in skill/tool for Wrapper and manager only. POST /api/v1/namespaces/{ns}/agent-run-profiles when composition.writeEnabled. Peers request create-agent via requestPeer STATUS_JSON; they must not create AgentRunProfiles. GitOps-owned objects stay read-only; the API stamps managed-by=anvil-agents-console.",
 			},
 			{
 				ID:          "anvil-api",
@@ -65,7 +65,7 @@ func defaultWrapper() WrapperInfo {
 				Notes:       "Second function, on the Local page: activate an already-installed catalog CLI (native PATH or WSL). Not Primaris chat. The OIDC token is not copied into argv, env, or the prompt file.",
 			},
 		},
-		Message: "Anvil Agents Desktop is the workstation process that signs in to the anvil-agents OIDC API (Anvil Primaris) and talks to cluster agents. create_agent and standing chat are the main tools. Local harness activation is a separate page. This is not a Kubernetes operator UI.",
+		Message: "Anvil Agents Desktop is the workstation process that signs in to the anvil-agents OIDC API (Anvil Primaris) and talks to cluster agents. create-agent (Wrapper/manager only) and standing chat are the main tools. Peers request create-agent; they do not create profiles. Local harness activation is a separate page. This is not a Kubernetes operator UI.",
 	}
 }
 

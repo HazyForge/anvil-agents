@@ -250,6 +250,16 @@ export function extractChipsFromPayload(payload: unknown, eventName?: string): C
       if (target) {
         chips.push({ id: `to-${target}`, type: "recipient", label: `To: ${target}` });
       }
+      const request = String(args.request || "").trim().toLowerCase();
+      const createdName = String(args.name || args.agentName || "").trim();
+      if (request === "create-agent" || request === "create_agent" || request === "requestcreateagent") {
+        chips.push({
+          id: `requested-create-${createdName || "agent"}`,
+          type: "transition",
+          label: createdName ? `Requested create: ${createdName}` : "Requested create",
+          status: "pending",
+        });
+      }
       const peerRun = String(args.peerRunName || args.runName || "").trim();
       if (peerRun) {
         chips.push({
@@ -260,6 +270,17 @@ export function extractChipsFromPayload(payload: unknown, eventName?: string): C
         });
       }
       chips.push({ id: "trans-dispatched", type: "transition", label: "Dispatched", status: "completed" });
+    } else if (name === "create-agent" || name === "create_agent" || name === "createAgent") {
+      chips.push({ id: "tool-create-agent", type: "tool", label: "create-agent" });
+      const createdName = String(args.name || args.profileName || args.agent || "").trim();
+      if (createdName) {
+        chips.push({
+          id: `created-${createdName}`,
+          type: "transition",
+          label: `Created: ${createdName}`,
+          status: "completed",
+        });
+      }
     } else if (name === "interruptDuplicate") {
       chips.push({ id: "routing-interrupt", type: "routing", label: "Routing: interruptDuplicate" });
       const target = String(args.duplicateRunName || args.runName || args.targetAgent || "").trim();
@@ -389,7 +410,7 @@ export function extractChipsAndCleanText(rawText: string): { text: string; chips
 
   // Match bracket directives: [Routing: Delegate], [To: scout], [Starting AgentRun: scout-1], [Dispatched], [Running]
   const bracketRegex =
-    /\[(Routing:\s*[^\]]+|(?:To|Recipient):\s*[^\]]+|Starting AgentRun:\s*[^\]]+|Dispatched|Running|Completed|Failed|Delegated)\]/gi;
+    /\[(Routing:\s*[^\]]+|(?:To|Recipient):\s*[^\]]+|Starting AgentRun:\s*[^\]]+|Created:\s*[^\]]+|Requested create:\s*[^\]]+|Refused create:\s*[^\]]+|Dispatched|Running|Completed|Failed|Delegated)\]/gi;
   let match: RegExpExecArray | null;
   while ((match = bracketRegex.exec(text)) !== null) {
     const item = match[1].trim();

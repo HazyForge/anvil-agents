@@ -197,6 +197,8 @@ a { color: var(--teal); text-decoration: none; }
   color: var(--text-dim);
 }
 .panel-body { padding: 0.75rem; display: flex; flex-direction: column; gap: 0.7rem; }
+.create-agent-panel { margin-bottom: 0.75rem; }
+.create-agent-form { display: flex; flex-direction: column; gap: 0.7rem; }
 
 .split {
   display: grid;
@@ -472,6 +474,11 @@ a { color: var(--teal); text-decoration: none; }
   border-color: rgba(240, 180, 41, 0.35);
   color: #ffe0a0;
   background: rgba(240, 180, 41, 0.05);
+}
+.chat-chip-tool {
+  border-color: rgba(61, 255, 168, 0.4);
+  color: var(--emerald);
+  background: rgba(61, 255, 168, 0.08);
 }
 .chat-turn-status {
   font-family: var(--font-mono);

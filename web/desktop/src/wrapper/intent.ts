@@ -61,7 +61,16 @@ function countFromText(text: string): number {
   return COUNT_WORDS[raw] ?? 0;
 }
 
+export function explicitAgentNames(text: string): string[] {
+  return namesFromText(text);
+}
+
 function namesFromText(text: string): string[] {
+  const namedThat = text.match(/\bnamed\s+([a-zA-Z0-9-]+)\s+that\b/i);
+  if (namedThat) {
+    const name = dnsLabel(namedThat[1]);
+    return name ? [name] : [];
+  }
   const named = text.match(/\bnamed\s+(.+?)(?:[.!?,]|$)/i);
   if (named) {
     return splitNames(named[1]);
@@ -69,6 +78,11 @@ function namesFromText(text: string): string[] {
   const called = text.match(/\bcalled\s+([a-zA-Z0-9-]+)/i);
   if (called) {
     const name = dnsLabel(called[1]);
+    return name ? [name] : [];
+  }
+  const toolNamed = text.match(/\bcreate-agent\s+([a-zA-Z0-9-]+)/i);
+  if (toolNamed) {
+    const name = dnsLabel(toolNamed[1]);
     return name ? [name] : [];
   }
   const colon = text.match(/\b(?:agents?|profiles?|entities)\s*:\s*([a-zA-Z0-9, \-]+)/i);
@@ -80,7 +94,9 @@ function namesFromText(text: string): string[] {
 
 export function parseWrapperIntent(text: string, existing: string[] = []): WrapperIntent {
   const talk = /\b(talk|chat|message|greet|introduce|hello|each other|peer)\b/i.test(text);
-  const spawn = /\b(create|spawn|make|add)\b/i.test(text) && /\b(agent|profile|entity|entities|agents|profiles)\b/i.test(text);
+  const spawn =
+    (/\b(create|spawn|make|add)\b/i.test(text) && /\b(agent|profile|entity|entities|agents|profiles)\b/i.test(text)) ||
+    /\bcreate-agent\b/i.test(text);
   const names = namesFromText(text);
   if (names.length > 0) {
     return { spawn: spawn || names.length > 0, talk, names };

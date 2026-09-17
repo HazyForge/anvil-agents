@@ -9,21 +9,35 @@ import {
 } from "../api/chat";
 import { APIError, AUDITOR_GROK_PROFILE, DESKTOP_GROK_PEER_PROFILE } from "../api/client";
 import type { ChatChip, ChatMessage, ChatThread, ChatTurnStatus } from "../api/types.chat";
+import {
+  CREATE_AGENT_TOOL,
+  createAgentChips,
+  executeCreateAgentBatch,
+  formatCreateAgentReceipt,
+  MANAGER_PROFILE_NAMES,
+  parseCreateAgentFromStatusBodies,
+  parseCreateAgentIntent,
+  parseCreateAgentToolCalls,
+  requestedCreateChips,
+  type CreateAgentInput,
+  type CreateAgentResult,
+} from "./createAgent";
 import { formatTurnError } from "./turn";
 
-/** Always-on manager harness profiles. Dedicated grok-home — never auditor or desktop-grok-peer. */
-export const MANAGER_PROFILE_NAMES = ["desktop-manager", "manager-hazy-trade"] as const;
+export { MANAGER_PROFILE_NAMES };
 
 /** Volume name for the manager pod. Do not reuse auditor or peer homes. */
 export const MANAGER_GROK_HOME = "hazy-trade-desktop-manager-grok-home";
 
 /**
- * Tools the manager harness may call. Desktop Chat never invokes them.
+ * Tools the manager harness may call. Desktop Chat never executes cluster
+ * harness tools except baked-in create-agent (OIDC composition write).
  * Hello is text with zero tool calls.
  */
 export const MANAGER_HARNESS_TOOLS = [
   "startSpecialistAgentRun",
   "requestPeer",
+  CREATE_AGENT_TOOL,
   "interruptDuplicate",
   "steerAgentRun",
   "directReply",
@@ -254,14 +268,80 @@ function recoveredReplyForUser(lines: HarnessChatLine[], userText: string): Harn
   return undefined;
 }
 
+function uniqueCreateAgentInputs(inputs: CreateAgentInput[]): CreateAgentInput[] {
+  const seen = new Set<string>();
+  const out: CreateAgentInput[] = [];
+  for (const item of inputs) {
+    if (!item.name || seen.has(item.name)) {
+      continue;
+    }
+    seen.add(item.name);
+    out.push(item);
+  }
+  return out;
+}
+
+/** Peer requestPeer(create-agent) is a receipt. Manager/Wrapper create-agent is fulfilled. */
+export async function fulfillCreateAgentFromChat(opts: {
+  token: string;
+  namespace: string;
+  principal: string;
+  text: string;
+  replyText: string;
+  chips?: ChatChip[];
+  writeEnabled: boolean;
+  chatEnabled: boolean;
+  threadId?: string;
+}): Promise<{ chips: ChatChip[]; receipts: string[] }> {
+  const chips: ChatChip[] = [...(opts.chips || [])];
+  const receipts: string[] = [];
+  const combined = `${opts.text}\n${opts.replyText}`;
+  const { creates: statusCreates, requests } = parseCreateAgentFromStatusBodies(combined);
+
+  for (const request of requests) {
+    chips.push(...requestedCreateChips(request));
+    receipts.push(
+      `Requested create: ${request.name}. Ask the manager or Wrapper to fulfill create-agent; peers cannot create AgentRunProfiles.`,
+    );
+  }
+
+  const inputs = uniqueCreateAgentInputs([
+    ...parseCreateAgentIntent(opts.text),
+    ...statusCreates,
+    ...parseCreateAgentFromStatusBodies(opts.replyText).creates,
+    ...parseCreateAgentToolCalls({ content: opts.replyText }),
+  ]);
+
+  if (inputs.length > 0) {
+    const results: CreateAgentResult[] = await executeCreateAgentBatch({
+      token: opts.token,
+      namespace: opts.namespace,
+      principal: opts.principal,
+      inputs,
+      chatEnabled: opts.chatEnabled,
+      writeEnabled: opts.writeEnabled,
+      spawnedFromThreadId: opts.threadId,
+    });
+    for (const result of results) {
+      chips.push(...createAgentChips(result));
+      receipts.push(formatCreateAgentReceipt(result));
+    }
+  }
+
+  return { chips: dedupeChips(chips), receipts };
+}
+
 /**
  * Desktop Chat Send. Streams the always-on manager harness reply.
- * Never POSTs AgentRuns. No command parser. No speak() fakes. No tool execution.
+ * Never POSTs AgentRuns. create-agent is the only Desktop-fulfilled tool
+ * (Wrapper/manager allowlist). Hello is a message, not a run.
  */
 export async function streamDesktopChat(opts: {
   token: string;
   namespace: string;
   text: string;
+  writeEnabled?: boolean;
+  chatEnabled?: boolean;
   onDelta?: (text: string) => void;
   onChips?: (chips: ChatChip[]) => void;
   onStatus?: (status: ChatTurnStatus) => void;
@@ -286,11 +366,28 @@ export async function streamDesktopChat(opts: {
       () => null,
     );
     const recovered = history ? recoveredReplyForUser(history.lines, text) : undefined;
+    const principal = history?.thread?.profileName || MANAGER_PROFILE_NAMES[0];
+    const replyText = recovered?.content || reply.text;
+    const fulfilled = await fulfillCreateAgentFromChat({
+      token: opts.token,
+      namespace: opts.namespace,
+      principal,
+      text,
+      replyText,
+      chips: recovered?.chips || reply.chips,
+      writeEnabled: Boolean(opts.writeEnabled),
+      chatEnabled: opts.chatEnabled !== false,
+      threadId: history?.thread?.id || reply.threadId,
+    }).catch(() => ({ chips: recovered?.chips || reply.chips || [], receipts: [] as string[] }));
+    const receiptText = fulfilled.receipts.length > 0 ? `\n\n${fulfilled.receipts.join("\n")}` : "";
+    if (fulfilled.chips.length > 0) {
+      opts.onChips?.(fulfilled.chips);
+    }
     return {
-      text: recovered?.content || reply.text,
+      text: replyText + receiptText,
       source: "harness",
       threadId: history?.thread?.id || reply.threadId,
-      chips: recovered?.chips || reply.chips,
+      chips: fulfilled.chips.length > 0 ? fulfilled.chips : recovered?.chips || reply.chips,
       lines: history?.lines,
       targetAgent: recovered?.targetAgent || reply.targetAgent,
     };

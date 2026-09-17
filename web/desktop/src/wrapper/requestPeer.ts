@@ -4,6 +4,15 @@ export type RequestPeerPayload = {
   peerProfileName: string;
   summary?: string;
   stage?: string;
+  /** requestPeer extension: peers ask Wrapper/manager to create-agent. */
+  request?: string;
+  action?: string;
+  name?: string;
+  agentName?: string;
+  description?: string;
+  title?: string;
+  systemPrompt?: string;
+  harnessProfileName?: string;
 };
 
 export type InterruptDuplicatePayload = {
@@ -88,7 +97,14 @@ export function parseRequestPeerFromLogLine(line: string): RequestPeerPayload | 
   if (!body) {
     return null;
   }
-  if (decisionAction(body) !== "requestPeer") {
+  const action = decisionAction(body);
+  const request = typeof body.request === "string" ? body.request.trim() : "";
+  const isCreateRequest =
+    action === "requestCreateAgent" ||
+    request === "create-agent" ||
+    request === "create_agent" ||
+    request === "requestCreateAgent";
+  if (action !== "requestPeer" && !isCreateRequest) {
     return null;
   }
   const peerProfileName =
@@ -101,6 +117,14 @@ export function parseRequestPeerFromLogLine(line: string): RequestPeerPayload | 
     peerProfileName,
     summary: typeof body.summary === "string" ? body.summary : undefined,
     stage: typeof body.stage === "string" ? body.stage : undefined,
+    request: request || (isCreateRequest ? "create-agent" : undefined),
+    action: action || undefined,
+    name: typeof body.name === "string" ? body.name.trim() : undefined,
+    agentName: typeof body.agentName === "string" ? body.agentName.trim() : undefined,
+    description: typeof body.description === "string" ? body.description.trim() : undefined,
+    title: typeof body.title === "string" ? body.title.trim() : undefined,
+    systemPrompt: typeof body.systemPrompt === "string" ? body.systemPrompt.trim() : undefined,
+    harnessProfileName: typeof body.harnessProfileName === "string" ? body.harnessProfileName.trim() : undefined,
   };
 }
 
