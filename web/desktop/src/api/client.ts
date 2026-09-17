@@ -125,6 +125,7 @@ export type AgentRunView = {
   intent?: string;
   application?: string;
   error?: string;
+  output?: string;
   conditions?: AgentRunCondition[];
   decision?: { action?: string; summary?: string };
   reports?: AgentRunReport[];

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { getAgentRun, type AgentRunView } from "../api/client";
 import { isRunningPhase, peerSignalText } from "../wrapper/collaboration";
+import { preferStickyConferral, stickyConferralAction } from "../wrapper/requestPeer";
 import { stickAgentRunStatus } from "../wrapper/runStatus";
 import { AgentRunStatusCard } from "./AgentRunStatusCard";
 import { LiveStream } from "./LiveStream";
@@ -16,6 +17,8 @@ interface Props {
 export function CollaborationMonitor({ token, namespace, runA, runB, objective }: Props) {
   const [runViewA, setRunViewA] = useState<AgentRunView | null>(null);
   const [runViewB, setRunViewB] = useState<AgentRunView | null>(null);
+  const [actionA, setActionA] = useState("");
+  const [actionB, setActionB] = useState("");
   const [peerNotes, setPeerNotes] = useState<string[]>([]);
 
   useEffect(() => {
@@ -34,6 +37,8 @@ export function CollaborationMonitor({ token, namespace, runA, runB, objective }
         }
         setRunViewA((prev) => stickAgentRunStatus(prev, a));
         setRunViewB((prev) => stickAgentRunStatus(prev, b));
+        setActionA((prev) => preferStickyConferral(prev, stickyConferralAction(a)));
+        setActionB((prev) => preferStickyConferral(prev, stickyConferralAction(b)));
         const hits = collectPeerNotes(a, b);
         if (hits.length > 0) {
           setPeerNotes((prev) => uniqueStrings([...prev, ...hits]));
@@ -85,8 +90,8 @@ export function CollaborationMonitor({ token, namespace, runA, runB, objective }
         <p className="muted">{objective}</p>
         <div className={`banner banner-${banner.kind === "ok" ? "info" : "info"}`}>{banner.text}</div>
         <div className="collab-run-cards">
-          <RunCard name={runA} run={runViewA} />
-          <RunCard name={runB} run={runViewB} />
+          <RunCard name={runA} run={runViewA} action={actionA} />
+          <RunCard name={runB} run={runViewB} action={actionB} />
         </div>
         {peerNotes.length > 0 ? (
           <ul className="collab-peer-notes">
@@ -104,12 +109,22 @@ export function CollaborationMonitor({ token, namespace, runA, runB, objective }
   );
 }
 
-function RunCard({ name, run }: { name: string; run: AgentRunView | null }) {
+function RunCard({ name, run, action }: { name: string; run: AgentRunView | null; action?: string }) {
+  const conferral = action === "requestPeer" || action === "interruptDuplicate" ? action : undefined;
   if (run) {
-    return <AgentRunStatusCard run={run} />;
+    return (
+      <div className="collab-run-card" data-run={name}>
+        <AgentRunStatusCard run={run} />
+        {conferral ? (
+          <span className="chip chip-ok mono" data-run={name} data-conferral={conferral}>
+            {conferral}
+          </span>
+        ) : null}
+      </div>
+    );
   }
   return (
-    <div className="collab-run-card">
+    <div className="collab-run-card" data-run={name}>
       <span className="mono">{name}</span>
       <span className="chip">Phase —</span>
     </div>
@@ -124,6 +139,13 @@ function collectPeerNotes(a: AgentRunView, b: AgentRunView): string[] {
       if (peerSignalText(blob)) {
         out.push(`${run.name}: ${blob.trim()}`);
       }
+    }
+    const conferral = stickyConferralAction(run);
+    if (conferral === "requestPeer" || conferral === "interruptDuplicate") {
+      out.push(`${run.name} STATUS_JSON action=${conferral}`);
+    }
+    if (run.decision?.action === "requestPeer" || run.decision?.action === "interruptDuplicate") {
+      out.push(`${run.name} decision.action=${run.decision.action}`);
     }
     if (run.decision?.summary && peerSignalText(run.decision.summary)) {
       out.push(`${run.name} decision: ${run.decision.summary}`);

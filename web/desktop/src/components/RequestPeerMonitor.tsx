@@ -15,6 +15,7 @@ import { isRunningPhase } from "../wrapper/collaboration";
 import {
   grokInterruptDuplicatePrompt,
   parseRequestPeerFromLogLine,
+  peerRunBelongsToSource,
   STATUS_JSON_PREFIX,
   type RequestPeerPayload,
 } from "../wrapper/requestPeer";
@@ -149,7 +150,9 @@ export function RequestPeerMonitor({ token, namespace, sourceRun, createEnabled,
       }
       if (skip) {
         const existingForSource =
-          skip.existing && belongsToSource(skip.existing, sourceRun) ? skip.existing : null;
+          skip.existing && peerRunBelongsToSource(skip.existing, sourceRun, namespace)
+            ? skip.existing
+            : null;
         if (existingForSource) {
           fulfilled.current.add(key);
           rememberPeer(namespace, sourceRun, existingForSource.name);
@@ -324,10 +327,6 @@ function recalledPeerName(namespace: string, sourceRun: string): string {
   }
 }
 
-function belongsToSource(run: AgentRunView, sourceRun: string): boolean {
-  return (run.source?.name || "").trim() === sourceRun;
-}
-
 async function listDesktopPeers(token: string, namespace: string): Promise<AgentRunView[]> {
   const runs = await listAgentRuns(token, namespace, 50);
   return runs.filter(isDesktopPeerRun);
@@ -348,7 +347,7 @@ async function lookupExistingPeer(
   }
   try {
     const peers = await listDesktopPeers(token, namespace);
-    return peers.find((run) => belongsToSource(run, sourceRun)) ?? null;
+    return peers.find((run) => peerRunBelongsToSource(run, sourceRun, namespace)) ?? null;
   } catch {
     return null;
   }

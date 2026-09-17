@@ -16,6 +16,7 @@ import {
 } from "../api/client";
 import type { Snapshot } from "../api/types";
 import type { UIConfig } from "../auth/config";
+import { CollaborationMonitor } from "../components/CollaborationMonitor";
 import { MidrunProofPanel } from "../components/MidrunProofPanel";
 import { RequestPeerMonitor } from "../components/RequestPeerMonitor";
 import { AgentRunStatusCard } from "../components/AgentRunStatusCard";
@@ -35,6 +36,8 @@ interface Props {
 export function WrapperPage({ token, config }: Props) {
   const [params] = useSearchParams();
   const lab = params.get("lab") === "1";
+  const watchA = (params.get("a") || "").trim();
+  const watchB = (params.get("b") || "").trim();
   const fallbackNs = config.defaultNamespaces[0] || "";
   const [namespace, setNamespace] = useState(() => loadNamespace(fallbackNs));
   const [prompt, setPrompt] = useState("");
@@ -375,6 +378,15 @@ export function WrapperPage({ token, config }: Props) {
           <div className="banner banner-warn" style={{ marginTop: "0.75rem" }}>
             Lab controls. Not the default Runs page.
           </div>
+          {watchA && watchB ? (
+            <CollaborationMonitor
+              token={token}
+              namespace={namespace}
+              runA={watchA}
+              runB={watchB}
+              objective="live interruptDuplicate path"
+            />
+          ) : null}
           <MidrunProofPanel
             token={token}
             namespace={namespace}

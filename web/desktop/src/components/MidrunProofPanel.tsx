@@ -3,6 +3,7 @@ import { getAgentRun, type AgentRunView } from "../api/client";
 import { stickAgentRunStatus } from "../wrapper/runStatus";
 import { AgentRunStatusCard } from "./AgentRunStatusCard";
 import { LiveStream } from "./LiveStream";
+import { stickyConferralAction } from "../wrapper/requestPeer";
 
 export const MIDRUN_OBJECTIVE = "midrun-proof-bc98af8-20260912";
 export const MIDRUN_RUN_A = "midrun-peer-a-frkt2";
@@ -103,12 +104,15 @@ export function MidrunProofPanel({ token, namespace, onLoaded }: Props) {
 }
 
 function RunDecisionCard({ run, label }: { run: AgentRunView; label: string }) {
-  const action = run.decision?.action || "—";
+  const action = stickyConferralAction(run) || run.decision?.action || "—";
   const summary = run.decision?.summary || "";
+  const conferral = action === "requestPeer" || action === "interruptDuplicate" ? action : undefined;
   return (
     <div className="collab-run-card">
       <AgentRunStatusCard run={run} label={label} />
-      <span className="chip mono">action={action}</span>
+      <span className={`chip mono${conferral ? " chip-ok" : ""}`} data-conferral={conferral}>
+        action={action}
+      </span>
       {summary ? <p className="muted">{summary}</p> : null}
     </div>
   );
