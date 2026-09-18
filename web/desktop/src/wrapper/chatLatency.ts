@@ -20,11 +20,32 @@ export type ChatLatencyReport = {
   waitingMs?: number;
   /** ms from send to first onDelta chunk (first token) */
   firstTokenMs?: number;
+  /**
+   * Alias of firstTokenMs under the standing-latency vocabulary
+   * (Desktop send → first live token). Always equals firstTokenMs when both
+   * are present; emitted so `.runtime/chat-latency.jsonl` carries the
+   * `sendToFirstTokenMs` field the Desktop e2e documents.
+   */
+  sendToFirstTokenMs?: number;
   /** ms from send to onStatus("running") */
   runningMs?: number;
   /** ms from send to reply settled */
   replyReadyMs?: number;
   failedMs?: number;
+  /** Durable thread id the turn ran on, when known. */
+  threadId?: string;
+  /** Standing session name from the stream snapshot, when known. */
+  sessionId?: string;
+  /** Delivery plane the turn took: standing WS tokens vs the Job POST path. */
+  path?: string;
+  /** Short machine-friendly failure reason, when the turn did not deliver. */
+  error?: string;
+};
+
+export type ChatLatencyTurnContext = {
+  threadId?: string;
+  sessionId?: string;
+  path?: string;
 };
 
 export type ChatLatencyTracker = {
@@ -32,12 +53,18 @@ export type ChatLatencyTracker = {
   onStatus: (status: string) => void;
   onDelta: (chunk: string) => void;
   markReplyReady: () => void;
+  /** Record which thread/session/plane the turn ran on for the JSONL line. */
+  setTurnContext: (context: ChatLatencyTurnContext) => void;
+  /** Record a short failure reason for the JSONL line. Never throws. */
+  markError: (message: string) => void;
   report: () => ChatLatencyReport;
 };
 
 /** Create a latency tracker. Pass a fake `now` in tests. */
 export function createChatLatencyTracker(now: () => number = () => Date.now()): ChatLatencyTracker {
   const marks: ChatLatencyMarks = { sendStartedAt: now() };
+  let turnContext: ChatLatencyTurnContext = {};
+  let errorMessage: string | undefined;
 
   return {
     marks,
@@ -63,17 +90,56 @@ export function createChatLatencyTracker(now: () => number = () => Date.now()): 
         marks.replyReadyAt = now();
       }
     },
+    setTurnContext(context: ChatLatencyTurnContext) {
+      try {
+        turnContext = {
+          ...turnContext,
+          ...(context?.threadId?.trim() ? { threadId: context.threadId.trim() } : {}),
+          ...(context?.sessionId?.trim() ? { sessionId: context.sessionId.trim() } : {}),
+          ...(context?.path?.trim() ? { path: context.path.trim() } : {}),
+        };
+      } catch {
+        // Context must never break chat.
+      }
+    },
+    markError(message: string) {
+      try {
+        const trimmed = (message || "").trim().slice(0, 240);
+        if (trimmed && errorMessage === undefined) {
+          errorMessage = trimmed;
+        }
+      } catch {
+        // Error context must never break chat.
+      }
+    },
     report(): ChatLatencyReport {
       const base = marks.sendStartedAt;
       const delta = (t?: number) => (t === undefined ? undefined : t - base);
-      return {
+      const firstTokenMs = delta(marks.firstTokenAt);
+      const report: ChatLatencyReport = {
         marks: { ...marks },
         waitingMs: delta(marks.waitingAt),
-        firstTokenMs: delta(marks.firstTokenAt),
+        firstTokenMs,
         runningMs: delta(marks.runningAt),
         replyReadyMs: delta(marks.replyReadyAt),
         failedMs: delta(marks.failedAt),
       };
+      if (firstTokenMs !== undefined) {
+        report.sendToFirstTokenMs = firstTokenMs;
+      }
+      if (turnContext.threadId) {
+        report.threadId = turnContext.threadId;
+      }
+      if (turnContext.sessionId) {
+        report.sessionId = turnContext.sessionId;
+      }
+      if (turnContext.path) {
+        report.path = turnContext.path;
+      }
+      if (errorMessage) {
+        report.error = errorMessage;
+      }
+      return report;
     },
   };
 }
@@ -205,15 +271,20 @@ export function formatChatLatencyJsonLine(
       ts: new Date(now()).toISOString(),
       waitingMs: report.waitingMs,
       firstTokenMs: report.firstTokenMs,
+      sendToFirstTokenMs: report.sendToFirstTokenMs,
       runningMs: report.runningMs,
       replyReadyMs: report.replyReadyMs,
       failedMs: report.failedMs,
+      threadId: report.threadId,
+      sessionId: report.sessionId,
+      path: report.path,
+      error: report.error,
     };
     const source = (opts?.source || "").trim();
     if (source) {
       line["source"] = source;
     }
-    for (const key of ["waitingMs", "firstTokenMs", "runningMs", "replyReadyMs", "failedMs"]) {
+    for (const key of ["waitingMs", "firstTokenMs", "sendToFirstTokenMs", "runningMs", "replyReadyMs", "failedMs", "threadId", "sessionId", "path", "error"]) {
       if (line[key] === undefined) {
         delete line[key];
       }
@@ -335,10 +406,15 @@ export type ChatLatencyLinePayload = {
   ts: string;
   waitingMs?: number;
   firstTokenMs?: number;
+  sendToFirstTokenMs?: number;
   runningMs?: number;
   replyReadyMs?: number;
   failedMs?: number;
   source?: string;
+  threadId?: string;
+  sessionId?: string;
+  path?: string;
+  error?: string;
 };
 
 /** Build the JSON object POSTed to the loopback host (same fields as JSONL). */
@@ -352,9 +428,14 @@ export function buildChatLatencyPayload(
   };
   if (report.waitingMs !== undefined) payload.waitingMs = report.waitingMs;
   if (report.firstTokenMs !== undefined) payload.firstTokenMs = report.firstTokenMs;
+  if (report.sendToFirstTokenMs !== undefined) payload.sendToFirstTokenMs = report.sendToFirstTokenMs;
   if (report.runningMs !== undefined) payload.runningMs = report.runningMs;
   if (report.replyReadyMs !== undefined) payload.replyReadyMs = report.replyReadyMs;
   if (report.failedMs !== undefined) payload.failedMs = report.failedMs;
+  if (report.threadId !== undefined) payload.threadId = report.threadId;
+  if (report.sessionId !== undefined) payload.sessionId = report.sessionId;
+  if (report.path !== undefined) payload.path = report.path;
+  if (report.error !== undefined) payload.error = report.error;
   const source = (opts?.source || "").trim();
   if (source) payload.source = source;
   return payload;

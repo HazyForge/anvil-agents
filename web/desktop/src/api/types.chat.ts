@@ -120,6 +120,12 @@ export type CreateChatThreadRequest = {
 export type AppendChatMessageRequest = {
   content: string;
   metadata?: unknown;
+  /**
+   * Idempotency key: the server dedupes by (thread, requestId) and returns
+   * the existing turn when the same content is re-POSTed, so a WS fallback
+   * never creates a second turn. Absent means the server mints one.
+   */
+  requestId?: string;
 };
 
 export type ListChatThreadsParams = {

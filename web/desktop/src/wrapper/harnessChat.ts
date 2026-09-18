@@ -8,6 +8,8 @@ import {
   turnStatusFromMessage,
 } from "../api/chat";
 import { APIError, AUDITOR_GROK_PROFILE, DESKTOP_GROK_PEER_PROFILE } from "../api/client";
+import { openChatThreadStream } from "../api/chatThreadStream";
+import { sendRemoteMessage } from "../api/remoteChat";
 import type { ChatChip, ChatMessage, ChatThread, ChatTurnStatus } from "../api/types.chat";
 import {
   CREATE_AGENT_TOOL,
@@ -29,6 +31,13 @@ import {
   withChatLatency,
   type ChatLatencyReport,
 } from "./chatLatency";
+import {
+  streamStandingChatTurn,
+  type OpenThreadStreamFn,
+  type ReadThreadReplyFn,
+  type SendChatMessageFn,
+  type StandingTurnResult,
+} from "./standingChatTurn";
 import { formatTurnError } from "./turn";
 
 export { MANAGER_PROFILE_NAMES };
@@ -210,25 +219,47 @@ export async function loadManagerHarnessHistory(opts: {
  * Never createAgentRun. Never create a thread. Never execute harness tools.
  * Hello is a user message; the harness replies in text and may choose zero tools.
  */
-async function proxyManagerHarnessChat(opts: {
+async function resolveManagerThread(opts: {
   token: string;
   namespace: string;
-  text: string;
-  onDelta?: (text: string) => void;
-  onChips?: (chips: ChatChip[]) => void;
-  onStatus?: (status: ChatTurnStatus) => void;
-}): Promise<{ text: string; threadId: string; chips?: ChatChip[]; targetAgent?: string }> {
+}): Promise<ChatThread> {
   const threads = await listChatThreads(opts.token, opts.namespace, { limit: 50 });
   const thread = pickManagerThread(threads);
   if (!thread) {
     throw new APIError(404, "harness_thread_missing", "no standing manager harness chat thread");
   }
+  return thread;
+}
+
+function newChatRequestId(): string {
+  try {
+    const random = (globalThis as unknown as { crypto?: { randomUUID?: () => string } }).crypto;
+    if (random && typeof random.randomUUID === "function") {
+      return random.randomUUID();
+    }
+  } catch {
+    // Fall through to the Math.random fallback below.
+  }
+  const hex = () => Math.floor(Math.random() * 0xffffffff).toString(16).padStart(8, "0");
+  return `${hex().slice(0, 8)}-${hex().slice(0, 4)}-4${hex().slice(1, 4)}-${hex().slice(0, 4)}-${hex()}${hex().slice(0, 4)}`;
+}
+
+async function proxyManagerHarnessChat(opts: {
+  token: string;
+  namespace: string;
+  text: string;
+  requestId?: string;
+  onDelta?: (text: string) => void;
+  onChips?: (chips: ChatChip[]) => void;
+  onStatus?: (status: ChatTurnStatus) => void;
+}): Promise<{ text: string; threadId: string; chips?: ChatChip[]; targetAgent?: string }> {
+  const thread = await resolveManagerThread({ token: opts.token, namespace: opts.namespace });
   opts.onStatus?.("waiting");
   const posted = await appendChatMessageStream(
     opts.token,
     opts.namespace,
     thread.id,
-    { content: opts.text },
+    { content: opts.text, ...(opts.requestId ? { requestId: opts.requestId } : {}) },
     {
       onDelta: (chunk) => {
         opts.onStatus?.("running");
@@ -259,6 +290,148 @@ async function proxyManagerHarnessChat(opts: {
     chips: chips.length > 0 ? chips : undefined,
     targetAgent,
   };
+}
+
+export type StandingStreamDeps = {
+  /** Test/fake transport. Defaults to the live `openChatThreadStream` WS path. */
+  openStream?: OpenThreadStreamFn;
+  /** Test/fake send. Defaults to the live `sendRemoteMessage` POST. */
+  sendMessage?: SendChatMessageFn;
+  /** Test/fake durable settle read. Defaults to the live thread history. */
+  readThread?: ReadThreadReplyFn;
+  /** Cap for the sent-but-unstreamed durable poll. Defaults to 90. */
+  pollAttempts?: number;
+  /** Cadence for the sent-but-unstreamed durable poll. Defaults to 2000ms. */
+  pollDelayMs?: number;
+  /** Stream snapshot budget. Defaults to 15s. */
+  snapshotTimeoutMs?: number;
+  /** Post-send terminal budget. Defaults to 120s. */
+  terminalTimeoutMs?: number;
+};
+
+function defaultStandingOpenStream(
+  token: string,
+  namespace: string,
+  threadId: string,
+): OpenThreadStreamFn {
+  return (handlers, options) =>
+    openChatThreadStream(token, namespace, threadId, {
+      onEvent: (event, payload) =>
+        handlers.onEvent(event, payload as unknown as Record<string, unknown>),
+      onTransportError: handlers.onTransportError,
+      onDone: handlers.onDone,
+    }, options);
+}
+
+/**
+ * Attempt one live turn over the standing WebSocket token path. Returns null
+ * when the caller should keep its existing POST path (WS unavailable,
+ * Job-plane snapshot, OIDC denied, or any stream failure). Never throws and
+ * never sends twice: when the POST was already accepted (`sent: true`) the
+ * result carries `sent` so the caller settles by polling the durable thread
+ * instead of re-POSTing.
+ */
+async function tryStandingLiveTurn(opts: {
+  token: string;
+  namespace: string;
+  thread: ChatThread;
+  text: string;
+  requestId: string;
+  onDelta?: (text: string) => void;
+  onStatus?: (status: string) => void;
+  setTurnContext: (context: { threadId?: string; sessionId?: string; path?: string }) => void;
+  markError: (message: string) => void;
+  deps?: StandingStreamDeps;
+}): Promise<({ text: string; threadId: string } & Partial<StandingTurnResult>) | null> {
+  const threadId = opts.thread.id;
+  opts.setTurnContext({ threadId });
+  const openStream =
+    opts.deps?.openStream ?? defaultStandingOpenStream(opts.token, opts.namespace, threadId);
+  const sendMessage: SendChatMessageFn =
+    opts.deps?.sendMessage ??
+    (async ({ content, requestId }) => {
+      const accepted = await sendRemoteMessage(opts.token, opts.namespace, threadId, content, requestId);
+      return { turnId: accepted.turn?.id, runName: accepted.turn?.runName };
+    });
+  const readThread: ReadThreadReplyFn =
+    opts.deps?.readThread ??
+    (async () => {
+      const history = await loadManagerHarnessHistory({
+        token: opts.token,
+        namespace: opts.namespace,
+      }).catch(() => null);
+      if (!history) {
+        return undefined;
+      }
+      const found = recoveredReplyForUser(history.lines, opts.text);
+      return found ? { text: found.content } : undefined;
+    });
+
+  let result: StandingTurnResult;
+  try {
+    result = await streamStandingChatTurn({
+      threadId,
+      content: opts.text,
+      requestId: opts.requestId,
+      openStream,
+      sendMessage,
+      readThread,
+      onDelta: opts.onDelta,
+      onStatus: opts.onStatus,
+      snapshotTimeoutMs: opts.deps?.snapshotTimeoutMs,
+      terminalTimeoutMs: opts.deps?.terminalTimeoutMs,
+      pollIntervalMs: opts.deps?.pollDelayMs,
+    });
+  } catch (error) {
+    opts.markError(error instanceof Error ? error.message : String(error ?? "standing stream failed"));
+    return null;
+  }
+  opts.setTurnContext({
+    threadId: result.threadId || threadId,
+    ...(result.sessionName ? { sessionId: result.sessionName } : {}),
+    ...(result.path && result.path !== "unknown" ? { path: result.path } : {}),
+  });
+  if (result.delivered && result.text && result.text.trim()) {
+    return { ...result, text: result.text, threadId: result.threadId || threadId };
+  }
+  if (result.error) {
+    opts.markError(result.error);
+  }
+  // The stream attempt only classifies or fails; delivery stays with the
+  // existing POST path below. `sent` tells the caller whether the POST
+  // already landed (settle by polling) or still needs to happen.
+  return { ...result, text: "", threadId: result.threadId || threadId };
+}
+
+/**
+ * Settle an already-accepted turn without re-POSTing: poll the durable
+ * thread history until the assistant reply for this user text lands.
+ */
+async function waitForAcceptedReply(opts: {
+  token: string;
+  namespace: string;
+  text: string;
+  attempts?: number;
+  delayMs?: number;
+}): Promise<HarnessChatLine | undefined> {
+  const attempts = Math.max(1, opts.attempts ?? 90);
+  const delayMs = Math.max(0, opts.delayMs ?? 2000);
+  for (let i = 0; i < attempts; i++) {
+    const history = await loadManagerHarnessHistory({
+      token: opts.token,
+      namespace: opts.namespace,
+    }).catch(() => null);
+    if (history) {
+      const found = recoveredReplyForUser(history.lines, opts.text);
+      if (found) {
+        return found;
+      }
+    }
+    if (i < attempts - 1 && delayMs > 0) {
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
+  }
+  return undefined;
 }
 
 function recoveredReplyForUser(lines: HarnessChatLine[], userText: string): HarnessChatLine | undefined {
@@ -356,6 +529,15 @@ export async function streamDesktopChat(opts: {
   onLatency?: (report: ChatLatencyReport) => void;
   /** Clock override for tests. Defaults to Date.now. */
   now?: () => number;
+  /**
+   * Attempt the live turn over the standing WebSocket token path
+   * (`openChatThreadStream`) before the POST path. Defaults to true; any
+   * stream failure falls back to the existing POST path with the same
+   * requestId, so disabling is only needed for path-specific tests.
+   */
+  useStandingStream?: boolean;
+  /** Injectable standing-stream transport for tests (fake WS stream). */
+  standingStream?: StandingStreamDeps;
 }): Promise<HarnessChatResult> {
   const text = opts.text.trim();
   if (!text) {
@@ -390,12 +572,83 @@ export async function streamDesktopChat(opts: {
     return report;
   };
   let threadId: string | undefined;
+  // One idempotency key per send: the server dedupes by (thread, requestId),
+  // so a standing-stream attempt and its POST fallback can never create two
+  // turns for one Send.
+  const requestId = newChatRequestId();
   try {
     tracked.onStatus?.("waiting");
+    // Live turns prefer the standing WebSocket token path when the thread's
+    // snapshot carries a resumed standing session. Job-plane snapshots and
+    // any stream failure fall through to the POST path below with the same
+    // requestId; an already-accepted turn settles by polling, never re-POSTs.
+    if (opts.useStandingStream !== false) {
+      const thread = await resolveManagerThread({
+        token: opts.token,
+        namespace: opts.namespace,
+      }).catch(() => null);
+      if (thread) {
+        threadId = thread.id;
+        const live = await tryStandingLiveTurn({
+          token: opts.token,
+          namespace: opts.namespace,
+          thread,
+          text,
+          requestId,
+          onDelta: tracked.onDelta,
+          onStatus: (status: string) => tracked.onStatus?.(status),
+          setTurnContext: (context) => tracker.setTurnContext(context),
+          markError: (message) => tracker.markError(message),
+          deps: opts.standingStream,
+        });
+        if (live && live.delivered && live.text.trim()) {
+          tracker.markReplyReady();
+          settleLatency();
+          return {
+            text: live.text,
+            source: "harness",
+            threadId: live.threadId || thread.id,
+          };
+        }
+        if (live && live.sent) {
+          const accepted = await waitForAcceptedReply({
+            token: opts.token,
+            namespace: opts.namespace,
+            text,
+            attempts: opts.standingStream?.pollAttempts,
+            delayMs: opts.standingStream?.pollDelayMs,
+          });
+          if (accepted) {
+            const history = await loadManagerHarnessHistory({
+              token: opts.token,
+              namespace: opts.namespace,
+            }).catch(() => null);
+            tracker.markReplyReady();
+            settleLatency();
+            return {
+              text: accepted.content,
+              source: "harness",
+              threadId: history?.thread?.id || threadId,
+              chips: accepted.chips,
+              lines: history?.lines,
+              targetAgent: accepted.targetAgent,
+            };
+          }
+          throw new APIError(
+            504,
+            "standing_settle_timeout",
+            live.error || "standing turn accepted but the durable reply was not observed",
+          );
+        }
+        // Not sent (or no live attempt): fall through to the POST path with
+        // the same requestId.
+      }
+    }
     const reply = await proxyManagerHarnessChat({
       token: opts.token,
       namespace: opts.namespace,
       text,
+      requestId,
       onDelta: tracked.onDelta,
       onChips: opts.onChips,
       onStatus: tracked.onStatus,
@@ -471,6 +724,8 @@ export async function sendDesktopChat(opts: {
   onStatus?: (status: ChatTurnStatus) => void;
   onLatency?: (report: ChatLatencyReport) => void;
   now?: () => number;
+  useStandingStream?: boolean;
+  standingStream?: StandingStreamDeps;
 }): Promise<HarnessChatResult> {
   return streamDesktopChat(opts);
 }
