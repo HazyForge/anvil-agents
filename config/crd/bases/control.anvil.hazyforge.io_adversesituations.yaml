@@ -2060,8 +2060,8 @@ spec:
                                   standing/manager chat turns; scouts and batch runs must stay on Jobs.
                                   The controller never creates a Job for SubstrateActor runs: with the
                                   live gate off it holds them as SubstrateActorNotWired, and with the
-                                  gate on it will bind the warm actor once the pending ATE dialer lands
-                                  (until then the operator fails fast with the gate enabled).
+                                  gate on (plus the ateapi endpoint) it dials ateapi and binds the warm
+                                  actor.
                                   See docs/substrate-spike.md.
                                 enum:
                                 - Job

@@ -26,7 +26,7 @@ const (
 	GateEndpointEnvVar = "ANVIL_AGENTS_SUBSTRATE_ENDPOINT"
 	// GateTokenEnvVar optionally carries a bearer token for ateapi. Prefer
 	// GateTokenFileEnvVar: the token is only ever attached to the gRPC
-	// channel by the future dialer and must never appear in status, logs, or
+	// channel by the dialer and must never appear in status, logs, or
 	// API JSON.
 	GateTokenEnvVar = "ANVIL_AGENTS_SUBSTRATE_TOKEN"
 	// GateTokenFileEnvVar points at a file holding the ateapi bearer token
@@ -41,6 +41,11 @@ const (
 	// leaves ActorClass empty (e.g. "standing-chat"). Required for live
 	// dispatch because CreateActor always derives from a template.
 	GateTemplateEnvVar = "ANVIL_AGENTS_SUBSTRATE_TEMPLATE"
+	// GateInsecureEnvVar opts into plaintext gRPC for a local Kind
+	// port-forward when the podcert trust bundle is not yet wired locally.
+	// Kind-only: the dialer refuses every non-loopback endpoint when this is
+	// set. Production and shared clusters must use verified TLS (default).
+	GateInsecureEnvVar = "ANVIL_AGENTS_SUBSTRATE_INSECURE"
 )
 
 // GateConfig is the explicit opt-in configuration for live Substrate actor
@@ -56,6 +61,9 @@ type GateConfig struct {
 	Atespace string
 	// Template is the default ActorTemplate for specs without an actor class.
 	Template string
+	// Insecure dials plaintext gRPC for a local Kind port-forward.
+	// Kind-only: the dialer refuses every non-loopback endpoint when set.
+	Insecure bool
 }
 
 // GateConfigFromEnv reads the live-plane gate from the process environment.
@@ -68,6 +76,7 @@ func GateConfigFromEnv() GateConfig {
 		TokenFile: strings.TrimSpace(os.Getenv(GateTokenFileEnvVar)),
 		Atespace:  strings.TrimSpace(os.Getenv(GateAtespaceEnvVar)),
 		Template:  strings.TrimSpace(os.Getenv(GateTemplateEnvVar)),
+		Insecure:  gateBoolEnv(GateInsecureEnvVar),
 	}
 }
 

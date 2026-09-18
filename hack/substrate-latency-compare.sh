@@ -1,17 +1,23 @@
 #!/usr/bin/env bash
 # substrate-latency-compare.sh — Job cold-start baseline vs warm Substrate
-# resume for a direct turn AND a peer delivery (standing-chat spike, slice 2).
+# resume for a direct turn AND a peer delivery (standing-chat spike).
 #
 # Fake-backend by default: the fake run needs no cluster and is safe in
-# CI. The live run needs a Kind cluster with Substrate ATE (see
-# docs/substrate-spike.md) plus Austin's observed Job baseline flags, and is
-# pending the generated-stub gRPC dialer (the harness fails fast with --live
-# until the dialer lands).
+# CI. The live run dials a Kind cluster's Substrate ATE over gRPC (see
+# docs/substrate-spike.md for the port-forward setup) plus Austin's observed
+# Job baseline flags.
 #
 # Usage:
 #   hack/substrate-latency-compare.sh [--iterations 20] [--out /tmp/substrate-latency.json]
 #   hack/substrate-latency-compare.sh --live --iterations 20 \
 #     --job-baseline-p50-ms 12000 --job-baseline-p95-ms 44000
+#
+# Live env (see docs/substrate-spike.md "Kind port-forward + live env"):
+#   export ANVIL_AGENTS_SUBSTRATE_ACTORS_ENABLED=true
+#   export ANVIL_AGENTS_SUBSTRATE_ENDPOINT=127.0.0.1:<port-forward-port>
+#   export ANVIL_AGENTS_SUBSTRATE_TEMPLATE=standing-chat
+#   export ANVIL_AGENTS_SUBSTRATE_INSECURE=true   # Kind loopback only
+#   # or export ANVIL_AGENTS_SUBSTRATE_TOKEN_FILE=/run/ate/token for verified TLS
 set -euo pipefail
 
 ITERATIONS=20
@@ -26,7 +32,7 @@ while [[ $# -gt 0 ]]; do
     --live) LIVE=1; shift ;;
     --job-baseline-p50-ms|--job-baseline-p95-ms) JOB_ARGS+=("$1" "$2"); shift 2 ;;
     -h|--help)
-      sed -n '2,12p' "$0"
+      sed -n '2,22p' "$0"
       exit 0
       ;;
     *)
@@ -49,6 +55,10 @@ if [[ "$LIVE" -eq 1 ]]; then
   fi
   if [[ -z "${ANVIL_AGENTS_SUBSTRATE_ENDPOINT:-}" ]]; then
     echo "error: --live requires ANVIL_AGENTS_SUBSTRATE_ENDPOINT (ateapi address)" >&2
+    exit 2
+  fi
+  if [[ -z "${ANVIL_AGENTS_SUBSTRATE_TEMPLATE:-}" ]]; then
+    echo "error: --live requires ANVIL_AGENTS_SUBSTRATE_TEMPLATE (default ActorTemplate, e.g. standing-chat)" >&2
     exit 2
   fi
 fi
