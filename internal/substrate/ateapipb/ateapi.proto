@@ -1,0 +1,144 @@
+// Minimal ateapi Control subset for the Anvil live dialer.
+//
+// Upstream source: github.com/agent-substrate/substrate,
+// pkg/proto/ateapipb/ateapi.proto, service ateapi.Control, at commit
+// af2477e45d3d449fb797d55d70a26521cd666827 (Sep 2026).
+//
+// This file keeps ONLY the five lifecycle RPCs the Anvil side needs
+// (Get/Create/Resume/Suspend/PauseActor) plus the messages they touch.
+// Field numbers, package (ateapi), service (Control), and method names are
+// copied verbatim so the generated stubs stay wire-compatible with ateapi.
+// Unknown server fields (timestamps, egress, volumes, tags, workers) are
+// ignored per proto3 semantics.
+//
+// How to refresh:
+//  1. Fetch the upstream proto:
+//     curl -sL https://raw.githubusercontent.com/agent-substrate/substrate/<commit>/pkg/proto/ateapipb/ateapi.proto -o /tmp/ateapi.proto
+//  2. Diff the message/service sections listed below against /tmp/ateapi.proto.
+//     If field numbers or RPC signatures changed, update this file to match.
+//  3. Regenerate (requires buf + protoc-gen-go + protoc-gen-go-grpc):
+//     export PATH="$PATH:$(go env GOPATH)/bin"
+//     buf generate --template internal/substrate/ateapipb/buf.gen.yaml
+//  4. Run: go test ./internal/substrate/... ; go build ./...
+//
+// Full-proto alternative: replacing this subset with the complete upstream
+// ateapi.proto and generating from it is wire-compatible too, but pulls the
+// whole ATE surface (tags, workers, templates, egress) into the Anvil module
+// for no spike benefit. Stay minimal until promotion.
+
+syntax = "proto3";
+
+package ateapi;
+
+option go_package = "github.com/hazyforge/anvil-agents/internal/substrate/ateapipb";
+
+// Control is the primary RPC interface for Agentic Substrate (upstream
+// service ateapi.Control). Only the lifecycle subset is bound here.
+service Control {
+  // Get an Actor.
+  rpc GetActor(GetActorRequest) returns (Actor) {}
+
+  // Create a new Actor deriving from a given ActorTemplate.
+  rpc CreateActor(CreateActorRequest) returns (Actor) {}
+
+  // Suspend a given actor to a new snapshot.
+  rpc SuspendActor(SuspendActorRequest) returns (SuspendActorResponse) {}
+
+  // Pause a given actor and keep its snapshots on node VM.
+  rpc PauseActor(PauseActorRequest) returns (PauseActorResponse) {}
+
+  // Resume an actor from its latest snapshot.
+  rpc ResumeActor(ResumeActorRequest) returns (ResumeActorResponse) {}
+}
+
+// ObjectRef references a Substrate resource by its atespace and name
+// (upstream ateapi.ObjectRef: atespace = 1, name = 2).
+message ObjectRef {
+  string atespace = 1;
+  string name = 2;
+}
+
+// Selector matches worker pools by label (upstream ateapi.Selector:
+// match_labels = 1).
+message Selector {
+  map<string, string> match_labels = 1;
+}
+
+// ResourceMetadata holds the common fields carried by every Substrate
+// resource (upstream ateapi.ResourceMetadata: atespace = 1, name = 2,
+// uid = 3, version = 4; create_time = 5 and update_time = 6 are omitted here
+// and ignored per proto3 semantics).
+message ResourceMetadata {
+  string atespace = 1;
+  string name = 2;
+  string uid = 3;
+  int64 version = 4;
+}
+
+// Actor is the Anvil-side lifecycle projection (upstream ateapi.Actor:
+// metadata = 1, actor_template = 4, worker_selector = 5, status = 7;
+// source_tag = 6 is create-only and never set by Anvil, so it is omitted).
+message Actor {
+  ResourceMetadata metadata = 1;
+  ObjectRef actor_template = 4;
+  Selector worker_selector = 5;
+  ActorStatus status = 7;
+}
+
+// ActorState mirrors the upstream lifecycle vocabulary (upstream
+// ateapi.ActorState enum values 0-8).
+enum ActorState {
+  ACTOR_STATE_UNSPECIFIED = 0;
+  ACTOR_STATE_RESUMING = 1;
+  ACTOR_STATE_RUNNING = 2;
+  ACTOR_STATE_SUSPENDING = 3;
+  ACTOR_STATE_SUSPENDED = 4;
+  ACTOR_STATE_PAUSING = 5;
+  ACTOR_STATE_PAUSED = 6;
+  ACTOR_STATE_CRASHED = 7;
+  ACTOR_STATE_DELETING = 8;
+}
+
+// ActorStatus carries the lifecycle state (upstream ateapi.ActorStatus:
+// state = 1; worker assignment, snapshots, and volumes are omitted here).
+message ActorStatus {
+  ActorState state = 1;
+}
+
+message GetActorRequest {
+  ObjectRef actor = 1;
+}
+
+// Request to create a new Actor (upstream ateapi.CreateActorRequest:
+// actor = 1).
+message CreateActorRequest {
+  Actor actor = 1;
+}
+
+message SuspendActorRequest {
+  ObjectRef actor = 1;
+}
+
+message SuspendActorResponse {
+  Actor actor = 1;
+}
+
+message PauseActorRequest {
+  ObjectRef actor = 1;
+}
+
+message PauseActorResponse {
+  Actor actor = 1;
+}
+
+message ResumeActorRequest {
+  ObjectRef actor = 1;
+}
+
+message ResumeActorResponse {
+  Actor actor = 1;
+
+  // True if a resume workflow was executed to activate the actor.
+  // False if the actor was already RUNNING.
+  bool resumed = 2;
+}

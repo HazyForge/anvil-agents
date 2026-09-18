@@ -33,6 +33,11 @@ const (
 	agyRunnerImageEnv               = "ANVIL_AGENTS_RUNNER_IMAGE_AGY"
 	substrateActorsEnabledEnv       = "ANVIL_AGENTS_SUBSTRATE_ACTORS_ENABLED"
 	substrateEndpointEnv            = "ANVIL_AGENTS_SUBSTRATE_ENDPOINT"
+	substrateTokenEnv               = "ANVIL_AGENTS_SUBSTRATE_TOKEN"
+	substrateTokenFileEnv           = "ANVIL_AGENTS_SUBSTRATE_TOKEN_FILE"
+	substrateAtespaceEnv            = "ANVIL_AGENTS_SUBSTRATE_ATESPACE"
+	substrateTemplateEnv            = "ANVIL_AGENTS_SUBSTRATE_TEMPLATE"
+	substrateInsecureEnv            = "ANVIL_AGENTS_SUBSTRATE_INSECURE"
 )
 
 var defaultGitHubAPIAllowedHosts = []string{"api.github.com"}
@@ -80,6 +85,21 @@ type Options struct {
 	// ate-api-server.ate-system.svc:443). Empty disables live
 	// dispatch even when the gate flag is set.
 	SubstrateEndpoint string
+	// SubstrateToken is the inline ateapi bearer token (env-only, never a
+	// flag). Prefer SubstrateTokenFile. Never logged.
+	SubstrateToken string
+	// SubstrateTokenFile points at the file holding the ateapi bearer token
+	// (kubectl-ate --token-file parallel). Preferred over the inline token.
+	SubstrateTokenFile string
+	// SubstrateAtespace forces every actor into one atespace. Empty maps
+	// each Kubernetes namespace to the same-named atespace.
+	SubstrateAtespace string
+	// SubstrateTemplate is the default ActorTemplate when an actor spec
+	// leaves the actor class empty. Required for live dispatch.
+	SubstrateTemplate string
+	// SubstrateInsecure dials plaintext gRPC for a local Kind port-forward.
+	// Kind-only: the dialer refuses every non-loopback endpoint when set.
+	SubstrateInsecure bool
 }
 
 func DefaultOptions() *Options {
@@ -103,8 +123,13 @@ func DefaultOptions() *Options {
 		PiAgentRunnerImage:           firstNonEmpty(strings.TrimSpace(os.Getenv(piAgentRunnerImageEnv)), agentRunDefaultPiAgentImage),
 		PrimeAgentRunnerImage:        firstNonEmpty(strings.TrimSpace(os.Getenv(primeAgentRunnerImageEnv)), agentRunDefaultPrimeAgentImage),
 		AgyRunnerImage:               firstNonEmpty(strings.TrimSpace(os.Getenv(agyRunnerImageEnv)), agentRunDefaultAgyImage),
-		SubstrateActorsEnabled:       boolEnv(substrateActorsEnabledEnv),
+		SubstrateActorsEnabled:       substrateBoolEnv(substrateActorsEnabledEnv),
 		SubstrateEndpoint:            strings.TrimSpace(os.Getenv(substrateEndpointEnv)),
+		SubstrateToken:               strings.TrimSpace(os.Getenv(substrateTokenEnv)),
+		SubstrateTokenFile:           strings.TrimSpace(os.Getenv(substrateTokenFileEnv)),
+		SubstrateAtespace:            strings.TrimSpace(os.Getenv(substrateAtespaceEnv)),
+		SubstrateTemplate:            strings.TrimSpace(os.Getenv(substrateTemplateEnv)),
+		SubstrateInsecure:            substrateBoolEnv(substrateInsecureEnv),
 	}
 }
 
@@ -162,4 +187,18 @@ func positiveIntEnv(name string, fallback int) int {
 func boolEnv(name string) bool {
 	value, err := strconv.ParseBool(strings.TrimSpace(os.Getenv(name)))
 	return err == nil && value
+}
+
+// substrateBoolEnv parses the Substrate gate booleans with the same truthy
+// spellings as substrate.GateConfigFromEnv ("1", "true", "yes", "on") so the
+// controller and the latency harness agree on whether the gate is set.
+func substrateBoolEnv(name string) bool {
+	raw := strings.ToLower(strings.TrimSpace(os.Getenv(name)))
+	if raw == "" {
+		return false
+	}
+	if enabled, err := strconv.ParseBool(raw); err == nil {
+		return enabled
+	}
+	return raw == "on" || raw == "yes"
 }

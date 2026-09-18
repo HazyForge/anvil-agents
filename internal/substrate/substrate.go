@@ -4,18 +4,18 @@
 // Substrate (agent-substrate/substrate) multiplexes idle actors onto warm
 // workers with Create/Resume/Suspend/Pause, which lets interactive standing
 // chat turns skip the cold Job/Pod start (~8-44s measured on Primaris) that
-// dominates turn latency today. Kubernetes Jobs remain the default and only
-// live execution plane: scouts, batch, scheduled, and chained runs always use
-// Jobs, and the controller holds SubstrateActor runs without creating a Job
-// until live dispatch lands (see docs/substrate-spike.md).
+// dominates turn latency today. Kubernetes Jobs remain the default execution
+// plane: scouts, batch, scheduled, and chained runs always use Jobs, and the
+// controller holds SubstrateActor runs without creating a Job until the live
+// gate is explicitly enabled (see docs/substrate-spike.md).
 //
 // Substrate is early and its APIs are expected to churn, so this package binds
 // only to stable lifecycle concepts behind the Client interface. The live ATE
 // binding (live.go) maps that interface onto the real ateapi Control RPCs
-// (Create/Resume/Suspend/Pause/GetActor) without vendoring upstream generated
-// types, so swapping in a generated-stub dialer later touches only the
-// transport. Tests use FakeClient and an in-memory ATEControl fake; no test
-// needs a live Substrate cluster.
+// (Create/Resume/Suspend/Pause/GetActor) through the gRPC dialer
+// (ate_grpc.go over the hand-written ateapipb stubs), so transport changes
+// touch only the dialer. Tests use FakeClient, an in-memory ATEControl fake,
+// and in-process gRPC servers; no test needs a live Substrate cluster.
 package substrate
 
 import (

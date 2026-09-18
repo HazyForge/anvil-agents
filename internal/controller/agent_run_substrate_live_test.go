@@ -34,7 +34,7 @@ func liveSubstrateReconciler(t *testing.T, run *agents.AgentRun, backend *substr
 		SubstrateClient: backend,
 		CommonReconcilerOptions: CommonReconcilerOptions{Options: &Options{
 			SubstrateActorsEnabled: true,
-			SubstrateEndpoint:      "http://substrate-gateway.substrate:8080",
+			SubstrateEndpoint:      "ate-api-server.ate-system.svc:443",
 		}},
 	}
 }
@@ -54,7 +54,7 @@ func TestSubstrateLiveClientRequiresGateAndEndpoint(t *testing.T) {
 	run := liveSubstrateRun("thread-1")
 	gated := &AgentRunReconciler{
 		SubstrateClient:         substrate.NewFakeClient(),
-		CommonReconcilerOptions: CommonReconcilerOptions{Options: &Options{SubstrateActorsEnabled: true, SubstrateEndpoint: "http://substrate-gateway.substrate:8080"}},
+		CommonReconcilerOptions: CommonReconcilerOptions{Options: &Options{SubstrateActorsEnabled: true, SubstrateEndpoint: "ate-api-server.ate-system.svc:443"}},
 	}
 	if gated.substrateLiveClient() == nil {
 		t.Fatal("gate on with endpoint and backend must yield a live client")
@@ -66,7 +66,7 @@ func TestSubstrateLiveClientRequiresGateAndEndpoint(t *testing.T) {
 	}{
 		{"gate off", &Options{}, substrate.NewFakeClient()},
 		{"gate on without endpoint", &Options{SubstrateActorsEnabled: true}, substrate.NewFakeClient()},
-		{"gate on without backend", &Options{SubstrateActorsEnabled: true, SubstrateEndpoint: "http://substrate-gateway.substrate:8080"}, nil},
+		{"gate on without backend", &Options{SubstrateActorsEnabled: true, SubstrateEndpoint: "ate-api-server.ate-system.svc:443"}, nil},
 		{"nil options", nil, substrate.NewFakeClient()},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -89,7 +89,7 @@ func TestSubstrateGateOnLiftsHoldWithoutJob(t *testing.T) {
 	run := liveSubstrateRun("thread-1")
 	r := &AgentRunReconciler{
 		SubstrateClient:         substrate.NewFakeClient(),
-		CommonReconcilerOptions: CommonReconcilerOptions{Options: &Options{SubstrateActorsEnabled: true, SubstrateEndpoint: "http://substrate-gateway.substrate:8080"}},
+		CommonReconcilerOptions: CommonReconcilerOptions{Options: &Options{SubstrateActorsEnabled: true, SubstrateEndpoint: "ate-api-server.ate-system.svc:443"}},
 	}
 	if phase, reason, message := r.agentRunBlockingValidation(run); phase != "" || reason != "" || message != "" {
 		t.Fatalf("live validation = %q/%q/%q, want no blocking phase", phase, reason, message)
@@ -226,7 +226,7 @@ func TestSubstrateLiveDefaultJobPathUntouched(t *testing.T) {
 	run := substrateSpikeRun()
 	r := &AgentRunReconciler{
 		SubstrateClient:         substrate.NewFakeClient(),
-		CommonReconcilerOptions: CommonReconcilerOptions{Options: &Options{SubstrateActorsEnabled: true, SubstrateEndpoint: "http://substrate-gateway.substrate:8080"}},
+		CommonReconcilerOptions: CommonReconcilerOptions{Options: &Options{SubstrateActorsEnabled: true, SubstrateEndpoint: "ate-api-server.ate-system.svc:443"}},
 	}
 	if phase, reason, message := r.agentRunBlockingValidation(run); phase != "" || reason != "" || message != "" {
 		t.Fatalf("job validation = %q/%q/%q, want no blocking phase", phase, reason, message)

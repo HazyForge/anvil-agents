@@ -3,11 +3,11 @@
 // This file binds substrate.Client to the real Agent Substrate (ATE) surface
 // in agent-substrate/substrate — the ateapi gRPC service
 // (pkg/proto/ateapipb/ateapi.proto, service ateapi.Control) driven the same
-// way cmd/kubectl-ate drives it — instead of any invented HTTP mapping. No
-// upstream generated types are vendored here: ATEControl is a narrow,
-// proto-agnostic seam shaped 1:1 on the five lifecycle RPCs, so a future
-// generated-stub dialer (ateapipb.ControlClient) can implement it without
-// touching Client callers, merge rules, or chat selection.
+// way cmd/kubectl-ate drives it — instead of any invented HTTP mapping.
+// ATEControl is a narrow, proto-agnostic seam shaped 1:1 on the five
+// lifecycle RPCs; the generated-stub dialer in ate_grpc.go
+// (ateapipb.ControlClient) implements it, so swapping transports never
+// touches Client callers, merge rules, or chat selection.
 //
 // Upstream lifecycle mapping (see docs/substrate-spike.md for the full table):
 //
@@ -24,21 +24,10 @@
 // becomes a worker_selector match label (see WorkerSelectorPoolLabel).
 //
 // The opt-in gate itself lives in gate.go (GateConfig): the controller and
-// the latency harness consult GateConfig.LiveEnabled, then build the client
-// below. Until the dialer lands the operator keeps the safe hold when the
-// gate requests live dispatch instead of silently running Jobs-only.
-//
-// TODO(ate-grpc-dial): implement the network dialer that returns an
-// ATEControl over gRPC using generated ateapipb stubs. It must keep parity
-// with upstream internal/ateclient.NewClient: TLS verified before any bearer
-// token is attached, token loaded from ATEClientConfig.TokenFile (mirroring
-// kubectl-ate --token-file, never an inline env token), target from
-// ATEClientConfig.Address (mirroring --endpoint, e.g.
-// ate-api-server.ate-system.svc:443, with a local-dev fallback to
-// port-forwarding the ate-api-server Service like kubectl-ate does when
-// --endpoint is omitted). Until that lands, construct ATEClient with an
-// injected ATEControl (tests use an in-memory fake); the mapping below is
-// already the live transport contract.
+// the latency harness consult GateConfig.LiveEnabled, then dial the client
+// below (DialATEClient in ate_grpc.go). Tests construct ATEClient with an
+// injected ATEControl (in-memory fake); the mapping below is the live
+// transport contract.
 package substrate
 
 import (
@@ -218,6 +207,15 @@ type ATEClientConfig struct {
 	Template string
 	// TokenFile is the path to the file holding the ateapi bearer token.
 	TokenFile string
+	// Token is the inline bearer token. Prefer TokenFile: inline tokens are
+	// harder to rotate and easier to leak via the process environment. The
+	// dialer only ever attaches it to the verified gRPC channel and it must
+	// never appear in status, logs, or API JSON.
+	Token string
+	// Insecure dials plaintext gRPC for a local Kind port-forward.
+	// Kind-only: the dialer refuses every non-loopback endpoint when set.
+	// Production and shared clusters must use verified TLS (default).
+	Insecure bool
 }
 
 // ATEClientConfigFromGate bridges the opt-in gate to the transport config.
@@ -227,6 +225,8 @@ func ATEClientConfigFromGate(gate GateConfig) ATEClientConfig {
 		Atespace:  strings.TrimSpace(gate.Atespace),
 		Template:  strings.TrimSpace(gate.Template),
 		TokenFile: strings.TrimSpace(gate.TokenFile),
+		Token:     strings.TrimSpace(gate.Token),
+		Insecure:  gate.Insecure,
 	}
 }
 
@@ -242,7 +242,7 @@ func (c ATEClientConfig) Validate() error {
 }
 
 // NewATEClient binds the Client lifecycle onto a real ATE backend behind
-// cfg. control is the ATEControl transport (a future generated-stub dialer;
+// cfg. control is the ATEControl transport (DialATEControl in ate_grpc.go;
 // tests inject an in-memory fake).
 func NewATEClient(cfg ATEClientConfig, control ATEControl) (Client, error) {
 	if err := cfg.Validate(); err != nil {

@@ -1,12 +1,16 @@
 // Command substrate-latency measures warm actor resume versus cold actor
 // create for standing-chat turns, covering both direct turns and peer
-// deliveries (slice 2 of the Substrate spike).
+// deliveries (Substrate spike).
 //
 // Fake-backend by default: without the live gate it drives the in-memory
-// FakeClient, so CI stays green with no cluster. The live ATE backend is
-// pending the generated-stub gRPC dialer (TODO(ate-grpc-dial) in
-// internal/substrate/live.go), so requesting live measurement with the gate
-// fails fast with guidance instead of measuring the wrong backend.
+// FakeClient, so CI stays green with no cluster. With the live gate on
+// (ANVIL_AGENTS_SUBSTRATE_ACTORS_ENABLED + ANVIL_AGENTS_SUBSTRATE_ENDPOINT)
+// it dials ateapi over gRPC — verified TLS before any bearer token, token
+// from ANVIL_AGENTS_SUBSTRATE_TOKEN_FILE (or the inline token env, or a
+// minted ServiceAccount token), Kind-only plaintext behind
+// ANVIL_AGENTS_SUBSTRATE_INSECURE for a loopback port-forward — and measures
+// real Create/Resume timings. See docs/substrate-spike.md for the Kind
+// port-forward setup.
 //
 // The Job cold-start baseline cannot be measured from this process (it needs a
 // real cluster scheduler), so pass the observed baseline explicitly with
@@ -158,9 +162,18 @@ func main() {
 	ctx := context.Background()
 	backendName := "fake"
 	var client substrate.Client = substrate.NewFakeClient()
+	gateEnabled := false
 	if gate := substrate.GateConfigFromEnv(); gate.LiveEnabled() {
-		fmt.Fprintln(os.Stderr, "error: live ATE measurement is pending the generated-stub gRPC dialer (see TODO(ate-grpc-dial) in internal/substrate/live.go); unset ANVIL_AGENTS_SUBSTRATE_ACTORS_ENABLED to measure the fake backend")
-		os.Exit(1)
+		ateCfg := substrate.ATEClientConfigFromGate(gate)
+		live, closeConn, err := substrate.DialATEClient(ctx, ateCfg, substrate.ATEDialOptions{})
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error: dial ateapi at %s: %v\n", ateCfg.Address, err)
+			os.Exit(1)
+		}
+		defer closeConn()
+		client = live
+		backendName = "ate-live"
+		gateEnabled = true
 	}
 
 	directCold, err := measureCold(ctx, client, *namespace, "direct", *harness, *actorClass, *pool, *iterations)
@@ -192,7 +205,7 @@ func main() {
 	report := latencyReport{
 		Tool:        "substrate-latency",
 		Backend:     backendName,
-		GateEnabled: false,
+		GateEnabled: gateEnabled,
 		Iterations:  *iterations,
 		Namespace:   *namespace,
 		GeneratedAt: time.Now().UTC().Format(time.RFC3339Nano),
