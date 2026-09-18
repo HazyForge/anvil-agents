@@ -1,14 +1,15 @@
 # Standing in-process harness + WebSocket chat delivery
 
-Status: slice 5c (chart/RBAC enablement for API-owned standing turns) on top
-of Desktop chat e2e over the standing WebSocket, slice 5b (persistent native
-session resume for ProcessBackend), slice 5a (standing vs Job latency
-compare harness), slice 4 (controller-hold yield + multi-replica claim for
-API-owned standing turns) and slice 3b (real harness process behind
-`standing.Backend`) — exactly one API replica drives a standing turn
-through an annotation claim the controller respects, while open standing
-streams multiplex live token frames during the turn and the durable turn
-record stays the source of truth. Architectural
+Status: process-exec cold-first + resumed-second turn measurement path on top
+of slice 5c (chart/RBAC enablement for API-owned standing turns), Desktop chat
+e2e over the standing WebSocket, slice 5b (persistent native session resume
+for ProcessBackend), slice 5a (standing vs Job latency compare harness),
+slice 4 (controller-hold yield + multi-replica claim for API-owned standing
+turns) and slice 3b (real harness process behind `standing.Backend`) —
+exactly one API replica drives a standing turn through an annotation claim
+the controller respects, while open standing streams multiplex live token
+frames during the turn and the durable turn record stays the source of truth.
+Architectural
 direction locked by Austin 2026-09-18.
 
 ## Direction
@@ -372,14 +373,27 @@ batch; no Primaris Argo changes; no Secret expansion.
   thread, peer child thread) it times session cold-create (`EnsureTurnSession`
   on a fresh thread), warm resume (pre-bound session, `warmOps` counts the
   resumes), the full warm turn (resume + `StreamTurn`), and time-to-first-token
-  from `StreamTurn` start (Desktop `firstTokenMs` vocabulary). Eight scenarios
-  (`directEnsureCold`, `directEnsureWarm`, `directTurnWarm`,
-  `directFirstToken`, plus the four `peer…` peers), each with
-  `count/minMs/meanMs/p50Ms/p95Ms/maxMs`.
+  from `StreamTurn` start (Desktop `firstTokenMs` vocabulary) — plus, since
+  slice 5c, cold FIRST turns (`*TurnCold` / `*FirstTokenCold`: fresh thread,
+  first `StreamTurn`, records the slice-5b native session id when the harness
+  kind supports one) and resumed SECOND turns (`*TurnResumed` /
+  `*FirstTokenResumed`: same thread, second `StreamTurn` reusing the recorded
+  native id). Sixteen scenarios (the eight `direct…` above plus `directTurnCold`,
+  `directFirstTokenCold`, `directTurnResumed`, `directFirstTokenResumed`, and
+  the eight `peer…` peers), each with
+  `count/minMs/meanMs/p50Ms/p95Ms/maxMs`, plus a `nativeResume` section
+  (`supported`, `coldTurns`, `resumedTurns`, `nativeIDsObserved`, `note`)
+  proving whether second turns actually resumed a native session or honestly
+  ran cold. `-only` (also `--only` on the compare script) runs a
+  comma-separated scenario subset for cheap live probes; the bars need the
+  full matrix, so a subset `process-exec` run reports `inconclusive-live`.
 - **Backends.** `fake` (default) drives `standing.FakeBackend`: deterministic,
   no cluster, no subprocess, no model call — CI-safe. `process-stub` runs the
-  real `ProcessBackend` session/streaming code behind a fixed-latency stub
-  runner (still no PATH binary, no credentials). `process-exec` (optional
+  real `ProcessBackend` session/streaming code behind a fixed-latency
+  resume-aware stub runner (still no PATH binary, no credentials): the stub
+  implements `standing.SessionRunner`, so resume-supporting kinds record the
+  deterministic placeholder `stub-ses-latency-probe` on cold turns and resume
+  it on second turns. `process-exec` (optional
   local only) runs one real harness subprocess per measured turn through
   `ExecRunner` with the desktop delegate's filtered env; it fails closed when
   the harness CLI is missing and never reads Secrets.
@@ -400,15 +414,43 @@ hack/standing-latency-compare.sh --iterations 20 --out .runtime/standing-latency
 # Stubbed ProcessBackend code path (still no binary, no credentials).
 hack/standing-latency-compare.sh --process-stub --iterations 20 --out .runtime/standing-latency-stub.json
 
-# Optional local live path: real CLI per turn (needs e.g. codex on PATH).
+# Optional local live path: real CLI per turn (needs e.g. codex on PATH
+# plus that CLI's own local auth, e.g. ~/.codex/auth.json — never a Secret).
 hack/standing-latency-compare.sh --live --harness codex -n 10 --out .runtime/standing-latency-live.json
 # Equivalent direct binary run:
 # go run ./cmd/standing-latency -backend process-exec -harness codex -n 10 -out .runtime/standing-latency-live.json
+
+# Cheap live probe: cold first turns + resumed second turns only.
+hack/standing-latency-compare.sh --live --harness codex -n 5 \
+  --only directTurnCold,directTurnResumed --out .runtime/standing-latency-live-cold-resume.json
 ```
 
+Live collection checklist (same cluster shape as the Job baseline; provider
+credentials stay in each CLI's own auth home and outside the API Secret
+surface throughout):
+
+1. `command -v <cli>` (`codex` | `opencode` | `openclaw` | `grok` |
+   `prime-agent` | `agy` for harness kinds `codex` | `openCode` | `openClaw` |
+   `grokBuild` | `primeAgent` | `agy`).
+2. Authenticate the CLI itself once with its own login flow and confirm one
+   manual turn works, e.g.
+   `printf 'reply briefly: hi' | codex exec --skip-git-repo-check --json | head -c 300`.
+   Resume-supporting kinds (`codex`, `openCode`, `openClaw`) resume the
+   recorded native session on second turns; `grokBuild` / `primeAgent` / `agy`
+   and Fake-only kinds honestly run cold (the report's `nativeResume.note`
+   says so).
+3. Run the compare script with `--live` (full matrix for a bars verdict, or
+   `--only` for a cold+resume probe).
+4. Compare `directTurnCold` vs `directTurnResumed` p50/p95 and check
+   `nativeResume.nativeIDsObserved` (4×n when every cold turn records and
+   every resumed turn reuses); feed the bars below. Re-measure Desktop
+   send→firstToken via `.runtime/chat-latency.jsonl` on the same shape.
+
 The report is gitignored local JSON (`.runtime/standing-latency-*.json`,
-also printed to stdout) with the eight scenarios, `jobBaseline`,
-`comparisonMs` savings of warm turn and first-token against the Job
+also printed to stdout) with the sixteen scenarios, `nativeResume`,
+`jobBaseline`,
+`comparisonMs` savings of warm, cold, resumed, and first-token turns against
+the Job
 baseline, and a `verdict` + `verdictReason`. Deterministic backends always
 report `harness-ok` — fake numbers prove the harness and the warm-reuse
 contract, never a promotion. Only `process-exec` live numbers on the same
@@ -421,10 +463,46 @@ cluster shape as the baseline feed the bars:
 | `retire` | Warm turn p50 within noise of the Job p50 (under a 2x win). The standing plane does not pay for itself; remove the live backend wiring while keeping the `execution.runtime` API surface parked per a planned migration. |
 | `inconclusive-live` / `harness-ok` / `no-baseline` | Between the bars, deterministic-only, or no baseline passed: collect more live iterations on the same cluster shape before deciding. |
 
-Tests: `cmd/standing-latency/main_test.go` pins the report shape, warmOps
-per warm scenario, the documented baseline defaults, the fail-closed backend
+Tests: `cmd/standing-latency/main_test.go` pins the report shape (sixteen
+scenarios, `warmOps` per warm scenario), the `nativeResume` record/reuse
+accounting (resume-aware stub records + resumes, fake and resume-unsupported
+kinds honestly run cold), the `-only` subset flag and its withheld live
+verdict, the documented baseline defaults, the fail-closed backend
 selection, and the `harness-ok` ceiling for deterministic backends — all with
 no cluster and no subprocess.
+
+## Slice 5c: process-exec cold-first + resumed-second measurement path (this slice)
+
+Slice 5c makes the `process-exec` live-number path as runnable and documented
+as possible without a harness CLI in the agent environment — no live numbers
+are captured here, and none are invented. The turn-based model does not move:
+one append-only AgentRun per accepted message, frozen intent in, `Succeeded`
+completion out; no Primaris Argo changes, no Secret expansion, no
+Substrate/WarmPool changes, no chart/RBAC changes.
+
+- **Cold first turns AND resumed second turns are explicit in flags and
+  output JSON.** `cmd/standing-latency` gains `*TurnCold` /
+  `*FirstTokenCold` (fresh thread, first `StreamTurn`) and `*TurnResumed` /
+  `*FirstTokenResumed` (same thread, second `StreamTurn` reusing the slice-5b
+  native session id when `standing.SupportsNativeResume` says the kind
+  documents one) for both planes, plus the `nativeResume` report section and
+  the `-only` subset flag (`--only` on `hack/standing-latency-compare.sh`)
+  for cheap live probes.
+- **Stub gap wired shut.** `process-stub` now drives the real
+  `ProcessBackend` record/resume plumbing through a resume-aware stub
+  `SessionRunner` (deterministic `stub-ses-latency-probe` id, still no PATH
+  binary, no credentials, no model call), so the cold-vs-resumed scenario
+  shape is green in CI before any live CLI exists. Fake stays honestly cold
+  with no native ids.
+- **Live collection is a documented local run.** The exact Kind/local
+  commands, CLI-to-kind mapping, per-CLI auth-home posture, and the
+  cold-vs-resumed comparison to make live in the checklist under "How to
+  run" above. Stub OIDC still blocks signed-in Desktop live samples, so the
+  live path here is the standing-latency `process-exec` run, not Desktop
+  OIDC.
+
+Desktop e2e (slice #220) is done and stays untouched: this slice touches no
+chart RBAC and no Desktop `standingChatTurn` code.
 
 ## Slice 5b: persistent native session resume (this slice)
 
@@ -580,14 +658,17 @@ chat_latency_standing_test.go` pins the new sink fields server-side.
 
 ## NEXT (after slice 5c)
 
-1. **Live numbers.** The slice-5a harness is green on deterministic
-   backends, slice-5b resume is pinned against stub CLIs, and Desktop chat
-   already attempts the standing WS live turn end to end (see "Desktop chat
-   e2e over the standing WebSocket" above); `process-exec` live numbers on
-   the same cluster shape as the Job baseline are still open (needs a
-   harness CLI with local auth) — measure cold first turns AND resumed
-   second turns, re-measure Desktop send→firstToken, then apply the
-   promote/reshape/retire bars above.
+1. **Live numbers (the remaining open measurement item).** Desktop e2e is
+   done (see "Desktop chat e2e over the standing WebSocket" above), the
+   slice-5a harness is green on deterministic backends, slice-5b resume is
+   pinned against stub CLIs, and slice 5c wires the cold-first vs
+   resumed-second turn scenarios plus the resume-aware stub end to end — but
+   `process-exec` live numbers on the same cluster shape as the Job baseline
+   are still open (needs a harness CLI with local auth; none exists in the
+   agent environment, so no live numbers are captured or committed here).
+   Next: run the checklist under "How to run" above against a local/Kind
+   harness CLI (cold first turns AND resumed second turns), re-measure
+   Desktop send→firstToken, then apply the promote/reshape/retire bars above.
 2. **Retire the envelope wrapper** entirely once no Fake-only live path
    remains. Provider credentials stay outside the API's Secret surface
    throughout.

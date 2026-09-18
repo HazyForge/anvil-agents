@@ -28,7 +28,9 @@ func requireScenarios(t *testing.T, cfg config) map[string]scenarioStats {
 	}
 	want := []string{
 		"directEnsureCold", "directEnsureWarm", "directTurnWarm", "directFirstToken",
+		"directTurnCold", "directFirstTokenCold", "directTurnResumed", "directFirstTokenResumed",
 		"peerEnsureCold", "peerEnsureWarm", "peerTurnWarm", "peerFirstToken",
+		"peerTurnCold", "peerFirstTokenCold", "peerTurnResumed", "peerFirstTokenResumed",
 	}
 	for _, name := range want {
 		stats, ok := report.Scenarios[name]
@@ -116,6 +118,126 @@ func TestNoBaselineReport(t *testing.T) {
 	}
 	if report.JobBaseline != nil {
 		t.Fatal("jobBaseline must be omitted when both baseline flags are 0")
+	}
+}
+
+// TestProcessStubNativeResume pins the slice-5c resume-aware stub: with a
+// resume-supporting harness kind every cold turn records the deterministic
+// stub native id and every resumed second turn reuses it, while the verdict
+// stays harness-ok (stub numbers never promote the plane).
+func TestProcessStubNativeResume(t *testing.T) {
+	cfg := testConfig("process-stub", 2)
+	report, err := run(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	native := report.NativeResume
+	if native == nil {
+		t.Fatal("nativeResume section is missing")
+	}
+	if !native.Supported {
+		t.Fatal("process-stub with openCode must report native resume supported")
+	}
+	if native.ColdTurns != 4 || native.ResumedTurns != 4 {
+		t.Fatalf("cold/resumed turns = %d/%d, want 4/4 (direct + peer, n=2)", native.ColdTurns, native.ResumedTurns)
+	}
+	if native.NativeIDsObserved != 8 {
+		t.Fatalf("nativeIDsObserved = %d, want 8 (every stub cold turn records, every resumed turn reuses)", native.NativeIDsObserved)
+	}
+	for _, name := range []string{"directTurnCold", "directTurnResumed", "peerTurnCold", "peerTurnResumed"} {
+		stats, ok := report.Scenarios[name]
+		if !ok {
+			t.Fatalf("missing scenario %q", name)
+		}
+		if stats.Count != 2 {
+			t.Fatalf("scenario %q count = %d, want 2", name, stats.Count)
+		}
+	}
+}
+
+// TestFakeNativeResumeUnsupported pins the honest cold path: FakeBackend
+// records no native ids, so resumed second turns are second cold turns and
+// the report says so instead of the timing pretending otherwise.
+func TestFakeNativeResumeUnsupported(t *testing.T) {
+	report, err := run(context.Background(), testConfig("fake", 2))
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	native := report.NativeResume
+	if native == nil {
+		t.Fatal("nativeResume section is missing")
+	}
+	if native.Supported {
+		t.Fatal("fake backend must report native resume unsupported")
+	}
+	if native.NativeIDsObserved != 0 {
+		t.Fatalf("nativeIDsObserved = %d, want 0 on the fake backend", native.NativeIDsObserved)
+	}
+	if native.Note == "" {
+		t.Fatal("unsupported resume path must carry an explanatory note")
+	}
+}
+
+// TestProcessStubUnsupportedHarnessStaysCold pins fail-closed resume for a
+// harness kind with no documented resume surface: stub turns still succeed,
+// but nothing is recorded and resumed turns honestly run cold.
+func TestProcessStubUnsupportedHarnessStaysCold(t *testing.T) {
+	cfg := testConfig("process-stub", 2)
+	cfg.harness = "primeAgent"
+	report, err := run(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	native := report.NativeResume
+	if native == nil {
+		t.Fatal("nativeResume section is missing")
+	}
+	if native.Supported {
+		t.Fatal("primeAgent must report native resume unsupported")
+	}
+	if native.NativeIDsObserved != 0 {
+		t.Fatalf("nativeIDsObserved = %d, want 0 for a resume-unsupported kind", native.NativeIDsObserved)
+	}
+}
+
+// TestOnlyFilter pins the -only subset flag for cheap live probes: only the
+// requested scenarios are measured, and a bars verdict is withheld when the
+// warm-turn scenarios it needs are absent.
+func TestOnlyFilter(t *testing.T) {
+	cfg := testConfig("fake", 2)
+	only, err := parseOnly("directTurnCold,directTurnResumed")
+	if err != nil {
+		t.Fatalf("parseOnly: %v", err)
+	}
+	cfg.only = only
+	report, err := run(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if len(report.Scenarios) != 2 {
+		t.Fatalf("scenarios = %d, want exactly the 2 requested", len(report.Scenarios))
+	}
+	for _, name := range []string{"directTurnCold", "directTurnResumed"} {
+		if _, ok := report.Scenarios[name]; !ok {
+			t.Fatalf("missing scenario %q", name)
+		}
+	}
+	if report.NativeResume == nil || report.NativeResume.ColdTurns != 2 || report.NativeResume.ResumedTurns != 2 {
+		t.Fatalf("nativeResume = %+v, want cold/resumed turns counted for the direct plane only", report.NativeResume)
+	}
+	if _, err := parseOnly("bogusScenario"); err == nil {
+		t.Fatal("expected an error for an unknown scenario name")
+	}
+}
+
+// TestOnlySubsetWithholdsLiveVerdict pins the judge guard: a process-exec
+// subset without the warm-turn scenarios cannot promote, reshape, or retire.
+func TestOnlySubsetWithholdsLiveVerdict(t *testing.T) {
+	scenarios := map[string]scenarioStats{
+		"directTurnCold": {Count: 2, P50Ms: 1, P95Ms: 2},
+	}
+	if verdict, _ := judge("process-exec", scenarios, 12000, 44000); verdict != "inconclusive-live" {
+		t.Fatalf("subset verdict = %q, want inconclusive-live", verdict)
 	}
 }
 
