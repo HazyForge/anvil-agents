@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 
@@ -44,9 +45,11 @@ import (
 // plain-text reply parses through the existing per-harness reply extractors;
 // a real harness process returns native-enveloped output directly and this
 // wrapper goes away with it. Crash recovery between create and the Succeeded
-// mark re-streams at least once; the singleflight guard only serializes one
-// process (the chart runs one API replica), so a multi-replica claim and a
-// controller-hold yield are the documented next steps, not this slice.
+// mark re-streams at least once. The singleflight guard only serializes one
+// process (the chart runs one API replica), so cross-replica races are won
+// through the annotation claim below (claimStandingTurn), and the controller
+// yields its InProcess hold for claimed turns (StandingClaimed, never
+// InProcessNotWired racing a live stream).
 
 // standingTurnGuard serializes live standing execution per turn ID within one
 // API process. Queue, read-refresh, and background recovery can reconcile the
@@ -101,8 +104,10 @@ func (server *Server) reconcileStandingTurn(ctx context.Context, turn *chat.Turn
 	}
 	phase := run.Status.Phase
 	if phase == agentsv1alpha1.AgentRunPhaseSucceeded ||
-		phase == agentsv1alpha1.AgentRunPhaseFailed ||
-		phase == agentsv1alpha1.AgentRunPhaseNeedsHuman {
+		phase == agentsv1alpha1.AgentRunPhaseFailed {
+		return false, nil
+	}
+	if phase == agentsv1alpha1.AgentRunPhaseNeedsHuman && !server.standingTakeoverAllowed(run, turn) {
 		return false, nil
 	}
 	if !server.standingTurnEnabled() {
@@ -122,6 +127,12 @@ func (server *Server) reconcileStandingTurn(ctx context.Context, turn *chat.Turn
 	}
 	spec, ok := server.standingSessionSpec(ctx, thread)
 	if !ok {
+		return false, nil
+	}
+	// Multi-replica claim: exactly one API replica may drive this turn. The
+	// winner is decided by the annotation write below; losers keep today's
+	// hold behavior and observe the winner's Succeeded mark on a later pass.
+	if !server.claimStandingTurn(ctx, turn, run) {
 		return false, nil
 	}
 	handle, _, err := standing.EnsureTurnSession(ctx, server.standing, spec)
@@ -172,6 +183,98 @@ func (server *Server) reconcileStandingTurn(ctx context.Context, turn *chat.Turn
 	return true, nil
 }
 
+// standingTakeoverAllowed reports whether a NeedsHuman run may be re-driven
+// through this turn's standing claim. Fresh (empty-phase) runs never reach
+// here; this only re-opens a yielded hold: the claim must bind this exact
+// turn, and it must be ours or stale (owner crash). A live foreign claim
+// means another replica is driving — keep hold behavior, never steal it.
+func (server *Server) standingTakeoverAllowed(run *agentsv1alpha1.AgentRun, turn *chat.Turn) bool {
+	if server == nil || run == nil || turn == nil {
+		return false
+	}
+	if !server.standingTurnEnabled() {
+		return false
+	}
+	turnID := strings.TrimSpace(turn.ID)
+	if turnID == "" {
+		return false
+	}
+	raw := strings.TrimSpace(run.Annotations[agentsv1alpha1.AgentRunStandingClaimAnnotation])
+	if raw == "" {
+		return false
+	}
+	claim, err := standing.ParseClaim(raw)
+	if err != nil || claim.TurnID != turnID {
+		return false
+	}
+	if _, live := standing.ClaimForTurn(run.Annotations, turnID, time.Now(), standing.ClaimTTL); live {
+		return claim.Owner == server.standingOwnerID()
+	}
+	return true
+}
+
+// claimStandingTurn wins the cross-replica annotation claim for turn.ID on
+// the turn's AgentRun. It fresh-reads the run, yields to terminal results
+// and live foreign claims, and stamps this replica's claim with a single
+// conditional metadata Update: exactly one replica's write lands first, so
+// exactly one replica streams. On a win the in-memory run is refreshed to
+// the winning revision so the Succeeded mark below applies cleanly; on a
+// loss it is refreshed to stored truth so the caller can complete off the
+// winner's result. Any failure keeps today's hold behavior — the turn stays
+// active for the holder or a later recovery pass.
+func (server *Server) claimStandingTurn(ctx context.Context, turn *chat.Turn, run *agentsv1alpha1.AgentRun) bool {
+	if server == nil || server.writes == nil || turn == nil || run == nil {
+		return false
+	}
+	namespace := strings.TrimSpace(turn.Namespace)
+	if namespace == "" || strings.TrimSpace(turn.ID) == "" || strings.TrimSpace(turn.RunName) == "" {
+		return false
+	}
+	owner := server.standingOwnerID()
+	now := time.Now()
+	for attempt := 0; attempt < 2; attempt++ {
+		fresh := &agentsv1alpha1.AgentRun{}
+		if err := server.writes.Get(ctx, types.NamespacedName{Namespace: namespace, Name: turn.RunName}, fresh); err != nil {
+			server.log.Error(err, "standing turn cannot read run for claim; keeping hold behavior", "namespace", namespace, "turn", turn.ID)
+			return false
+		}
+		switch fresh.Status.Phase {
+		case agentsv1alpha1.AgentRunPhaseSucceeded, agentsv1alpha1.AgentRunPhaseFailed:
+			*run = *fresh
+			return false
+		case agentsv1alpha1.AgentRunPhaseNeedsHuman:
+			if !server.standingTakeoverAllowed(fresh, turn) {
+				*run = *fresh
+				return false
+			}
+		}
+		if live, ok := standing.ClaimForTurn(fresh.Annotations, turn.ID, now, standing.ClaimTTL); ok && live.Owner != owner {
+			server.log.Info("standing turn owned by another replica; keeping hold behavior", "namespace", namespace, "turn", turn.ID, "owner", live.Owner)
+			*run = *fresh
+			return false
+		}
+		value, err := standing.EncodeClaim(standing.Claim{TurnID: turn.ID, Owner: owner, AtUnix: now.Unix()})
+		if err != nil {
+			server.log.Error(err, "standing turn cannot encode claim; keeping hold behavior", "namespace", namespace, "turn", turn.ID)
+			return false
+		}
+		if fresh.Annotations == nil {
+			fresh.Annotations = map[string]string{}
+		}
+		fresh.Annotations[agentsv1alpha1.AgentRunStandingClaimAnnotation] = value
+		if err := server.writes.Update(ctx, fresh); err != nil {
+			if apierrors.IsConflict(err) {
+				continue
+			}
+			server.log.Error(err, "standing turn cannot persist claim; keeping hold behavior", "namespace", namespace, "turn", turn.ID)
+			return false
+		}
+		*run = *fresh
+		return true
+	}
+	return false
+}
+
 // suspendStandingTurn releases session resources after a terminal turn
 // reconciliation. Best-effort: suspend is a density optimization, never a
 // correctness gate, so errors are logged and never fail the turn.
@@ -190,6 +293,15 @@ func (server *Server) suspendStandingTurn(ctx context.Context, namespace, thread
 	if _, err := standing.SuspendIdleSession(ctx, server.standing, spec.Namespace, spec.SessionName, nil); err != nil {
 		server.log.Error(err, "suspend standing session after terminal turn", "namespace", namespace, "turn", turnID)
 	}
+}
+
+// standingOwnerID identifies this API process in standing-turn claims.
+// Tests override Server.standingOwner to simulate peer replicas.
+func (server *Server) standingOwnerID() string {
+	if server == nil || strings.TrimSpace(server.standingOwner) == "" {
+		return standing.NewOwnerID()
+	}
+	return server.standingOwner
 }
 
 // standingTokenPublisher fans stamped token events out to open WebSocket
