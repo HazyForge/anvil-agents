@@ -10,7 +10,11 @@ import "strings"
 // Job is the default plane. Every scout, batch, scheduled, and
 // chained run stays on Jobs. SubstrateActor is an opt-in spike surface for
 // standing/manager chat turns that may run on warm Substrate actors instead of
-// paying a cold Job/Pod start per turn. See docs/substrate-spike.md.
+// paying a cold Job/Pod start per turn. InProcess is an opt-in slice-1 surface
+// for standing in-process harness sessions owned by a long-lived process (the
+// AgentRun API or Desktop) instead of a Job; with no live backend the
+// controller holds these runs without creating a Job. See
+// docs/substrate-spike.md and docs/standing-inprocess-harness.md.
 type AgentRunExecutionRuntime string
 
 const (
@@ -23,6 +27,12 @@ const (
 	// with the gate on (plus the ateapi endpoint) it dials ateapi and binds
 	// the warm actor (still with no Job).
 	AgentRunExecutionRuntimeSubstrateActor AgentRunExecutionRuntime = "SubstrateActor"
+	// AgentRunExecutionRuntimeInProcess routes execution to a standing
+	// in-process harness session instead of a Job. Slice 1 is API-first: the
+	// controller holds these runs without creating a Job until a live
+	// standing-harness backend is wired. See
+	// docs/standing-inprocess-harness.md.
+	AgentRunExecutionRuntimeInProcess AgentRunExecutionRuntime = "InProcess"
 )
 
 // AgentRunSubstrateActorSpec tunes the optional Substrate actor execution
@@ -76,6 +86,8 @@ func (s *AgentRunHarnessExecutionSpec) EffectiveRuntime() AgentRunExecutionRunti
 	switch AgentRunExecutionRuntime(strings.TrimSpace(string(s.Runtime))) {
 	case AgentRunExecutionRuntimeSubstrateActor:
 		return AgentRunExecutionRuntimeSubstrateActor
+	case AgentRunExecutionRuntimeInProcess:
+		return AgentRunExecutionRuntimeInProcess
 	default:
 		return AgentRunExecutionRuntimeJob
 	}
@@ -87,17 +99,28 @@ func (s *AgentRunHarnessExecutionSpec) UsesSubstrateActors() bool {
 	return s.EffectiveRuntime() == AgentRunExecutionRuntimeSubstrateActor
 }
 
+// UsesInProcess reports whether this execution selects the optional standing
+// in-process harness plane instead of the default Job plane. Slice 1 is
+// API-first: the controller holds these runs without creating a Job until a
+// live standing-harness backend is wired. See
+// docs/standing-inprocess-harness.md.
+func (s *AgentRunHarnessExecutionSpec) UsesInProcess() bool {
+	return s.EffectiveRuntime() == AgentRunExecutionRuntimeInProcess
+}
+
 // ValidateSubstrateExecution checks the structural shape of the optional
-// Substrate surface. It returns a controller reason/message pair when invalid
-// and empty strings when valid. Unknown runtime spellings are not rejected
-// here; EffectiveRuntime folds them back to the Job default.
+// execution-plane surface. It returns a controller reason/message pair when
+// invalid and empty strings when valid. Unknown runtime spellings are not
+// rejected here; EffectiveRuntime folds them back to the Job default. The
+// InProcess standing-harness plane follows the same rule as Job: it must not
+// carry a Substrate actor section.
 func ValidateSubstrateExecution(spec *AgentRunHarnessExecutionSpec) (reason, message string) {
 	if spec == nil {
 		return "", ""
 	}
 	raw := strings.TrimSpace(string(spec.Runtime))
 	switch AgentRunExecutionRuntime(raw) {
-	case "", AgentRunExecutionRuntimeJob:
+	case "", AgentRunExecutionRuntimeJob, AgentRunExecutionRuntimeInProcess:
 		if spec.Substrate != nil {
 			return "InvalidSubstrateSpec", "spec.harness.execution.substrate must only be set when execution.runtime is SubstrateActor."
 		}

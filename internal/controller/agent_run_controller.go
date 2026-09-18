@@ -3485,9 +3485,10 @@ func (r *AgentRunReconciler) agentRunBlockingValidation(obj *controlv1alpha1.Age
 			return controlv1alpha1.AgentRunPhaseFailed, "CrossNamespaceDataVolumeRef", "AgentRun dataVolumeRefs must be in the agent run namespace."
 		}
 	}
-	// Optional Substrate actor plane (API-first spike). Structural shape fails
-	// closed; a well-formed SubstrateActor selection holds without creating a
-	// Job until live dispatch lands. The default Job path is unaffected.
+	// Optional execution planes (SubstrateActor spike, InProcess slice 1).
+	// Structural shape fails closed; a well-formed non-Job selection holds
+	// without creating a Job until live dispatch lands. The default Job path
+	// is unaffected.
 	if reason, message := controlv1alpha1.ValidateSubstrateExecution(&obj.Spec.Harness.Execution); reason != "" {
 		return controlv1alpha1.AgentRunPhaseFailed, reason, message
 	}
@@ -3531,7 +3532,10 @@ func (r *AgentRunReconciler) agentRunBlockingValidation(obj *controlv1alpha1.Age
 	if phase, reason, message := r.agentRunBackendValidation(obj); phase != "" {
 		return phase, reason, message
 	}
-	return r.agentRunSubstrateHold(obj)
+	if phase, reason, message := r.agentRunSubstrateHold(obj); phase != "" {
+		return phase, reason, message
+	}
+	return r.agentRunInProcessHold(obj)
 }
 
 // agentRunBackendValidation checks that the selected harness adapter has its
@@ -3606,6 +3610,22 @@ func (r *AgentRunReconciler) agentRunSubstrateHold(obj *controlv1alpha1.AgentRun
 	}
 	return controlv1alpha1.AgentRunPhaseNeedsHuman, "SubstrateActorNotWired",
 		"execution.runtime SubstrateActor is an API-first spike surface; live Substrate dispatch is not enabled in this build, so no Kubernetes Job was created. See docs/substrate-spike.md for the Kind e2e follow-up."
+}
+
+// agentRunInProcessHold keeps well-formed InProcess runs from creating a
+// Kubernetes Job before a live standing-harness backend exists. It runs after
+// backend validation so adapter misconfiguration still surfaces first; scouts
+// and batch runs never reach it because they stay on the default Job runtime.
+// Slice 1 is API-first (selection + session/stream contract + Fake backend in
+// internal/standing), so the hold always applies until a later slice wires a
+// live backend behind an explicit opt-in gate. See
+// docs/standing-inprocess-harness.md.
+func (r *AgentRunReconciler) agentRunInProcessHold(obj *controlv1alpha1.AgentRun) (controlv1alpha1.AgentRunPhase, string, string) {
+	if obj == nil || !obj.Spec.Harness.Execution.UsesInProcess() {
+		return "", "", ""
+	}
+	return controlv1alpha1.AgentRunPhaseNeedsHuman, "InProcessNotWired",
+		"execution.runtime InProcess is an API-first slice-1 surface; no standing in-process harness backend is wired in this build, so no Kubernetes Job was created. See docs/standing-inprocess-harness.md for the live-backend follow-up."
 }
 
 func agentRunBlockingValidation(obj *controlv1alpha1.AgentRun) (controlv1alpha1.AgentRunPhase, string, string) {
