@@ -238,6 +238,7 @@ func (r *AgentRunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		status.Model = agentRunBackendModel(effective)
 		status.Intent = string(agentRunIntent(effective))
 		status.Image = r.agentRunImage(effective)
+		status.ExecutionRuntime = string(effective.Spec.Harness.Execution.EffectiveRuntime())
 		if phase != "" {
 			if jobNeedsValidation {
 				return ctrl.Result{}, fmt.Errorf("cannot validate recovered AgentRun Job %s/%s without its original resolved composition: %s", job.Namespace, job.Name, message)
@@ -283,6 +284,9 @@ func (r *AgentRunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		status.Model = firstNonEmpty(status.Model, agentRunModelFromJob(job))
 		status.Intent = firstNonEmpty(status.Intent, agentRunJobEnvValue(job, "ANVIL_AGENT_RUN_INTENT"))
 		status.Image = firstNonEmpty(agentRunJobContainerImage(job), status.Image)
+		// A recovered Job implies the default Job plane; SubstrateActor runs
+		// never create a Job, so they never reach this branch.
+		status.ExecutionRuntime = firstNonEmpty(status.ExecutionRuntime, string(controlv1alpha1.AgentRunExecutionRuntimeJob))
 	}
 
 	if job == nil {
@@ -2947,6 +2951,12 @@ func agentRunMergeExecution(profile, run controlv1alpha1.AgentRunHarnessExecutio
 	if strings.TrimSpace(run.Workdir) != "" {
 		out.Workdir = run.Workdir
 	}
+	if run.Runtime != "" {
+		out.Runtime = run.Runtime
+	}
+	if run.Substrate != nil {
+		out.Substrate = run.Substrate.DeepCopy()
+	}
 	if run.TimeoutSeconds != 0 {
 		out.TimeoutSeconds = run.TimeoutSeconds
 	}
@@ -3461,6 +3471,12 @@ func (r *AgentRunReconciler) agentRunBlockingValidation(obj *controlv1alpha1.Age
 			return controlv1alpha1.AgentRunPhaseFailed, "CrossNamespaceDataVolumeRef", "AgentRun dataVolumeRefs must be in the agent run namespace."
 		}
 	}
+	// Optional Substrate actor plane (API-first spike). Structural shape fails
+	// closed; a well-formed SubstrateActor selection holds without creating a
+	// Job until live dispatch lands. The default Job path is unaffected.
+	if reason, message := controlv1alpha1.ValidateSubstrateExecution(&obj.Spec.Harness.Execution); reason != "" {
+		return controlv1alpha1.AgentRunPhaseFailed, reason, message
+	}
 	for _, skill := range obj.Spec.Harness.SkillInjections {
 		if strings.TrimSpace(skill.Name) == "" {
 			return controlv1alpha1.AgentRunPhaseFailed, "InvalidSkillInjection", "spec.harness.skillInjections entries must set name."
@@ -3498,6 +3514,17 @@ func (r *AgentRunReconciler) agentRunBlockingValidation(obj *controlv1alpha1.Age
 			}
 		}
 	}
+	if phase, reason, message := r.agentRunBackendValidation(obj); phase != "" {
+		return phase, reason, message
+	}
+	return r.agentRunSubstrateHold(obj)
+}
+
+// agentRunBackendValidation checks that the selected harness adapter has its
+// required image configured. It stays separate from agentRunBlockingValidation
+// so the SubstrateActor hold runs after adapter validation: adapter
+// misconfiguration still surfaces first.
+func (r *AgentRunReconciler) agentRunBackendValidation(obj *controlv1alpha1.AgentRun) (controlv1alpha1.AgentRunPhase, string, string) {
 	switch agentRunBackendKind(obj) {
 	case controlv1alpha1.AgentRunHarnessBackendCodex:
 		if strings.TrimSpace(r.agentRunImage(obj)) == "" {
@@ -3547,6 +3574,18 @@ func (r *AgentRunReconciler) agentRunBlockingValidation(obj *controlv1alpha1.Age
 	default:
 		return controlv1alpha1.AgentRunPhaseFailed, "UnsupportedBackend", fmt.Sprintf("Unsupported agent run harness backend %q.", obj.Spec.Harness.Backend.Kind)
 	}
+}
+
+// agentRunSubstrateHold keeps well-formed SubstrateActor runs from creating a
+// Kubernetes Job before live actor dispatch exists. It runs after backend
+// validation so adapter misconfiguration still surfaces first; scouts and
+// batch runs never reach it because they stay on the default Job runtime.
+func (r *AgentRunReconciler) agentRunSubstrateHold(obj *controlv1alpha1.AgentRun) (controlv1alpha1.AgentRunPhase, string, string) {
+	if obj == nil || !obj.Spec.Harness.Execution.UsesSubstrateActors() {
+		return "", "", ""
+	}
+	return controlv1alpha1.AgentRunPhaseNeedsHuman, "SubstrateActorNotWired",
+		"execution.runtime SubstrateActor is an API-first spike surface; live Substrate dispatch is not enabled in this build, so no Kubernetes Job was created. See docs/substrate-spike.md for the Kind e2e follow-up."
 }
 
 func agentRunBlockingValidation(obj *controlv1alpha1.AgentRun) (controlv1alpha1.AgentRunPhase, string, string) {

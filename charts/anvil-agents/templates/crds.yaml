@@ -2321,6 +2321,18 @@ spec:
                                       More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
                                     type: object
                                 type: object
+                              runtime:
+                                description: |-
+                                  Runtime selects the Kubernetes execution plane for the harness adapter.
+                                  Empty defaults to Job: exactly one Kubernetes Job per AgentRun. Set to
+                                  SubstrateActor to select the optional warm-actor plane for
+                                  standing/manager chat turns; scouts and batch runs must stay on Jobs.
+                                  Live Substrate dispatch is not wired yet, so the controller holds
+                                  SubstrateActor runs without creating a Job. See docs/substrate-spike.md.
+                                enum:
+                                - Job
+                                - SubstrateActor
+                                type: string
                               securityContext:
                                 description: SecurityContext configures the agent
                                   container security settings.
@@ -2573,6 +2585,30 @@ spec:
                                       Workload API. It is required when Enabled so a pod cannot silently use a different
                                       SVID exposed by a co-located agent.
                                     type: string
+                                type: object
+                              substrate:
+                                description: |-
+                                  Substrate tunes the optional Substrate actor plane. Required when
+                                  runtime is SubstrateActor; must be nil otherwise.
+                                properties:
+                                  actorClass:
+                                    description: |-
+                                      ActorClass selects the Substrate actor class for this execution, for
+                                      example "standing-chat". Empty uses the Substrate default.
+                                    maxLength: 253
+                                    type: string
+                                  pool:
+                                    description: |-
+                                      Pool selects the warm worker pool that multiplexes idle actors. Empty
+                                      uses the Substrate default pool.
+                                    maxLength: 253
+                                    type: string
+                                  suspendOnIdle:
+                                    description: |-
+                                      SuspendOnIdle releases the warm worker while keeping actor state when
+                                      the turn goes idle. Nil defaults to true in the future live backend;
+                                      the spike surface records intent only.
+                                    type: boolean
                                 type: object
                               timeoutSeconds:
                                 description: TimeoutSeconds bounds the child agent
@@ -5872,6 +5908,18 @@ spec:
                                         More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
                                       type: object
                                   type: object
+                                runtime:
+                                  description: |-
+                                    Runtime selects the Kubernetes execution plane for the harness adapter.
+                                    Empty defaults to Job: exactly one Kubernetes Job per AgentRun. Set to
+                                    SubstrateActor to select the optional warm-actor plane for
+                                    standing/manager chat turns; scouts and batch runs must stay on Jobs.
+                                    Live Substrate dispatch is not wired yet, so the controller holds
+                                    SubstrateActor runs without creating a Job. See docs/substrate-spike.md.
+                                  enum:
+                                  - Job
+                                  - SubstrateActor
+                                  type: string
                                 securityContext:
                                   description: SecurityContext configures the agent
                                     container security settings.
@@ -6124,6 +6172,30 @@ spec:
                                         Workload API. It is required when Enabled so a pod cannot silently use a different
                                         SVID exposed by a co-located agent.
                                       type: string
+                                  type: object
+                                substrate:
+                                  description: |-
+                                    Substrate tunes the optional Substrate actor plane. Required when
+                                    runtime is SubstrateActor; must be nil otherwise.
+                                  properties:
+                                    actorClass:
+                                      description: |-
+                                        ActorClass selects the Substrate actor class for this execution, for
+                                        example "standing-chat". Empty uses the Substrate default.
+                                      maxLength: 253
+                                      type: string
+                                    pool:
+                                      description: |-
+                                        Pool selects the warm worker pool that multiplexes idle actors. Empty
+                                        uses the Substrate default pool.
+                                      maxLength: 253
+                                      type: string
+                                    suspendOnIdle:
+                                      description: |-
+                                        SuspendOnIdle releases the warm worker while keeping actor state when
+                                        the turn goes idle. Nil defaults to true in the future live backend;
+                                        the spike surface records intent only.
+                                      type: boolean
                                   type: object
                                 timeoutSeconds:
                                   description: TimeoutSeconds bounds the child agent
@@ -10359,6 +10431,18 @@ spec:
                           More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
                         type: object
                     type: object
+                  runtime:
+                    description: |-
+                      Runtime selects the Kubernetes execution plane for the harness adapter.
+                      Empty defaults to Job: exactly one Kubernetes Job per AgentRun. Set to
+                      SubstrateActor to select the optional warm-actor plane for
+                      standing/manager chat turns; scouts and batch runs must stay on Jobs.
+                      Live Substrate dispatch is not wired yet, so the controller holds
+                      SubstrateActor runs without creating a Job. See docs/substrate-spike.md.
+                    enum:
+                    - Job
+                    - SubstrateActor
+                    type: string
                   securityContext:
                     description: SecurityContext configures the agent container security
                       settings.
@@ -10611,6 +10695,30 @@ spec:
                           Workload API. It is required when Enabled so a pod cannot silently use a different
                           SVID exposed by a co-located agent.
                         type: string
+                    type: object
+                  substrate:
+                    description: |-
+                      Substrate tunes the optional Substrate actor plane. Required when
+                      runtime is SubstrateActor; must be nil otherwise.
+                    properties:
+                      actorClass:
+                        description: |-
+                          ActorClass selects the Substrate actor class for this execution, for
+                          example "standing-chat". Empty uses the Substrate default.
+                        maxLength: 253
+                        type: string
+                      pool:
+                        description: |-
+                          Pool selects the warm worker pool that multiplexes idle actors. Empty
+                          uses the Substrate default pool.
+                        maxLength: 253
+                        type: string
+                      suspendOnIdle:
+                        description: |-
+                          SuspendOnIdle releases the warm worker while keeping actor state when
+                          the turn goes idle. Nil defaults to true in the future live backend;
+                          the spike surface records intent only.
+                        type: boolean
                     type: object
                   timeoutSeconds:
                     description: TimeoutSeconds bounds the child agent Job.
@@ -12892,6 +13000,18 @@ spec:
                               More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
                             type: object
                         type: object
+                      runtime:
+                        description: |-
+                          Runtime selects the Kubernetes execution plane for the harness adapter.
+                          Empty defaults to Job: exactly one Kubernetes Job per AgentRun. Set to
+                          SubstrateActor to select the optional warm-actor plane for
+                          standing/manager chat turns; scouts and batch runs must stay on Jobs.
+                          Live Substrate dispatch is not wired yet, so the controller holds
+                          SubstrateActor runs without creating a Job. See docs/substrate-spike.md.
+                        enum:
+                        - Job
+                        - SubstrateActor
+                        type: string
                       securityContext:
                         description: SecurityContext configures the agent container
                           security settings.
@@ -13144,6 +13264,30 @@ spec:
                               Workload API. It is required when Enabled so a pod cannot silently use a different
                               SVID exposed by a co-located agent.
                             type: string
+                        type: object
+                      substrate:
+                        description: |-
+                          Substrate tunes the optional Substrate actor plane. Required when
+                          runtime is SubstrateActor; must be nil otherwise.
+                        properties:
+                          actorClass:
+                            description: |-
+                              ActorClass selects the Substrate actor class for this execution, for
+                              example "standing-chat". Empty uses the Substrate default.
+                            maxLength: 253
+                            type: string
+                          pool:
+                            description: |-
+                              Pool selects the warm worker pool that multiplexes idle actors. Empty
+                              uses the Substrate default pool.
+                            maxLength: 253
+                            type: string
+                          suspendOnIdle:
+                            description: |-
+                              SuspendOnIdle releases the warm worker while keeping actor state when
+                              the turn goes idle. Nil defaults to true in the future live backend;
+                              the spike surface records intent only.
+                            type: boolean
                         type: object
                       timeoutSeconds:
                         description: TimeoutSeconds bounds the child agent Job.
@@ -15780,6 +15924,18 @@ spec:
                               More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
                             type: object
                         type: object
+                      runtime:
+                        description: |-
+                          Runtime selects the Kubernetes execution plane for the harness adapter.
+                          Empty defaults to Job: exactly one Kubernetes Job per AgentRun. Set to
+                          SubstrateActor to select the optional warm-actor plane for
+                          standing/manager chat turns; scouts and batch runs must stay on Jobs.
+                          Live Substrate dispatch is not wired yet, so the controller holds
+                          SubstrateActor runs without creating a Job. See docs/substrate-spike.md.
+                        enum:
+                        - Job
+                        - SubstrateActor
+                        type: string
                       securityContext:
                         description: SecurityContext configures the agent container
                           security settings.
@@ -16032,6 +16188,30 @@ spec:
                               Workload API. It is required when Enabled so a pod cannot silently use a different
                               SVID exposed by a co-located agent.
                             type: string
+                        type: object
+                      substrate:
+                        description: |-
+                          Substrate tunes the optional Substrate actor plane. Required when
+                          runtime is SubstrateActor; must be nil otherwise.
+                        properties:
+                          actorClass:
+                            description: |-
+                              ActorClass selects the Substrate actor class for this execution, for
+                              example "standing-chat". Empty uses the Substrate default.
+                            maxLength: 253
+                            type: string
+                          pool:
+                            description: |-
+                              Pool selects the warm worker pool that multiplexes idle actors. Empty
+                              uses the Substrate default pool.
+                            maxLength: 253
+                            type: string
+                          suspendOnIdle:
+                            description: |-
+                              SuspendOnIdle releases the warm worker while keeping actor state when
+                              the turn goes idle. Nil defaults to true in the future live backend;
+                              the spike surface records intent only.
+                            type: boolean
                         type: object
                       timeoutSeconds:
                         description: TimeoutSeconds bounds the child agent Job.
@@ -16878,6 +17058,12 @@ spec:
                 type: object
               error:
                 type: string
+              executionRuntime:
+                description: |-
+                  ExecutionRuntime records the selected execution plane (Job or
+                  SubstrateActor) from the effective harness after composition. Empty on
+                  runs written before this field means the default Job plane.
+                type: string
               externalSecretRefreshes:
                 items:
                   description: |-
@@ -17201,6 +17387,25 @@ spec:
               startedAt:
                 format: date-time
                 type: string
+              substrateActor:
+                description: |-
+                  SubstrateActor records the bound Substrate actor identity once live
+                  actor dispatch lands. The spike surface never populates it; Jobs ignore it.
+                properties:
+                  actorId:
+                    description: ActorID is the Substrate-assigned actor identity,
+                      if any.
+                    type: string
+                  actorName:
+                    description: ActorName is the stable Substrate actor name for
+                      this execution.
+                    type: string
+                  state:
+                    description: |-
+                      State is the last observed actor lifecycle state, for example
+                      "Active", "Suspended", or "Paused".
+                    type: string
+                type: object
             type: object
         type: object
     served: true
@@ -19280,6 +19485,18 @@ spec:
                                   More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
                                 type: object
                             type: object
+                          runtime:
+                            description: |-
+                              Runtime selects the Kubernetes execution plane for the harness adapter.
+                              Empty defaults to Job: exactly one Kubernetes Job per AgentRun. Set to
+                              SubstrateActor to select the optional warm-actor plane for
+                              standing/manager chat turns; scouts and batch runs must stay on Jobs.
+                              Live Substrate dispatch is not wired yet, so the controller holds
+                              SubstrateActor runs without creating a Job. See docs/substrate-spike.md.
+                            enum:
+                            - Job
+                            - SubstrateActor
+                            type: string
                           securityContext:
                             description: SecurityContext configures the agent container
                               security settings.
@@ -19532,6 +19749,30 @@ spec:
                                   Workload API. It is required when Enabled so a pod cannot silently use a different
                                   SVID exposed by a co-located agent.
                                 type: string
+                            type: object
+                          substrate:
+                            description: |-
+                              Substrate tunes the optional Substrate actor plane. Required when
+                              runtime is SubstrateActor; must be nil otherwise.
+                            properties:
+                              actorClass:
+                                description: |-
+                                  ActorClass selects the Substrate actor class for this execution, for
+                                  example "standing-chat". Empty uses the Substrate default.
+                                maxLength: 253
+                                type: string
+                              pool:
+                                description: |-
+                                  Pool selects the warm worker pool that multiplexes idle actors. Empty
+                                  uses the Substrate default pool.
+                                maxLength: 253
+                                type: string
+                              suspendOnIdle:
+                                description: |-
+                                  SuspendOnIdle releases the warm worker while keeping actor state when
+                                  the turn goes idle. Nil defaults to true in the future live backend;
+                                  the spike surface records intent only.
+                                type: boolean
                             type: object
                           timeoutSeconds:
                             description: TimeoutSeconds bounds the child agent Job.
@@ -22258,6 +22499,18 @@ spec:
                                         More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
                                       type: object
                                   type: object
+                                runtime:
+                                  description: |-
+                                    Runtime selects the Kubernetes execution plane for the harness adapter.
+                                    Empty defaults to Job: exactly one Kubernetes Job per AgentRun. Set to
+                                    SubstrateActor to select the optional warm-actor plane for
+                                    standing/manager chat turns; scouts and batch runs must stay on Jobs.
+                                    Live Substrate dispatch is not wired yet, so the controller holds
+                                    SubstrateActor runs without creating a Job. See docs/substrate-spike.md.
+                                  enum:
+                                  - Job
+                                  - SubstrateActor
+                                  type: string
                                 securityContext:
                                   description: SecurityContext configures the agent
                                     container security settings.
@@ -22510,6 +22763,30 @@ spec:
                                         Workload API. It is required when Enabled so a pod cannot silently use a different
                                         SVID exposed by a co-located agent.
                                       type: string
+                                  type: object
+                                substrate:
+                                  description: |-
+                                    Substrate tunes the optional Substrate actor plane. Required when
+                                    runtime is SubstrateActor; must be nil otherwise.
+                                  properties:
+                                    actorClass:
+                                      description: |-
+                                        ActorClass selects the Substrate actor class for this execution, for
+                                        example "standing-chat". Empty uses the Substrate default.
+                                      maxLength: 253
+                                      type: string
+                                    pool:
+                                      description: |-
+                                        Pool selects the warm worker pool that multiplexes idle actors. Empty
+                                        uses the Substrate default pool.
+                                      maxLength: 253
+                                      type: string
+                                    suspendOnIdle:
+                                      description: |-
+                                        SuspendOnIdle releases the warm worker while keeping actor state when
+                                        the turn goes idle. Nil defaults to true in the future live backend;
+                                        the spike surface records intent only.
+                                      type: boolean
                                   type: object
                                 timeoutSeconds:
                                   description: TimeoutSeconds bounds the child agent

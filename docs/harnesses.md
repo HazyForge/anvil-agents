@@ -145,3 +145,14 @@ Remote skill content is a separate controller-side fetch. Its source must name
 a full immutable commit. Private-source tokens are mapped by exact API host in
 the trusted harness execution envelope; they cannot be selected by an
 `AgentSkillSet` or skill override.
+
+## Optional Substrate execution plane (spike)
+
+The harness adapter (`backend.kind`) and the execution plane are independent.
+`execution.runtime` defaults to `Job`; setting it to `SubstrateActor` with an
+`execution.substrate` section marks a harness profile as eligible to run
+standing/manager chat turns on warm Substrate actors instead of cold Jobs.
+Scouts and batch runs stay on Jobs, and live Substrate dispatch is not wired
+yet — the controller holds those runs without creating a Job. See
+[Substrate spike](substrate-spike.md) and the sample
+`config/samples/control_v1alpha1_agentharnessprofile_substrate.yaml`.

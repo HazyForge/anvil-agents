@@ -135,3 +135,11 @@ the API container. Configure `api.extraVolumes` and `api.extraVolumeMounts`;
 controller mounts are intentionally independent. The Primaris overlay projects
 only the existing Secret's `ca.crt` key into the API mount. Also verify PostgreSQL
 admits the API node's egress address before enabling chat.
+
+## Optional Substrate actors (spike)
+
+A new conversation can select a harness profile whose `execution.runtime` is
+`SubstrateActor` to make its turns eligible for the warm-actor plane once live
+dispatch lands. Existing conversations keep their selected harness, and the
+controller currently holds SubstrateActor runs without creating a Job. See
+[Substrate spike](substrate-spike.md).
