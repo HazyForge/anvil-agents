@@ -148,9 +148,10 @@ backend-kind overlay, which stays orthogonal to the runtime plane).
   mapped onto the warm-reuse contract — parity with upstream
   `internal/ateclient`. Kind-only escape hatch:
   `ANVIL_AGENTS_SUBSTRATE_INSECURE=true` (flag `--substrate-insecure`) dials
-  plaintext but refuses every non-loopback endpoint, so it can only reach a
-  local port-forward. Prefer verified TLS; use insecure-dev only while the
-  local trust bundle is not yet wired.
+  TLS with certificate verification skipped but refuses every non-loopback
+  endpoint, so it can only reach a local port-forward. ateapi always serves
+  TLS, so this is still a TLS channel — never plaintext. Prefer verified TLS;
+  use insecure-dev only while the local trust bundle is not yet wired.
 - Controller dispatch (`internal/controller/agent_run_substrate_live.go`): with
   the gate on, a well-formed SubstrateActor run binds its thread actor through
   `EnsureTurnActor`, records `status.substrateActor` (turn-to-actor binding),
@@ -243,19 +244,31 @@ kubectl ate --endpoint 127.0.0.1:8443 create actor my-counter-1 \
 kubectl ate --endpoint 127.0.0.1:8443 get actor my-counter-1 -a ate-demo-counter
 
 # Terminal 2 (continued): point Anvil at the same forward and measure.
+# Target the counter demo (real ActorTemplate, not a fictional standing-chat
+# template): the harness suspends each cold-created actor before the next
+# iteration, so cold create then warm resume fits the small counter
+# WorkerPool.
 export ANVIL_AGENTS_SUBSTRATE_ACTORS_ENABLED=true
 export ANVIL_AGENTS_SUBSTRATE_ENDPOINT=127.0.0.1:8443
-export ANVIL_AGENTS_SUBSTRATE_TEMPLATE=standing-chat
-# Verified TLS (default): uses your kubeconfig's ClusterTrustBundle plus a
-# token file, an inline token, or a minted ate-client token, in that order.
+export ANVIL_AGENTS_SUBSTRATE_ATESPACE=ate-demo-counter
+export ANVIL_AGENTS_SUBSTRATE_TEMPLATE=counter
+# Verified TLS (default, preferred): uses your kubeconfig's
+# ClusterTrustBundle plus a token file, an inline token, or a minted
+# ate-client token, in that order.
 # export ANVIL_AGENTS_SUBSTRATE_TOKEN_FILE="$HOME/.config/ate/token"
-# Kind-only shortcut while the local trust bundle is not yet wired:
-# plaintext, loopback-only (refuses non-local endpoints).
-export ANVIL_AGENTS_SUBSTRATE_INSECURE=true
+# Kind-only fallback while the local trust bundle is not yet wired: ateapi is
+# always TLS, so ANVIL_AGENTS_SUBSTRATE_INSECURE=true is skip-verify TLS
+# (never plaintext), loopback-only (refuses non-local endpoints). Leave it
+# unset for verified TLS.
+# export ANVIL_AGENTS_SUBSTRATE_INSECURE=true
 
-hack/substrate-latency-compare.sh --live --iterations 20 \
+hack/substrate-latency-compare.sh --live -n 10 \
+  --namespace ate-demo-counter --actor-class counter --pool '' \
   --job-baseline-p50-ms 12000 --job-baseline-p95-ms 44000 \
   --out /tmp/substrate-latency-live.json
+# Equivalent direct binary run:
+# go run ./cmd/substrate-latency -n 10 -namespace ate-demo-counter \
+#   -actor-class counter -pool '' ...
 ```
 
 The harness dials `ANVIL_AGENTS_SUBSTRATE_ENDPOINT` with the same TLS/token
@@ -280,10 +293,11 @@ hack/substrate-latency-compare.sh --iterations 20 --out /tmp/substrate-latency-f
 
 3. Live compare on the Kind spike cluster (Austin's cluster/WSL Kind) via
    the port-forward setup above — the harness dials ateapi and times real
-   Create/Resume calls:
+   Create/Resume calls against the counter demo:
 
 ```bash
-hack/substrate-latency-compare.sh --live --iterations 20 \
+hack/substrate-latency-compare.sh --live -n 10 \
+  --namespace ate-demo-counter --actor-class counter --pool '' \
   --job-baseline-p50-ms 12000 --job-baseline-p95-ms 44000 \
   --out /tmp/substrate-latency-live.json
 ```

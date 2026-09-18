@@ -96,7 +96,7 @@ func Run(ctx context.Context, options *Options) error {
 	// gate is off by default; with the gate on plus an ateapi endpoint the
 	// operator dials ateapi over gRPC (verified TLS before any bearer token,
 	// token from the token file or inline env, ServiceAccount mint fallback;
-	// Kind-only plaintext behind --substrate-insecure for loopback). No token
+	// Kind-only skip-verify TLS behind --substrate-insecure for loopback). No token
 	// material is ever logged.
 	var substrateClient substrate.Client
 	if options.SubstrateActorsEnabled && strings.TrimSpace(options.SubstrateEndpoint) != "" {

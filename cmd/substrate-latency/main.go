@@ -7,7 +7,7 @@
 // (ANVIL_AGENTS_SUBSTRATE_ACTORS_ENABLED + ANVIL_AGENTS_SUBSTRATE_ENDPOINT)
 // it dials ateapi over gRPC — verified TLS before any bearer token, token
 // from ANVIL_AGENTS_SUBSTRATE_TOKEN_FILE (or the inline token env, or a
-// minted ServiceAccount token), Kind-only plaintext behind
+// minted ServiceAccount token), Kind-only skip-verify TLS behind
 // ANVIL_AGENTS_SUBSTRATE_INSECURE for a loopback port-forward — and measures
 // real Create/Resume timings. See docs/substrate-spike.md for the Kind
 // port-forward setup.
@@ -112,6 +112,14 @@ func measureCold(ctx context.Context, client substrate.Client, namespace, prefix
 			return nil, err
 		}
 		durations = append(durations, time.Since(start))
+		// Release the worker before the next iteration: Create returns while
+		// the actor still occupies a worker, so without a suspend a small
+		// WorkerPool exhausts (ResourceExhausted) before warm scenarios run.
+		// The suspend is outside the timed sample, matching warm which times
+		// Ensure/Resume only.
+		if _, err := substrate.SuspendIdleActor(ctx, client, namespace, spec.Name, nil); err != nil {
+			return nil, err
+		}
 	}
 	return durations, nil
 }
@@ -181,7 +189,11 @@ func main() {
 		fmt.Fprintf(os.Stderr, "error: direct cold: %v\n", err)
 		os.Exit(1)
 	}
-	directWarm, directWarmOps, err := measureWarm(ctx, client, *namespace, "latency-direct-thread", *harness, *actorClass, *pool, *iterations)
+	// Warm actors get a fresh thread ID per run: reusing a fixed thread after
+	// a failed resume can rebind a CRASHED/stuck actor on a stale worker
+	// (ateom.sock errors) instead of measuring a clean warm resume.
+	runID := time.Now().UnixNano()
+	directWarm, directWarmOps, err := measureWarm(ctx, client, *namespace, fmt.Sprintf("latency-direct-thread-%d", runID), *harness, *actorClass, *pool, *iterations)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: direct warm: %v\n", err)
 		os.Exit(1)
@@ -191,7 +203,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "error: peer cold: %v\n", err)
 		os.Exit(1)
 	}
-	peerWarm, peerWarmOps, err := measureWarm(ctx, client, *namespace, "latency-peer-child-thread", *harness, *actorClass, *pool, *iterations)
+	peerWarm, peerWarmOps, err := measureWarm(ctx, client, *namespace, fmt.Sprintf("latency-peer-child-thread-%d", runID), *harness, *actorClass, *pool, *iterations)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: peer warm: %v\n", err)
 		os.Exit(1)
