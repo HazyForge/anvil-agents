@@ -7,7 +7,7 @@
 // (ANVIL_AGENTS_SUBSTRATE_ACTORS_ENABLED + ANVIL_AGENTS_SUBSTRATE_ENDPOINT)
 // it dials ateapi over gRPC — verified TLS before any bearer token, token
 // from ANVIL_AGENTS_SUBSTRATE_TOKEN_FILE (or the inline token env, or a
-// minted ServiceAccount token), Kind-only plaintext behind
+// minted ServiceAccount token), Kind-only skip-verify TLS behind
 // ANVIL_AGENTS_SUBSTRATE_INSECURE for a loopback port-forward — and measures
 // real Create/Resume timings. See docs/substrate-spike.md for the Kind
 // port-forward setup.
@@ -112,6 +112,14 @@ func measureCold(ctx context.Context, client substrate.Client, namespace, prefix
 			return nil, err
 		}
 		durations = append(durations, time.Since(start))
+		// Release the worker before the next iteration: Create returns while
+		// the actor still occupies a worker, so without a suspend a small
+		// WorkerPool exhausts (ResourceExhausted) before warm scenarios run.
+		// The suspend is outside the timed sample, matching warm which times
+		// Ensure/Resume only.
+		if _, err := substrate.SuspendIdleActor(ctx, client, namespace, spec.Name, nil); err != nil {
+			return nil, err
+		}
 	}
 	return durations, nil
 }

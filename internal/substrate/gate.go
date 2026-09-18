@@ -41,10 +41,12 @@ const (
 	// leaves ActorClass empty (e.g. "standing-chat"). Required for live
 	// dispatch because CreateActor always derives from a template.
 	GateTemplateEnvVar = "ANVIL_AGENTS_SUBSTRATE_TEMPLATE"
-	// GateInsecureEnvVar opts into plaintext gRPC for a local Kind
-	// port-forward when the podcert trust bundle is not yet wired locally.
-	// Kind-only: the dialer refuses every non-loopback endpoint when this is
-	// set. Production and shared clusters must use verified TLS (default).
+	// GateInsecureEnvVar opts into TLS with certificate verification skipped
+	// for a local Kind port-forward when the podcert trust bundle is not yet
+	// wired locally. ateapi always serves TLS, so this is still a TLS
+	// channel — never plaintext. Kind-only: the dialer refuses every
+	// non-loopback endpoint when this is set. Production and shared clusters
+	// must use verified TLS (default).
 	GateInsecureEnvVar = "ANVIL_AGENTS_SUBSTRATE_INSECURE"
 )
 
@@ -61,8 +63,10 @@ type GateConfig struct {
 	Atespace string
 	// Template is the default ActorTemplate for specs without an actor class.
 	Template string
-	// Insecure dials plaintext gRPC for a local Kind port-forward.
-	// Kind-only: the dialer refuses every non-loopback endpoint when set.
+	// Insecure dials TLS with certificate verification skipped for a local
+	// Kind port-forward. ateapi always serves TLS, so this is still a TLS
+	// channel — never plaintext. Kind-only: the dialer refuses every
+	// non-loopback endpoint when set.
 	Insecure bool
 }
 

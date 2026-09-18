@@ -5,6 +5,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
@@ -24,6 +25,7 @@ import (
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
 	"google.golang.org/grpc/test/bufconn"
@@ -355,9 +357,9 @@ func TestDialInsecureRefusesNonLoopback(t *testing.T) {
 	}
 }
 
-// TestDialInsecureLoopbackRoundTrip proves the real dial path (plaintext
-// gRPC) against a loopback TCP listener: the same DialATEControl the
-// controller and the latency harness use.
+// TestDialInsecureLoopbackRoundTrip proves the real dial path (skip-verify
+// TLS over a loopback TCP listener, since ateapi always serves TLS) via the
+// same DialATEControl the controller and the latency harness use.
 func TestDialInsecureLoopbackRoundTrip(t *testing.T) {
 	t.Parallel()
 
@@ -367,7 +369,10 @@ func TestDialInsecureLoopbackRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("listen: %v", err)
 	}
-	srv := grpc.NewServer()
+	// ateapi always serves TLS, so the loopback fixture serves TLS with a
+	// throwaway self-signed cert; the insecure dial skips verification.
+	serverCert := loopbackServerCert(t)
+	srv := grpc.NewServer(grpc.Creds(credentials.NewServerTLSFromCert(&serverCert)))
 	ateapipb.RegisterControlServer(srv, server)
 	go func() { _ = srv.Serve(lis) }()
 	t.Cleanup(srv.Stop)
@@ -399,6 +404,67 @@ func TestDialInsecureLoopbackRoundTrip(t *testing.T) {
 	if resumed.Resumes != 1 {
 		t.Fatalf("resumed handle = %+v, want one observed resume", resumed)
 	}
+	// A file token on the insecure path must still attach over the TLS
+	// channel (per-RPC creds require transport security).
+	tokenPath := filepath.Join(t.TempDir(), "token")
+	if err := os.WriteFile(tokenPath, []byte("loopback-token"), 0o600); err != nil {
+		t.Fatalf("write token: %v", err)
+	}
+	fileCfg := ATEClientConfig{Address: lis.Addr().String(), Template: "standing-chat", Insecure: true, TokenFile: tokenPath}
+	fileControl, closeFile, err := DialATEControl(ctx, fileCfg, ATEDialOptions{})
+	if err != nil {
+		t.Fatalf("DialATEControl insecure loopback with token file: %v", err)
+	}
+	defer closeFile()
+	fileClient, err := NewATEClient(fileCfg, fileControl)
+	if err != nil {
+		t.Fatalf("NewATEClient with token file: %v", err)
+	}
+	if _, err := fileClient.CreateActor(ctx, ActorSpec{Namespace: "agents", Name: "chat-dial-2", ActorClass: "standing-chat"}); err != nil {
+		t.Fatalf("create via token-file dialed client: %v", err)
+	}
+}
+
+// loopbackServerCert mints a throwaway self-signed TLS cert for the insecure
+// (skip-verify) loopback fixture. ateapi always serves TLS, so the fixture
+// must too; the client skips verification.
+func loopbackServerCert(t *testing.T) tls.Certificate {
+	t.Helper()
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("generate key: %v", err)
+	}
+	template := &x509.Certificate{
+		SerialNumber: big.NewInt(1),
+		Subject:      pkix.Name{CommonName: "ate-loopback-test"},
+		NotBefore:    time.Now().Add(-time.Hour),
+		NotAfter:     time.Now().Add(time.Hour),
+		KeyUsage:     x509.KeyUsageDigitalSignature,
+		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		DNSNames:     []string{"localhost"},
+		IPAddresses:  []net.IP{net.ParseIP("127.0.0.1"), net.ParseIP("::1")},
+	}
+	der, err := x509.CreateCertificate(rand.Reader, template, template, key.Public(), key)
+	if err != nil {
+		t.Fatalf("create certificate: %v", err)
+	}
+	cert, err := tls.X509KeyPair(
+		pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}),
+		mustMarshalECKey(t, key),
+	)
+	if err != nil {
+		t.Fatalf("marshal key pair: %v", err)
+	}
+	return cert
+}
+
+func mustMarshalECKey(t *testing.T, key *ecdsa.PrivateKey) []byte {
+	t.Helper()
+	der, err := x509.MarshalECPrivateKey(key)
+	if err != nil {
+		t.Fatalf("marshal EC key: %v", err)
+	}
+	return pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: der})
 }
 
 func TestServerTLSConfigRequiresLiveBundle(t *testing.T) {
@@ -495,8 +561,13 @@ func TestStaticBearerCredentials(t *testing.T) {
 	if _, err := (staticBearerCreds{}).GetRequestMetadata(context.Background()); err == nil {
 		t.Fatal("empty token must fail")
 	}
-	insecureCreds := staticBearerCreds{token: "abc"}
-	if insecureCreds.RequireTransportSecurity() {
-		t.Fatal("insecure-dev credentials must not require transport security")
+	// The insecure path is still a TLS channel (skip-verify), so even
+	// loopback per-RPC creds must require transport security.
+	insecureCreds := staticBearerCreds{token: "abc", requireTLS: true}
+	if !insecureCreds.RequireTransportSecurity() {
+		t.Fatal("insecure-dev credentials must require transport security over skip-verify TLS")
+	}
+	if got := (fileBearerCreds{path: "some/path", requireTLS: true}).RequireTransportSecurity(); !got {
+		t.Fatal("file bearer credentials must require transport security over skip-verify TLS")
 	}
 }
