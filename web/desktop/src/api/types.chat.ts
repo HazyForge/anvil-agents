@@ -4,6 +4,69 @@ export type ChatMode = "persona" | "fleet";
 
 export type ChatRole = "system" | "user" | "assistant" | "tool";
 
+export type ChatChipType = "routing" | "recipient" | "transition" | "tool" | "target" | "lifecycle";
+
+export type ChatChipStatus = "pending" | "running" | "completed" | "failed" | "info" | "dispatched";
+
+export type ChatTurnStatus = "waiting" | "queued" | "running" | "failed";
+
+export type ChatChip = {
+  id: string;
+  type: ChatChipType;
+  label: string;
+  detail?: string;
+  status?: ChatChipStatus;
+  targetAgent?: string;
+};
+
+export type ChatRoutingDecision = {
+  action?: string;
+  targetAgent?: string;
+  recipient?: string;
+  targetProfile?: string;
+  peerProfileName?: string;
+  transition?: string;
+  transitions?: string[];
+  transitionState?: string;
+  runName?: string;
+  peerRunName?: string;
+  duplicateRunName?: string;
+  tool?: string;
+};
+
+export type ChatToolCall = {
+  id?: string;
+  name?: string;
+  tool?: string;
+  args?: Record<string, unknown> | string;
+  arguments?: Record<string, unknown> | string;
+  parameters?: Record<string, unknown>;
+  output?: string;
+};
+
+export type ChatMessageMetadata = {
+  routing?: ChatRoutingDecision;
+  action?: string;
+  targetAgent?: string;
+  recipient?: string;
+  targetProfile?: string;
+  peerProfileName?: string;
+  transition?: string;
+  transitions?: string[];
+  transitionState?: string;
+  runName?: string;
+  peerRunName?: string;
+  duplicateRunName?: string;
+  agentRun?: string;
+  status?: string;
+  phase?: string;
+  tool?: string;
+  toolCalls?: ChatToolCall[];
+  tool_calls?: ChatToolCall[];
+  chips?: ChatChip[];
+  [key: string]: unknown;
+};
+
 export type ChatThread = {
   id: string;
   namespace: string;
@@ -23,7 +86,8 @@ export type ChatMessage = {
   content: string;
   createdAt: string;
   sequence: number;
-  metadata?: unknown;
+  metadata?: ChatMessageMetadata | Record<string, unknown> | unknown;
+  chips?: ChatChip[];
 };
 
 export type ChatThreadListResponse = {
@@ -42,10 +106,11 @@ export type ChatAppendResponse = {
   thread: ChatThread;
   user: ChatMessage;
   assistant: ChatMessage;
+  chips?: ChatChip[];
 };
 
 export type CreateChatThreadRequest = {
-	standing?: boolean;
+  standing?: boolean;
   profileName?: string;
   mode?: ChatMode | string;
   title?: string;
@@ -61,39 +126,4 @@ export type ListChatThreadsParams = {
   profileName?: string;
   mode?: string;
   limit?: number;
-};
-
-export type ChatChipType = "routing" | "target" | "lifecycle" | "tool";
-
-export type ChatChipStatus = "dispatched" | "running" | "completed" | "failed" | "pending";
-
-export type ChatChip = {
-  id: string;
-  type: ChatChipType;
-  label: string;
-  detail?: string;
-  status?: ChatChipStatus;
-  targetAgent?: string;
-};
-
-export type ChatRoutingDecision = {
-  action: "delegate" | "startRun" | "steer" | "stop" | "directReply";
-  targetAgent?: string;
-  runName?: string;
-  transitionState?: string;
-};
-
-export type ChatToolCall = {
-  tool: string;
-  args?: Record<string, unknown>;
-  output?: string;
-};
-
-export type ChatMessageMetadata = {
-  chips?: ChatChip[];
-  routing?: ChatRoutingDecision;
-  targetAgent?: string;
-  transitionState?: string;
-  toolCalls?: ChatToolCall[];
-  [key: string]: unknown;
 };

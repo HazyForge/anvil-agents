@@ -17,6 +17,15 @@ The Local page separately discovers installed workstation CLIs on native PATH
 or in WSL. Local activation never copies the OIDC token into CLI arguments,
 environment variables or prompt files.
 
+The **wrapper** (`anvil-desktop-wrapper`) and **project manager** harnesses
+have a baked-in **create-agent** skill/tool: name + description →
+`AgentRunProfile` (and a standing-chat thread when chat is enabled). Peers
+request create-agent via existing `requestPeer` STATUS_JSON
+(`request=create-agent`); they must not create profiles. Desktop shows a
+**Requested create** receipt instead of failing silently.
+
+See `skills/create-agent/SKILL.md`.
+
 ## Why Anvil Agents Desktop
 
 The optional OIDC AgentRun API (`anvil-agents-api`) is a separate process from

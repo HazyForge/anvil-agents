@@ -1,11 +1,15 @@
-import {
-  appendChatMessage,
-  createChatThread,
-  listChatThreads,
-} from "../api/chat";
+import { appendChatMessage, listChatThreads } from "../api/chat";
 import { APIError, ensureAgentRunProfile, type CompositionDocument } from "../api/client";
 import type { ChatMessage, ChatThread } from "../api/types.chat";
-import { parseWrapperIntent, WRAPPER_PROFILE_NAME } from "./intent";
+import {
+  CREATE_AGENT_SKILL_CONTENT,
+  CREATE_AGENT_SKILL_DESCRIPTION,
+  ensurePersonaThread,
+  executeCreateAgentBatch,
+  parseCreateAgentIntent,
+  WRAPPER_PROFILE_NAME,
+} from "./createAgent";
+import { parseWrapperIntent } from "./intent";
 
 export type EntityLine = {
   author: string;
@@ -94,29 +98,7 @@ export function visibleFromChat(messages: ChatMessage[]): VisibleMessage[] {
   return out;
 }
 
-function profilePrompt(name: string, description: string): string {
-  return `You are ${name}, an Anvil agent spawned by Anvil Agents Desktop. ${description} You do not receive OIDC tokens. Talk to peers in short sentences.`;
-}
 
-async function ensureThread(
-  token: string,
-  namespace: string,
-  profileName: string,
-  title: string,
-  metadata?: unknown,
-): Promise<ChatThread> {
-  const existing = await listChatThreads(token, namespace, { mode: "persona", profileName, limit: 50 });
-  const match = existing.find((thread) => thread.profileName === profileName);
-  if (match) {
-    return match;
-  }
-  return createChatThread(token, namespace, {
-    mode: "persona",
-    profileName,
-    title,
-    metadata,
-  });
-}
 
 async function personaGreeting(
   token: string,
@@ -167,9 +149,8 @@ export async function runWrapperTurn(opts: {
 
   await ensureAgentRunProfile(opts.token, opts.namespace, {
     name: WRAPPER_PROFILE_NAME,
-    description: "Anvil Agents Desktop wrapper entity. Spawns more AgentRunProfiles when asked.",
-    systemPrompt:
-      "You are the Anvil Agents Desktop wrapper. When asked to create agents, POST more AgentRunProfiles. You can introduce spawned personas to each other.",
+    description: CREATE_AGENT_SKILL_DESCRIPTION,
+    systemPrompt: `You are the Anvil Agents Desktop wrapper. ${CREATE_AGENT_SKILL_CONTENT}`,
     intent: "observe",
   });
 
@@ -187,27 +168,32 @@ export async function runWrapperTurn(opts: {
         createdBy: "",
       };
     } else {
-      wrapperThread = await ensureThread(opts.token, opts.namespace, WRAPPER_PROFILE_NAME, "Desktop wrapper", {
+      wrapperThread = await ensurePersonaThread(opts.token, opts.namespace, WRAPPER_PROFILE_NAME, "Desktop wrapper", {
         wrapper: true,
       });
     }
   }
 
   const spawned: CompositionDocument[] = [];
-  const namesToCreate = intent.spawn ? intent.names : [];
-  for (const name of namesToCreate) {
-    const doc = await ensureAgentRunProfile(opts.token, opts.namespace, {
-      name,
-      description: `Spawned by ${WRAPPER_PROFILE_NAME} from Anvil Agents Desktop.`,
-      systemPrompt: profilePrompt(name, "Work with peer agents spawned in the same namespace."),
-      intent: "observe",
-    });
-    spawned.push(doc);
-    if (opts.chatEnabled) {
-      await ensureThread(opts.token, opts.namespace, name, name, {
-        spawnedFrom: wrapperThread?.id,
-        spawnedBy: WRAPPER_PROFILE_NAME,
-      });
+  const inputs = parseCreateAgentIntent(text, opts.existingProfileNames, { generateNames: true });
+  const results = await executeCreateAgentBatch({
+    token: opts.token,
+    namespace: opts.namespace,
+    principal: WRAPPER_PROFILE_NAME,
+    inputs,
+    chatEnabled: opts.chatEnabled,
+    writeEnabled: opts.writeEnabled,
+    spawnedFromThreadId: wrapperThread?.id,
+  });
+  for (const result of results) {
+    if (result.ok) {
+      if (result.profile) {
+        spawned.push(result.profile as CompositionDocument);
+      }
+    } else if (result.refused) {
+      throw new APIError(403, "create_agent_refused", result.reason);
+    } else {
+      throw new Error(result.reason);
     }
   }
 

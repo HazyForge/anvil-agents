@@ -63,6 +63,11 @@ The controller resolves skills in this order:
 4. Run skill overrides.
 5. Legacy inline `harness.skillInjections`, `tools`, and `subagents` as a final
    v1alpha1 compatibility overlay.
+6. Baked-in `create-agent` for Wrapper/manager profiles (`anvil-desktop-wrapper`,
+   `desktop-manager`, `*-agent-manager`, or
+   `control.anvil.hazyforge.io/role=wrapper|manager`). The same skill name is
+   stripped from every other principal so peers cannot teach themselves to POST
+   `AgentRunProfile` objects. Peers request create-agent through `requestPeer`.
 
 Tool-set resolution happens after selected skill sets and before that inline
 overlay:

@@ -7,7 +7,7 @@ export type StreamHandlers = {
   onDone?: () => void;
 };
 
-export function eventsURL(namespace: string, name: string, tailLines = 200): string {
+export function eventsURL(namespace: string, name: string, tailLines = 10_000): string {
   const params = new URLSearchParams({ tailLines: String(tailLines) });
   return apiURL(
     `/api/v1/namespaces/${encodeURIComponent(namespace)}/agent-runs/${encodeURIComponent(name)}/events?${params}`,
@@ -37,7 +37,7 @@ export function openAgentRunStream(
       if (options?.lastEventID) {
         headers["Last-Event-ID"] = options.lastEventID;
       }
-      const response = await fetch(eventsURL(namespace, name, options?.tailLines ?? 200), {
+      const response = await fetch(eventsURL(namespace, name, options?.tailLines ?? 10_000), {
         headers,
         signal,
       });

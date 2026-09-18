@@ -73,6 +73,7 @@ func (r *AgentRunReconciler) resolveAgentRunComposition(ctx context.Context, obj
 	if reason, message := capabilities.applyCouncilPrompt(council); reason != "" {
 		return effective, nil, controlv1alpha1.AgentRunPhaseFailed, reason, message, nil
 	}
+	capabilities.applyCreateAgentSkill(profile)
 	effective.Spec.Harness.SkillInjections = capabilities.skills
 	effective.Spec.Harness.Tools = capabilities.tools
 	effective.Spec.Harness.Subagents = capabilities.subagents

@@ -11,8 +11,8 @@ Anvil Agents Desktop listens on loopback only (`127.0.0.1`):
 
 - Defaults `--api-origin` to `https://agents.anvil.hazyforge.io` and reverse-proxies `/api/` and `/ui-config.json`
 - Signs in with Authorization Code + PKCE (tokens in `sessionStorage`, never query strings)
-- **Chat** (`/chat`): named Primaris agents; the wrapper can POST AgentRunProfiles
-- **Wrapper** (`/wrapper`): create_agent and anvil-api (list/get/create runs)
+- **Chat** (`/chat`): manager harness; baked-in **create-agent** (manager only)
+- **Wrapper** (`/wrapper`): Wrapper **create-agent** and anvil-api (list/get/create runs). Peers request create-agent via requestPeer.
 - **Local** (`/local`): second function — activate already-installed Codex, Grok, OpenCode on native PATH or WSL
 
 Register `http://127.0.0.1:1738/auth/callback` on the **Native** OIDC client

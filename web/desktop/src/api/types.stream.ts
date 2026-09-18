@@ -20,8 +20,10 @@ export interface StreamEnvelope {
     phase?: string;
     backend?: string;
     error?: string;
+    output?: string;
     conditions?: { type?: string; status?: string; reason?: string; message?: string }[];
     decision?: { action?: string; summary?: string };
+    reports?: { type?: string; summary?: string; detail?: string }[];
   };
   reason?: string;
   previousEventID?: string;
