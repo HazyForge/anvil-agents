@@ -2,6 +2,18 @@
 // (session resume + streamed turn) for a direct turn AND a peer delivery,
 // against the documented Job cold-start baseline.
 //
+// What it measures (per thread plane: direct thread, peer child thread):
+// session cold-create, warm resume, the full warm turn (resume + StreamTurn),
+// time-to-first-token, plus — since slice 5c — cold FIRST turns (fresh thread,
+// first StreamTurn, records the slice-5b native session id when the harness
+// kind supports one) and resumed SECOND turns (same thread, second StreamTurn
+// reusing the recorded native id). Sixteen scenarios
+// (directEnsureCold/directEnsureWarm/directTurnWarm/directFirstToken/
+// directTurnCold/directFirstTokenCold/directTurnResumed/directFirstTokenResumed
+// plus the eight peer… peers), each with count/minMs/meanMs/p50Ms/p95Ms/maxMs,
+// plus a nativeResume section ({supported, coldTurns, resumedTurns,
+// nativeIDsObserved}) proving whether second turns actually resumed.
+//
 // Fake-backend by default: it drives standing.FakeBackend (or a stubbed
 // ProcessBackend runner), so the numbers are deterministic and CI-safe.
 // They prove the harness and the warm-reuse contract only — never a
@@ -9,7 +21,8 @@
 // (-backend process-exec) runs one real harness subprocess per measured turn
 // through standing.ProcessBackend with a PATH-resolved CLI, exactly like the
 // slice-3b turn path; that path is local-only (needs the harness CLI and its
-// own auth home) and never reads Secrets.
+// own auth home) and never reads Secrets. -only selects a scenario subset
+// for cheap live probes (e.g. cold + resumed turns only).
 //
 // The Job cold-start baseline cannot be measured from this process (it needs
 // a real cluster scheduler), so it defaults to the documented Primaris
@@ -24,6 +37,7 @@
 //	go run ./cmd/standing-latency -n 20 -out .runtime/standing-latency-fake.json
 //	go run ./cmd/standing-latency -backend process-stub -n 20 -out .runtime/standing-latency-stub.json
 //	go run ./cmd/standing-latency -backend process-exec -harness codex -n 10 -out .runtime/standing-latency-live.json
+//	go run ./cmd/standing-latency -backend process-exec -harness codex -n 5 -only directTurnCold,directTurnResumed -out .runtime/standing-latency-live-cold-resume.json
 package main
 
 import (
@@ -34,6 +48,7 @@ import (
 	"math"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -59,10 +74,25 @@ type latencyReport struct {
 	Harness       string                   `json:"harness"`
 	GeneratedAt   string                   `json:"generatedAt"`
 	Scenarios     map[string]scenarioStats `json:"scenarios"`
+	NativeResume  *nativeResumeReport      `json:"nativeResume,omitempty"`
 	JobBaseline   *scenarioStats           `json:"jobBaseline,omitempty"`
 	ComparisonMs  map[string]float64       `json:"comparisonMs,omitempty"`
 	Verdict       string                   `json:"verdict"`
 	VerdictReason string                   `json:"verdictReason"`
+}
+
+// nativeResumeReport makes the slice-5b cold-first vs resumed-second turn
+// distinction explicit in the report: how many measured second turns reused
+// a recorded native session id, and whether the harness kind supports native
+// resume at all. Fake backends never record native ids; stub and live
+// ProcessBackends record them exactly when the harness kind documents a
+// resume surface (see standing.SupportsNativeResume).
+type nativeResumeReport struct {
+	Supported         bool   `json:"supported"`
+	ColdTurns         int    `json:"coldTurns"`
+	ResumedTurns      int    `json:"resumedTurns"`
+	NativeIDsObserved int    `json:"nativeIDsObserved"`
+	Note              string `json:"note,omitempty"`
 }
 
 type config struct {
@@ -74,6 +104,7 @@ type config struct {
 	jobP50     float64
 	jobP95     float64
 	outPath    string
+	only       map[string]bool
 }
 
 func percentile(sorted []float64, quantile float64) float64 {
@@ -119,16 +150,25 @@ func summarize(durations []time.Duration, warmOps int) scenarioStats {
 	return stats
 }
 
-// stubRunner is the deterministic ProcessBackend runner for the
+// resumeStubRunner is the deterministic ProcessBackend runner for the
 // process-stub backend: it sleeps a fixed quantum and returns a canned
 // native reply, so CI measures the real ProcessBackend session/streaming
 // code with no PATH binary, no model call, and no credentials.
-type stubRunner struct {
-	latency time.Duration
-	reply   string
+//
+// Unlike a plain Runner it implements standing.SessionRunner, so harness
+// kinds with a documented resume surface (codex, openCode, openClaw) exercise
+// the same slice-5b record/resume plumbing the live ExecRunner uses: the
+// first turn records a deterministic stub native id, the second turn is
+// offered it back. The id is a fixed non-credential placeholder and must
+// never be mistaken for a live measurement.
+type resumeStubRunner struct {
+	latency    time.Duration
+	reply      string
+	nativeID   string
+	resumeSeen []string
 }
 
-func (s stubRunner) Run(ctx context.Context, harnessKind, prompt string, emit func(chunk string) error) (string, error) {
+func (s *resumeStubRunner) Run(ctx context.Context, harnessKind, prompt string, emit func(chunk string) error) (string, error) {
 	select {
 	case <-ctx.Done():
 		return "", ctx.Err()
@@ -142,14 +182,24 @@ func (s stubRunner) Run(ctx context.Context, harnessKind, prompt string, emit fu
 	return s.reply, nil
 }
 
+func (s *resumeStubRunner) RunWithResume(ctx context.Context, handle standing.SessionHandle, turnID, prompt, resumeID string, emit func(chunk string) error) (reply, newSessionID string, err error) {
+	s.resumeSeen = append(s.resumeSeen, resumeID)
+	reply, err = s.Run(ctx, handle.HarnessKind, prompt, emit)
+	if err != nil {
+		return "", "", err
+	}
+	return reply, s.nativeID, nil
+}
+
 func newBackend(name, harness string) (standing.Backend, error) {
 	switch name {
 	case "fake", "":
 		return standing.NewFakeBackend(), nil
 	case "process-stub":
-		return standing.NewProcessBackend(stubRunner{
-			latency: 5 * time.Millisecond,
-			reply:   "standing stub reply for the latency probe turn",
+		return standing.NewProcessBackend(&resumeStubRunner{
+			latency:  5 * time.Millisecond,
+			reply:    "standing stub reply for the latency probe turn",
+			nativeID: "stub-ses-latency-probe",
 		}), nil
 	case "process-exec":
 		// Nil runner selects ExecRunner: PATH-resolved harness CLIs with the
@@ -274,6 +324,153 @@ func firstTokenDurations(samples []turnSample) []time.Duration {
 	return out
 }
 
+// nativeSessionObserver is the slice-5b introspection surface the latency
+// harness uses to confirm a measured turn actually recorded (cold) or reused
+// (resumed) a native session id. Only *standing.ProcessBackend implements it;
+// FakeBackend has no native ids, so every assertion against it stays cold.
+type nativeSessionObserver interface {
+	NativeSessionID(namespace, name string) (string, bool)
+}
+
+func observedNativeID(backend standing.Backend, namespace, sessionName string) bool {
+	observer, ok := backend.(nativeSessionObserver)
+	if !ok {
+		return false
+	}
+	_, found := observer.NativeSessionID(namespace, sessionName)
+	return found
+}
+
+// measureTurnCold times cold first turns: one fresh thread per iteration, so
+// every timed StreamTurn is the thread's first turn and the slice-5b native
+// session id (when the harness kind supports one) is recorded by this turn,
+// never resumed. It returns the timed samples plus how many cold turns left
+// a native id behind for the next turn to resume.
+func measureTurnCold(ctx context.Context, backend standing.Backend, namespace, harness, prompt, prefix string, iterations int, runID int64) ([]turnSample, int, error) {
+	samples := make([]turnSample, 0, iterations)
+	nativeIDs := 0
+	for i := 0; i < iterations; i++ {
+		threadID := fmt.Sprintf("%s-turn-cold-%d-%d", prefix, runID, i)
+		spec := turnSpec(namespace, threadID, harness)
+		handle, _, err := standing.EnsureTurnSession(ctx, backend, spec)
+		if err != nil {
+			return nil, 0, err
+		}
+		turnID := fmt.Sprintf("latency-turn-cold-%d-%d", runID, i)
+		sink := &firstTokenSink{start: time.Now()}
+		start := time.Now()
+		if _, err := backend.StreamTurn(ctx, handle, turnID, prompt, sink); err != nil {
+			return nil, 0, err
+		}
+		full := time.Since(start)
+		first := full
+		if !sink.first.IsZero() {
+			first = sink.first.Sub(sink.start)
+		}
+		samples = append(samples, turnSample{full: full, firstToken: first})
+		if observedNativeID(backend, namespace, handle.SessionName) {
+			nativeIDs++
+		}
+	}
+	return samples, nativeIDs, nil
+}
+
+// measureTurnResumed times resumed second turns: one fresh thread per
+// iteration, an untimed cold first turn to record the slice-5b native session
+// id, then a timed second turn that resumes it. Unsupported harness kinds
+// (and FakeBackend) record nothing, so their "resumed" turn is honestly a
+// second cold turn — the nativeResume section of the report says so instead
+// of the timing pretending otherwise.
+func measureTurnResumed(ctx context.Context, backend standing.Backend, namespace, harness, prompt, prefix string, iterations int, runID int64) ([]turnSample, int, error) {
+	samples := make([]turnSample, 0, iterations)
+	nativeIDs := 0
+	for i := 0; i < iterations; i++ {
+		threadID := fmt.Sprintf("%s-turn-resumed-%d-%d", prefix, runID, i)
+		spec := turnSpec(namespace, threadID, harness)
+		handle, _, err := standing.EnsureTurnSession(ctx, backend, spec)
+		if err != nil {
+			return nil, 0, err
+		}
+		if _, err := backend.StreamTurn(ctx, handle, fmt.Sprintf("latency-turn-resume-cold-%d-%d", runID, i), prompt, nil); err != nil {
+			return nil, 0, err
+		}
+		handle, _, err = standing.EnsureTurnSession(ctx, backend, spec)
+		if err != nil {
+			return nil, 0, err
+		}
+		turnID := fmt.Sprintf("latency-turn-resumed-%d-%d", runID, i)
+		sink := &firstTokenSink{start: time.Now()}
+		start := time.Now()
+		if _, err := backend.StreamTurn(ctx, handle, turnID, prompt, sink); err != nil {
+			return nil, 0, err
+		}
+		full := time.Since(start)
+		first := full
+		if !sink.first.IsZero() {
+			first = sink.first.Sub(sink.start)
+		}
+		samples = append(samples, turnSample{full: full, firstToken: first})
+		if observedNativeID(backend, namespace, handle.SessionName) {
+			nativeIDs++
+		}
+	}
+	return samples, nativeIDs, nil
+}
+
+// scenarioGroups maps each report scenario to the measurement group that
+// produces it, so -only can skip expensive live subprocess turns without
+// changing the shape of the scenarios it does collect.
+func scenarioGroups() map[string]string {
+	return map[string]string{
+		"directEnsureCold": "ensureCold", "peerEnsureCold": "ensureCold",
+		"directEnsureWarm": "ensureWarm", "peerEnsureWarm": "ensureWarm",
+		"directTurnWarm": "turnWarm", "directFirstToken": "turnWarm",
+		"peerTurnWarm": "turnWarm", "peerFirstToken": "turnWarm",
+		"directTurnCold": "turnCold", "directFirstTokenCold": "turnCold",
+		"peerTurnCold": "turnCold", "peerFirstTokenCold": "turnCold",
+		"directTurnResumed": "turnResumed", "directFirstTokenResumed": "turnResumed",
+		"peerTurnResumed": "turnResumed", "peerFirstTokenResumed": "turnResumed",
+	}
+}
+
+func wantedGroups(only map[string]bool) map[string]bool {
+	groups := scenarioGroups()
+	if len(only) == 0 {
+		out := map[string]bool{}
+		for _, group := range groups {
+			out[group] = true
+		}
+		return out
+	}
+	out := map[string]bool{}
+	for name := range only {
+		if group, ok := groups[name]; ok {
+			out[group] = true
+		}
+	}
+	return out
+}
+
+func parseOnly(raw string) (map[string]bool, error) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return nil, nil
+	}
+	groups := scenarioGroups()
+	out := map[string]bool{}
+	for _, name := range strings.Split(trimmed, ",") {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			continue
+		}
+		if _, ok := groups[name]; !ok {
+			return nil, fmt.Errorf("unknown scenario %q (want one of directEnsureCold, directEnsureWarm, directTurnWarm, directFirstToken, directTurnCold, directFirstTokenCold, directTurnResumed, directFirstTokenResumed, and the four peer… peers)", name)
+		}
+		out[name] = true
+	}
+	return out, nil
+}
+
 // judge applies the standing promote/reshape/retire bars. Deterministic
 // backends (fake, process-stub) only prove the harness and the warm-reuse
 // contract, so they always report harness-ok: the bars need process-exec
@@ -286,10 +483,13 @@ func judge(backend string, scenarios map[string]scenarioStats, jobP50, jobP95 fl
 		return "harness-ok", "deterministic " + backend + " backend proves the harness and warm-reuse contract only; " +
 			"promote/reshape/retire needs process-exec live numbers on the same cluster shape as the Job baseline"
 	}
-	directTurn := scenarios["directTurnWarm"]
-	peerTurn := scenarios["peerTurnWarm"]
-	directFirst := scenarios["directFirstToken"]
-	peerFirst := scenarios["peerFirstToken"]
+	directTurn, directOK := scenarios["directTurnWarm"]
+	peerTurn, peerOK := scenarios["peerTurnWarm"]
+	directFirst, directFirstOK := scenarios["directFirstToken"]
+	peerFirst, peerFirstOK := scenarios["peerFirstToken"]
+	if !directOK || !peerOK || !directFirstOK || !peerFirstOK {
+		return "inconclusive-live", "subset measurement (-only): the promote/reshape/retire bars need the full directTurnWarm + peerTurnWarm scenarios, re-run without -only for a verdict"
+	}
 	// Promote: warm turn p95 an order of magnitude under the Job p95 for BOTH
 	// direct and peer, with first-token p95 in the low single seconds.
 	if jobP95 > 0 && directTurn.P95Ms <= jobP95/10 && peerTurn.P95Ms <= jobP95/10 &&
@@ -327,65 +527,181 @@ func run(ctx context.Context, cfg config) (*latencyReport, error) {
 	if backendName == "" {
 		backendName = "fake"
 	}
-
-	directCold, err := measureEnsureCold(ctx, backend, cfg.namespace, cfg.harness, "direct", cfg.iterations)
-	if err != nil {
-		return nil, fmt.Errorf("direct ensure cold: %w", err)
-	}
+	groups := wantedGroups(cfg.only)
 	runID := time.Now().UnixNano()
-	directWarm, directWarmOps, err := measureEnsureWarm(ctx, backend, cfg.namespace, fmt.Sprintf("latency-direct-thread-%d", runID), cfg.harness, cfg.iterations)
-	if err != nil {
-		return nil, fmt.Errorf("direct ensure warm: %w", err)
-	}
-	directTurns, err := measureTurnWarm(ctx, backend, cfg.namespace, fmt.Sprintf("latency-direct-thread-%d", runID), cfg.harness, cfg.prompt, cfg.iterations, runID)
-	if err != nil {
-		return nil, fmt.Errorf("direct turn warm: %w", err)
-	}
-	peerCold, err := measureEnsureCold(ctx, backend, cfg.namespace, cfg.harness, "peer-child", cfg.iterations)
-	if err != nil {
-		return nil, fmt.Errorf("peer ensure cold: %w", err)
-	}
-	peerWarmEnsure, peerWarmEnsureOps, err := measureEnsureWarm(ctx, backend, cfg.namespace, fmt.Sprintf("latency-peer-child-thread-%d", runID), cfg.harness, cfg.iterations)
-	if err != nil {
-		return nil, fmt.Errorf("peer ensure warm: %w", err)
-	}
-	peerTurns, err := measureTurnWarm(ctx, backend, cfg.namespace, fmt.Sprintf("latency-peer-child-thread-%d", runID), cfg.harness, cfg.prompt, cfg.iterations, runID)
-	if err != nil {
-		return nil, fmt.Errorf("peer turn warm: %w", err)
+	scenarios := map[string]scenarioStats{}
+
+	if groups["ensureCold"] {
+		directCold, err := measureEnsureCold(ctx, backend, cfg.namespace, cfg.harness, "direct", cfg.iterations)
+		if err != nil {
+			return nil, fmt.Errorf("direct ensure cold: %w", err)
+		}
+		scenarios["directEnsureCold"] = summarize(directCold, 0)
+		peerCold, err := measureEnsureCold(ctx, backend, cfg.namespace, cfg.harness, "peer-child", cfg.iterations)
+		if err != nil {
+			return nil, fmt.Errorf("peer ensure cold: %w", err)
+		}
+		scenarios["peerEnsureCold"] = summarize(peerCold, 0)
 	}
 
-	scenarios := map[string]scenarioStats{
-		"directEnsureCold": summarize(directCold, 0),
-		"directEnsureWarm": summarize(directWarm, directWarmOps),
-		"directTurnWarm":   summarize(fullDurations(directTurns), directWarmOps),
-		"directFirstToken": summarize(firstTokenDurations(directTurns), 0),
-		"peerEnsureCold":   summarize(peerCold, 0),
-		"peerEnsureWarm":   summarize(peerWarmEnsure, peerWarmEnsureOps),
-		"peerTurnWarm":     summarize(fullDurations(peerTurns), peerWarmEnsureOps),
-		"peerFirstToken":   summarize(firstTokenDurations(peerTurns), 0),
+	var directWarmOps, peerWarmEnsureOps int
+	if groups["ensureWarm"] {
+		directWarm, ops, err := measureEnsureWarm(ctx, backend, cfg.namespace, fmt.Sprintf("latency-direct-thread-%d", runID), cfg.harness, cfg.iterations)
+		if err != nil {
+			return nil, fmt.Errorf("direct ensure warm: %w", err)
+		}
+		directWarmOps = ops
+		scenarios["directEnsureWarm"] = summarize(directWarm, ops)
+		peerWarmEnsure, ops, err := measureEnsureWarm(ctx, backend, cfg.namespace, fmt.Sprintf("latency-peer-child-thread-%d", runID), cfg.harness, cfg.iterations)
+		if err != nil {
+			return nil, fmt.Errorf("peer ensure warm: %w", err)
+		}
+		peerWarmEnsureOps = ops
+		scenarios["peerEnsureWarm"] = summarize(peerWarmEnsure, ops)
+	}
+
+	native := &nativeResumeReport{Supported: standing.SupportsNativeResume(cfg.harness) && backendName != "fake"}
+	wants := func(names ...string) bool {
+		if len(cfg.only) == 0 {
+			return true
+		}
+		for _, name := range names {
+			if cfg.only[name] {
+				return true
+			}
+		}
+		return false
+	}
+	if groups["turnWarm"] {
+		if wants("directTurnWarm", "directFirstToken") {
+			directTurns, err := measureTurnWarm(ctx, backend, cfg.namespace, fmt.Sprintf("latency-direct-thread-%d", runID), cfg.harness, cfg.prompt, cfg.iterations, runID)
+			if err != nil {
+				return nil, fmt.Errorf("direct turn warm: %w", err)
+			}
+			scenarios["directTurnWarm"] = summarize(fullDurations(directTurns), directWarmOps)
+			scenarios["directFirstToken"] = summarize(firstTokenDurations(directTurns), 0)
+		}
+		if wants("peerTurnWarm", "peerFirstToken") {
+			peerTurns, err := measureTurnWarm(ctx, backend, cfg.namespace, fmt.Sprintf("latency-peer-child-thread-%d", runID), cfg.harness, cfg.prompt, cfg.iterations, runID)
+			if err != nil {
+				return nil, fmt.Errorf("peer turn warm: %w", err)
+			}
+			scenarios["peerTurnWarm"] = summarize(fullDurations(peerTurns), peerWarmEnsureOps)
+			scenarios["peerFirstToken"] = summarize(firstTokenDurations(peerTurns), 0)
+		}
+	}
+	if groups["turnCold"] {
+		if wants("directTurnCold", "directFirstTokenCold") {
+			directColdTurns, directColdIDs, err := measureTurnCold(ctx, backend, cfg.namespace, cfg.harness, cfg.prompt, "direct", cfg.iterations, runID)
+			if err != nil {
+				return nil, fmt.Errorf("direct turn cold: %w", err)
+			}
+			scenarios["directTurnCold"] = summarize(fullDurations(directColdTurns), 0)
+			scenarios["directFirstTokenCold"] = summarize(firstTokenDurations(directColdTurns), 0)
+			native.ColdTurns += cfg.iterations
+			native.NativeIDsObserved += directColdIDs
+		}
+		if wants("peerTurnCold", "peerFirstTokenCold") {
+			peerColdTurns, peerColdIDs, err := measureTurnCold(ctx, backend, cfg.namespace, cfg.harness, cfg.prompt, "peer-child", cfg.iterations, runID)
+			if err != nil {
+				return nil, fmt.Errorf("peer turn cold: %w", err)
+			}
+			scenarios["peerTurnCold"] = summarize(fullDurations(peerColdTurns), 0)
+			scenarios["peerFirstTokenCold"] = summarize(firstTokenDurations(peerColdTurns), 0)
+			native.ColdTurns += cfg.iterations
+			native.NativeIDsObserved += peerColdIDs
+		}
+	}
+
+	if groups["turnResumed"] {
+		if wants("directTurnResumed", "directFirstTokenResumed") {
+			directResumed, directResumedIDs, err := measureTurnResumed(ctx, backend, cfg.namespace, cfg.harness, cfg.prompt, "direct", cfg.iterations, runID)
+			if err != nil {
+				return nil, fmt.Errorf("direct turn resumed: %w", err)
+			}
+			scenarios["directTurnResumed"] = summarize(fullDurations(directResumed), cfg.iterations)
+			scenarios["directFirstTokenResumed"] = summarize(firstTokenDurations(directResumed), 0)
+			native.ResumedTurns += cfg.iterations
+			native.NativeIDsObserved += directResumedIDs
+		}
+		if wants("peerTurnResumed", "peerFirstTokenResumed") {
+			peerResumed, peerResumedIDs, err := measureTurnResumed(ctx, backend, cfg.namespace, cfg.harness, cfg.prompt, "peer-child", cfg.iterations, runID)
+			if err != nil {
+				return nil, fmt.Errorf("peer turn resumed: %w", err)
+			}
+			scenarios["peerTurnResumed"] = summarize(fullDurations(peerResumed), cfg.iterations)
+			scenarios["peerFirstTokenResumed"] = summarize(firstTokenDurations(peerResumed), 0)
+			native.ResumedTurns += cfg.iterations
+			native.NativeIDsObserved += peerResumedIDs
+		}
+	}
+	switch {
+	case backendName == "fake":
+		native.Note = "fake backend records no native session ids: resumed second turns are second cold turns through the same warm process-local session"
+	case !standing.SupportsNativeResume(cfg.harness):
+		native.Note = "harness kind " + strconv.Quote(cfg.harness) + " has no documented resume surface (Fake-only or single-turn): resumed second turns run the cold path, only the process-local warm-reuse win applies"
+	case backendName == "process-stub":
+		native.Note = "deterministic stub native id (stub-ses-latency-probe): proves the record/resume plumbing only, never a live measurement"
+	}
+
+	// A filtered (-only) run keeps only the requested scenarios so an
+	// expensive live CLI can probe cold+resume turns without paying for the
+	// full matrix.
+	if len(cfg.only) > 0 {
+		filtered := map[string]scenarioStats{}
+		for name := range cfg.only {
+			if stats, ok := scenarios[name]; ok {
+				filtered[name] = stats
+			}
+		}
+		scenarios = filtered
 	}
 
 	report := &latencyReport{
-		Tool:        "standing-latency",
-		Backend:     backendName,
-		Live:        backendName == "process-exec",
-		Iterations:  cfg.iterations,
-		Namespace:   cfg.namespace,
-		Harness:     cfg.harness,
-		GeneratedAt: time.Now().UTC().Format(time.RFC3339Nano),
-		Scenarios:   scenarios,
+		Tool:         "standing-latency",
+		Backend:      backendName,
+		Live:         backendName == "process-exec",
+		Iterations:   cfg.iterations,
+		Namespace:    cfg.namespace,
+		Harness:      cfg.harness,
+		GeneratedAt:  time.Now().UTC().Format(time.RFC3339Nano),
+		Scenarios:    scenarios,
+		NativeResume: native,
 	}
 	if cfg.jobP50 > 0 || cfg.jobP95 > 0 {
 		report.JobBaseline = &scenarioStats{Count: cfg.iterations, P50Ms: cfg.jobP50, P95Ms: cfg.jobP95}
-		report.ComparisonMs = map[string]float64{
-			"directTurnWarmSavedVsJobP50":   cfg.jobP50 - scenarios["directTurnWarm"].P50Ms,
-			"directTurnWarmSavedVsJobP95":   cfg.jobP95 - scenarios["directTurnWarm"].P95Ms,
-			"peerTurnWarmSavedVsJobP50":     cfg.jobP50 - scenarios["peerTurnWarm"].P50Ms,
-			"peerTurnWarmSavedVsJobP95":     cfg.jobP95 - scenarios["peerTurnWarm"].P95Ms,
-			"directFirstTokenSavedVsJobP50": cfg.jobP50 - scenarios["directFirstToken"].P50Ms,
-			"directFirstTokenSavedVsJobP95": cfg.jobP95 - scenarios["directFirstToken"].P95Ms,
-			"peerFirstTokenSavedVsJobP50":   cfg.jobP50 - scenarios["peerFirstToken"].P50Ms,
-			"peerFirstTokenSavedVsJobP95":   cfg.jobP95 - scenarios["peerFirstToken"].P95Ms,
+		report.ComparisonMs = map[string]float64{}
+		if stats, ok := scenarios["directTurnWarm"]; ok {
+			report.ComparisonMs["directTurnWarmSavedVsJobP50"] = cfg.jobP50 - stats.P50Ms
+			report.ComparisonMs["directTurnWarmSavedVsJobP95"] = cfg.jobP95 - stats.P95Ms
+		}
+		if stats, ok := scenarios["peerTurnWarm"]; ok {
+			report.ComparisonMs["peerTurnWarmSavedVsJobP50"] = cfg.jobP50 - stats.P50Ms
+			report.ComparisonMs["peerTurnWarmSavedVsJobP95"] = cfg.jobP95 - stats.P95Ms
+		}
+		if stats, ok := scenarios["directFirstToken"]; ok {
+			report.ComparisonMs["directFirstTokenSavedVsJobP50"] = cfg.jobP50 - stats.P50Ms
+			report.ComparisonMs["directFirstTokenSavedVsJobP95"] = cfg.jobP95 - stats.P95Ms
+		}
+		if stats, ok := scenarios["peerFirstToken"]; ok {
+			report.ComparisonMs["peerFirstTokenSavedVsJobP50"] = cfg.jobP50 - stats.P50Ms
+			report.ComparisonMs["peerFirstTokenSavedVsJobP95"] = cfg.jobP95 - stats.P95Ms
+		}
+		if stats, ok := scenarios["directTurnCold"]; ok {
+			report.ComparisonMs["directTurnColdSavedVsJobP50"] = cfg.jobP50 - stats.P50Ms
+			report.ComparisonMs["directTurnColdSavedVsJobP95"] = cfg.jobP95 - stats.P95Ms
+		}
+		if stats, ok := scenarios["directTurnResumed"]; ok {
+			report.ComparisonMs["directTurnResumedSavedVsJobP50"] = cfg.jobP50 - stats.P50Ms
+			report.ComparisonMs["directTurnResumedSavedVsJobP95"] = cfg.jobP95 - stats.P95Ms
+		}
+		if stats, ok := scenarios["peerTurnCold"]; ok {
+			report.ComparisonMs["peerTurnColdSavedVsJobP50"] = cfg.jobP50 - stats.P50Ms
+			report.ComparisonMs["peerTurnColdSavedVsJobP95"] = cfg.jobP95 - stats.P95Ms
+		}
+		if stats, ok := scenarios["peerTurnResumed"]; ok {
+			report.ComparisonMs["peerTurnResumedSavedVsJobP50"] = cfg.jobP50 - stats.P50Ms
+			report.ComparisonMs["peerTurnResumedSavedVsJobP95"] = cfg.jobP95 - stats.P95Ms
 		}
 	}
 	report.Verdict, report.VerdictReason = judge(backendName, scenarios, cfg.jobP50, cfg.jobP95)
@@ -402,7 +718,14 @@ func main() {
 	jobP50 := flag.Float64("job-baseline-p50-ms", 12000, "Documented Job create-to-Pod-ready p50 in ms for comparison (0 omits the baseline).")
 	jobP95 := flag.Float64("job-baseline-p95-ms", 44000, "Documented Job create-to-Pod-ready p95 in ms for comparison (0 omits the baseline).")
 	outPath := flag.String("out", "", "Optional JSON report path (written with 0600 permissions).")
+	onlyRaw := flag.String("only", "", "Optional comma-separated scenario subset (e.g. directTurnCold,directTurnResumed) for cheap live probes; empty measures all sixteen scenarios.")
 	flag.Parse()
+
+	only, err := parseOnly(*onlyRaw)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
+	}
 
 	cfg = config{
 		iterations: *iterations,
@@ -413,6 +736,7 @@ func main() {
 		jobP50:     *jobP50,
 		jobP95:     *jobP95,
 		outPath:    *outPath,
+		only:       only,
 	}
 
 	report, err := run(context.Background(), cfg)
