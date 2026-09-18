@@ -22,13 +22,18 @@ const maxChatLatencyBytes = 16 << 10
 // formatChatLatencyJsonLine emits in web/desktop/src/wrapper/chatLatency.ts:
 // durations plus optional source/ts. Unknown fields are ignored.
 type chatLatencyLine struct {
-	WaitingMs    *float64 `json:"waitingMs"`
-	FirstTokenMs *float64 `json:"firstTokenMs"`
-	RunningMs    *float64 `json:"runningMs"`
-	ReplyReadyMs *float64 `json:"replyReadyMs"`
-	FailedMs     *float64 `json:"failedMs"`
-	Source       string   `json:"source"`
-	Ts           string   `json:"ts"`
+	WaitingMs          *float64 `json:"waitingMs"`
+	FirstTokenMs       *float64 `json:"firstTokenMs"`
+	SendToFirstTokenMs *float64 `json:"sendToFirstTokenMs"`
+	RunningMs          *float64 `json:"runningMs"`
+	ReplyReadyMs       *float64 `json:"replyReadyMs"`
+	FailedMs           *float64 `json:"failedMs"`
+	Source             string   `json:"source"`
+	Ts                 string   `json:"ts"`
+	ThreadID           string   `json:"threadId"`
+	SessionID          string   `json:"sessionId"`
+	Path               string   `json:"path"`
+	Error              string   `json:"error"`
 }
 
 func isAbsoluteLatencyPath(path string) bool {
@@ -125,6 +130,9 @@ func (s *Server) handleChatLatency(writer http.ResponseWriter, request *http.Req
 	if line.FirstTokenMs != nil {
 		payload["firstTokenMs"] = *line.FirstTokenMs
 	}
+	if line.SendToFirstTokenMs != nil {
+		payload["sendToFirstTokenMs"] = *line.SendToFirstTokenMs
+	}
 	if line.RunningMs != nil {
 		payload["runningMs"] = *line.RunningMs
 	}
@@ -136,6 +144,18 @@ func (s *Server) handleChatLatency(writer http.ResponseWriter, request *http.Req
 	}
 	if source := strings.TrimSpace(line.Source); source != "" {
 		payload["source"] = source
+	}
+	if threadID := strings.TrimSpace(line.ThreadID); threadID != "" {
+		payload["threadId"] = threadID
+	}
+	if sessionID := strings.TrimSpace(line.SessionID); sessionID != "" {
+		payload["sessionId"] = sessionID
+	}
+	if path := strings.TrimSpace(line.Path); path != "" {
+		payload["path"] = path
+	}
+	if lineErr := strings.TrimSpace(line.Error); lineErr != "" {
+		payload["error"] = lineErr
 	}
 	if ts := strings.TrimSpace(line.Ts); ts != "" {
 		payload["ts"] = ts

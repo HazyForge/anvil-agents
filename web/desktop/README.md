@@ -86,10 +86,25 @@ set on the **host** process: the Desktop UI runs in the browser (or Electron
 with `nodeIntegration: false`), where `process.env`/Node `fs` are
 unavailable, so the renderer POSTs each settled report to the same-origin
 loopback endpoint `POST /local/v1/chat-latency` and the host appends one
-JSON line (`waitingMs`, `firstTokenMs`, `runningMs`, `replyReadyMs`,
-`failedMs`, `source: "desktop-chat"`, `ts`). `GET /local/v1/snapshot`
+JSON line. Every line carries `ts` plus whichever of `waitingMs`,
+`firstTokenMs`, `sendToFirstTokenMs` (= `firstTokenMs`, the standing-latency
+vocabulary), `runningMs`, `replyReadyMs`, `failedMs` were observed, with
+`source: "desktop-chat"`, the `threadId` the turn ran on, the `sessionId`
+(standing session name from the stream snapshot, when the turn took the
+standing path), the `path` tag (`standing` vs `job`), and `error` when the
+turn did not deliver. `GET /local/v1/snapshot`
 reports `chatLatencyJsonlEnabled: true/false` (the absolute path is never
 leaked to the SPA). Both paths are fire-and-forget and never break chat.
+
+Desktop Chat Send prefers the standing WebSocket live turn
+(`openChatThreadStream` + live `token` frames, settled from the durable
+thread record) and falls back to the existing POST path with the same
+idempotency key when the stream is unavailable, the thread stays on the Job
+plane, or OIDC denies the call. See
+[`docs/standing-inprocess-harness.md`](../../docs/standing-inprocess-harness.md)
+("Desktop chat e2e over the standing WebSocket") for the e2e run steps and
+the fake-transport CI gate
+(`node --experimental-strip-types --test hack/desktop-standing-chat-stream.mjs`).
 
 ## Local API
 

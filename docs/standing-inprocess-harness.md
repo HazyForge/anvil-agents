@@ -1,7 +1,8 @@
 # Standing in-process harness + WebSocket chat delivery
 
-Status: slice 5b (persistent native session resume for ProcessBackend) on top
-of slice 5a (standing vs Job latency compare harness), slice 4
+Status: Desktop chat e2e over the standing WebSocket on top of slice 5b
+(persistent native session resume for ProcessBackend), slice 5a (standing vs
+Job latency compare harness), slice 4
 (controller-hold yield + multi-replica claim for API-owned standing turns) and
 slice 3b (real harness process behind `standing.Backend`) — exactly one API
 replica drives a standing turn through an annotation claim the controller
@@ -494,6 +495,88 @@ no model calls, no credentials.
    turns AND resumed second turns, then wire Desktop chat to
    `openChatThreadStream` end to end and apply the promote/reshape/retire
    bars above.
+2. **Retire the envelope wrapper** entirely once no Fake-only live path
+   remains. Provider credentials stay outside the API's Secret surface
+   throughout. Production enablement also needs the API role granted
+   `update`/`patch` on `agentruns` (claim stamp) and `update` on
+   `agentruns/status` (Succeeded mark) — the slice-4 claim degrades to hold
+   behavior without them, so no chart change rode slices 4–5b.
+
+## Desktop chat e2e over the standing WebSocket (this slice)
+
+Desktop Chat Send (`streamDesktopChat` in `web/desktop/src/wrapper/harnessChat.ts`)
+now attempts one live turn over the slice-3 standing WebSocket token path
+before its existing POST path. The turn-based model does not move: one
+append-only AgentRun per accepted message (the POST carries one `requestId`
+the server dedupes by, so an attempt and its fallback can never create two
+turns), frozen intent in, `Succeeded` completion out, peer fanout unchanged.
+No Primaris Argo changes, no Secret expansion, no chart/RBAC broadening —
+Desktop opens the standing WS with its existing OIDC bearer and chat-read
+grant.
+
+- **Open first, then send.** `streamStandingChatTurn`
+  (`web/desktop/src/wrapper/standingChatTurn.ts`) opens the thread stream
+  (`openChatThreadStream`, WebSocket-first with authenticated SSE fallback,
+  never a query-string token) before the POST, so tokens published during
+  the handshake still reach the turn. The snapshot classifies the plane:
+  `snapshot.standing` present means the standing path, absent means the Job
+  plane and the existing POST path stays the turn path.
+- **Live tokens are display only.** `token` frames (`threadId`/`turnId`/
+  `runName` + `seq` + `done`, peer-child threads filtered out) render as
+  deltas and mark first-token timing; the turn settles from the durable
+  thread read, exactly like the existing history-recovery path.
+- **Every failure falls back.** No WS available, OIDC denied (stub OIDC
+  historically blocks signed-in Desktop chat — the denial is recorded, not
+  fatal), snapshot/terminal timeouts, or a Job-plane snapshot all return to
+  the existing POST path with the same `requestId`. An already-accepted turn
+  (`sent: true`) settles by polling the durable thread, never by re-POSTing.
+- **Latency samples.** Every send persists one JSONL line to the gitignored
+  `.runtime/chat-latency.jsonl` sink (via `ANVIL_CHAT_LATENCY_JSONL` on the
+  `anvil-desktop` host process, `POST /local/v1/chat-latency` from the
+  renderer) with at least `ts`, `source: "desktop-chat"`,
+  `sendToFirstTokenMs` (= `firstTokenMs`), `threadId`, `sessionId`
+  (standing session name), `path` (`standing` vs `job`), and `error` when
+  the turn did not deliver.
+
+How to run the Desktop e2e / collect samples:
+
+```bash
+# 1. Deterministic CI path: fake WS stream, no cluster, no OIDC.
+node --experimental-strip-types --test hack/desktop-standing-chat-stream.mjs
+node --experimental-strip-types --test hack/desktop-chat-latency.mjs
+
+# 2. Same-origin host + UI (Kind-local API origin for real OIDC).
+export ANVIL_CHAT_LATENCY_JSONL=$PWD/.runtime/chat-latency.jsonl
+go run ./cmd/anvil-desktop --listen 127.0.0.1:1738 --api-origin http://127.0.0.1:18080
+# terminal 2: cd web/desktop && npm run dev  (or --ui-dir web/desktop/dist --open)
+
+# 3. Sign in (Authorization Code + PKCE; stub OIDC denies -> fallback path
+#    with error recorded) and Send one chat message; then:
+cat .runtime/chat-latency.jsonl
+```
+
+Stub OIDC denies the WS upgrade and the POST alike, so signed-in Desktop
+chat against the stub still lands on the honest failure copy — with the
+denial recorded in the JSONL `error` field. Live send→firstToken samples
+need real OIDC (Kind-local issuer or Zitadel) plus a standing-enabled
+manager thread (`standing.liveEnabled` / `ANVIL_AGENTS_STANDING_LIVE` on the
+API). The fake path above is the CI gate; it never blocks on auth.
+
+Tests: `hack/desktop-standing-chat-stream.mjs` fakes the WS stream and
+asserts first-token timing, the standing/job classification, the
+never-send-twice fallback, and the JSONL fields; `internal/desktop/
+chat_latency_standing_test.go` pins the new sink fields server-side.
+
+## NEXT (slice 5c and beyond)
+
+1. **Live numbers.** The slice-5a harness is green on deterministic
+   backends, slice-5b resume is pinned against stub CLIs, and Desktop chat
+   already attempts the standing WS live turn end to end (see "Desktop chat
+   e2e over the standing WebSocket" above); `process-exec` live numbers on
+   the same cluster shape as the Job baseline are still open (needs a
+   harness CLI with local auth) — measure cold first turns AND resumed
+   second turns, re-measure Desktop send→firstToken, then apply the
+   promote/reshape/retire bars above.
 2. **Retire the envelope wrapper** entirely once no Fake-only live path
    remains. Provider credentials stay outside the API's Secret surface
    throughout. Production enablement also needs the API role granted
