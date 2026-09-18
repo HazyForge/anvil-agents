@@ -189,7 +189,11 @@ func main() {
 		fmt.Fprintf(os.Stderr, "error: direct cold: %v\n", err)
 		os.Exit(1)
 	}
-	directWarm, directWarmOps, err := measureWarm(ctx, client, *namespace, "latency-direct-thread", *harness, *actorClass, *pool, *iterations)
+	// Warm actors get a fresh thread ID per run: reusing a fixed thread after
+	// a failed resume can rebind a CRASHED/stuck actor on a stale worker
+	// (ateom.sock errors) instead of measuring a clean warm resume.
+	runID := time.Now().UnixNano()
+	directWarm, directWarmOps, err := measureWarm(ctx, client, *namespace, fmt.Sprintf("latency-direct-thread-%d", runID), *harness, *actorClass, *pool, *iterations)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: direct warm: %v\n", err)
 		os.Exit(1)
@@ -199,7 +203,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "error: peer cold: %v\n", err)
 		os.Exit(1)
 	}
-	peerWarm, peerWarmOps, err := measureWarm(ctx, client, *namespace, "latency-peer-child-thread", *harness, *actorClass, *pool, *iterations)
+	peerWarm, peerWarmOps, err := measureWarm(ctx, client, *namespace, fmt.Sprintf("latency-peer-child-thread-%d", runID), *harness, *actorClass, *pool, *iterations)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: peer warm: %v\n", err)
 		os.Exit(1)

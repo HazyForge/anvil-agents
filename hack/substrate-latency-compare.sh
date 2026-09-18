@@ -21,14 +21,12 @@
 # Live env (see docs/substrate-spike.md "Kind port-forward + live env"):
 #   export ANVIL_AGENTS_SUBSTRATE_ACTORS_ENABLED=true
 #   export ANVIL_AGENTS_SUBSTRATE_ENDPOINT=127.0.0.1:<port-forward-port>
-#   export ANVIL_AGENTS_SUBSTRATE_TEMPLATE=standing-chat
-#   export ANVIL_AGENTS_SUBSTRATE_INSECURE=true   # skip-verify TLS, Kind loopback only
-#   # or export ANVIL_AGENTS_SUBSTRATE_TOKEN_FILE=/run/ate/token for verified TLS
-#   # Counter demo without editing Go defaults:
-#   # export ANVIL_AGENTS_SUBSTRATE_ATESPACE=ate-demo-counter
-#   # export ANVIL_AGENTS_SUBSTRATE_TEMPLATE=counter
-#   # hack/substrate-latency-compare.sh --live -n 10 \
-#   #   --namespace ate-demo-counter --actor-class counter --pool '' ...
+#   export ANVIL_AGENTS_SUBSTRATE_ATESPACE=ate-demo-counter
+#   export ANVIL_AGENTS_SUBSTRATE_TEMPLATE=counter
+#   # Verified TLS preferred (leave INSECURE unset).
+#   # export ANVIL_AGENTS_SUBSTRATE_TOKEN_FILE=/run/ate/token for verified TLS
+#   # Kind-only fallback: export ANVIL_AGENTS_SUBSTRATE_INSECURE=true for
+#   # skip-verify TLS on a loopback port-forward (never plaintext).
 set -euo pipefail
 
 ITERATIONS=20
