@@ -4,8 +4,12 @@
 //
 // API-first by default: without the live gate it drives the in-memory
 // FakeClient, so CI stays green with no cluster. On a Kind cluster with the
-// Substrate spike gateway installed, set ANVIL_AGENTS_SUBSTRATE_ACTORS_ENABLED
-// and ANVIL_AGENTS_SUBSTRATE_ENDPOINT to measure the live backend instead.
+// Substrate spike installed (atenet-router plus the cmd/substrate-ate-shim
+// control bridge), set ANVIL_AGENTS_SUBSTRATE_ACTORS_ENABLED,
+// ANVIL_AGENTS_SUBSTRATE_ENDPOINT (the router origin), and
+// ANVIL_AGENTS_SUBSTRATE_SHIM_ENDPOINT to measure the live backend instead.
+// Cold scenarios time create plus the first router request (the restore);
+// warm scenarios time resume-on-request through the router.
 //
 // The Job cold-start baseline cannot be measured from this process (it needs a
 // real cluster scheduler), so pass the observed baseline explicitly with
@@ -17,7 +21,8 @@
 //
 //	go run ./cmd/substrate-latency -n 20 -out /tmp/substrate-latency.json
 //	ANVIL_AGENTS_SUBSTRATE_ACTORS_ENABLED=true \
-//	  ANVIL_AGENTS_SUBSTRATE_ENDPOINT=http://substrate-gateway.substrate:8080 \
+//	  ANVIL_AGENTS_SUBSTRATE_ENDPOINT=http://localhost:8000 \
+//	  ANVIL_AGENTS_SUBSTRATE_SHIM_ENDPOINT=http://127.0.0.1:8081 \
 //	  go run ./cmd/substrate-latency -n 20 \
 //	    -job-baseline-p50-ms 12000 -job-baseline-p95-ms 44000
 package main
@@ -110,6 +115,12 @@ func measureCold(ctx context.Context, client substrate.Client, namespace, prefix
 		if _, err := client.CreateActor(ctx, spec); err != nil {
 			return nil, err
 		}
+		// Cold means provision plus the first restore: upstream CreateActor
+		// only writes a SUSPENDED record, and the first router request does
+		// the expensive worker assign plus snapshot restore.
+		if _, err := client.ResumeActor(ctx, spec.Namespace, spec.Name); err != nil {
+			return nil, err
+		}
 		durations = append(durations, time.Since(start))
 	}
 	return durations, nil
@@ -150,6 +161,7 @@ func main() {
 	actorClass := flag.String("actor-class", "standing-chat", "Substrate actor class for the measurement.")
 	pool := flag.String("pool", "warm", "Substrate warm pool for the measurement.")
 	outPath := flag.String("out", "", "Optional JSON report path (written with 0600 permissions).")
+	timeoutSecs := flag.Float64("timeout-s", 10, "Per-operation timeout in seconds for the live backend (cold restores can take longer than the default).")
 	jobP50 := flag.Float64("job-baseline-p50-ms", 0, "Observed Job cold-start p50 in ms for comparison (0 omits the baseline).")
 	jobP95 := flag.Float64("job-baseline-p95-ms", 0, "Observed Job cold-start p95 in ms for comparison (0 omits the baseline).")
 	flag.Parse()
@@ -158,19 +170,32 @@ func main() {
 		fmt.Fprintln(os.Stderr, "error: -n must be at least 1")
 		os.Exit(2)
 	}
+	if *timeoutSecs <= 0 {
+		fmt.Fprintln(os.Stderr, "error: -timeout-s must be positive")
+		os.Exit(2)
+	}
 	ctx := context.Background()
 	backendName := "fake"
 	var client substrate.Client
-	if live, ok, err := substrate.NewLiveClientFromEnv(); err != nil {
-		fmt.Fprintf(os.Stderr, "error: live substrate client: %v\n", err)
-		os.Exit(1)
-	} else if ok {
+	gate := substrate.GateConfigFromEnv()
+	if gate.LiveEnabled() {
+		live, err := substrate.NewLiveClient(substrate.LiveConfig{
+			Endpoint:      gate.Endpoint,
+			Atespace:      gate.Atespace,
+			ActorTemplate: gate.ActorTemplate,
+			ShimEndpoint:  gate.ShimEndpoint,
+			AuthToken:     gate.Token,
+			Timeout:       time.Duration(*timeoutSecs * float64(time.Second)),
+		})
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error: live substrate client: %v\n", err)
+			os.Exit(1)
+		}
 		backendName = "live"
 		client = live
 	} else {
 		client = substrate.NewFakeClient()
 	}
-	gate := substrate.GateConfigFromEnv()
 
 	directCold, err := measureCold(ctx, client, *namespace, "direct", *harness, *actorClass, *pool, *iterations)
 	if err != nil {

@@ -96,17 +96,27 @@ backend-kind overlay, which stays orthogonal to the runtime plane).
 
 ## What is in slice 2 (live dispatch behind a gate)
 
-- Live `substrate.Client` (`internal/substrate/live.go`) speaking only the
-  stable lifecycle (create-or-reuse, resume, suspend, pause, describe) over
-  HTTP to a gateway origin. No vendored Substrate API types; the versioned
-  path prefix lives in one constant so a churning upstream only re-points the
-  transport. Covered by `httptest` round-trip tests, including 404 mapping to
-  `ErrActorNotFound` and endpoint validation that rejects userinfo, query, and
-  fragment (access tokens never travel in query strings).
+- Live `substrate.Client` (`internal/substrate/live.go`) aligned with the
+  real upstream surfaces instead of the earlier `/v1/actors` spike mapping:
+  resume and describe speak the atenet-router HTTP data plane directly
+  (Host-addressed `<actor>.<atespace>.actors.resources.substrate.ate.dev`
+  requests; the router resumes via ateapi on every request and forwards to
+  the worker), while create/suspend/pause go through the documented
+  `cmd/substrate-ate-shim` control bridge (a thin `kubectl ate` wrapper over
+  ateapi gRPC, which has no REST equivalent upstream). No vendored Substrate
+  API types; the Host suffix and shim paths live in one place each so a
+  churning upstream only re-points the transport. Covered by `httptest`
+  round-trip tests against a fake router plus a fake shim, including 404
+  mapping to `ErrActorNotFound`, fail-closed control ops without a shim
+  (`ErrLiveControlPlaneRequired`), and endpoint validation that rejects
+  userinfo, query, and fragment (access tokens never travel in query
+  strings).
 - Explicit opt-in gate, off by default: `ANVIL_AGENTS_SUBSTRATE_ACTORS_ENABLED`
-  plus `ANVIL_AGENTS_SUBSTRATE_ENDPOINT` (controller flags
-  `--substrate-actors-enabled` / `--substrate-endpoint` mirror the same env).
-  An endpoint alone never enables dispatch, and the optional
+  plus `ANVIL_AGENTS_SUBSTRATE_ENDPOINT` (the atenet-router origin;
+  controller flags `--substrate-actors-enabled` / `--substrate-endpoint`
+  mirror the same env, with `--substrate-atespace`,
+  `--substrate-actor-template`, and `--substrate-shim-endpoint` for the
+  tenancy, template, and control shim). An endpoint alone never enables dispatch, and the optional
   `ANVIL_AGENTS_SUBSTRATE_TOKEN` travels only as an `Authorization` header —
   never in status, logs, or API JSON.
 - Controller dispatch (`internal/controller/agent_run_substrate_live.go`): with
@@ -135,44 +145,84 @@ backend-kind overlay, which stays orthogonal to the runtime plane).
 - No actor CRD/controller, no Kind e2e against a real Substrate cluster in CI,
   and no chat-log replay onto actors. Peer resume against live actors is wired
   and tested via fakes; the remaining gap is live cluster numbers.
-- The live gateway path prefix (`/v1/actors/...`) is a spike mapping, not a
-  pinned upstream contract: Substrate is early and its APIs will churn. If the
-  upstream Kind install serves a different lifecycle surface, re-point
-  `internal/substrate/live.go` only — AgentRun types, merge rules, chat
-  selection, and the controller dispatch branch do not change.
+- The live client binds the pinned upstream contracts (atenet-router Host
+  addressing plus ateapi Create/Resume/Suspend/Pause/Get semantics via the
+  shim) rather than a generic actor REST API, because upstream exposes none:
+  ateapi is gRPC-only and the router is a resume-on-request data plane. If
+  the upstream Kind install serves a different lifecycle surface, re-point
+  `internal/substrate/live.go` and `cmd/substrate-ate-shim` only — AgentRun
+  types, merge rules, chat selection, and the controller dispatch branch do
+  not change.
 
 ## Kind-local spike install
 
-Prefer the Kind-local install docs from Substrate itself
-(`hack/create-kind-cluster.sh` / `install-ate-kind` in
-agent-substrate/substrate); Substrate is early, so treat the upstream README
-as authoritative if script names drift. Do not require GKE for the spike, and
-do not change Primaris Argo sync policy. The spike needs only:
+Prefer the Kind-local install docs from Substrate itself; Substrate is early,
+so treat the upstream README as authoritative if script names drift. Do not
+require GKE for the spike, and do not change Primaris Argo sync policy. The
+spike needs only:
 
-1. A Kind cluster from the upstream script (Austin's cluster or WSL Kind both
-   work; CI does not install Substrate).
-2. The Substrate control plane + a lifecycle gateway reachable from the
-   controller as one origin URL, for example
-   `http://substrate-gateway.substrate:8080`. The Anvil live client only needs
-   the stable lifecycle (create-or-reuse, resume, suspend, pause, describe);
-   point the gateway paths at `/v1/actors/{namespace}/{name}` with
-   `/resume`, `/suspend`, `/pause` actions, or re-point `live.go` to match
-   whatever the install serves.
-3. A harness profile selecting the actor plane (sample:
+1. A Kind cluster from the upstream script plus the ate system (Austin's
+   cluster or WSL Kind both work; CI does not install Substrate):
+
+```bash
+git clone https://github.com/agent-substrate/substrate && cd substrate
+hack/create-kind-cluster.sh
+hack/install-ate-kind.sh --deploy-ate-system
+go install ./cmd/kubectl-ate
+```
+
+2. An atespace plus an ActorTemplate for the measurement actors. Atespaces
+   are Substrate-native records, not Kubernetes namespaces:
+
+```bash
+kubectl ate create atespace agents
+# Pick a template installed on the cluster (counter demo shown):
+kubectl ate create actor chat-smoke-1 --atespace agents --template ate-demo-counter/counter
+```
+
+3. The atenet-router data plane reachable from the measuring process. The
+   upstream demos address actors as
+   `<actor>.<atespace>.actors.resources.substrate.ate.dev` through the
+   router, for example:
+
+```bash
+kubectl -n ate-system port-forward svc/atenet-router 8000:8080 &
+curl -s -H "Host: chat-smoke-1.agents.actors.resources.substrate.ate.dev" http://localhost:8000/
+```
+
+   Confirm the Service name with `kubectl get svc -n ate-system` if the
+   upstream manifests drifted. Native router measurements (curl timing on
+   the Host-addressed request) are the ground truth the harness compares
+   against; the Anvil live client issues the same request shape.
+
+4. The spike control shim for create/suspend/pause (ateapi is gRPC-only, so
+   the shim shells out to `kubectl ate` with the same kubeconfig):
+
+```bash
+go run ./cmd/substrate-ate-shim -listen 127.0.0.1:8081 -default-template ate-demo-counter/counter &
+```
+
+5. A harness profile selecting the actor plane (sample:
    `config/samples/control_v1alpha1_agentharnessprofile_substrate.yaml`).
 
-Enable the gate on the controller only (no chart values were added, no
-Primaris sync changes):
+Enable the gate on the controller/harness only (no chart values were added,
+no Primaris sync changes):
 
 ```bash
 export ANVIL_AGENTS_SUBSTRATE_ACTORS_ENABLED=true
-export ANVIL_AGENTS_SUBSTRATE_ENDPOINT=http://substrate-gateway.substrate:8080
+export ANVIL_AGENTS_SUBSTRATE_ENDPOINT=http://localhost:8000
+export ANVIL_AGENTS_SUBSTRATE_ATESPACE=agents
+export ANVIL_AGENTS_SUBSTRATE_TEMPLATE=ate-demo-counter/counter
+export ANVIL_AGENTS_SUBSTRATE_SHIM_ENDPOINT=http://127.0.0.1:8081
 # Optional: export ANVIL_AGENTS_SUBSTRATE_TOKEN=... (header-only, never logged)
 ```
 
 Or the equivalent flags: `--substrate-actors-enabled --substrate-endpoint
-http://substrate-gateway.substrate:8080`. With the gate off (the default),
-SubstrateActor runs keep holding as `SubstrateActorNotWired` with no Job.
+http://localhost:8000 --substrate-atespace agents --substrate-shim-endpoint
+http://127.0.0.1:8081`. With the gate off (the default), SubstrateActor runs
+keep holding as `SubstrateActorNotWired` with no Job. Without the shim
+endpoint, create/suspend/pause fail closed with guidance while router
+resume/probe still works.
 
 ## Latency compare (direct turns and peer deliveries)
 
@@ -187,9 +237,15 @@ SubstrateActor runs keep holding as `SubstrateActorNotWired` with no Job.
 hack/substrate-latency-compare.sh --iterations 20 --out /tmp/substrate-latency-fake.json
 ```
 
-3. Live compare on the Kind spike cluster (Austin's cluster/WSL Kind):
+3. Live compare on the Kind spike cluster (Austin's cluster/WSL Kind), with
+   the router port-forward and the shim running per the install section
+   above (the harness needs both: the router for resume/probe timing and
+   the shim for create/suspend):
 
 ```bash
+export ANVIL_AGENTS_SUBSTRATE_ACTORS_ENABLED=true
+export ANVIL_AGENTS_SUBSTRATE_ENDPOINT=http://localhost:8000
+export ANVIL_AGENTS_SUBSTRATE_SHIM_ENDPOINT=http://127.0.0.1:8081
 hack/substrate-latency-compare.sh --live --iterations 20 \
   --job-baseline-p50-ms 12000 --job-baseline-p95-ms 44000 \
   --out /tmp/substrate-latency-live.json

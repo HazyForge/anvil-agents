@@ -15,9 +15,24 @@ const (
 	// to a truthy value ("1", "true", "yes", "on"). Anything else keeps the
 	// API-first hold.
 	GateEnabledEnvVar = "ANVIL_AGENTS_SUBSTRATE_ACTORS_ENABLED"
-	// GateEndpointEnvVar carries the Substrate lifecycle endpoint backing the
-	// live Client (Kind-local gateway for the spike, never GKE by default).
+	// GateEndpointEnvVar carries the atenet-router origin backing the live
+	// Client (Kind-local for the spike, never GKE by default). Point it at the
+	// router Service, for example http://localhost:8000 via
+	// `kubectl -n ate-system port-forward svc/atenet-router 8000:8080`.
 	GateEndpointEnvVar = "ANVIL_AGENTS_SUBSTRATE_ENDPOINT"
+	// GateAtespaceEnvVar selects the Substrate tenancy for chat actors. Empty
+	// means DefaultAtespace ("agents"); the atespace must be pre-created on
+	// the cluster with `kubectl ate create atespace <name>`.
+	GateAtespaceEnvVar = "ANVIL_AGENTS_SUBSTRATE_ATESPACE"
+	// GateTemplateEnvVar optionally carries the `namespace/name`
+	// ActorTemplate used for CreateActor through the control shim (for
+	// example ate-demo-counter/counter for spike measurements).
+	GateTemplateEnvVar = "ANVIL_AGENTS_SUBSTRATE_TEMPLATE"
+	// GateShimEndpointEnvVar optionally carries the cmd/substrate-ate-shim
+	// origin backing create/suspend/pause (and full status reads) through
+	// kubectl ate. Without it those operations fail closed with
+	// ErrLiveControlPlaneRequired while router resume/probe still works.
+	GateShimEndpointEnvVar = "ANVIL_AGENTS_SUBSTRATE_SHIM_ENDPOINT"
 	// GateTokenEnvVar optionally carries a bearer token for the lifecycle
 	// endpoint. It is only ever sent as an Authorization header and must never
 	// appear in status, logs, or API JSON.
@@ -27,18 +42,24 @@ const (
 // GateConfig is the explicit opt-in configuration for live Substrate actor
 // dispatch. Zero value is disabled.
 type GateConfig struct {
-	Enabled  bool
-	Endpoint string
-	Token    string
+	Enabled       bool
+	Endpoint      string
+	Atespace      string
+	ActorTemplate string
+	ShimEndpoint  string
+	Token         string
 }
 
 // GateConfigFromEnv reads the live-plane gate from the process environment.
 // The gate defaults to off; an endpoint alone never enables dispatch.
 func GateConfigFromEnv() GateConfig {
 	return GateConfig{
-		Enabled:  gateBoolEnv(GateEnabledEnvVar),
-		Endpoint: strings.TrimSpace(os.Getenv(GateEndpointEnvVar)),
-		Token:    strings.TrimSpace(os.Getenv(GateTokenEnvVar)),
+		Enabled:       gateBoolEnv(GateEnabledEnvVar),
+		Endpoint:      strings.TrimSpace(os.Getenv(GateEndpointEnvVar)),
+		Atespace:      strings.TrimSpace(os.Getenv(GateAtespaceEnvVar)),
+		ActorTemplate: strings.TrimSpace(os.Getenv(GateTemplateEnvVar)),
+		ShimEndpoint:  strings.TrimSpace(os.Getenv(GateShimEndpointEnvVar)),
+		Token:         strings.TrimSpace(os.Getenv(GateTokenEnvVar)),
 	}
 }
 

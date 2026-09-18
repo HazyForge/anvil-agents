@@ -34,7 +34,7 @@ func TestGateRequiresExplicitOptIn(t *testing.T) {
 func TestGateTruthySpellings(t *testing.T) {
 	for _, raw := range []string{"1", "true", "TRUE", "yes", "on", " True "} {
 		t.Setenv(GateEnabledEnvVar, raw)
-		t.Setenv(GateEndpointEnvVar, "http://substrate-gateway.substrate:8080")
+		t.Setenv(GateEndpointEnvVar, "http://localhost:8000")
 		if !GateConfigFromEnv().LiveEnabled() {
 			t.Fatalf("gate value %q must enable live dispatch", raw)
 		}
@@ -44,10 +44,33 @@ func TestGateTruthySpellings(t *testing.T) {
 func TestGateRejectsFalsySpellings(t *testing.T) {
 	for _, raw := range []string{"0", "false", "no", "off", "maybe", "enabled"} {
 		t.Setenv(GateEnabledEnvVar, raw)
-		t.Setenv(GateEndpointEnvVar, "http://substrate-gateway.substrate:8080")
+		t.Setenv(GateEndpointEnvVar, "http://localhost:8000")
 		if GateConfigFromEnv().LiveEnabled() {
 			t.Fatalf("gate value %q must not enable live dispatch", raw)
 		}
+	}
+}
+
+func TestGateCarriesAtenetPlaneConfig(t *testing.T) {
+	t.Setenv(GateEnabledEnvVar, "true")
+	t.Setenv(GateEndpointEnvVar, "http://localhost:8000")
+	t.Setenv(GateAtespaceEnvVar, "agents")
+	t.Setenv(GateTemplateEnvVar, "demo-ns/demo-tmpl")
+	t.Setenv(GateShimEndpointEnvVar, "http://127.0.0.1:8081")
+	t.Setenv(GateTokenEnvVar, "")
+	gate := GateConfigFromEnv()
+	if !gate.LiveEnabled() {
+		t.Fatalf("gate = %+v, want live", gate)
+	}
+	client, ok, err := NewLiveClientFromEnv()
+	if err != nil || !ok {
+		t.Fatalf("live client from gate = ok=%v err=%v, want enabled", ok, err)
+	}
+	if client.Atespace() != "agents" {
+		t.Fatalf("client atespace = %q, want agents", client.Atespace())
+	}
+	if got := client.Endpoint(); got != "http://localhost:8000" {
+		t.Fatalf("client endpoint = %q, want the router origin", got)
 	}
 }
 

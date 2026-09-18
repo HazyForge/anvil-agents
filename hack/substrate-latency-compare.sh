@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
 # substrate-latency-compare.sh — Job cold-start baseline vs warm Substrate
-# resume for a direct turn AND a peer delivery (standing-chat spike, slice 2).
+# resume for a direct turn AND a peer delivery (standing-chat spike).
 #
 # API-first by default: the fake-backend run needs no cluster and is safe in
-# CI. The live run needs a Kind cluster with the Substrate spike gateway (see
-# docs/substrate-spike.md) plus Austin's observed Job baseline flags.
+# CI. The live run needs a Kind cluster with ate installed (see
+# docs/substrate-spike.md): atenet-router for the resume/probe data plane plus
+# the cmd/substrate-ate-shim control bridge for create/suspend, plus Austin's
+# observed Job baseline flags.
 #
 # Usage:
 #   hack/substrate-latency-compare.sh [--iterations 20] [--out /tmp/substrate-latency.json]
@@ -46,7 +48,12 @@ if [[ "$LIVE" -eq 1 ]]; then
     exit 2
   fi
   if [[ -z "${ANVIL_AGENTS_SUBSTRATE_ENDPOINT:-}" ]]; then
-    echo "error: --live requires ANVIL_AGENTS_SUBSTRATE_ENDPOINT (Kind gateway origin)" >&2
+    echo "error: --live requires ANVIL_AGENTS_SUBSTRATE_ENDPOINT (atenet-router origin, e.g. http://localhost:8000 via port-forward)" >&2
+    exit 2
+  fi
+  if [[ -z "${ANVIL_AGENTS_SUBSTRATE_SHIM_ENDPOINT:-}" ]]; then
+    echo "error: --live requires ANVIL_AGENTS_SUBSTRATE_SHIM_ENDPOINT (cmd/substrate-ate-shim origin for create/suspend)" >&2
+    echo "hint: go run ./cmd/substrate-ate-shim -listen 127.0.0.1:8081, then export ANVIL_AGENTS_SUBSTRATE_SHIM_ENDPOINT=http://127.0.0.1:8081 (see docs/substrate-spike.md)" >&2
     exit 2
   fi
 fi

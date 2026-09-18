@@ -99,8 +99,11 @@ func Run(ctx context.Context, options *Options) error {
 	if options.SubstrateActorsEnabled && strings.TrimSpace(options.SubstrateEndpoint) != "" {
 		gate := substrate.GateConfigFromEnv()
 		live, err := substrate.NewLiveClient(substrate.LiveConfig{
-			Endpoint:  strings.TrimSpace(options.SubstrateEndpoint),
-			AuthToken: gate.Token,
+			Endpoint:      strings.TrimSpace(options.SubstrateEndpoint),
+			Atespace:      strings.TrimSpace(options.SubstrateAtespace),
+			ActorTemplate: strings.TrimSpace(options.SubstrateActorTemplate),
+			ShimEndpoint:  strings.TrimSpace(options.SubstrateShimEndpoint),
+			AuthToken:     gate.Token,
 		})
 		if err != nil {
 			return fmt.Errorf("configure Substrate live client: %w", err)

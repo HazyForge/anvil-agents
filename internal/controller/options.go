@@ -33,6 +33,9 @@ const (
 	agyRunnerImageEnv               = "ANVIL_AGENTS_RUNNER_IMAGE_AGY"
 	substrateActorsEnabledEnv       = "ANVIL_AGENTS_SUBSTRATE_ACTORS_ENABLED"
 	substrateEndpointEnv            = "ANVIL_AGENTS_SUBSTRATE_ENDPOINT"
+	substrateAtespaceEnv            = "ANVIL_AGENTS_SUBSTRATE_ATESPACE"
+	substrateActorTemplateEnv       = "ANVIL_AGENTS_SUBSTRATE_TEMPLATE"
+	substrateShimEndpointEnv        = "ANVIL_AGENTS_SUBSTRATE_SHIM_ENDPOINT"
 )
 
 var defaultGitHubAPIAllowedHosts = []string{"api.github.com"}
@@ -75,10 +78,21 @@ type Options struct {
 	// well-formed SubstrateActor runs hold without creating a Job until the
 	// operator enables this gate and configures SubstrateEndpoint.
 	SubstrateActorsEnabled bool
-	// SubstrateEndpoint is the Substrate lifecycle gateway origin backing the
-	// live substrate.Client (Kind-local for the spike). Empty disables live
-	// dispatch even when the gate flag is set.
+	// SubstrateEndpoint is the atenet-router origin backing the live
+	// substrate.Client (Kind-local for the spike, for example
+	// http://localhost:8000 via port-forward or the in-cluster router
+	// Service). Empty disables live dispatch even when the gate flag is set.
 	SubstrateEndpoint string
+	// SubstrateAtespace selects the Substrate tenancy for chat actors. Empty
+	// means the substrate package default ("agents").
+	SubstrateAtespace string
+	// SubstrateActorTemplate is the optional `namespace/name` ActorTemplate
+	// used for CreateActor through the control shim.
+	SubstrateActorTemplate string
+	// SubstrateShimEndpoint is the optional cmd/substrate-ate-shim origin
+	// backing create/suspend/pause. Empty keeps those operations failing
+	// closed while router resume/probe still works.
+	SubstrateShimEndpoint string
 }
 
 func DefaultOptions() *Options {
@@ -104,6 +118,9 @@ func DefaultOptions() *Options {
 		AgyRunnerImage:               firstNonEmpty(strings.TrimSpace(os.Getenv(agyRunnerImageEnv)), agentRunDefaultAgyImage),
 		SubstrateActorsEnabled:       boolEnv(substrateActorsEnabledEnv),
 		SubstrateEndpoint:            strings.TrimSpace(os.Getenv(substrateEndpointEnv)),
+		SubstrateAtespace:            strings.TrimSpace(os.Getenv(substrateAtespaceEnv)),
+		SubstrateActorTemplate:       strings.TrimSpace(os.Getenv(substrateActorTemplateEnv)),
+		SubstrateShimEndpoint:        strings.TrimSpace(os.Getenv(substrateShimEndpointEnv)),
 	}
 }
 
