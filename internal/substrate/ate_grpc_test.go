@@ -257,6 +257,7 @@ func TestAteStateFromProtoFoldsThroughMapATEState(t *testing.T) {
 		{ateapipb.ActorState_ACTOR_STATE_SUSPENDED, ActorStateSuspended},
 		{ateapipb.ActorState_ACTOR_STATE_SUSPENDING, ActorStateSuspended},
 		{ateapipb.ActorState_ACTOR_STATE_CRASHED, ActorStateSuspended},
+		{ateapipb.ActorState_ACTOR_STATE_REVERTING, ActorStateSuspended},
 		{ateapipb.ActorState_ACTOR_STATE_PAUSED, ActorStatePaused},
 		{ateapipb.ActorState_ACTOR_STATE_PAUSING, ActorStatePaused},
 		{ateapipb.ActorState_ACTOR_STATE_DELETING, ActorStateActive},
@@ -270,6 +271,12 @@ func TestAteStateFromProtoFoldsThroughMapATEState(t *testing.T) {
 	// them before folding.
 	if got := ateStateFromProto(ateapipb.ActorState_ACTOR_STATE_RESUMING); got != ATEActorStateResuming {
 		t.Fatalf("resuming seam state = %q, want Resuming", got)
+	}
+	if got := ateStateFromProto(ateapipb.ActorState_ACTOR_STATE_REVERTING); got != ATEActorStateReverting {
+		t.Fatalf("reverting seam state = %q, want Reverting", got)
+	}
+	if got := ateStateFromProto(ateapipb.ActorState(9)); got != ATEActorStateReverting {
+		t.Fatalf("wire 9 seam state = %q, want Reverting", got)
 	}
 }
 

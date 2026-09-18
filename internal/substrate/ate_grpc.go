@@ -334,7 +334,7 @@ func mapGRPCError(err error) error {
 
 // ateStateFromProto projects the wire ActorState onto the seam vocabulary,
 // preserving transitional states so MapATEState can fold them onto the
-// client tri-state (Resuming->Active, Suspending->Suspended,
+// client tri-state (Resuming->Active, Suspending/Reverting->Suspended,
 // Pausing->Paused). Unknown future states pass through by name; MapATEState
 // treats them as Active so Describe never fails on a valid server state.
 func ateStateFromProto(state ateapipb.ActorState) ATEActorState {
@@ -347,6 +347,8 @@ func ateStateFromProto(state ateapipb.ActorState) ATEActorState {
 		return ATEActorStateSuspended
 	case ateapipb.ActorState_ACTOR_STATE_SUSPENDING:
 		return ATEActorStateSuspending
+	case ateapipb.ActorState_ACTOR_STATE_REVERTING:
+		return ATEActorStateReverting
 	case ateapipb.ActorState_ACTOR_STATE_CRASHED:
 		return ATEActorStateCrashed
 	case ateapipb.ActorState_ACTOR_STATE_PAUSED:

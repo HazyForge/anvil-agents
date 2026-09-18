@@ -3,7 +3,10 @@
 //
 // Upstream source: github.com/agent-substrate/substrate,
 // pkg/proto/ateapipb/ateapi.proto, service ateapi.Control, at commit
-// af2477e45d3d449fb797d55d70a26521cd666827 (Sep 2026). The full .proto
+// 944abe3278b895ccbf5d45555a49dd0f2f6ceae7 (Sep 2026, RevertActor #1675).
+// Lifecycle-subset diff vs the previous pin af2477e: only
+// ACTOR_STATE_REVERTING = 9 was added; the five bound RPC signatures and all
+// lifecycle field numbers are unchanged. The full .proto
 // subset lives in ateapi.proto next to this file; the Go structs below carry
 // the same package (ateapi), service (Control), method, message, and field
 // numbers via protobuf struct tags, so they stay wire-compatible with ateapi
@@ -45,7 +48,9 @@ const (
 	Control_ResumeActor_FullMethodName  = "/ateapi.Control/ResumeActor"
 )
 
-// ActorState mirrors the upstream ateapi.ActorState enum values 0-8.
+// ActorState mirrors the upstream ateapi.ActorState enum values 0-9
+// (REVERTING = 9 arrived with the RevertActor RPC in 944abe3 and transitions
+// the actor back to SUSPENDED; the spike binds no Revert/Delete RPCs).
 type ActorState int32
 
 const (
@@ -58,6 +63,7 @@ const (
 	ActorState_ACTOR_STATE_PAUSED      ActorState = 6
 	ActorState_ACTOR_STATE_CRASHED     ActorState = 7
 	ActorState_ACTOR_STATE_DELETING    ActorState = 8
+	ActorState_ACTOR_STATE_REVERTING   ActorState = 9
 )
 
 var actorStateNames = map[ActorState]string{
@@ -70,6 +76,7 @@ var actorStateNames = map[ActorState]string{
 	ActorState_ACTOR_STATE_PAUSED:      "ACTOR_STATE_PAUSED",
 	ActorState_ACTOR_STATE_CRASHED:     "ACTOR_STATE_CRASHED",
 	ActorState_ACTOR_STATE_DELETING:    "ACTOR_STATE_DELETING",
+	ActorState_ACTOR_STATE_REVERTING:   "ACTOR_STATE_REVERTING",
 }
 
 func (s ActorState) String() string {

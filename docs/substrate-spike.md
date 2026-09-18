@@ -274,7 +274,10 @@ hack/substrate-latency-compare.sh --live -n 10 \
 The harness dials `ANVIL_AGENTS_SUBSTRATE_ENDPOINT` with the same TLS/token
 rules as the controller (`KUBECONFIG` selects the cluster for trust-bundle
 fetch and token minting), runs cold-create vs warm-resume for a direct turn
-AND a peer delivery, and writes the JSON report. Unset
+AND a peer delivery, and writes the JSON report. Probe first —
+`hack/substrate-latency-compare.sh --probe [--out /tmp/substrate-probe.json]`
+reports `{"reachable":true/false}` with no timings, so an unavailable gateway
+is honest instead of blocking or fabricating numbers. Unset
 `ANVIL_AGENTS_SUBSTRATE_ACTORS_ENABLED` to go back to the fake backend; with
 the gate off, SubstrateActor runs hold as `SubstrateActorNotWired` with no Job.
 
@@ -352,6 +355,16 @@ the same cluster shape:
 - [x] Actor identity in `status.substrateActor` and turn-to-actor binding.
 - [x] Latency harness (Job cold start vs warm actor resume) covering direct
   turns and peer deliveries, not only standing Wrapper chat. Fake-backend
-  green; live Kind numbers still open (Austin's cluster/WSL Kind).
+  green; live Kind numbers still open (Austin's cluster/WSL Kind). Before
+  any `--live` run, `hack/substrate-latency-compare.sh --probe` (or
+  `go run ./cmd/substrate-latency -probe-only`) dials ateapi once and
+  reports `{"reachable":true/false}` JSON with no timings — an unreachable
+  gateway surfaces as `reachable:false` instead of fabricated numbers.
+- [x] Upstream alignment to `944abe3` (RevertActor #1675): the only
+  lifecycle-subset drift vs the previous pin was the new
+  `ACTOR_STATE_REVERTING = 9`, which folds onto Suspended (Revert targets
+  SUSPENDED) while staying distinct on the seam; the five bound RPC
+  signatures and all lifecycle field numbers are unchanged, and the spike
+  binds no Revert/Delete RPCs.
 - [ ] Decision: promote, reshape, or retire the `SubstrateActor` surface once
   live Kind numbers land.

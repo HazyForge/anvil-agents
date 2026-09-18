@@ -11,12 +11,18 @@
 #
 # Usage:
 #   hack/substrate-latency-compare.sh [--iterations 20] [--out /tmp/substrate-latency.json]
+#   hack/substrate-latency-compare.sh --probe [--out /tmp/substrate-probe.json]
 #   hack/substrate-latency-compare.sh --live --iterations 20 \
 #     --job-baseline-p50-ms 12000 --job-baseline-p95-ms 44000
 #   hack/substrate-latency-compare.sh --live -n 10 \
 #     --namespace ate-demo-counter --actor-class counter --pool '' \
 #     --job-baseline-p50-ms 12000 --job-baseline-p95-ms 44000 \
 #     --out /tmp/substrate-latency-counter.json
+#
+# --probe dials ateapi once and reports {"reachable":true/false} JSON with no
+# timings: run it before --live so an unreachable gateway is reported honestly
+# instead of blocking or fabricating numbers. --probe does not require the
+# live env to be set — a missing gate is itself reported as reachable:false.
 #
 # Live env (see docs/substrate-spike.md "Kind port-forward + live env"):
 #   export ANVIL_AGENTS_SUBSTRATE_ACTORS_ENABLED=true
@@ -32,6 +38,7 @@ set -euo pipefail
 ITERATIONS=20
 OUT=""
 LIVE=0
+PROBE=0
 NAMESPACE="agents"
 ACTOR_CLASS="standing-chat"
 POOL="warm"
@@ -42,6 +49,7 @@ while [[ $# -gt 0 ]]; do
     -n|--iterations) ITERATIONS="$2"; shift 2 ;;
     --out) OUT="$2"; shift 2 ;;
     --live) LIVE=1; shift ;;
+    --probe) PROBE=1; shift ;;
     --namespace) NAMESPACE="$2"; shift 2 ;;
     --actor-class) ACTOR_CLASS="$2"; shift 2 ;;
     --pool) POOL="$2"; shift 2 ;;
@@ -62,6 +70,19 @@ BIN="$(mktemp -d)/substrate-latency"
 trap 'rm -rf "$(dirname "$BIN")"' EXIT
 
 go build -trimpath -o "$BIN" ./cmd/substrate-latency
+
+if [[ "$PROBE" -eq 1 ]]; then
+  # Probe never hard-fails on missing env: the binary reports reachable:false
+  # as JSON (still 0600 when --out is set) so an unavailable gateway is
+  # honest, not a usage error.
+  PROBE_ARGS=(-probe-only -namespace "$NAMESPACE")
+  if [[ -n "$OUT" ]]; then
+    "$BIN" "${PROBE_ARGS[@]}" -out "$OUT"
+  else
+    "$BIN" "${PROBE_ARGS[@]}"
+  fi
+  exit $?
+fi
 
 if [[ "$LIVE" -eq 1 ]]; then
   if [[ "${ANVIL_AGENTS_SUBSTRATE_ACTORS_ENABLED:-}" != "true" && "${ANVIL_AGENTS_SUBSTRATE_ACTORS_ENABLED:-}" != "1" ]]; then

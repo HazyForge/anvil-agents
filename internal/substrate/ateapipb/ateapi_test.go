@@ -9,7 +9,8 @@ import (
 
 // TestWireGoldenVectors pins the hand-written stubs to exact protobuf bytes
 // captured from the upstream-generated stubs (protoc-gen-go from ateapi.proto
-// at af2477e). If upstream renumbers a lifecycle field, this test fails and
+// at 944abe3; lifecycle-subset diff vs af2477e is only ACTOR_STATE_REVERTING
+// = 9). If upstream renumbers a lifecycle field, this test fails and
 // the refresh procedure in ateapi.go applies. Vectors:
 //
 //	ref:      ObjectRef{atespace: "agents", name: "chat-1"}
@@ -85,6 +86,36 @@ func TestWireGoldenVectors(t *testing.T) {
 				t.Fatalf("round-trip bytes = %s, want %s", got, vector.wantHex)
 			}
 		})
+	}
+}
+
+// TestRevertingWireValue pins the upstream ACTOR_STATE_REVERTING = 9 wire
+// value (added in 944abe3 with the RevertActor RPC): the status varint must
+// encode as field 1 = 9 (bytes 0809) so a reverting actor round-trips instead
+// of collapsing into an unknown state.
+func TestRevertingWireValue(t *testing.T) {
+	t.Parallel()
+
+	if ActorState_ACTOR_STATE_REVERTING != ActorState(9) {
+		t.Fatalf("REVERTING = %d, want 9", int32(ActorState_ACTOR_STATE_REVERTING))
+	}
+	if got := ActorState_ACTOR_STATE_REVERTING.String(); got != "ACTOR_STATE_REVERTING" {
+		t.Fatalf("REVERTING String() = %q", got)
+	}
+	status := &ActorStatus{State: ActorState_ACTOR_STATE_REVERTING}
+	encoded, err := proto.Marshal(status)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if got := hex.EncodeToString(encoded); got != "0809" {
+		t.Fatalf("reverting status bytes = %s, want 0809", got)
+	}
+	decoded := &ActorStatus{}
+	if err := proto.Unmarshal(encoded, decoded); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if decoded.GetState() != ActorState_ACTOR_STATE_REVERTING {
+		t.Fatalf("round-trip state = %v, want REVERTING", decoded.GetState())
 	}
 }
 

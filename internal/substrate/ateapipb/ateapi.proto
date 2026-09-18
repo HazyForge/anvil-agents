@@ -2,7 +2,11 @@
 //
 // Upstream source: github.com/agent-substrate/substrate,
 // pkg/proto/ateapipb/ateapi.proto, service ateapi.Control, at commit
-// af2477e45d3d449fb797d55d70a26521cd666827 (Sep 2026).
+// 944abe3278b895ccbf5d45555a49dd0f2f6ceae7 (Sep 2026, RevertActor #1675).
+// Lifecycle-subset diff vs the previous pin af2477e45d3d449fb797d55d70a26521cd666827:
+// only ACTOR_STATE_REVERTING = 9 was added (plus the ActorStatus maximum
+// comment 8 -> 9); the five bound RPC signatures and all lifecycle field
+// numbers are unchanged.
 //
 // This file keeps ONLY the five lifecycle RPCs the Anvil side needs
 // (Get/Create/Resume/Suspend/PauseActor) plus the messages they touch.
@@ -86,7 +90,8 @@ message Actor {
 }
 
 // ActorState mirrors the upstream lifecycle vocabulary (upstream
-// ateapi.ActorState enum values 0-8).
+// ateapi.ActorState enum values 0-9; REVERTING = 9 arrived with the
+// RevertActor RPC in 944abe3 and transitions the actor back to SUSPENDED).
 enum ActorState {
   ACTOR_STATE_UNSPECIFIED = 0;
   ACTOR_STATE_RESUMING = 1;
@@ -97,6 +102,7 @@ enum ActorState {
   ACTOR_STATE_PAUSED = 6;
   ACTOR_STATE_CRASHED = 7;
   ACTOR_STATE_DELETING = 8;
+  ACTOR_STATE_REVERTING = 9;
 }
 
 // ActorStatus carries the lifecycle state (upstream ateapi.ActorStatus:

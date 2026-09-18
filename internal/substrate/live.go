@@ -67,6 +67,11 @@ const (
 	ATEActorStatePaused      ATEActorState = "Paused"
 	ATEActorStateCrashed     ATEActorState = "Crashed"
 	ATEActorStateDeleting    ATEActorState = "Deleting"
+	// ATEActorStateReverting tracks an actor mid-RevertActor (upstream
+	// ACTOR_STATE_REVERTING = 9, added in 944abe3): the server is moving a
+	// crashed, running, or paused actor back to SUSPENDED. The spike binds
+	// no Revert/Delete RPCs; the state folds onto Suspended via MapATEState.
+	ATEActorStateReverting ATEActorState = "Reverting"
 )
 
 // ATEObjectRef addresses one ATE resource. It mirrors ateapi.ObjectRef for
@@ -315,7 +320,7 @@ func selectorForPool(pool string) map[string]string {
 
 // MapATEState folds the ateapi.ActorState vocabulary onto the Client
 // tri-state. Transitional states map to their target (Resuming->Active,
-// Suspending->Suspended, Pausing->Paused). Crashed holds no worker like
+// Suspending/Reverting->Suspended, Pausing->Paused). Crashed holds no worker like
 // Suspended, so it maps there and the next Resume either rehydrates or fails
 // loudly. Deleting/Unspecified/unknown values map to Active so Describe never
 // fails on a valid server state; callers observing them should re-Describe.
@@ -325,7 +330,7 @@ func MapATEState(state ATEActorState) ActorState {
 	switch state {
 	case ATEActorStateRunning, ATEActorStateResuming:
 		return ActorStateActive
-	case ATEActorStateSuspended, ATEActorStateSuspending, ATEActorStateCrashed:
+	case ATEActorStateSuspended, ATEActorStateSuspending, ATEActorStateCrashed, ATEActorStateReverting:
 		return ActorStateSuspended
 	case ATEActorStatePaused, ATEActorStatePausing:
 		return ActorStatePaused

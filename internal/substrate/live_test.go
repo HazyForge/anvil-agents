@@ -322,6 +322,7 @@ func TestMapATEState(t *testing.T) {
 		{ATEActorStateSuspended, ActorStateSuspended},
 		{ATEActorStateSuspending, ActorStateSuspended},
 		{ATEActorStateCrashed, ActorStateSuspended},
+		{ATEActorStateReverting, ActorStateSuspended},
 		{ATEActorStatePaused, ActorStatePaused},
 		{ATEActorStatePausing, ActorStatePaused},
 		{ATEActorStateDeleting, ActorStateActive},
