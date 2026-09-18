@@ -216,6 +216,13 @@ func (server *Server) reconcileChatTurn(ctx context.Context, turn *chat.Turn) er
 	run := &agentsv1alpha1.AgentRun{}
 	err := server.runs.Get(ctx, types.NamespacedName{Namespace: turn.Namespace, Name: turn.RunName}, run)
 	if apierrors.IsNotFound(err) {
+		// Future standing in-process wiring plugs in here, beside (never
+		// instead of) the durable turn: when the thread's harness selects
+		// execution.runtime InProcess and a live standing backend is
+		// configured, the turn still creates exactly one append-only AgentRun
+		// from the outbox-frozen intent below, then streams it through the
+		// thread's standing session and completes it via CompleteTurn. See
+		// docs/standing-inprocess-harness.md.
 		if !server.config.Runs.CreateEnabled {
 			return server.failChatTurn(ctx, turn, "Chat execution was disabled before the accepted turn could launch")
 		}

@@ -25,7 +25,36 @@ delivery contract live in [Standing Chat](standing-chat.md) and
 
 ## How a standing process owns a thread's harness session across turns
 
-One chat thread owns exactly one standing session, resumed across turns:
+One chat thread owns exactly one standing session, resumed across turns.
+Standing chat today is **turn-based, not a continuously running native CLI
+session**: every accepted message creates one append-only AgentRun, and that
+does not change here. A standing session evolves the model by keeping warm
+harness/model context (session identity, working state, backend envelope)
+across turns so interactive turns skip the cold start — it never substitutes
+for the durable turn record:
+
+- Every accepted message still creates exactly one append-only AgentRun
+  through the same turn path (`queueChatTurn` in
+  `internal/runapi/chat_execution.go`), with the execution intent frozen in
+  the durable turn outbox (`QueueTurn`) before anything executes. The
+  outbox, stable run names, idempotent completion, and background recovery
+  (`runChatRecovery`) are untouched.
+- `reconcileChatTurn` still binds the turn to its recorded AgentRun identity
+  (turn/thread labels, `ChatThread` source ref, UID) and still completes the
+  turn with the real assistant reply via `CompleteTurn`. A standing backend
+  consumes the outbox-frozen intent; it never bypasses it.
+- Peer deliveries still fan out through `dispatchChatCoordination` into one
+  durable child thread per recipient, each completed through the same turn
+  path with deterministic delivery IDs. Each thread (parent or peer child)
+  owns its session via the same `EnsureTurnSession` path (see below).
+- Running executions keep their original prompt; native mid-generation
+  steering and interruption remain unimplemented, as documented in
+  [Standing Chat](standing-chat.md).
+- Jobs stay the default plane for scouts, batch, scheduled, and chained
+  runs, and the optional SubstrateActor isolation/density plane is
+  untouched.
+
+The session contract itself (`internal/standing.Backend`):
 
 - `internal/standing.Backend` is the thin contract: `CreateSession` (or
   reuse), `ResumeSession` before a turn, `StreamTurn` for token delivery,
@@ -134,16 +163,33 @@ Unchanged, by construction:
 
 ## NEXT (exact next PR)
 
+Wiring the live backend **into the turn path** (not around it), so every
+standing turn remains one durable AgentRun:
+
 1. **Live `standing.Backend` behind an explicit opt-in gate** (env/flags,
-   off by default; no chart values, no Primaris sync changes): resume a real
-   harness session per thread and `StreamTurn` against it, bound to a
-   durable AgentRun created through the existing turn path so streaming
-   stays delivery-only.
-2. **Long-lived stream subscription**: keep the WS connection open past the
+   off by default; no chart values, no Primaris sync changes). In
+   `reconcileChatTurn` (`internal/runapi/chat_execution.go`), beside the
+   `writes.Create` branch (marked with an anchor comment in slice 1): when
+   the thread's harness resolves to `execution.runtime: InProcess` and the
+   gate is on, create the append-only AgentRun from the outbox-frozen
+   `turn.RunJSON` exactly as today, then `EnsureTurnSession` for the thread
+   and `StreamTurn` bound to the turn's identity (thread ID, turn ID, run
+   name in the sink metadata). Persist the returned full reply through the
+   existing `CompleteTurn` path (including the 64KiB truncation and
+   `dispatchChatCoordination` peer fanout), and `SuspendIdleSession` on
+   terminal reconciliation (best-effort). Gate off (or unresolvable
+   harness, or any backend error) falls back to today's behavior: the run
+   holds as `InProcessNotWired` and no Job is ever created for it.
+2. **Peer turns take the identical branch** via their recipient child-thread
+   source: resume the child thread's session, stream the child turn, complete
+   it with the same deterministic delivery IDs. No new peer protocol; the
+   durable wait for busy recipients still owns queueing.
+3. **Long-lived stream subscription**: keep the WS connection open past the
    snapshot and multiplex `token` frames (`TokenEvent`: thread/turn/seq +
-   done marker) with the same terminal codes; SSE stays the fallback.
-   Bound connection counts already exist via the shared stream limiter.
-3. **Latency compare** (direct turns AND peer deliveries, warm resume vs the
+   done marker) for the turn bound in step 1, with the same terminal codes;
+   SSE stays the fallback. Bound connection counts already exist via the
+   shared stream limiter.
+4. **Latency compare** (direct turns AND peer deliveries, warm resume vs the
    Job cold-start baseline on the same cluster shape) with promote/reshape/
    retire bars mirroring the Substrate spike, then wire Desktop chat to
    `openChatThreadStream` end to end.
