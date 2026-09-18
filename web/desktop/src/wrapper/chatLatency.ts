@@ -121,6 +121,14 @@ export function formatChatLatencyReport(report: ChatLatencyReport): string {
 /** Env var holding the absolute JSONL path for durable chat-latency reports. */
 export const CHAT_LATENCY_JSONL_ENV = "ANVIL_CHAT_LATENCY_JSONL";
 
+/**
+ * Same-origin loopback endpoint on the Go `anvil-desktop` host that appends
+ * one JSONL line to the host's ANVIL_CHAT_LATENCY_JSONL sink. The Desktop UI
+ * runs in the browser (or Electron with nodeIntegration: false), where
+ * process.env/Node fs are unavailable, so live chat must POST here instead.
+ */
+export const CHAT_LATENCY_ENDPOINT = "/local/v1/chat-latency";
+
 export type ChatLatencyJsonLineOptions = {
   /** Optional source label recorded on the JSONL line (e.g. "desktop-chat"). */
   source?: string;
@@ -318,6 +326,111 @@ export function persistChatLatencyReport(
       appendFileSync: opts?.appendFileSync,
       mkdirSync: opts?.mkdirSync,
     });
+  } catch {
+    return false;
+  }
+}
+
+export type ChatLatencyLinePayload = {
+  ts: string;
+  waitingMs?: number;
+  firstTokenMs?: number;
+  runningMs?: number;
+  replyReadyMs?: number;
+  failedMs?: number;
+  source?: string;
+};
+
+/** Build the JSON object POSTed to the loopback host (same fields as JSONL). */
+export function buildChatLatencyPayload(
+  report: ChatLatencyReport,
+  opts?: ChatLatencyJsonLineOptions,
+): ChatLatencyLinePayload {
+  const now = opts?.now ?? (() => Date.now());
+  const payload: ChatLatencyLinePayload = {
+    ts: new Date(now()).toISOString(),
+  };
+  if (report.waitingMs !== undefined) payload.waitingMs = report.waitingMs;
+  if (report.firstTokenMs !== undefined) payload.firstTokenMs = report.firstTokenMs;
+  if (report.runningMs !== undefined) payload.runningMs = report.runningMs;
+  if (report.replyReadyMs !== undefined) payload.replyReadyMs = report.replyReadyMs;
+  if (report.failedMs !== undefined) payload.failedMs = report.failedMs;
+  const source = (opts?.source || "").trim();
+  if (source) payload.source = source;
+  return payload;
+}
+
+type ChatLatencyFetchResponse = {
+  ok?: boolean;
+  status?: number;
+};
+
+type ChatLatencyFetchFn = (
+  input: string,
+  init?: { method?: string; headers?: Record<string, string>; body?: string },
+) => Promise<ChatLatencyFetchResponse>;
+
+export type ChatLatencyPersistAsyncOptions = ChatLatencyPersistOptions & {
+  /** Same-origin endpoint override for tests. Defaults to CHAT_LATENCY_ENDPOINT. */
+  endpoint?: string;
+  /** Fetch injector for tests. Defaults to globalThis.fetch. */
+  fetchFn?: ChatLatencyFetchFn;
+};
+
+function resolveLatencyFetch(fetchFn?: ChatLatencyFetchFn): ChatLatencyFetchFn | undefined {
+  if (typeof fetchFn === "function") {
+    return fetchFn;
+  }
+  try {
+    const impl = (globalThis as unknown as { fetch?: unknown }).fetch;
+    if (typeof impl === "function") {
+      return impl as ChatLatencyFetchFn;
+    }
+  } catch {
+    return undefined;
+  }
+  return undefined;
+}
+
+/**
+ * Browser-capable persist: try the Node fs/env path first (tests, record
+ * script, Node harnesses), then POST the same payload to the loopback host
+ * so live Desktop chat in the browser still captures JSONL when the host was
+ * started with ANVIL_CHAT_LATENCY_JSONL set. Never throws: resolves true
+ * when either path accepted the report, false otherwise.
+ */
+export async function persistChatLatencyReportAsync(
+  report: ChatLatencyReport,
+  opts?: ChatLatencyPersistAsyncOptions,
+): Promise<boolean> {
+  try {
+    if (persistChatLatencyReport(report, opts)) {
+      return true;
+    }
+  } catch {
+    // Fall through to the loopback POST path.
+  }
+  try {
+    const fetchImpl = resolveLatencyFetch(opts?.fetchFn);
+    if (!fetchImpl) {
+      return false;
+    }
+    const endpoint = (opts?.endpoint || CHAT_LATENCY_ENDPOINT).trim() || CHAT_LATENCY_ENDPOINT;
+    const payload = buildChatLatencyPayload(report, { source: opts?.source, now: opts?.now });
+    const response = await fetchImpl(endpoint, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const status = response?.status;
+    if (response?.ok) {
+      return true;
+    }
+    // No-content / explicit 204 from the host counts as accepted.
+    if (status === 204 || status === 200) {
+      return true;
+    }
+    return false;
   } catch {
     return false;
   }

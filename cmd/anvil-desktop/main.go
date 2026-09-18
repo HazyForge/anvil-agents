@@ -33,6 +33,7 @@ func run(ctx context.Context, args []string) int {
 	oidcRedirectPath := flags.String("oidc-redirect-path", "", "Override OIDC redirect path (default /auth/callback). Kind desktop client uses /callback.")
 	harnessTarget := flags.String("harness-target", "", "Where to discover and run catalog CLIs: native, wsl, or empty (auto).")
 	wslDistro := flags.String("wsl-distro", "", "WSL distro for Operate on WSL. Empty uses the default distro.")
+	chatLatencyJSONL := flags.String("chat-latency-jsonl", "", "Absolute JSONL path for live Desktop chat-latency reports. Defaults to $ANVIL_CHAT_LATENCY_JSONL. Relative/empty disables the sink.")
 	openWindow := flags.Bool("open", false, "Open a Chrome --app window on the loopback UI.")
 	snapshotOnly := flags.Bool("snapshot", false, "Print the local harness and API snapshot as JSON and exit.")
 	flags.Usage = func() {
@@ -57,6 +58,7 @@ func run(ctx context.Context, args []string) int {
 		OIDCRedirectPath: *oidcRedirectPath,
 		HarnessTarget:    *harnessTarget,
 		WSLDistro:        *wslDistro,
+		ChatLatencyJSONL: *chatLatencyJSONL,
 		Discoverer: desktop.Discoverer{
 			Path: *pathDirs,
 		},

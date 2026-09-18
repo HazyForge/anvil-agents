@@ -35,6 +35,10 @@ type Options struct {
 	OIDCRedirectPath string
 	HarnessTarget    string
 	WSLDistro        string
+	// ChatLatencyJSONL is the absolute JSONL sink for live Desktop
+	// chat-latency reports. Empty falls back to ANVIL_CHAT_LATENCY_JSONL
+	// on the host process. Relative/empty values disable the sink.
+	ChatLatencyJSONL string
 	Discoverer       Discoverer
 	HTTPClient       *http.Client
 	Transport        http.RoundTripper
@@ -57,6 +61,9 @@ type Server struct {
 	issuer            issuerCache
 	httpClient        *http.Client
 	mux               http.Handler
+	// chatLatencyPath is the resolved absolute JSONL sink ("" = disabled).
+	// The full path is never exposed to the SPA; snapshot reports a boolean.
+	chatLatencyPath string
 }
 
 func NewServer(opts Options) (*Server, error) {
@@ -106,10 +113,12 @@ func NewServer(opts Options) (*Server, error) {
 		}
 	}
 	server := &Server{opts: opts, prefs: prefs, httpClient: client}
+	server.chatLatencyPath = resolveChatLatencySink(opts.ChatLatencyJSONL)
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", server.handleHealthz)
 	mux.HandleFunc("GET /local/v1/snapshot", server.handleSnapshot)
 	mux.HandleFunc("GET /local/v1/api-health", server.handleAPIHealth)
+	mux.HandleFunc("POST /local/v1/chat-latency", server.handleChatLatency)
 	mux.HandleFunc("POST /local/v1/prefs", server.handlePrefs)
 	mux.HandleFunc("POST /local/v1/delegate", server.handleDelegate)
 	mux.HandleFunc("POST /local/v1/chat/stream", server.handleChatStream)
