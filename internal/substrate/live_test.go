@@ -2,162 +2,263 @@ package substrate
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
-	"net/http"
-	"net/http/httptest"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
 )
 
-// liveTestBackend is a minimal in-memory gateway speaking the spike lifecycle
-// paths so live-client tests never need a Substrate cluster.
-type liveTestBackend struct {
-	mu       sync.Mutex
-	actors   map[string]liveActorPayload
-	authSeen []string
+// fakeATEControl is an in-memory ATEControl standing in for ateapi over the
+// wire. It models the server-side semantics the mapping depends on: unknown
+// actors fail with ATECodeNotFound on every RPC, duplicate creates fail with
+// ATECodeAlreadyExists, and Resume reports whether a resume workflow actually
+// ran (ResumeActorResponse.resumed: false when already RUNNING).
+type fakeATEControl struct {
+	mu     sync.Mutex
+	actors map[string]*ATEActor
+	// creates records the create payloads so tests can assert template and
+	// placement mapping.
+	creates []ATECreateSpec
+	calls   []string
+	uids    int
 }
 
-func newLiveTestBackend() *liveTestBackend {
-	return &liveTestBackend{actors: map[string]liveActorPayload{}}
+func newFakeATEControl() *fakeATEControl {
+	return &fakeATEControl{actors: map[string]*ATEActor{}}
 }
 
-func (b *liveTestBackend) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
-	if auth := request.Header.Get("Authorization"); auth != "" {
-		b.mu.Lock()
-		b.authSeen = append(b.authSeen, auth)
-		b.mu.Unlock()
+func (f *fakeATEControl) key(ref ATEObjectRef) string {
+	return ActorKey(ref.Atespace, ref.Name)
+}
+
+func (f *fakeATEControl) GetActor(_ context.Context, ref ATEObjectRef) (ATEActor, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls = append(f.calls, "get:"+f.key(ref))
+	actor, ok := f.actors[f.key(ref)]
+	if !ok {
+		return ATEActor{}, ateNotFoundf("actor %s/%s not found", ref.Atespace, ref.Name)
 	}
-	rest := strings.TrimPrefix(request.URL.Path, "/v1/actors/")
-	parts := strings.Split(rest, "/")
-	if len(parts) < 2 {
-		http.Error(writer, "not found", http.StatusNotFound)
-		return
+	return *actor, nil
+}
+
+func (f *fakeATEControl) CreateActor(_ context.Context, spec ATECreateSpec) (ATEActor, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	key := ActorKey(spec.Atespace, spec.Name)
+	if _, ok := f.actors[key]; ok {
+		return ATEActor{}, &ATEError{Code: ATECodeAlreadyExists, Err: fmt.Errorf("actor %s already exists", key)}
 	}
-	namespace, name := parts[0], parts[1]
-	action := ""
-	if len(parts) > 2 {
-		action = parts[2]
+	f.uids++
+	actor := &ATEActor{
+		Atespace:         spec.Atespace,
+		Name:             spec.Name,
+		UID:              fmt.Sprintf("ate-uid-%d", f.uids),
+		TemplateAtespace: spec.TemplateAtespace,
+		TemplateName:     spec.TemplateName,
+		WorkerSelector:   spec.WorkerSelector,
+		State:            ATEActorStateRunning,
 	}
-	key := namespace + "/" + name
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	actor, ok := b.actors[key]
-	switch {
-	case request.Method == http.MethodPut && action == "":
-		var body liveActorPayload
-		if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
-			http.Error(writer, "bad request", http.StatusBadRequest)
-			return
-		}
-		if ok {
-			// Idempotent create-or-reuse: warm reuse keeps the resume count.
-			actor.State = string(ActorStateActive)
-			b.actors[key] = actor
-			writeLiveJSON(writer, actor)
-			return
-		}
-		actor = liveActorPayload{Namespace: namespace, Name: name, ID: "live-" + key, State: string(ActorStateActive), ActorClass: body.ActorClass, Pool: body.Pool, HarnessKind: body.HarnessKind, Labels: body.Labels}
-		b.actors[key] = actor
-		writer.WriteHeader(http.StatusCreated)
-		writeLiveJSON(writer, actor)
-	case request.Method == http.MethodGet && action == "":
-		if !ok {
-			http.Error(writer, "not found", http.StatusNotFound)
-			return
-		}
-		writeLiveJSON(writer, actor)
-	case request.Method == http.MethodPost && action == "resume":
-		if !ok {
-			http.Error(writer, "not found", http.StatusNotFound)
-			return
-		}
-		actor.State = string(ActorStateActive)
-		actor.Resumes++
-		b.actors[key] = actor
-		writeLiveJSON(writer, actor)
-	case request.Method == http.MethodPost && (action == "suspend" || action == "pause"):
-		if !ok {
-			http.Error(writer, "not found", http.StatusNotFound)
-			return
-		}
-		if action == "suspend" {
-			actor.State = string(ActorStateSuspended)
-		} else {
-			actor.State = string(ActorStatePaused)
-		}
-		b.actors[key] = actor
-		writeLiveJSON(writer, actor)
-	default:
-		http.Error(writer, "not found", http.StatusNotFound)
+	f.actors[key] = actor
+	f.creates = append(f.creates, spec)
+	f.calls = append(f.calls, "create:"+key)
+	return *actor, nil
+}
+
+func (f *fakeATEControl) ResumeActor(_ context.Context, ref ATEObjectRef) (ATEActor, bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls = append(f.calls, "resume:"+f.key(ref))
+	actor, ok := f.actors[f.key(ref)]
+	if !ok {
+		return ATEActor{}, false, ateNotFoundf("actor %s/%s not found", ref.Atespace, ref.Name)
+	}
+	if actor.State == ATEActorStateRunning {
+		return *actor, false, nil
+	}
+	actor.State = ATEActorStateRunning
+	return *actor, true, nil
+}
+
+func (f *fakeATEControl) SuspendActor(_ context.Context, ref ATEObjectRef) (ATEActor, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls = append(f.calls, "suspend:"+f.key(ref))
+	actor, ok := f.actors[f.key(ref)]
+	if !ok {
+		return ATEActor{}, ateNotFoundf("actor %s/%s not found", ref.Atespace, ref.Name)
+	}
+	actor.State = ATEActorStateSuspended
+	return *actor, nil
+}
+
+func (f *fakeATEControl) PauseActor(_ context.Context, ref ATEObjectRef) (ATEActor, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls = append(f.calls, "pause:"+f.key(ref))
+	actor, ok := f.actors[f.key(ref)]
+	if !ok {
+		return ATEActor{}, ateNotFoundf("actor %s/%s not found", ref.Atespace, ref.Name)
+	}
+	actor.State = ATEActorStatePaused
+	return *actor, nil
+}
+
+func liveTestConfig() ATEClientConfig {
+	return ATEClientConfig{Address: "ate-api-server.ate-system.svc:443", Template: "standing-chat"}
+}
+
+func liveTestGate() GateConfig {
+	return GateConfig{
+		Enabled:  true,
+		Endpoint: "ate-api-server.ate-system.svc:443",
+		Atespace: "",
+		Template: "standing-chat",
 	}
 }
 
-func writeLiveJSON(writer http.ResponseWriter, payload liveActorPayload) {
-	writer.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(writer).Encode(payload)
-}
-
-func newLiveTestClient(t *testing.T, backend *liveTestBackend, token string) (*LiveClient, context.Context) {
+func mustLiveClient(t *testing.T, control ATEControl) (Client, *fakeATEControl) {
 	t.Helper()
-	server := httptest.NewServer(backend)
-	t.Cleanup(server.Close)
-	client, err := NewLiveClient(LiveConfig{Endpoint: server.URL, AuthToken: token})
+	fake, ok := control.(*fakeATEControl)
+	if !ok {
+		t.Fatal("live tests require *fakeATEControl")
+	}
+	client, err := NewATEClient(liveTestConfig(), control)
 	if err != nil {
-		t.Fatalf("live client: %v", err)
+		t.Fatalf("NewATEClient: %v", err)
 	}
-	return client, context.Background()
+	return client, fake
 }
 
-func TestLiveClientRejectsBadEndpoints(t *testing.T) {
+func TestATEClientCreateMapsActorClassToTemplate(t *testing.T) {
 	t.Parallel()
 
-	for _, endpoint := range []string{
-		"",
-		"not-a-url",
-		"ftp://gateway/x",
-		"http://gateway/x?token=secret",
-		"http://user@gateway/x",
-		"http://gateway/x#frag",
-	} {
-		if _, err := NewLiveClient(LiveConfig{Endpoint: endpoint}); err == nil {
-			t.Fatalf("endpoint %q must be rejected", endpoint)
-		}
-	}
-}
-
-func TestLiveClientLifecycleRoundTrip(t *testing.T) {
-	t.Parallel()
-
-	backend := newLiveTestBackend()
-	client, ctx := newLiveTestClient(t, backend, "")
-	spec := ActorSpec{Namespace: "agents", Name: "chat-thread-1", HarnessKind: "openCode", ActorClass: "standing-chat", Pool: "warm"}
-
-	created, err := client.CreateActor(ctx, spec)
+	ctx := context.Background()
+	client, fake := mustLiveClient(t, newFakeATEControl())
+	created, err := client.CreateActor(ctx, ActorSpec{Namespace: "agents", Name: "chat-thread-1", HarnessKind: "openCode", ActorClass: "standing-chat", Pool: "warm"})
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
-	if created.ID == "" || created.State != ActorStateActive {
-		t.Fatalf("created handle = %+v, want active with an ID", created)
+	if created.State != ActorStateActive || created.ID == "" {
+		t.Fatalf("created handle = %+v, want active with a server UID", created)
 	}
-	if _, err := client.ResumeActor(ctx, "other", "chat-thread-1"); !errors.Is(err, ErrActorNotFound) {
-		t.Fatalf("cross-namespace resume err = %v, want ErrActorNotFound", err)
+	if len(fake.creates) != 1 {
+		t.Fatalf("creates = %d, want 1", len(fake.creates))
+	}
+	got := fake.creates[0]
+	if got.Atespace != "agents" || got.TemplateAtespace != "agents" || got.TemplateName != "standing-chat" {
+		t.Fatalf("create spec = %+v, want agents atespace with standing-chat template", got)
+	}
+	if got.WorkerSelector[WorkerSelectorPoolLabel] != "warm" {
+		t.Fatalf("create worker selector = %+v, want pool warm", got.WorkerSelector)
+	}
+}
+
+func TestATEClientCreateFallsBackToDefaultTemplate(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	client, fake := mustLiveClient(t, newFakeATEControl())
+	if _, err := client.CreateActor(ctx, ActorSpec{Namespace: "agents", Name: "chat-thread-1"}); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if len(fake.creates) != 1 || fake.creates[0].TemplateName != "standing-chat" {
+		t.Fatalf("creates = %+v, want default standing-chat template", fake.creates)
+	}
+	if len(fake.creates[0].WorkerSelector) != 0 {
+		t.Fatalf("empty pool must leave placement to the template, got %+v", fake.creates[0].WorkerSelector)
+	}
+}
+
+func TestATEClientWarmReuse(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	client, _ := mustLiveClient(t, newFakeATEControl())
+	first, err := client.CreateActor(ctx, ActorSpec{Namespace: "agents", Name: "chat-thread-1"})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if _, err := client.SuspendActor(ctx, "agents", "chat-thread-1"); err != nil {
+		t.Fatalf("suspend: %v", err)
 	}
 	resumed, err := client.ResumeActor(ctx, "agents", "chat-thread-1")
 	if err != nil {
 		t.Fatalf("resume: %v", err)
 	}
-	if resumed.ID != created.ID || resumed.Resumes != 1 {
-		t.Fatalf("resumed handle = %+v, want stable ID with one resume", resumed)
+	if resumed.Resumes != 1 {
+		t.Fatalf("resumed handle = %+v, want one observed resume workflow", resumed)
 	}
+	second, err := client.CreateActor(ctx, ActorSpec{Namespace: "agents", Name: "chat-thread-1"})
+	if err != nil {
+		t.Fatalf("re-create: %v", err)
+	}
+	if second.ID != first.ID {
+		t.Fatalf("re-create ID = %q, want warm reuse of %q", second.ID, first.ID)
+	}
+	if second.Resumes != 1 {
+		t.Fatalf("re-create resumes = %d, want warm resume count preserved", second.Resumes)
+	}
+}
+
+func TestATEClientAlreadyRunningResumeIsWarmNoop(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	client, _ := mustLiveClient(t, newFakeATEControl())
+	if _, err := client.CreateActor(ctx, ActorSpec{Namespace: "agents", Name: "chat-thread-1"}); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	resumed, err := client.ResumeActor(ctx, "agents", "chat-thread-1")
+	if err != nil {
+		t.Fatalf("resume: %v", err)
+	}
+	if resumed.State != ActorStateActive || resumed.Resumes != 0 {
+		t.Fatalf("resume of running actor = %+v, want active with no resume workflow", resumed)
+	}
+}
+
+func TestATEClientNotFoundMapsToErrActorNotFound(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	client, _ := mustLiveClient(t, newFakeATEControl())
+	if _, err := client.ResumeActor(ctx, "agents", "missing"); !errors.Is(err, ErrActorNotFound) {
+		t.Fatalf("resume err = %v, want ErrActorNotFound", err)
+	}
+	if _, err := client.SuspendActor(ctx, "agents", "missing"); !errors.Is(err, ErrActorNotFound) {
+		t.Fatalf("suspend err = %v, want ErrActorNotFound", err)
+	}
+	if _, err := client.PauseActor(ctx, "agents", "missing"); !errors.Is(err, ErrActorNotFound) {
+		t.Fatalf("pause err = %v, want ErrActorNotFound", err)
+	}
+	if _, err := client.DescribeActor(ctx, "agents", "missing"); !errors.Is(err, ErrActorNotFound) {
+		t.Fatalf("describe err = %v, want ErrActorNotFound", err)
+	}
+	if _, err := client.ResumeActor(ctx, "other", "chat-thread-1"); !errors.Is(err, ErrActorNotFound) {
+		t.Fatalf("cross-atespace resume err = %v, want ErrActorNotFound", err)
+	}
+}
+
+func TestATEClientSuspendPauseDescribeRoundTrip(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	client, _ := mustLiveClient(t, newFakeATEControl())
+	created, err := client.CreateActor(ctx, ActorSpec{Namespace: "agents", Name: "chat-thread-1"})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
 	suspended, err := client.SuspendActor(ctx, "agents", "chat-thread-1")
 	if err != nil {
 		t.Fatalf("suspend: %v", err)
 	}
-	if suspended.State != ActorStateSuspended {
-		t.Fatalf("suspended state = %q, want Suspended", suspended.State)
+	if suspended.State != ActorStateSuspended || suspended.ID != created.ID {
+		t.Fatalf("suspended handle = %+v, want suspended with stable UID", suspended)
 	}
+
 	paused, err := client.PauseActor(ctx, "agents", "chat-thread-1")
 	if err != nil {
 		t.Fatalf("pause: %v", err)
@@ -165,59 +266,109 @@ func TestLiveClientLifecycleRoundTrip(t *testing.T) {
 	if paused.State != ActorStatePaused {
 		t.Fatalf("paused state = %q, want Paused", paused.State)
 	}
+
 	described, err := client.DescribeActor(ctx, "agents", "chat-thread-1")
 	if err != nil {
 		t.Fatalf("describe: %v", err)
 	}
-	if described.ID != created.ID || described.Resumes != 1 {
-		t.Fatalf("described handle = %+v, want stable identity", described)
+	if described.State != ActorStatePaused || described.ID != created.ID {
+		t.Fatalf("described handle = %+v, want paused with stable UID", described)
 	}
 }
 
-func TestLiveClientCreateIsIdempotent(t *testing.T) {
-	t.Parallel()
-
-	backend := newLiveTestBackend()
-	client, ctx := newLiveTestClient(t, backend, "")
-	spec := ActorSpec{Namespace: "agents", Name: "chat-thread-1", HarnessKind: "openCode"}
-
-	first, err := client.CreateActor(ctx, spec)
-	if err != nil {
-		t.Fatalf("create: %v", err)
-	}
-	second, err := client.CreateActor(ctx, spec)
-	if err != nil {
-		t.Fatalf("re-create: %v", err)
-	}
-	if second.ID != first.ID {
-		t.Fatalf("re-create ID = %q, want warm reuse of %q", second.ID, first.ID)
-	}
-}
-
-func TestLiveClientAuthTokenUsesHeaderOnly(t *testing.T) {
-	t.Parallel()
-
-	backend := newLiveTestBackend()
-	client, ctx := newLiveTestClient(t, backend, "spike-token")
-	if _, err := client.CreateActor(ctx, ActorSpec{Namespace: "agents", Name: "chat-thread-1"}); err != nil {
-		t.Fatalf("create: %v", err)
-	}
-	backend.mu.Lock()
-	defer backend.mu.Unlock()
-	if len(backend.authSeen) == 0 || backend.authSeen[0] != "Bearer spike-token" {
-		t.Fatalf("auth headers = %v, want exactly the bearer header", backend.authSeen)
-	}
-}
-
-func TestLiveClientNilClientFailsClosed(t *testing.T) {
+func TestATEClientAtespaceOverride(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
-	var client *LiveClient
-	if _, err := client.CreateActor(ctx, ActorSpec{Namespace: "agents", Name: "a"}); err == nil {
-		t.Fatal("nil live client must fail closed")
+	fake := newFakeATEControl()
+	cfg := liveTestConfig()
+	cfg.Atespace = "shared"
+	client, err := NewATEClient(cfg, fake)
+	if err != nil {
+		t.Fatalf("NewATEClient: %v", err)
 	}
-	if got := client.Endpoint(); got != "" {
-		t.Fatalf("nil endpoint = %q, want empty", got)
+	if _, err := client.CreateActor(ctx, ActorSpec{Namespace: "agents", Name: "chat-thread-1"}); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if len(fake.creates) != 1 || fake.creates[0].Atespace != "shared" {
+		t.Fatalf("creates = %+v, want forced shared atespace", fake.creates)
+	}
+}
+
+func TestATEClientRejectsOverlongNames(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	client, _ := mustLiveClient(t, newFakeATEControl())
+	name := "chat-" + strings.Repeat("a", 60)
+	if _, err := client.CreateActor(ctx, ActorSpec{Namespace: "agents", Name: name}); err == nil {
+		t.Fatal("expected overlong actor name to fail fast")
+	}
+	uuidThread := "123e4567-e89b-12d3-a456-426614174000"
+	if _, err := client.CreateActor(ctx, ActorSpec{Namespace: "agents", Name: ActorNameForThread(uuidThread)}); err != nil {
+		t.Fatalf("uuid thread actor name must fit the ATE bound: %v", err)
+	}
+}
+
+func TestMapATEState(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		state ATEActorState
+		want  ActorState
+	}{
+		{ATEActorStateRunning, ActorStateActive},
+		{ATEActorStateResuming, ActorStateActive},
+		{ATEActorStateSuspended, ActorStateSuspended},
+		{ATEActorStateSuspending, ActorStateSuspended},
+		{ATEActorStateCrashed, ActorStateSuspended},
+		{ATEActorStatePaused, ActorStatePaused},
+		{ATEActorStatePausing, ActorStatePaused},
+		{ATEActorStateDeleting, ActorStateActive},
+		{ATEActorStateUnspecified, ActorStateActive},
+		{"future-state", ActorStateActive},
+	} {
+		if got := MapATEState(tc.state); got != tc.want {
+			t.Fatalf("MapATEState(%q) = %q, want %q", tc.state, got, tc.want)
+		}
+	}
+}
+
+func TestATEClientConfigValidation(t *testing.T) {
+	t.Parallel()
+
+	if _, err := NewATEClient(ATEClientConfig{}, newFakeATEControl()); err == nil {
+		t.Fatal("expected config without address to fail")
+	}
+	noTemplate := liveTestConfig()
+	noTemplate.Template = ""
+	if _, err := NewATEClient(noTemplate, newFakeATEControl()); err == nil {
+		t.Fatal("expected config without template to fail")
+	}
+	if _, err := NewATEClient(liveTestConfig(), nil); err == nil {
+		t.Fatal("expected nil control transport to fail")
+	}
+}
+
+func TestATEClientConfigFromGate(t *testing.T) {
+	t.Setenv(GateEnabledEnvVar, "true")
+	t.Setenv(GateEndpointEnvVar, "ate-api-server.ate-system.svc:443")
+	t.Setenv(GateAtespaceEnvVar, "agents")
+	t.Setenv(GateTemplateEnvVar, "standing-chat")
+	t.Setenv(GateTokenFileEnvVar, "/run/ate/token")
+
+	gate := GateConfigFromEnv()
+	if !gate.LiveEnabled() {
+		t.Fatalf("gate from env = %+v, want live", gate)
+	}
+	cfg := ATEClientConfigFromGate(gate)
+	if cfg.Address != "ate-api-server.ate-system.svc:443" || cfg.Atespace != "agents" || cfg.Template != "standing-chat" || cfg.TokenFile != "/run/ate/token" {
+		t.Fatalf("client config from gate = %+v", cfg)
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("gate-derived config: %v", err)
+	}
+	if _, err := NewATEClient(cfg, newFakeATEControl()); err != nil {
+		t.Fatalf("NewATEClient from gate: %v", err)
 	}
 }
