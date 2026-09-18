@@ -18,6 +18,12 @@
 // Job create-to-ready timings; Primaris measured ~8-44s). The report keeps
 // p50/p95 fields for every scenario plus the comparison.
 //
+// Honest-unavailable probing: -probe-only dials ateapi once (GetActor for an
+// absent probe name) and reports {"reachable":true/false} as JSON with no
+// timings at all — NotFound for the absent probe counts as reachable because
+// the server answered. Use it before any --live run so an unreachable gateway
+// surfaces as reachable:false instead of fabricated numbers.
+//
 // Usage:
 //
 //	go run ./cmd/substrate-latency -n 20 -out /tmp/substrate-latency.json
@@ -57,6 +63,90 @@ type latencyReport struct {
 	Scenarios    map[string]scenarioStats `json:"scenarios"`
 	JobBaseline  *scenarioStats           `json:"jobBaseline,omitempty"`
 	ComparisonMs map[string]float64       `json:"comparisonMs,omitempty"`
+}
+
+// probeReport answers "is live Kind ATE reachable?" with no latency numbers
+// at all. reachable=true means ateapi answered a GetActor probe (either with
+// the actor or with NotFound for the absent probe name); reachable=false
+// carries the dial/probe error so callers never mistake an unavailable
+// gateway for fast warm resume. Token material never appears in the report —
+// only the endpoint address does.
+type probeReport struct {
+	Tool        string `json:"tool"`
+	Backend     string `json:"backend"`
+	Endpoint    string `json:"endpoint"`
+	Reachable   bool   `json:"reachable"`
+	Error       string `json:"error,omitempty"`
+	GeneratedAt string `json:"generatedAt"`
+}
+
+// evaluateProbeTarget resolves the live gate to a dial config, or returns the
+// honest reason the gateway cannot be probed (gate off, missing template).
+// Pure so unit tests can pin the gate-off messaging without a cluster.
+func evaluateProbeTarget(gate substrate.GateConfig) (substrate.ATEClientConfig, string, bool) {
+	if !gate.LiveEnabled() {
+		missing := substrate.GateEnabledEnvVar + "=true"
+		if strings.TrimSpace(gate.Endpoint) == "" {
+			missing += " + " + substrate.GateEndpointEnvVar
+		}
+		return substrate.ATEClientConfig{}, "live gate off (need " + missing + ")", false
+	}
+	ateCfg := substrate.ATEClientConfigFromGate(gate)
+	if err := ateCfg.Validate(); err != nil {
+		return substrate.ATEClientConfig{}, err.Error(), false
+	}
+	return ateCfg, "", true
+}
+
+// runProbe dials ateapi per the live gate and issues one GetActor for a probe
+// name that is expected to be absent. It always writes the JSON report (to
+// -out when set, plus stdout) and exits 0 when ateapi answered, 1 otherwise.
+func runProbe(ctx context.Context, namespace, outPath string) {
+	gate := substrate.GateConfigFromEnv()
+	ateCfg, gateErr, ok := evaluateProbeTarget(gate)
+	report := probeReport{Tool: "substrate-latency-probe", Backend: "ate-live", Endpoint: ateCfg.Address, GeneratedAt: time.Now().UTC().Format(time.RFC3339Nano)}
+	exitCode := 1
+	switch {
+	case !ok:
+		report.Error = gateErr
+	default:
+		probeCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+		defer cancel()
+		control, closeConn, err := substrate.DialATEControl(probeCtx, ateCfg, substrate.ATEDialOptions{})
+		if err != nil {
+			report.Error = err.Error()
+		} else {
+			defer closeConn()
+			atespace := strings.TrimSpace(gate.Atespace)
+			if atespace == "" {
+				atespace = strings.TrimSpace(namespace)
+			}
+			_, probeErr := control.GetActor(probeCtx, substrate.ATEObjectRef{Atespace: atespace, Name: "anvil-substrate-probe"})
+			if probeErr == nil || substrate.IsATENotFound(probeErr) {
+				report.Reachable = true
+				exitCode = 0
+			} else {
+				report.Error = probeErr.Error()
+			}
+		}
+	}
+	encoded, err := json.MarshalIndent(report, "", "  ")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: encode probe report: %v\n", err)
+		os.Exit(1)
+	}
+	encoded = append(encoded, '\n')
+	if trimmed := strings.TrimSpace(outPath); trimmed != "" {
+		if err := os.WriteFile(trimmed, encoded, 0o600); err != nil {
+			fmt.Fprintf(os.Stderr, "error: write probe report: %v\n", err)
+			os.Exit(1)
+		}
+	}
+	if _, err := os.Stdout.Write(encoded); err != nil {
+		fmt.Fprintf(os.Stderr, "error: write stdout: %v\n", err)
+		os.Exit(1)
+	}
+	os.Exit(exitCode)
 }
 
 func percentile(sorted []float64, quantile float64) float64 {
@@ -161,7 +251,12 @@ func main() {
 	outPath := flag.String("out", "", "Optional JSON report path (written with 0600 permissions).")
 	jobP50 := flag.Float64("job-baseline-p50-ms", 0, "Observed Job cold-start p50 in ms for comparison (0 omits the baseline).")
 	jobP95 := flag.Float64("job-baseline-p95-ms", 0, "Observed Job cold-start p95 in ms for comparison (0 omits the baseline).")
+	probeOnly := flag.Bool("probe-only", false, "Dial ateapi once and report reachability as JSON (no timings, no iterations). Exits 0 when ateapi answered, 1 otherwise.")
 	flag.Parse()
+
+	if *probeOnly {
+		runProbe(context.Background(), *namespace, *outPath)
+	}
 
 	if *iterations < 1 {
 		fmt.Fprintln(os.Stderr, "error: -n must be at least 1")
