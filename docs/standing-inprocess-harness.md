@@ -1,8 +1,8 @@
 # Standing in-process harness + WebSocket chat delivery
 
-Status: slice 1 (API-first) — architectural direction locked by Austin
-2026-09-18. This is the first slice of the standing in-process +
-WebSocket interactive path.
+Status: slice 2 (live standing backend in the turn path, Fake-backed) —
+turn-based execution stays durable while InProcess threads stream through
+their standing session. Architectural direction locked by Austin 2026-09-18.
 
 ## Direction
 
@@ -140,11 +140,13 @@ Unchanged, by construction:
 - **SubstrateActor (optional):** warm-actor isolation/density when operating
   a Substrate/ATE gateway pays off (see [Substrate spike](substrate-spike.md)
   for the promote/reshape/retire bars). Unchanged by this slice.
-- **InProcess (opt-in, slice 1 API-first):** interactive Wrapper/manager/peer
+- **InProcess (opt-in, slice 2 live in the turn path):** interactive Wrapper/manager/peer
   chat where a standing session removes the per-turn cold start. Slice 1
-  only selects, names, resumes, and streams (Fake); live harness execution
-  behind it is the next slice. Until then `InProcess` runs hold as
-  `InProcessNotWired` with guidance and create no Jobs.
+  selected, named, resumed, and streamed (Fake); slice 2 executes turns
+  through the backend behind the `standing.liveEnabled` /
+  `ANVIL_AGENTS_STANDING_LIVE` opt-in gate (Fake-backed in tests — no model
+  calls, no harness subprocess yet). Gate off still holds as
+  `InProcessNotWired` with guidance and creates no Jobs.
 
 ## Explicit non-goals for slice 1
 
@@ -161,34 +163,66 @@ Unchanged, by construction:
 - No Primaris Argo changes, no chart values for the plane, no Secret access
   for the API beyond what standing chat already mounts (database URI only).
 
-## NEXT (exact next PR)
+## Slice 2: live standing backend in the turn path (this slice)
 
-Wiring the live backend **into the turn path** (not around it), so every
-standing turn remains one durable AgentRun:
+Slice 2 wires a live `standing.Backend` **into** `reconcileChatTurn`
+(`internal/runapi/chat_execution.go`), beside the `writes.Create` branch —
+never around the durable turn:
 
-1. **Live `standing.Backend` behind an explicit opt-in gate** (env/flags,
-   off by default; no chart values, no Primaris sync changes). In
-   `reconcileChatTurn` (`internal/runapi/chat_execution.go`), beside the
-   `writes.Create` branch (marked with an anchor comment in slice 1): when
-   the thread's harness resolves to `execution.runtime: InProcess` and the
-   gate is on, create the append-only AgentRun from the outbox-frozen
-   `turn.RunJSON` exactly as today, then `EnsureTurnSession` for the thread
-   and `StreamTurn` bound to the turn's identity (thread ID, turn ID, run
-   name in the sink metadata). Persist the returned full reply through the
-   existing `CompleteTurn` path (including the 64KiB truncation and
-   `dispatchChatCoordination` peer fanout), and `SuspendIdleSession` on
-   terminal reconciliation (best-effort). Gate off (or unresolvable
-   harness, or any backend error) falls back to today's behavior: the run
-   holds as `InProcessNotWired` and no Job is ever created for it.
-2. **Peer turns take the identical branch** via their recipient child-thread
-   source: resume the child thread's session, stream the child turn, complete
-   it with the same deterministic delivery IDs. No new peer protocol; the
-   durable wait for busy recipients still owns queueing.
-3. **Long-lived stream subscription**: keep the WS connection open past the
-   snapshot and multiplex `token` frames (`TokenEvent`: thread/turn/seq +
-   done marker) for the turn bound in step 1, with the same terminal codes;
-   SSE stays the fallback. Bound connection counts already exist via the
-   shared stream limiter.
+- **Opt-in gate, deny by default.** `standing.liveEnabled` config plus the
+  `ANVIL_AGENTS_STANDING_LIVE` environment variable (either enables; neither
+  disables the other), and an attached backend — all required. No chart
+  values, no Primaris sync changes. Gate off keeps today's Job /
+  `NeedsHuman` hold behavior byte-identical: the run is created from the
+  outbox-frozen intent and left untouched for the existing hold path, and no
+  Job is ever created for it.
+- **One durable AgentRun per accepted message, unchanged.** The run is still
+  created from the outbox-frozen `turn.RunJSON` exactly as today; the
+  standing backend consumes that frozen prompt and never bypasses it. After
+  `EnsureTurnSession` + `StreamTurn` (bound to thread ID, turn ID, and run
+  name in the sink), the full reply marks the run `Succeeded` so the
+  existing `Succeeded` branch completes the turn: same 64KiB truncation,
+  same `dispatchChatCoordination` peer fanout, same `CompleteTurn`.
+  `SuspendIdleSession` runs best-effort on terminal reconciliation.
+- **Peer child turns take the identical branch.** Peer deliveries already
+  queue through `queueChatTurnInternal` into the same `reconcileChatTurn`,
+  keyed off the recipient child thread — so a child whose profile resolves
+  to `InProcess` streams through its own session with the same
+  deterministic delivery IDs, while Job-plane parents and children are
+  untouched.
+- **Gate off, unresolvable harness, or any backend error falls back** to
+  today's behavior (active hold; the controller's `InProcessNotWired`
+  guidance surfaces on its normal pass). Queue, read-refresh, and
+  background recovery racing on one turn are serialized by a per-turn
+  singleflight guard in the API process (the chart runs one API replica).
+- **Stream visibility without a protocol change.** The streamed reply lands
+  in the durable turn record, so the existing snapshot tail already serves
+  it over SSE and WebSocket (`standing_ready`); token events carry the full
+  turn identity (`threadId`/`turnId`/`runName`) for the future live
+  subscription, which stays a follow-up.
+
+Stubbed vs live, explicitly: tests drive `FakeBackend` (deterministic
+word-streamed prose — no model calls, no provider credentials, no harness
+subprocess in the API process). The per-harness envelope wrapper
+(`standingRunOutput`) is stub glue so the fake's plain text parses through
+the existing reply extractors; a real harness process returns
+native-enveloped output directly and the wrapper goes away with it. Crash
+recovery between create and the `Succeeded` mark re-streams at least once;
+a multi-replica claim and a controller-hold yield for API-owned standing
+turns are slice-3 work, not this slice.
+
+## NEXT (slice 3 and beyond)
+
+1. **Real harness process** behind the same `standing.Backend` + gate
+   (model session per thread, provider credentials outside the API's Secret
+   surface), then retire the envelope wrapper.
+2. **Long-lived stream subscription**: keep the WS connection open past the
+   snapshot and multiplex `token` frames (`TokenEvent`: thread/turn/run +
+   seq + done marker) for the streaming turn, with the same terminal codes;
+   SSE stays the fallback.
+3. **Controller-hold yield + multi-replica claim** for API-owned standing
+   turns (annotation claim the controller respects), so the
+   `InProcessNotWired` hold can never race a live stream.
 4. **Latency compare** (direct turns AND peer deliveries, warm resume vs the
    Job cold-start baseline on the same cluster shape) with promote/reshape/
    retire bars mirroring the Substrate spike, then wire Desktop chat to
