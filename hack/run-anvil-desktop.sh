@@ -4,6 +4,16 @@
 set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# Ensure Go is findable in non-login shells (WSL pulse / Cursor local-exec).
+if ! command -v go >/dev/null 2>&1; then
+	for _go_bin in /usr/local/go/bin "$HOME/go/bin" /usr/lib/go/bin; do
+		if [[ -x "${_go_bin}/go" ]]; then
+			PATH="${_go_bin}:${PATH}"
+			export PATH
+			break
+		fi
+	done
+fi
 workdir="${ANVIL_DESKTOP_VM_DIR:-${XDG_RUNTIME_DIR:-/tmp}/anvil-desktop-vm}"
 listen="${ANVIL_DESKTOP_LISTEN:-127.0.0.1:1738}"
 api_origin="${ANVIL_DESKTOP_API_ORIGIN:-}"
@@ -317,6 +327,9 @@ host_args=(
 	--api-origin "${api_origin}"
 	--config-dir "${workdir}/prefs"
 )
+if [[ -n "${ANVIL_CHAT_LATENCY_JSONL:-}" && "${ANVIL_CHAT_LATENCY_JSONL}" == /* ]]; then
+	host_args+=(--chat-latency-jsonl "${ANVIL_CHAT_LATENCY_JSONL}")
+fi
 if [[ "${install_fixtures}" == 1 ]]; then
 	host_args+=(--path "${fixture_dir}")
 fi
