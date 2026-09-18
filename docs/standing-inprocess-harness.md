@@ -1,13 +1,14 @@
 # Standing in-process harness + WebSocket chat delivery
 
-Status: Desktop chat e2e over the standing WebSocket on top of slice 5b
-(persistent native session resume for ProcessBackend), slice 5a (standing vs
-Job latency compare harness), slice 4
-(controller-hold yield + multi-replica claim for API-owned standing turns) and
-slice 3b (real harness process behind `standing.Backend`) — exactly one API
-replica drives a standing turn through an annotation claim the controller
-respects, while open standing streams multiplex live token frames during the
-turn and the durable turn record stays the source of truth. Architectural
+Status: slice 5c (chart/RBAC enablement for API-owned standing turns) on top
+of Desktop chat e2e over the standing WebSocket, slice 5b (persistent native
+session resume for ProcessBackend), slice 5a (standing vs Job latency
+compare harness), slice 4 (controller-hold yield + multi-replica claim for
+API-owned standing turns) and slice 3b (real harness process behind
+`standing.Backend`) — exactly one API replica drives a standing turn
+through an annotation claim the controller respects, while open standing
+streams multiplex live token frames during the turn and the durable turn
+record stays the source of truth. Architectural
 direction locked by Austin 2026-09-18.
 
 ## Direction
@@ -474,7 +475,7 @@ unchanged.
   untouched; provider auth stays in each CLI's own auth home), no Primaris
   Argo/chart changes, no RBAC changes — the slice-4 claim follow-up (API
   role `update`/`patch` on `agentruns`, `update` on `agentruns/status`)
-  stays documented under NEXT. `FakeBackend`, gate-off, Job-plane, and scout
+  landed as slice 5c. `FakeBackend`, gate-off, Job-plane, and scout
   paths are byte-identical.
 
 Tests: `internal/standing/process_resume_test.go` pins the plumbing with a
@@ -486,21 +487,31 @@ against stub shell binaries (codex `resume <uuid>`, openCode `--session`,
 openClaw stable `--session-key`, primeAgent with no resume argv anywhere) —
 no model calls, no credentials.
 
-## NEXT (slice 5c and beyond)
+## Slice 5c: chart/RBAC enablement for API-owned standing turns (this slice)
 
-1. **Live numbers + Desktop e2e.** The slice-5a harness is green on
-   deterministic backends and slice-5b resume is pinned against stub CLIs;
-   `process-exec` live numbers on the same cluster shape as the Job baseline
-   are still open (needs a harness CLI with local auth) — measure cold first
-   turns AND resumed second turns, then wire Desktop chat to
-   `openChatThreadStream` end to end and apply the promote/reshape/retire
-   bars above.
-2. **Retire the envelope wrapper** entirely once no Fake-only live path
-   remains. Provider credentials stay outside the API's Secret surface
-   throughout. Production enablement also needs the API role granted
-   `update`/`patch` on `agentruns` (claim stamp) and `update` on
-   `agentruns/status` (Succeeded mark) — the slice-4 claim degrades to hold
-   behavior without them, so no chart change rode slices 4–5b.
+Slice 5c lands the minimal Helm/RBAC chart change so standing live mode can
+claim + mark Succeeded in multi-replica production. No Substrate/WarmPool
+changes, no new execution path — the slice-4 claim and the Succeeded mark
+already exist in code and degrade to hold behavior without these verbs.
+
+- **Opt-in gate.** `api.config.standing.liveEnabled` (default `false`)
+  renders into the API ConfigMap verbatim as `standing.liveEnabled`, so one
+  value flips both the process gate and the RBAC. Gate off renders
+  byte-identical read-only RBAC (`get`/`list` on `agentruns`), pinned by the
+  exact rule contract in `hack/test-api-chart.sh`.
+- **Exactly two additions, both scoped to standing turns.** Gate on grants
+  `update`/`patch` on `agentruns` (the slice-4 claim stamp is a metadata
+  `Update`) and `update` on `agentruns/status` (the streamed Succeeded
+  mark is a status `Update`). No `create`/`delete`, no other resources, no
+  Secret access — the status rule is update-only by construction.
+- **Composes with existing gates.** External-trigger `create`/`patch`/
+  `update` on `agentruns` is preserved without duplicating verbs when both
+  gates are on; chat, composition, controls, and Secret rules are untouched.
+
+Operator path: set `api.config.standing.liveEnabled=true` (standing chat
+must already be enabled with its database Secret) and upgrade the release;
+replicas past the upgrade claim through the annotation while older replicas
+keep hold behavior, converging without wedging.
 
 ## Desktop chat e2e over the standing WebSocket (this slice)
 
@@ -567,7 +578,7 @@ asserts first-token timing, the standing/job classification, the
 never-send-twice fallback, and the JSONL fields; `internal/desktop/
 chat_latency_standing_test.go` pins the new sink fields server-side.
 
-## NEXT (slice 5c and beyond)
+## NEXT (after slice 5c)
 
 1. **Live numbers.** The slice-5a harness is green on deterministic
    backends, slice-5b resume is pinned against stub CLIs, and Desktop chat
@@ -579,7 +590,4 @@ chat_latency_standing_test.go` pins the new sink fields server-side.
    promote/reshape/retire bars above.
 2. **Retire the envelope wrapper** entirely once no Fake-only live path
    remains. Provider credentials stay outside the API's Secret surface
-   throughout. Production enablement also needs the API role granted
-   `update`/`patch` on `agentruns` (claim stamp) and `update` on
-   `agentruns/status` (Succeeded mark) — the slice-4 claim degrades to hold
-   behavior without them, so no chart change rode slices 4–5b.
+   throughout.

@@ -5,6 +5,7 @@
 {{- $controlsRead := dig "controls" "readEnabled" false .Values.api.config }}
 {{- $controlsWrite := dig "controls" "writeEnabled" false .Values.api.config }}
 {{- $externalTriggers := dig "externalTriggers" "enabled" false .Values.api.config }}
+{{- $standingLive := dig "standing" "liveEnabled" false .Values.api.config }}
 {{- if and $compositionWrite (not $compositionRead) }}
 {{- fail "api.config.composition.writeEnabled requires api.config.composition.readEnabled" }}
 {{- end }}
@@ -27,8 +28,18 @@ rules:
 {{- if or $runsCreate $externalTriggers }}
       - create
 {{- end }}
-{{- if $externalTriggers }}
+{{- if $standingLive }}
+      - update
       - patch
+{{- end }}
+{{- if and $externalTriggers (not $standingLive) }}
+      - patch
+      - update
+{{- end }}
+{{- if $standingLive }}
+  - apiGroups: ["control.anvil.hazyforge.io"]
+    resources: ["agentruns/status"]
+    verbs:
       - update
 {{- end }}
 {{- if $compositionRead }}
