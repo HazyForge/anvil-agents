@@ -835,12 +835,15 @@ type AgentRunHarnessExecutionSpec struct {
 	// Empty defaults to Job: exactly one Kubernetes Job per AgentRun. Set to
 	// SubstrateActor to select the optional warm-actor plane for
 	// standing/manager chat turns; scouts and batch runs must stay on Jobs.
+	// Set to InProcess to select the optional standing in-process harness
+	// plane (API-first in slice 1: the controller holds these runs without
+	// creating a Job until a live standing-harness backend is wired).
 	// The controller never creates a Job for SubstrateActor runs: with the
 	// live gate off it holds them as SubstrateActorNotWired, and with the
 	// gate on (plus the ateapi endpoint) it dials ateapi and binds the warm
 	// actor.
-	// See docs/substrate-spike.md.
-	// +kubebuilder:validation:Enum=Job;SubstrateActor
+	// See docs/substrate-spike.md and docs/standing-inprocess-harness.md.
+	// +kubebuilder:validation:Enum=Job;SubstrateActor;InProcess
 	// +optional
 	Runtime AgentRunExecutionRuntime `json:"runtime,omitempty"`
 	// Substrate tunes the optional Substrate actor plane. Required when
@@ -1090,12 +1093,13 @@ type AgentRunStatus struct {
 	// grok-4.5) from the effective harness after composition. Empty when the
 	// backend uses its runner default or does not select a model.
 	// +optional
-	Model                   string                                `json:"model,omitempty"`
-	Intent                  string                                `json:"intent,omitempty"`
-	Image                   string                                `json:"image,omitempty"`
-	// ExecutionRuntime records the selected execution plane (Job or
-	// SubstrateActor) from the effective harness after composition. Empty on
-	// runs written before this field means the default Job plane.
+	Model  string `json:"model,omitempty"`
+	Intent string `json:"intent,omitempty"`
+	Image  string `json:"image,omitempty"`
+	// ExecutionRuntime records the selected execution plane (Job,
+	// SubstrateActor, or InProcess) from the effective harness after
+	// composition. Empty on runs written before this field means the default
+	// Job plane.
 	// +optional
 	ExecutionRuntime string `json:"executionRuntime,omitempty"`
 	// SubstrateActor records the bound Substrate actor identity. The controller

@@ -482,7 +482,7 @@ func DialATEControl(ctx context.Context, cfg ATEClientConfig, opts ATEDialOption
 		// what keeps this from ever reaching a shared cluster.
 		dialOpts := []grpc.DialOption{
 			grpc.WithTransportCredentials(credentials.NewTLS(&tls.Config{
-				InsecureSkipVerify: true, //nolint:gosec // Kind loopback-only spike path; guarded above.
+				InsecureSkipVerify: true, // #nosec G402 -- Kind-only loopback spike path; non-loopback endpoints are refused by the guard above.
 				MinVersion:         tls.VersionTLS13,
 				ServerName:         ateAPIServerName,
 			})),

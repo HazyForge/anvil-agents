@@ -2327,14 +2327,18 @@ spec:
                                   Empty defaults to Job: exactly one Kubernetes Job per AgentRun. Set to
                                   SubstrateActor to select the optional warm-actor plane for
                                   standing/manager chat turns; scouts and batch runs must stay on Jobs.
+                                  Set to InProcess to select the optional standing in-process harness
+                                  plane (API-first in slice 1: the controller holds these runs without
+                                  creating a Job until a live standing-harness backend is wired).
                                   The controller never creates a Job for SubstrateActor runs: with the
                                   live gate off it holds them as SubstrateActorNotWired, and with the
                                   gate on (plus the ateapi endpoint) it dials ateapi and binds the warm
                                   actor.
-                                  See docs/substrate-spike.md.
+                                  See docs/substrate-spike.md and docs/standing-inprocess-harness.md.
                                 enum:
                                 - Job
                                 - SubstrateActor
+                                - InProcess
                                 type: string
                               securityContext:
                                 description: SecurityContext configures the agent
@@ -5917,14 +5921,18 @@ spec:
                                     Empty defaults to Job: exactly one Kubernetes Job per AgentRun. Set to
                                     SubstrateActor to select the optional warm-actor plane for
                                     standing/manager chat turns; scouts and batch runs must stay on Jobs.
+                                    Set to InProcess to select the optional standing in-process harness
+                                    plane (API-first in slice 1: the controller holds these runs without
+                                    creating a Job until a live standing-harness backend is wired).
                                     The controller never creates a Job for SubstrateActor runs: with the
                                     live gate off it holds them as SubstrateActorNotWired, and with the
                                     gate on (plus the ateapi endpoint) it dials ateapi and binds the warm
                                     actor.
-                                    See docs/substrate-spike.md.
+                                    See docs/substrate-spike.md and docs/standing-inprocess-harness.md.
                                   enum:
                                   - Job
                                   - SubstrateActor
+                                  - InProcess
                                   type: string
                                 securityContext:
                                   description: SecurityContext configures the agent
@@ -10443,14 +10451,18 @@ spec:
                       Empty defaults to Job: exactly one Kubernetes Job per AgentRun. Set to
                       SubstrateActor to select the optional warm-actor plane for
                       standing/manager chat turns; scouts and batch runs must stay on Jobs.
+                      Set to InProcess to select the optional standing in-process harness
+                      plane (API-first in slice 1: the controller holds these runs without
+                      creating a Job until a live standing-harness backend is wired).
                       The controller never creates a Job for SubstrateActor runs: with the
                       live gate off it holds them as SubstrateActorNotWired, and with the
                       gate on (plus the ateapi endpoint) it dials ateapi and binds the warm
                       actor.
-                      See docs/substrate-spike.md.
+                      See docs/substrate-spike.md and docs/standing-inprocess-harness.md.
                     enum:
                     - Job
                     - SubstrateActor
+                    - InProcess
                     type: string
                   securityContext:
                     description: SecurityContext configures the agent container security
@@ -13015,14 +13027,18 @@ spec:
                           Empty defaults to Job: exactly one Kubernetes Job per AgentRun. Set to
                           SubstrateActor to select the optional warm-actor plane for
                           standing/manager chat turns; scouts and batch runs must stay on Jobs.
+                          Set to InProcess to select the optional standing in-process harness
+                          plane (API-first in slice 1: the controller holds these runs without
+                          creating a Job until a live standing-harness backend is wired).
                           The controller never creates a Job for SubstrateActor runs: with the
                           live gate off it holds them as SubstrateActorNotWired, and with the
                           gate on (plus the ateapi endpoint) it dials ateapi and binds the warm
                           actor.
-                          See docs/substrate-spike.md.
+                          See docs/substrate-spike.md and docs/standing-inprocess-harness.md.
                         enum:
                         - Job
                         - SubstrateActor
+                        - InProcess
                         type: string
                       securityContext:
                         description: SecurityContext configures the agent container
@@ -15942,14 +15958,18 @@ spec:
                           Empty defaults to Job: exactly one Kubernetes Job per AgentRun. Set to
                           SubstrateActor to select the optional warm-actor plane for
                           standing/manager chat turns; scouts and batch runs must stay on Jobs.
+                          Set to InProcess to select the optional standing in-process harness
+                          plane (API-first in slice 1: the controller holds these runs without
+                          creating a Job until a live standing-harness backend is wired).
                           The controller never creates a Job for SubstrateActor runs: with the
                           live gate off it holds them as SubstrateActorNotWired, and with the
                           gate on (plus the ateapi endpoint) it dials ateapi and binds the warm
                           actor.
-                          See docs/substrate-spike.md.
+                          See docs/substrate-spike.md and docs/standing-inprocess-harness.md.
                         enum:
                         - Job
                         - SubstrateActor
+                        - InProcess
                         type: string
                       securityContext:
                         description: SecurityContext configures the agent container
@@ -17075,9 +17095,10 @@ spec:
                 type: string
               executionRuntime:
                 description: |-
-                  ExecutionRuntime records the selected execution plane (Job or
-                  SubstrateActor) from the effective harness after composition. Empty on
-                  runs written before this field means the default Job plane.
+                  ExecutionRuntime records the selected execution plane (Job,
+                  SubstrateActor, or InProcess) from the effective harness after
+                  composition. Empty on runs written before this field means the default
+                  Job plane.
                 type: string
               externalSecretRefreshes:
                 items:
@@ -19507,14 +19528,18 @@ spec:
                               Empty defaults to Job: exactly one Kubernetes Job per AgentRun. Set to
                               SubstrateActor to select the optional warm-actor plane for
                               standing/manager chat turns; scouts and batch runs must stay on Jobs.
+                              Set to InProcess to select the optional standing in-process harness
+                              plane (API-first in slice 1: the controller holds these runs without
+                              creating a Job until a live standing-harness backend is wired).
                               The controller never creates a Job for SubstrateActor runs: with the
                               live gate off it holds them as SubstrateActorNotWired, and with the
                               gate on (plus the ateapi endpoint) it dials ateapi and binds the warm
                               actor.
-                              See docs/substrate-spike.md.
+                              See docs/substrate-spike.md and docs/standing-inprocess-harness.md.
                             enum:
                             - Job
                             - SubstrateActor
+                            - InProcess
                             type: string
                           securityContext:
                             description: SecurityContext configures the agent container
@@ -22524,14 +22549,18 @@ spec:
                                     Empty defaults to Job: exactly one Kubernetes Job per AgentRun. Set to
                                     SubstrateActor to select the optional warm-actor plane for
                                     standing/manager chat turns; scouts and batch runs must stay on Jobs.
+                                    Set to InProcess to select the optional standing in-process harness
+                                    plane (API-first in slice 1: the controller holds these runs without
+                                    creating a Job until a live standing-harness backend is wired).
                                     The controller never creates a Job for SubstrateActor runs: with the
                                     live gate off it holds them as SubstrateActorNotWired, and with the
                                     gate on (plus the ateapi endpoint) it dials ateapi and binds the warm
                                     actor.
-                                    See docs/substrate-spike.md.
+                                    See docs/substrate-spike.md and docs/standing-inprocess-harness.md.
                                   enum:
                                   - Job
                                   - SubstrateActor
+                                  - InProcess
                                   type: string
                                 securityContext:
                                   description: SecurityContext configures the agent

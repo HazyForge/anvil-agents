@@ -145,3 +145,15 @@ Job for SubstrateActor runs: with the live gate off it holds them as
 `SubstrateActorNotWired`, and with the gate on (plus the ateapi endpoint) it
 dials ateapi and binds the warm actor. See
 [Substrate spike](substrate-spike.md).
+
+## Standing in-process harness (slice 1, API-first)
+
+Interactive threads can instead select a harness profile whose
+`execution.runtime` is `InProcess` to bind each thread to a standing
+in-process harness session owned by a long-lived process, delivered over
+WebSocket with an SSE fallback
+(`GET .../chat/threads/{id}/stream`). Slice 1 selects, names, resumes, and
+streams (Fake backend) without live harness execution; well-formed
+`InProcess` runs hold as `InProcessNotWired` with no Job. Jobs stay the
+default for scouts/batch and the SubstrateActor plane is untouched. See
+[Standing in-process harness](standing-inprocess-harness.md).

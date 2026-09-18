@@ -28,6 +28,20 @@ func TestExecutionRuntimeDefaultsToJob(t *testing.T) {
 	if !substrate.UsesSubstrateActors() {
 		t.Fatal("substrate execution must select Substrate actors")
 	}
+	inProcess := &AgentRunHarnessExecutionSpec{Runtime: AgentRunExecutionRuntimeInProcess}
+	if got := inProcess.EffectiveRuntime(); got != AgentRunExecutionRuntimeInProcess {
+		t.Fatalf("in-process runtime = %q, want InProcess", got)
+	}
+	if !inProcess.UsesInProcess() {
+		t.Fatal("in-process execution must select the standing in-process plane")
+	}
+	if substrate.UsesInProcess() || inProcess.UsesSubstrateActors() {
+		t.Fatal("execution planes must not overlap: SubstrateActor and InProcess are distinct")
+	}
+	job := &AgentRunHarnessExecutionSpec{}
+	if job.UsesInProcess() {
+		t.Fatal("empty execution must not select the in-process plane")
+	}
 }
 
 func TestValidateSubstrateExecution(t *testing.T) {
@@ -55,6 +69,18 @@ func TestValidateSubstrateExecution(t *testing.T) {
 		{
 			name: "substrate section on Job runtime is invalid",
 			spec: &AgentRunHarnessExecutionSpec{
+				Substrate: &AgentRunSubstrateActorSpec{ActorClass: "standing-chat"},
+			},
+			wantReason: "InvalidSubstrateSpec",
+		},
+		{
+			name: "in-process without section is valid",
+			spec: &AgentRunHarnessExecutionSpec{Runtime: AgentRunExecutionRuntimeInProcess},
+		},
+		{
+			name: "substrate section on InProcess runtime is invalid",
+			spec: &AgentRunHarnessExecutionSpec{
+				Runtime:   AgentRunExecutionRuntimeInProcess,
 				Substrate: &AgentRunSubstrateActorSpec{ActorClass: "standing-chat"},
 			},
 			wantReason: "InvalidSubstrateSpec",

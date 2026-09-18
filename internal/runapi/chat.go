@@ -63,6 +63,11 @@ func (server *Server) registerChatRoutes(mux *http.ServeMux) {
 	mux.Handle("GET /api/v1/namespaces/{namespace}/chat/threads/{threadID}", server.authenticate(http.HandlerFunc(server.handleGetChatThread)))
 	mux.Handle("GET /api/v1/namespaces/{namespace}/chat/threads/{threadID}/messages", server.authenticate(http.HandlerFunc(server.handleListChatMessages)))
 	mux.Handle("POST /api/v1/namespaces/{namespace}/chat/threads/{threadID}/messages", server.authenticate(http.HandlerFunc(server.handleAppendChatMessage)))
+	// Slice-1 standing stream: same snapshot + terminal events over SSE or a
+	// WebSocket upgrade. Browser WebSocket clients cannot set Authorization,
+	// so this route authenticates itself (header bearer or verified bearer
+	// subprotocol) instead of using the shared authenticate middleware.
+	mux.HandleFunc("GET /api/v1/namespaces/{namespace}/chat/threads/{threadID}/stream", server.handleChatThreadStream)
 }
 
 func (server *Server) SetChatStore(store chat.Store) {
