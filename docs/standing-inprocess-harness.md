@@ -1,6 +1,7 @@
 # Standing in-process harness + WebSocket chat delivery
 
-Status: slice 5a (standing vs Job latency compare harness) on top of slice 4
+Status: slice 5b (persistent native session resume for ProcessBackend) on top
+of slice 5a (standing vs Job latency compare harness), slice 4
 (controller-hold yield + multi-replica claim for API-owned standing turns) and
 slice 3b (real harness process behind `standing.Backend`) — exactly one API
 replica drives a standing turn through an annotation claim the controller
@@ -423,19 +424,79 @@ per warm scenario, the documented baseline defaults, the fail-closed backend
 selection, and the `harness-ok` ceiling for deterministic backends — all with
 no cluster and no subprocess.
 
-## NEXT (slice 5b and beyond)
+## Slice 5b: persistent native session resume (this slice)
 
-1. **Persistent native session resume** (pass a harness session ID across
-   turns where the CLI supports it) now that the process path is live; then
-   retire the envelope wrapper entirely once no Fake-only live path remains.
-   Provider credentials stay outside the API's Secret surface throughout.
-   Production enablement also needs the API role granted `update`/`patch` on
-   `agentruns` (claim stamp) and `update` on `agentruns/status` (Succeeded
-   mark) — the slice-4 claim degrades to hold behavior without them, so no
-   chart change rode slice 4.
-2. **Live numbers + Desktop e2e.** The slice-5a harness is green on
-   deterministic backends; `process-exec` live numbers on the same cluster
-   shape as the Job baseline are still open (needs a harness CLI with local
-   auth), then wire Desktop chat to `openChatThreadStream` end to end and
-   apply the promote/reshape/retire bars above. Persistent session resume
-   (slice 5b) composes with the same harness — re-measure after it lands.
+Slice 5b keeps one subprocess per turn (no daemon harness) and adds native
+session continuity where the CLI documents it: `ProcessBackend` records the
+harness's durable session id per standing session and resumes it on the next
+turn for the same thread, so warm turns keep model context beyond the
+process-local `EnsureTurnSession` identity. The turn-based model does not
+move: one append-only AgentRun per accepted message, frozen outbox intent in,
+`Succeeded` completion out, peer fanout and the slice-4 claim/hold contract
+unchanged.
+
+- **Plumbing.** `standing.SessionRunner` (`internal/standing/process_resume.go`)
+  is an optional `Runner` extension: `RunWithResume(handle, turnID, prompt,
+  resumeID)` returns the reply plus the id the CLI actually served under.
+  `StreamTurn` prefers it exactly when the kind supports native resume
+  (`SupportsNativeResume`); plain `Runner`s (the latency `process-stub`,
+  every existing test double) run every turn cold, byte-identical to slice
+  3b. The recorded id is observable via `NativeSessionID` and never carries
+  credentials — only the CLI's opaque session token.
+- **Verified resume surfaces** (flags checked against the desktop PATH
+  catalog recipes, the Job runner images, and the CLIs' documented
+  reference; resume argv is catalog constants plus the validated id, exec'd
+  with no shell):
+
+| Harness kind | Resume argv | Id discovery |
+| --- | --- | --- |
+| `codex` | `exec resume <uuid>` (documented non-interactive resume subcommand; prompt still on stdin) | `thread_id` from the `thread.started` JSONL event (`codex exec` reference: "can be used to resume the thread later") |
+| `openCode` | `run --session <ses_ID>` (`--session`/`-s`, "Session ID to continue"; unknown ids exit non-zero) | top-level `sessionID` every `--format json` event carries (verified in `run.ts`) |
+| `openClaw` | `agent --session-key <key>` (Job image passes a fresh key per AgentRun) | client-assigned stable key per standing session (`NativeSessionKey`), no output parsing |
+
+- **Cold argv alignment.** `codex` cold turns gain `--json` and `openCode`
+  cold turns gain `--format json`, matching the Job runner images
+  (`docker/agent-run-codex`, `docker/agent-run-openclaw`,
+  `docker/agent-run-opencode`) and the shapes the reply extractors already
+  parse — structured output is the only way the resume path can discover an
+  id. `openClaw` cold turns are unchanged through plain `Run`; the
+  `--session-key` rides the resume-aware path only.
+- **Fail closed.** `grokBuild` (no documented resume flag), `primeAgent`
+  (explicitly `--no-session`), `agy` (single-turn stream-json, no persistent
+  conversation), and the Fake-only kinds (`hermesAgent`, `piAgent`, `custom`,
+  empty) run cold and record nothing; the turn still succeeds, only the
+  native-context win is skipped. Malformed recorded ids never reach argv.
+  A resume the CLI rejects fails the turn back to hold (no silent cold retry
+  inside the failed turn) and clears the recorded id, so the next turn
+  re-discovers cold instead of wedging on a dead session.
+- **No surface expansion.** No Secret access (the child env filter is
+  untouched; provider auth stays in each CLI's own auth home), no Primaris
+  Argo/chart changes, no RBAC changes — the slice-4 claim follow-up (API
+  role `update`/`patch` on `agentruns`, `update` on `agentruns/status`)
+  stays documented under NEXT. `FakeBackend`, gate-off, Job-plane, and scout
+  paths are byte-identical.
+
+Tests: `internal/standing/process_resume_test.go` pins the plumbing with a
+stub `SessionRunner` (first turn cold + records, second turn resumes,
+rotation, unsupported kinds cold with nothing recorded, plain `Runner`
+byte-identical, rejection holds + clears + re-discovers cold) plus the pure
+argv/validation/extraction tables and real-`ExecRunner` subprocess turns
+against stub shell binaries (codex `resume <uuid>`, openCode `--session`,
+openClaw stable `--session-key`, primeAgent with no resume argv anywhere) —
+no model calls, no credentials.
+
+## NEXT (slice 5c and beyond)
+
+1. **Live numbers + Desktop e2e.** The slice-5a harness is green on
+   deterministic backends and slice-5b resume is pinned against stub CLIs;
+   `process-exec` live numbers on the same cluster shape as the Job baseline
+   are still open (needs a harness CLI with local auth) — measure cold first
+   turns AND resumed second turns, then wire Desktop chat to
+   `openChatThreadStream` end to end and apply the promote/reshape/retire
+   bars above.
+2. **Retire the envelope wrapper** entirely once no Fake-only live path
+   remains. Provider credentials stay outside the API's Secret surface
+   throughout. Production enablement also needs the API role granted
+   `update`/`patch` on `agentruns` (claim stamp) and `update` on
+   `agentruns/status` (Succeeded mark) — the slice-4 claim degrades to hold
+   behavior without them, so no chart change rode slices 4–5b.
