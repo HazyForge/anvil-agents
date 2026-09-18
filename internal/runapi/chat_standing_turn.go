@@ -134,7 +134,7 @@ func (server *Server) reconcileStandingTurn(ctx context.Context, turn *chat.Turn
 		server.log.Info("standing turn has no frozen prompt; keeping hold behavior", "namespace", turn.Namespace, "turn", turn.ID)
 		return false, nil
 	}
-	sink := &standingRunSink{runName: turn.RunName}
+	sink := &standingRunSink{runName: turn.RunName, downstream: server.standingTokenPublisher(turn.Namespace)}
 	reply, err := server.standing.StreamTurn(ctx, handle, turn.ID, prompt, sink)
 	if err != nil {
 		server.log.Error(err, "standing turn stream failed; keeping hold behavior", "namespace", turn.Namespace, "turn", turn.ID)
@@ -192,12 +192,28 @@ func (server *Server) suspendStandingTurn(ctx context.Context, namespace, thread
 	}
 }
 
+// standingTokenPublisher fans stamped token events out to open WebSocket
+// stream subscribers for the turn's thread. The outer standingRunSink stamps
+// the run name first, so subscribers observe the full turn identity
+// (thread/turn/run). Publishing never fails the turn: the hub drops for slow
+// readers and the durable reply still lands in the turn record. Nil when no
+// hub is attached, which keeps the sink a pure counter exactly as before.
+func (server *Server) standingTokenPublisher(namespace string) standing.Sink {
+	if server == nil || server.standingHub == nil {
+		return nil
+	}
+	return standing.SinkFunc(func(ctx context.Context, event standing.TokenEvent) error {
+		server.standingHub.publish(namespace, event)
+		return ctx.Err()
+	})
+}
+
 // standingRunSink binds streamed token events to the turn identity: the
 // backend stamps thread/turn, this wrapper adds the append-only run name.
-// Slice 2 counts the events and drops them (the durable reply lands in the
-// turn record, which is what the existing stream snapshot serves); an
-// optional downstream receives the stamped events so tests can observe the
-// binding, and slice 3 can multiplex live token frames into open streams.
+// It counts the events while the durable reply lands in the turn record
+// (which is what the stream snapshot serves); the downstream receives the
+// stamped events so open WebSocket streams can multiplex live token frames
+// and tests can observe the binding.
 type standingRunSink struct {
 	runName    string
 	tokens     int

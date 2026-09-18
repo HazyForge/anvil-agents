@@ -3,12 +3,16 @@ import { parseSSEChunk, type StreamHandlers } from "./stream";
 import type { StreamEnvelope } from "./types.stream";
 
 /**
- * Slice-1 standing chat thread stream (see docs/standing-inprocess-harness.md).
+ * Slice-1 standing chat thread stream (see docs/standing-inprocess-harness.md),
+ * extended by slice 3 with a long-lived WebSocket token subscription.
  *
  * Prefers WebSocket for first-token feel, falls back to authenticated SSE
  * when the upgrade fails (Desktop Electron constraints, proxies, or older
- * servers). Both transports deliver the same snapshot + terminal events; the
- * stream is read-only and closes after the terminal event in slice 1.
+ * servers). SSE delivers snapshot + terminal and closes. Standing (InProcess)
+ * WebSocket streams stay open past the snapshot and multiplex live `token`
+ * frames (thread/turn/run + seq + done) for the thread's turns before the
+ * terminal frame; Job-plane streams keep snapshot + terminal and close.
+ * The stream is read-only: it never creates AgentRuns.
  *
  * Auth: browsers cannot set Authorization on a WebSocket, so the WS path
  * offers the versioned stream protocol plus a `bearer.<token>` subprotocol

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"k8s.io/apimachinery/pkg/types"
 
@@ -15,23 +16,30 @@ import (
 	"github.com/hazyforge/anvil-agents/internal/standing"
 )
 
-// Slice-1 standing chat stream contract.
+// Slice-1 standing chat stream contract, extended by slice 3 with a
+// long-lived WebSocket token subscription.
 //
 // GET /api/v1/namespaces/{namespace}/chat/threads/{threadID}/stream delivers
 // the same events over two transports:
 //
-//   - Server-Sent Events (default): text/event-stream with snapshot + terminal.
+//   - Server-Sent Events (default): text/event-stream with snapshot +
+//     terminal, then close. SSE stays the fallback and never subscribes to
+//     live tokens.
 //   - WebSocket: request Upgrade: websocket and the server answers 101, then
-//     sends the same snapshot + terminal JSON text frames and closes.
+//     sends the snapshot JSON text frame. Job-plane threads (and every
+//     gate-off read) follow with the terminal frame and close, byte-identical
+//     to slice 1. Standing (InProcess) threads keep the connection open past
+//     the snapshot and multiplex live `token` frames for the thread's turns,
+//     then send the same terminal frame and close.
 //
-// Both transports are read-only snapshots of durable state in slice 1: the
-// endpoint never creates AgentRuns, never consumes model, and never stores
-// tokens. It proves the upgrade path, the bearer-subprotocol auth browsers
-// need (browsers cannot set Authorization on a WebSocket), and that a
-// standing process owns the thread's harness session across turns (the
-// snapshot carries the resumed session). Live token streaming into this
-// endpoint is the documented next slice; Job-plane threads terminate with
-// code job_plane and keep using the existing AgentRun events stream.
+// Both transports are read-only views of durable state: the endpoint never
+// creates AgentRuns, never consumes model, and never stores tokens. It proves
+// the upgrade path, the bearer-subprotocol auth browsers need (browsers
+// cannot set Authorization on a WebSocket), and that a standing process owns
+// the thread's harness session across turns (the snapshot carries the resumed
+// session). Slice 3 adds live token frames into open standing streams; the
+// durable turn record stays the source of truth, so the snapshot tail already
+// carries the full reply even when a live frame drops.
 //
 // Auth: bearer access token in the Authorization header, or (WebSocket only)
 // a bearer subprotocol of the form `bearer.<token>` alongside the selected
@@ -77,6 +85,21 @@ type chatStreamTerminal struct {
 	Type    string `json:"type"`
 	Code    string `json:"code,omitempty"`
 	Message string `json:"message,omitempty"`
+}
+
+// chatStreamTokenFrame is one live token frame multiplexed into an open
+// standing WebSocket stream. ThreadID/TurnID/RunName bind the token to the
+// durable turn identity (runName is stamped by standingRunSink); Seq orders
+// tokens within the turn and the final frame carries Done. Frames are built
+// with structured marshaling only, never string concatenation.
+type chatStreamTokenFrame struct {
+	Type     string `json:"type"`
+	ThreadID string `json:"threadId"`
+	TurnID   string `json:"turnId"`
+	RunName  string `json:"runName,omitempty"`
+	Seq      int    `json:"seq"`
+	Token    string `json:"token"`
+	Done     bool   `json:"done"`
 }
 
 func (server *Server) handleChatThreadStream(writer http.ResponseWriter, request *http.Request) {
@@ -143,7 +166,7 @@ func (server *Server) handleChatThreadStream(writer http.ResponseWriter, request
 	server.log.Info("chat thread stream", "subject", principal.Subject, "namespace", namespace, "thread", thread.ID, "terminal", terminal.Code)
 
 	if isChatStreamUpgrade(request) {
-		server.serveChatStreamWebSocket(writer, request, protocol, snapshot, terminal)
+		server.serveChatStreamWebSocket(writer, request, protocol, namespace, thread, snapshot, terminal)
 		return
 	}
 	server.serveChatStreamSSE(writer, snapshot, terminal)
@@ -222,7 +245,7 @@ func (server *Server) serveChatStreamSSE(writer http.ResponseWriter, snapshot ch
 	_ = sse.write("terminal", "terminal", terminal)
 }
 
-func (server *Server) serveChatStreamWebSocket(writer http.ResponseWriter, request *http.Request, protocol string, snapshot chatStreamSnapshot, terminal chatStreamTerminal) {
+func (server *Server) serveChatStreamWebSocket(writer http.ResponseWriter, request *http.Request, protocol string, namespace string, thread chat.Thread, snapshot chatStreamSnapshot, terminal chatStreamTerminal) {
 	snapshotRaw, err := json.Marshal(snapshot)
 	if err != nil {
 		writeAPIError(writer, http.StatusInternalServerError, "stream_unavailable", "chat stream snapshot is unavailable")
@@ -233,6 +256,18 @@ func (server *Server) serveChatStreamWebSocket(writer http.ResponseWriter, reque
 		writeAPIError(writer, http.StatusInternalServerError, "stream_unavailable", "chat stream snapshot is unavailable")
 		return
 	}
+	// Subscribe before the upgrade so tokens published while the handshake
+	// completes still reach this stream. Job-plane threads never subscribe:
+	// they keep the slice-1 snapshot + terminal + close lifecycle
+	// byte-identical, and the existing AgentRun events stream stays their
+	// live path.
+	live := snapshot.Standing != nil && terminal.Code == "standing_ready"
+	var events <-chan standing.TokenEvent
+	var unsubscribe func()
+	if live {
+		events, unsubscribe = server.standingHub.subscribe(namespace, thread.ID)
+		defer unsubscribe()
+	}
 	conn, err := standing.Upgrade(writer, request, protocol)
 	if err != nil {
 		writeAPIError(writer, http.StatusBadRequest, "websocket_rejected", "WebSocket upgrade was rejected")
@@ -242,11 +277,76 @@ func (server *Server) serveChatStreamWebSocket(writer http.ResponseWriter, reque
 	if err := conn.WriteText(snapshotRaw); err != nil {
 		return
 	}
-	_ = conn.WriteText(terminalRaw)
-	// Slice 1 serves snapshot + terminal, then closes: there is no long-lived
-	// subscription yet, so both transports share the same lifecycle. Client
-	// messages are not part of the contract; the deferred close ends the
-	// stream after the terminal frame.
+	if !live {
+		_ = conn.WriteText(terminalRaw)
+		// Job-plane and gate-off reads close after the terminal frame.
+		// Client messages are not part of the contract; the deferred close
+		// ends the stream after the terminal frame.
+		return
+	}
+	server.serveChatStreamLive(request, conn, namespace, thread.ID, events, terminalRaw)
+}
+
+// serveChatStreamLive multiplexes stamped token frames into an open standing
+// stream after the snapshot, then sends the terminal frame and closes. The
+// durable turn record stays the source of truth: a slow reader drops live
+// frames (see the hub) and still reads the full reply from the snapshot tail
+// on its next open. Client messages are not part of the contract; the reader
+// below only watches for close so a departing client releases the stream.
+func (server *Server) serveChatStreamLive(request *http.Request, conn *standing.Conn, namespace, threadID string, events <-chan standing.TokenEvent, terminalRaw []byte) {
+	ctx := request.Context()
+	clientClosed := make(chan struct{})
+	go func() {
+		defer close(clientClosed)
+		for {
+			if _, _, err := conn.ReadMessage(); err != nil {
+				return
+			}
+		}
+	}()
+	maxDuration := server.config.Stream.MaxDuration.Duration
+	if maxDuration <= 0 {
+		maxDuration = 15 * time.Minute
+	}
+	deadline := time.NewTimer(maxDuration)
+	defer deadline.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-clientClosed:
+			return
+		case <-deadline.C:
+			_ = conn.WriteText(terminalRaw)
+			return
+		case event, ok := <-events:
+			if !ok {
+				return
+			}
+			if event.ThreadID != threadID {
+				continue
+			}
+			frame, err := json.Marshal(chatStreamTokenFrame{
+				Type:     "token",
+				ThreadID: event.ThreadID,
+				TurnID:   event.TurnID,
+				RunName:  event.RunName,
+				Seq:      event.Seq,
+				Token:    event.Token,
+				Done:     event.Done,
+			})
+			if err != nil {
+				continue
+			}
+			if err := conn.WriteText(frame); err != nil {
+				return
+			}
+			if event.Done {
+				_ = conn.WriteText(terminalRaw)
+				return
+			}
+		}
+	}
 }
 
 // authenticateChatStream verifies the bearer token for the stream endpoint.
