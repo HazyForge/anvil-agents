@@ -7,7 +7,10 @@
  * Run: node --experimental-strip-types --test hack/desktop-chat-latency.mjs
  */
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { test } from "node:test";
+import { fileURLToPath } from "node:url";
 
 import {
   createChatLatencyTracker,
@@ -94,4 +97,92 @@ test("formatChatLatencyReport is pulse-friendly", () => {
     replyReadyMs: 300,
   });
   assert.equal(line, "chat-latency waiting=1ms firstToken=40ms running=50ms replyReady=300ms");
+});
+
+test("live send wiring shape marks waiting/firstToken/running/replyReady end-to-end", () => {
+  let t = 0;
+  const seen = { status: [], deltas: [] };
+  let latencyReport;
+  // Shape mirrors streamDesktopChat opts: onDelta/onStatus plus an onLatency observer.
+  const liveOpts = {
+    onDelta: (d) => seen.deltas.push(d),
+    onStatus: (s) => seen.status.push(s),
+    onLatency: (r) => {
+      latencyReport = r;
+    },
+  };
+  const { opts: tracked, tracker } = withChatLatency(
+    {
+      onDelta: liveOpts.onDelta,
+      onStatus: (s) => liveOpts.onStatus(s),
+    },
+    createChatLatencyTracker(() => t),
+  );
+  const settleLatency = (failed) => {
+    if (!failed) {
+      tracker.markReplyReady();
+    }
+    const report = tracker.report();
+    liveOpts.onLatency(report);
+    return formatChatLatencyReport(report);
+  };
+
+  // Replay the exact emission order of streamDesktopChat + proxyManagerHarnessChat.
+  t = 2;
+  tracked.onStatus?.("waiting"); // streamDesktopChat top
+  t = 3;
+  tracked.onStatus?.("waiting"); // proxyManagerHarnessChat top (deduped)
+  t = 40;
+  tracked.onStatus?.("running"); // first stream chunk arrives
+  tracked.onDelta?.("hel"); // first token, same ms
+  t = 90;
+  tracked.onDelta?.("lo"); // later chunk, firstToken stays
+  t = 95;
+  tracked.onStatus?.("running"); // chips arrive
+  t = 210;
+  const line = settleLatency(false); // harness reply settles successfully
+
+  assert.deepEqual(seen.status, ["waiting", "waiting", "running", "running"]);
+  assert.deepEqual(seen.deltas, ["hel", "lo"]);
+  assert.equal(latencyReport.waitingMs, 2);
+  assert.equal(latencyReport.firstTokenMs, 40);
+  assert.equal(latencyReport.runningMs, 40);
+  assert.equal(latencyReport.replyReadyMs, 210);
+  assert.equal(line, "chat-latency waiting=2ms firstToken=40ms running=40ms replyReady=210ms");
+});
+
+test("live send failure settles with failed report", () => {
+  let t = 0;
+  const seen = [];
+  const { opts: tracked, tracker } = withChatLatency(
+    { onStatus: (s) => seen.push(s) },
+    createChatLatencyTracker(() => t),
+  );
+  t = 5;
+  tracked.onStatus?.("waiting");
+  t = 120;
+  tracked.onStatus?.("failed");
+  const report = tracker.report();
+  const line = formatChatLatencyReport(report);
+  assert.deepEqual(seen, ["waiting", "failed"]);
+  assert.equal(report.replyReadyMs, undefined);
+  assert.equal(line, "chat-latency waiting=5ms failed=120ms");
+});
+
+test("streamDesktopChat is wired to the latency tracker", () => {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const src = readFileSync(
+    join(here, "..", "web", "desktop", "src", "wrapper", "harnessChat.ts"),
+    "utf8",
+  );
+  for (const needle of [
+    "withChatLatency",
+    "createChatLatencyTracker",
+    "markReplyReady",
+    "formatChatLatencyReport",
+    "onLatency",
+    "streamDesktopChat",
+  ]) {
+    assert.ok(src.includes(needle), `harnessChat.ts should reference ${needle}`);
+  }
 });
