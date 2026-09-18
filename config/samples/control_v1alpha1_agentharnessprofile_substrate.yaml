@@ -1,0 +1,28 @@
+apiVersion: control.anvil.hazyforge.io/v1alpha1
+kind: AgentHarnessProfile
+metadata:
+  name: substrate-standing-chat
+  namespace: agents
+spec:
+  description: Spike standing-chat runtime on the optional Substrate warm-actor plane. Scouts and batch runs must stay on Job harnesses.
+  backend:
+    kind: openCode
+    openCode:
+      model: openai/gpt-5.4
+      format: json
+      auto: false
+  execution:
+    serviceAccountName: agent-runner
+    runtime: SubstrateActor
+    substrate:
+      actorClass: standing-chat
+      pool: warm
+      suspendOnIdle: true
+    timeoutSeconds: 1800
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: "2"
+        memory: 2Gi

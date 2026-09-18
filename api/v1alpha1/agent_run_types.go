@@ -831,6 +831,19 @@ type AgentRunHarnessExecutionSpec struct {
 	// Workdir is the working directory inside the agent container.
 	// +optional
 	Workdir string `json:"workdir,omitempty"`
+	// Runtime selects the Kubernetes execution plane for the harness adapter.
+	// Empty defaults to Job: exactly one Kubernetes Job per AgentRun. Set to
+	// SubstrateActor to select the optional warm-actor plane for
+	// standing/manager chat turns; scouts and batch runs must stay on Jobs.
+	// Live Substrate dispatch is not wired yet, so the controller holds
+	// SubstrateActor runs without creating a Job. See docs/substrate-spike.md.
+	// +kubebuilder:validation:Enum=Job;SubstrateActor
+	// +optional
+	Runtime AgentRunExecutionRuntime `json:"runtime,omitempty"`
+	// Substrate tunes the optional Substrate actor plane. Required when
+	// runtime is SubstrateActor; must be nil otherwise.
+	// +optional
+	Substrate *AgentRunSubstrateActorSpec `json:"substrate,omitempty"`
 	// TimeoutSeconds bounds the child agent Job.
 	// +kubebuilder:validation:Minimum=0
 	// +optional
@@ -1077,6 +1090,15 @@ type AgentRunStatus struct {
 	Model                   string                                `json:"model,omitempty"`
 	Intent                  string                                `json:"intent,omitempty"`
 	Image                   string                                `json:"image,omitempty"`
+	// ExecutionRuntime records the selected execution plane (Job or
+	// SubstrateActor) from the effective harness after composition. Empty on
+	// runs written before this field means the default Job plane.
+	// +optional
+	ExecutionRuntime string `json:"executionRuntime,omitempty"`
+	// SubstrateActor records the bound Substrate actor identity once live
+	// actor dispatch lands. The spike surface never populates it; Jobs ignore it.
+	// +optional
+	SubstrateActor          *AgentRunSubstrateActorStatus         `json:"substrateActor,omitempty"`
 	PlannedJobRef           *NamespacedObjectReference            `json:"plannedJobRef,omitempty"`
 	JobCreateAttemptedAt    *metav1.Time                          `json:"jobCreateAttemptedAt,omitempty"`
 	JobRef                  *NamespacedObjectReference            `json:"jobRef,omitempty"`
