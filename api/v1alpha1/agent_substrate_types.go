@@ -7,8 +7,8 @@ import "strings"
 // selects the harness adapter (codex, openCode, ...) while the runtime selects
 // where that adapter executes.
 //
-// Job is the default and only live plane. Every scout, batch, scheduled, and
-// chained run stays on Jobs. SubstrateActor is an API-first spike surface for
+// Job is the default plane. Every scout, batch, scheduled, and
+// chained run stays on Jobs. SubstrateActor is an opt-in spike surface for
 // standing/manager chat turns that may run on warm Substrate actors instead of
 // paying a cold Job/Pod start per turn. See docs/substrate-spike.md.
 type AgentRunExecutionRuntime string
@@ -18,9 +18,9 @@ const (
 	// AgentRun. This is the default when runtime is empty.
 	AgentRunExecutionRuntimeJob AgentRunExecutionRuntime = "Job"
 	// AgentRunExecutionRuntimeSubstrateActor routes execution to a warm
-	// Substrate actor (agent-substrate/substrate) instead of a Job. Live
-	// dispatch is not wired yet; the controller holds these runs without
-	// creating a Job until the Kind e2e follow-up lands.
+	// Substrate actor (agent-substrate/substrate) instead of a Job. With the
+	// live gate off the controller holds these runs without creating a Job;
+	// with the gate on it binds the warm actor (still with no Job).
 	AgentRunExecutionRuntimeSubstrateActor AgentRunExecutionRuntime = "SubstrateActor"
 )
 
@@ -50,8 +50,9 @@ type AgentRunSubstrateActorSpec struct {
 	SuspendOnIdle *bool `json:"suspendOnIdle,omitempty"`
 }
 
-// AgentRunSubstrateActorStatus records the bound Substrate actor identity once
-// live dispatch lands. The spike backend never populates it.
+// AgentRunSubstrateActorStatus records the bound Substrate actor identity.
+// The controller populates it when the live gate binds the warm actor; the
+// API-first hold leaves it empty.
 type AgentRunSubstrateActorStatus struct {
 	// ActorName is the stable Substrate actor name for this execution.
 	// +optional

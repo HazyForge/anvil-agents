@@ -152,7 +152,10 @@ The harness adapter (`backend.kind`) and the execution plane are independent.
 `execution.runtime` defaults to `Job`; setting it to `SubstrateActor` with an
 `execution.substrate` section marks a harness profile as eligible to run
 standing/manager chat turns on warm Substrate actors instead of cold Jobs.
-Scouts and batch runs stay on Jobs, and live Substrate dispatch is not wired
-yet — the controller holds those runs without creating a Job. See
+Scouts and batch runs stay on Jobs. With the live gate off (the default), the
+controller holds those runs without creating a Job; with
+`ANVIL_AGENTS_SUBSTRATE_ACTORS_ENABLED=true` plus
+`ANVIL_AGENTS_SUBSTRATE_ENDPOINT` it binds the warm actor instead (still with
+no Job). See
 [Substrate spike](substrate-spike.md) and the sample
 `config/samples/control_v1alpha1_agentharnessprofile_substrate.yaml`.
