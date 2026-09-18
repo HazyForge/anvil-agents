@@ -1,5 +1,6 @@
 export type StreamEventType =
   | "snapshot"
+  | "token"
   | "status"
   | "log"
   | "terminal"

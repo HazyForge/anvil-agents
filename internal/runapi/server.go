@@ -53,6 +53,10 @@ type Server struct {
 	// stream it twice in this process. It is a pointer so Server stays
 	// trivially copyable.
 	standingGuard *standingTurnGuard
+	// standingHub fans stamped standing token events out to open WebSocket
+	// stream subscribers for the same thread. Process-local, like the guard
+	// above; SSE never subscribes.
+	standingHub *standingTokenHub
 }
 
 func NewServer(config Config, authenticator AccessTokenAuthenticator, runs client.Reader, logs AgentRunLogSource, log logr.Logger) (*Server, error) {
@@ -71,6 +75,7 @@ func NewServer(config Config, authenticator AccessTokenAuthenticator, runs clien
 		log:           log,
 		limiter:       newStreamLimiter(config.Stream.MaxConnections, config.Stream.MaxConnectionsPerSubject),
 		standingGuard: newStandingTurnGuard(),
+		standingHub:   newStandingTokenHub(),
 	}
 	if writeClient, ok := runs.(client.Client); ok {
 		server.writes = writeClient

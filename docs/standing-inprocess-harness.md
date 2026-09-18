@@ -1,8 +1,9 @@
 # Standing in-process harness + WebSocket chat delivery
 
-Status: slice 2 (live standing backend in the turn path, Fake-backed) —
-turn-based execution stays durable while InProcess threads stream through
-their standing session. Architectural direction locked by Austin 2026-09-18.
+Status: slice 3 (long-lived WebSocket token subscription, Fake-backed) —
+open standing streams multiplex live token frames during a turn while the
+durable turn record stays the source of truth. Architectural direction
+locked by Austin 2026-09-18.
 
 ## Direction
 
@@ -88,13 +89,16 @@ delivers the **same events over two transports**:
 | Transport | Request | Response |
 | --- | --- | --- |
 | SSE (default) | `Accept: text/event-stream` + `Authorization: Bearer …` | `snapshot` + `terminal` events, then close |
-| WebSocket | `Upgrade: websocket` + versioned subprotocol (below) | 101, same `snapshot` + `terminal` JSON text frames, then server close |
+| WebSocket | `Upgrade: websocket` + versioned subprotocol (below) | 101, `snapshot` JSON text frame; Job-plane threads follow with `terminal` and close, while standing threads multiplex live `token` frames before the same `terminal` and close |
 
 - Event contract parity: `snapshot` carries the thread, the durable message
   tail (`messages`, default 50, max 200; full history stays on the existing
   GET), `turns`/`activeTurn`, and the resumed `standing` session. `terminal`
   carries `standing_ready` (session resumed) or `job_plane` (thread stays on
-  the Job plane — keep using the existing AgentRun `events` stream).
+  the Job plane — keep using the existing AgentRun `events` stream). Live
+  `token` frames carry the full turn identity (`threadId`/`turnId`/`runName`
+  + `seq` + `done`); the durable turn record stays the source of truth, so a
+  dropped live frame never loses the reply.
 - Nothing about the delivery contract moves: AgentRun stays append-only, new
   intent creates a new run, `purpose=interactive` scoping and the
   queue/steer/interrupt non-goals in [Chat delivery](chat-delivery.md) are
@@ -140,12 +144,13 @@ Unchanged, by construction:
 - **SubstrateActor (optional):** warm-actor isolation/density when operating
   a Substrate/ATE gateway pays off (see [Substrate spike](substrate-spike.md)
   for the promote/reshape/retire bars). Unchanged by this slice.
-- **InProcess (opt-in, slice 2 live in the turn path):** interactive Wrapper/manager/peer
+- **InProcess (opt-in, slices 2–3 live):** interactive Wrapper/manager/peer
   chat where a standing session removes the per-turn cold start. Slice 1
   selected, named, resumed, and streamed (Fake); slice 2 executes turns
   through the backend behind the `standing.liveEnabled` /
   `ANVIL_AGENTS_STANDING_LIVE` opt-in gate (Fake-backed in tests — no model
-  calls, no harness subprocess yet). Gate off still holds as
+  calls, no harness subprocess yet); slice 3 multiplexes live token frames
+  into open standing WebSocket streams. Gate off still holds as
   `InProcessNotWired` with guidance and creates no Jobs.
 
 ## Explicit non-goals for slice 1
@@ -163,9 +168,9 @@ Unchanged, by construction:
 - No Primaris Argo changes, no chart values for the plane, no Secret access
   for the API beyond what standing chat already mounts (database URI only).
 
-## Slice 2: live standing backend in the turn path (this slice)
+## Slice 2: live standing backend in the turn path (landed)
 
-Slice 2 wires a live `standing.Backend` **into** `reconcileChatTurn`
+Slice 2 wired a live `standing.Backend` **into** `reconcileChatTurn`
 (`internal/runapi/chat_execution.go`), beside the `writes.Create` branch —
 never around the durable turn:
 
@@ -209,21 +214,49 @@ the existing reply extractors; a real harness process returns
 native-enveloped output directly and the wrapper goes away with it. Crash
 recovery between create and the `Succeeded` mark re-streams at least once;
 a multi-replica claim and a controller-hold yield for API-owned standing
-turns are slice-3 work, not this slice.
+turns are later-slice work, not this slice.
 
-## NEXT (slice 3 and beyond)
+## Slice 3: long-lived WebSocket token subscription (this slice)
+
+Slice 3 keeps an open standing WebSocket stream past the snapshot so it
+receives live `token` frames during an InProcess turn — not only the
+post-turn snapshot. The turn-based model does not move: one append-only
+AgentRun per accepted message, frozen intent in, `Succeeded` completion out.
+
+- **Same snapshot, then tokens, then the same terminal.** A standing stream
+  writes the snapshot (with the resumed `standing` session), subscribes to
+  the thread's token hub before the upgrade completes, multiplexes `token`
+  frames (`threadId`/`turnId`/`runName` + `seq` + `done`, `runName` stamped
+  by `standingRunSink`), and closes with the existing `standing_ready`
+  terminal. SSE stays the snapshot + terminal fallback and never
+  subscribes. Job-plane and gate-off reads keep the snapshot + terminal +
+  close lifecycle byte-identical and stay on the AgentRun events stream.
+- **Process-local hub, non-blocking publish.** `standingTokenHub` fans
+  stamped events out per namespace/thread (no cross-namespace leaks). The
+  turn path publishes through the sink's downstream; a slow reader drops
+  live frames instead of stalling the turn, and the durable reply still
+  lands in the turn record, so the next snapshot tail stays complete.
+- **Peer children multiplex on their own thread.** Each recipient child turn
+  publishes under its child thread ID, so a parent stream never sees peer
+  tokens and a child stream sees only its own.
+- **Auth unchanged.** No tokens in query strings; bearer header or the
+  verified `bearer.<token>` subprotocol, with the same exact-origin CORS
+  enforcement before the upgrade.
+
+Stubbed vs live, explicitly: tests drive `FakeBackend` (no model calls, no
+harness subprocess). Desktop's `openChatThreadStream` already handles generic
+event types, so token frames flow through its `onEvent` handler with no
+protocol break; full Desktop e2e stays a later slice.
+
+## NEXT (slice 4 and beyond)
 
 1. **Real harness process** behind the same `standing.Backend` + gate
    (model session per thread, provider credentials outside the API's Secret
    surface), then retire the envelope wrapper.
-2. **Long-lived stream subscription**: keep the WS connection open past the
-   snapshot and multiplex `token` frames (`TokenEvent`: thread/turn/run +
-   seq + done marker) for the streaming turn, with the same terminal codes;
-   SSE stays the fallback.
-3. **Controller-hold yield + multi-replica claim** for API-owned standing
+2. **Controller-hold yield + multi-replica claim** for API-owned standing
    turns (annotation claim the controller respects), so the
    `InProcessNotWired` hold can never race a live stream.
-4. **Latency compare** (direct turns AND peer deliveries, warm resume vs the
+3. **Latency compare** (direct turns AND peer deliveries, warm resume vs the
    Job cold-start baseline on the same cluster shape) with promote/reshape/
    retire bars mirroring the Substrate spike, then wire Desktop chat to
    `openChatThreadStream` end to end.
