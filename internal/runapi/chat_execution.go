@@ -252,6 +252,16 @@ func (server *Server) reconcileChatTurn(ctx context.Context, turn *chat.Turn) er
 		}
 		return err
 	}
+	// Slice-2 standing turn wiring, beside (never instead of) the durable
+	// turn above: when the thread's harness selects execution.runtime
+	// InProcess and the live gate is on, the run created from the
+	// outbox-frozen intent streams through the thread's standing session and
+	// lands Succeeded, so the switch below completes it through the existing
+	// path. Gate off, unresolvable harness, or any backend error leaves the
+	// run untouched for today's Job / NeedsHuman hold behavior.
+	if _, err := server.reconcileStandingTurn(ctx, turn, run); err != nil {
+		return err
+	}
 	if (turn.RunUID != "" && turn.RunUID != string(run.UID)) || run.Labels[chatTurnLabel] != turn.ID || run.Labels[chatThreadLabel] != turn.ThreadID || run.Spec.SourceRef.Kind != "ChatThread" || run.Spec.SourceRef.Name != turn.ThreadID {
 		return server.failChatTurn(ctx, turn, "AgentRun identity does not match the accepted chat turn")
 	}
@@ -294,7 +304,9 @@ func (server *Server) reconcileChatTurn(ctx context.Context, turn *chat.Turn) er
 			metadata["replyFormat"] = openClawReplyFormat
 		}
 		meta, _ := json.Marshal(metadata)
-		return server.chatStore.CompleteTurn(ctx, *turn, chat.Message{Role: chat.RoleAssistant, Content: output, Metadata: meta})
+		completeErr := server.chatStore.CompleteTurn(ctx, *turn, chat.Message{Role: chat.RoleAssistant, Content: output, Metadata: meta})
+		server.suspendStandingTurn(ctx, turn.Namespace, turn.ThreadID, turn.ID)
+		return completeErr
 	case agentsv1alpha1.AgentRunPhaseNeedsHuman:
 		reason := strings.TrimSpace(run.Status.Error)
 		if reason == "" {
@@ -325,7 +337,9 @@ func (server *Server) failChatTurn(ctx context.Context, turn *chat.Turn, reason 
 	turn.Status = "failed"
 	turn.Error = reason
 	meta, _ := json.Marshal(map[string]string{"runName": turn.RunName, "turnId": turn.ID, "kind": "execution_error"})
-	return server.chatStore.CompleteTurn(ctx, *turn, chat.Message{Role: chat.RoleSystem, Content: reason, Metadata: meta})
+	completeErr := server.chatStore.CompleteTurn(ctx, *turn, chat.Message{Role: chat.RoleSystem, Content: reason, Metadata: meta})
+	server.suspendStandingTurn(ctx, turn.Namespace, turn.ThreadID, turn.ID)
+	return completeErr
 }
 func (server *Server) runChatRecovery(ctx context.Context) {
 	ticker := time.NewTicker(2 * time.Second)

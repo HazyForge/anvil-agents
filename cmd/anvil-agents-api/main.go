@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -33,6 +34,12 @@ func main() {
 	if err != nil {
 		log.Error(err, "load API configuration")
 		os.Exit(1)
+	}
+	// Slice-2 standing turn gate: explicit opt-in only, off by default. The
+	// environment variable can enable config-file standing.liveEnabled but
+	// never disables it; no chart values and no Primaris sync changes.
+	if enabled, err := strconv.ParseBool(strings.TrimSpace(os.Getenv("ANVIL_AGENTS_STANDING_LIVE"))); err == nil && enabled {
+		config.Standing.LiveEnabled = true
 	}
 	restConfig, err := ctrl.GetConfig()
 	if err != nil {

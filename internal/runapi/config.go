@@ -53,6 +53,10 @@ type Config struct {
 	Runs             RunsConfig             `json:"runs"`
 	ExternalTriggers ExternalTriggersConfig `json:"externalTriggers"`
 	Chat             ChatConfig             `json:"chat"`
+	// Standing gates live standing in-process turn execution behind an
+	// explicit opt-in. Off by default; no chart values and no Primaris sync
+	// changes. See docs/standing-inprocess-harness.md.
+	Standing StandingConfig `json:"standing"`
 }
 
 // ExternalTriggersConfig controls opt-in inbound webhook receivers.
@@ -64,6 +68,17 @@ type ExternalTriggersConfig struct {
 // into the process environment, never read through the Kubernetes API.
 type ChatConfig struct {
 	Enabled bool `json:"enabled"`
+}
+
+// StandingConfig controls live standing in-process turn execution. When
+// LiveEnabled is false (the default) the turn path keeps today's Job /
+// NeedsHuman InProcess hold behavior unchanged, even with a backend attached
+// (the stream endpoint may still resume sessions for reads).
+type StandingConfig struct {
+	// LiveEnabled wires the standing backend into reconcileChatTurn for
+	// threads whose harness selects execution.runtime InProcess. Enable via
+	// config file or the ANVIL_AGENTS_STANDING_LIVE environment variable.
+	LiveEnabled bool `json:"liveEnabled"`
 }
 
 // RunsConfig controls AgentRun mutation endpoints. Creates remain append-only.
