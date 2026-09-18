@@ -41,6 +41,11 @@ Environment:
   ANVIL_DESKTOP_API_ORIGIN        OIDC API origin (Kind-local for tests)
   ANVIL_DESKTOP_KIND_API_ORIGIN  Fallback Kind API origin (default http://127.0.0.1:18080)
   ANVIL_DESKTOP_VM_DIR           Work directory (pid files, fixtures, chrome profile)
+  ANVIL_CHAT_LATENCY_JSONL       Absolute JSONL sink for live Desktop chat latency
+                                 (e.g. $HOME/CodingFiles/HAZYFORGE/anvil-agents/.runtime/chat-latency.jsonl).
+                                 Must be set on the host process before start; the browser UI
+                                 POSTs each settled send→firstToken report to
+                                 POST /local/v1/chat-latency on this host. Relative/empty disables.
   DISPLAY                        Required for --open
 
 The OIDC token never goes in a query string. Completing PKCE requires

@@ -15,12 +15,15 @@ import { fileURLToPath } from "node:url";
 
 import {
   appendChatLatencyReport,
+  buildChatLatencyPayload,
+  CHAT_LATENCY_ENDPOINT,
   CHAT_LATENCY_JSONL_ENV,
   createChatLatencyTracker,
   formatChatLatencyJsonLine,
   formatChatLatencyReport,
   isAbsoluteLatencyPath,
   persistChatLatencyReport,
+  persistChatLatencyReportAsync,
   resolveChatLatencyJsonlPath,
   withChatLatency,
 } from "../web/desktop/src/wrapper/chatLatency.ts";
@@ -187,7 +190,7 @@ test("streamDesktopChat is wired to the latency tracker", () => {
     "createChatLatencyTracker",
     "markReplyReady",
     "formatChatLatencyReport",
-    "persistChatLatencyReport",
+    "persistChatLatencyReportAsync",
     "ANVIL_CHAT_LATENCY_JSONL",
     "onLatency",
     "streamDesktopChat",
@@ -301,4 +304,82 @@ test("persistChatLatencyReport writes only when the env path is set", () => {
   const parsed = JSON.parse(readFileSync(path, "utf8").trim());
   assert.equal(parsed.replyReadyMs, 50);
   assert.equal(parsed.source, "desktop-chat");
+});
+
+test("buildChatLatencyPayload matches the JSONL line fields for the loopback POST", () => {
+  assert.equal(CHAT_LATENCY_ENDPOINT, "/local/v1/chat-latency");
+  const payload = buildChatLatencyPayload(
+    { marks: { sendStartedAt: 0 }, waitingMs: 12, firstTokenMs: 48, replyReadyMs: 300 },
+    { source: "desktop-chat", now: () => Date.parse("2026-09-18T04:20:00.000Z") },
+  );
+  assert.equal(payload.ts, "2026-09-18T04:20:00.000Z");
+  assert.equal(payload.waitingMs, 12);
+  assert.equal(payload.firstTokenMs, 48);
+  assert.equal(payload.replyReadyMs, 300);
+  assert.equal(payload.runningMs, undefined);
+  assert.equal(payload.source, "desktop-chat");
+  const line = formatChatLatencyJsonLine(
+    { marks: { sendStartedAt: 0 }, waitingMs: 12, firstTokenMs: 48, replyReadyMs: 300 },
+    { source: "desktop-chat", now: () => Date.parse("2026-09-18T04:20:00.000Z") },
+  );
+  assert.deepEqual(JSON.parse(line), payload);
+});
+
+test("persistChatLatencyReportAsync POSTs to the loopback host when Node fs is unavailable", async () => {
+  const report = { marks: { sendStartedAt: 0 }, waitingMs: 2, firstTokenMs: 40, replyReadyMs: 210 };
+  const seen = [];
+  const fetchFn = async (input, init) => {
+    seen.push({ input, init });
+    return { ok: true, status: 204 };
+  };
+  const ok = await persistChatLatencyReportAsync(report, {
+    env: {},
+    source: "desktop-chat",
+    now: () => Date.parse("2026-09-18T04:20:00.000Z"),
+    fetchFn,
+  });
+  assert.equal(ok, true);
+  assert.equal(seen.length, 1);
+  assert.equal(seen[0].input, "/local/v1/chat-latency");
+  assert.equal(seen[0].init.method, "POST");
+  const body = JSON.parse(seen[0].init.body);
+  assert.equal(body.waitingMs, 2);
+  assert.equal(body.firstTokenMs, 40);
+  assert.equal(body.replyReadyMs, 210);
+  assert.equal(body.source, "desktop-chat");
+  assert.equal(body.ts, "2026-09-18T04:20:00.000Z");
+});
+
+test("persistChatLatencyReportAsync prefers the Node path and skips fetch when the env is set", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "chat-latency-async-env-"));
+  const path = join(dir, "chat-latency.jsonl");
+  const report = { marks: { sendStartedAt: 0 }, waitingMs: 2, replyReadyMs: 50 };
+  let fetchCalls = 0;
+  const ok = await persistChatLatencyReportAsync(report, {
+    env: { [CHAT_LATENCY_JSONL_ENV]: path },
+    source: "desktop-chat",
+    fetchFn: async () => {
+      fetchCalls += 1;
+      return { ok: true, status: 204 };
+    },
+  });
+  assert.equal(ok, true);
+  assert.equal(fetchCalls, 0);
+  const parsed = JSON.parse(readFileSync(path, "utf8").trim());
+  assert.equal(parsed.replyReadyMs, 50);
+  assert.equal(parsed.source, "desktop-chat");
+});
+
+test("persistChatLatencyReportAsync never throws and resolves false without a sink", async () => {
+  const report = { marks: { sendStartedAt: 0 }, waitingMs: 1 };
+  assert.equal(
+    await persistChatLatencyReportAsync(report, {
+      env: {},
+      fetchFn: async () => {
+        throw new Error("offline");
+      },
+    }),
+    false,
+  );
+  assert.equal(await persistChatLatencyReportAsync(report, { env: {} }), false);
 });

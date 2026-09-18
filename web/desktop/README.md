@@ -69,6 +69,28 @@ Print inventory without a window:
 go run ./cmd/anvil-desktop --snapshot
 ```
 
+## Chat-latency capture
+
+Every Desktop Chat send records send → waiting → first token → running →
+reply ready timings. The summary goes to `console.debug`; a durable JSONL
+sink is opt-in for latency work (no secrets are ever written):
+
+```bash
+export ANVIL_CHAT_LATENCY_JSONL=$HOME/CodingFiles/HAZYFORGE/anvil-agents/.runtime/chat-latency.jsonl
+./hack/run-anvil-desktop.sh
+# or: go run ./cmd/anvil-desktop --chat-latency-jsonl "$ANVIL_CHAT_LATENCY_JSONL" ...
+```
+
+The path must be **absolute** (relative/empty disables the sink) and must be
+set on the **host** process: the Desktop UI runs in the browser (or Electron
+with `nodeIntegration: false`), where `process.env`/Node `fs` are
+unavailable, so the renderer POSTs each settled report to the same-origin
+loopback endpoint `POST /local/v1/chat-latency` and the host appends one
+JSON line (`waitingMs`, `firstTokenMs`, `runningMs`, `replyReadyMs`,
+`failedMs`, `source: "desktop-chat"`, `ts`). `GET /local/v1/snapshot`
+reports `chatLatencyJsonlEnabled: true/false` (the absolute path is never
+leaked to the SPA). Both paths are fire-and-forget and never break chat.
+
 ## Local API
 
 | Endpoint | Purpose |
@@ -77,6 +99,7 @@ go run ./cmd/anvil-desktop --snapshot
 | `GET /local/v1/snapshot` | Harnesses, API origin health, wrapper tool list |
 | `GET /local/v1/api-health` | Unauthenticated probe of `{apiOrigin}/healthz` |
 | `POST /local/v1/prefs` | Save `apiOrigin`, `harnessTarget` (`native`/`wsl`), optional `wslDistro` (no tokens) |
+| `POST /local/v1/chat-latency` | Append one live chat-latency JSON line to the host's `ANVIL_CHAT_LATENCY_JSONL` sink (204; no-op when unset) |
 | `POST /local/v1/delegate` | Run a catalog CLI on native PATH or via WSL (no OIDC token) |
 | `GET /ui-config.json` | Proxied from the API (product title rewritten) |
 | `/api/v1/namespaces/…` | Proxied to the API with the caller's `Authorization` header |
