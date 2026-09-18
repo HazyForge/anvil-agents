@@ -19,6 +19,7 @@ import (
 	agentsv1alpha1 "github.com/hazyforge/anvil-agents/api/v1alpha1"
 	"github.com/hazyforge/anvil-agents/internal/chat"
 	"github.com/hazyforge/anvil-agents/internal/runapi"
+	"github.com/hazyforge/anvil-agents/internal/standing"
 )
 
 func main() {
@@ -94,6 +95,16 @@ func main() {
 	if err != nil {
 		log.Error(err, "configure AgentRun API")
 		os.Exit(1)
+	}
+	// Slice-3b standing process backend: when the live gate is on, live
+	// standing turns execute through a real harness subprocess (PATH-resolved
+	// CLI, filtered env, no Secret access) instead of the FakeBackend-only
+	// test path. Gate off leaves no backend attached, so today's Job /
+	// NeedsHuman hold behavior is unchanged. A missing CLI on PATH or any
+	// harness failure falls back to that same hold behavior per turn.
+	if config.Standing.LiveEnabled {
+		server.SetStandingBackend(standing.NewProcessBackend(nil))
+		log.Info("standing live process backend enabled", "supported", standing.SupportedProcessKinds())
 	}
 	if chatStore != nil {
 		server.SetChatStore(chatStore)

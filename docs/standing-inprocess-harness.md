@@ -1,9 +1,9 @@
 # Standing in-process harness + WebSocket chat delivery
 
-Status: slice 3 (long-lived WebSocket token subscription, Fake-backed) —
-open standing streams multiplex live token frames during a turn while the
-durable turn record stays the source of truth. Architectural direction
-locked by Austin 2026-09-18.
+Status: slice 3b (real harness process behind `standing.Backend`, stacked on
+slice 3) — live InProcess turns execute through a real harness subprocess
+with the same turn, gate, fanout, and WebSocket token-hub behavior the Fake
+proved. Architectural direction locked by Austin 2026-09-18.
 
 ## Direction
 
@@ -248,11 +248,75 @@ harness subprocess). Desktop's `openChatThreadStream` already handles generic
 event types, so token frames flow through its `onEvent` handler with no
 protocol break; full Desktop e2e stays a later slice.
 
+## Slice 3b: real harness process behind standing.Backend (this slice)
+
+Slice 3b replaces the FakeBackend-only live path with
+`standing.ProcessBackend` (`internal/standing/process.go`): `EnsureTurnSession`
+session identity stays process-local and turn-based, while `StreamTurn` runs
+one real harness subprocess per accepted message and streams its stdout as
+live token events through the same sink → token-hub → WebSocket path slice 3
+built. One append-only AgentRun per message, the opt-in
+`standing.liveEnabled` / `ANVIL_AGENTS_STANDING_LIVE` gate, peer fanout, Job
+defaults for scouts/batch, and the optional Substrate plane are all
+unchanged.
+
+- **Closest in-process adapter, no second protocol.** The recipe table
+  (`processRecipes`) mirrors the delegatable entries of the desktop PATH
+  catalog (`internal/desktop` `Catalog`): same binaries, same constant argv,
+  same prompt transport (stdin, 0600 prompt file, or agy stream-json), and
+  the same ambient-credential posture. The subprocess's native stdout is the
+  reply, returned verbatim: the runapi Fake envelope wrapper
+  (`standingRunOutput`) is skipped for this backend via the
+  `ReturnsNativeEnvelope` gate (`standingTurnOutput`), so native output is
+  never double-wrapped and the existing per-harness reply extractors parse
+  it directly.
+- **Turn-based, not a daemon.** Each turn spawns one subprocess bound to the
+  durable turn identity; there is deliberately no continuously running native
+  CLI session. The snappiness win is skipping the Job/Pod cold start
+  (~8–44s measured on Primaris), not skipping process start. Subprocesses
+  are serialized per thread session; peer child threads own their own
+  sessions, so peer fanout still runs concurrently across threads.
+- **Fail closed everywhere.** Unknown sessions, oversized prompts, a missing
+  CLI on PATH, a non-zero exit, a timeout (2 minutes, desktop-delegate
+  default), empty output, or a Fake-only harness kind all return an error
+  and the turn keeps today's hold behavior (`InProcessNotWired`, no Job).
+- **No Secret surface.** The backend never reads Secrets and gains no Secret
+  RBAC. Provider credentials stay in the harness CLI's own auth home
+  (`~/.codex/auth.json`, …); the child env is the filtered ambient env (no
+  `KUBE*`/`KUBERNETES_*`, no OIDC/token material, no `KUBECONFIG`, no
+  `*DATABASE_URL`). No Primaris Argo changes, no chart values.
+- **Wiring.** `cmd/anvil-agents-api` attaches `NewProcessBackend(nil)`
+  (default `ExecRunner`: PATH-resolved CLIs) exactly when the live gate is
+  on. Gate off attaches nothing, so hold behavior is byte-identical.
+
+Live vs Fake-only harness kinds, explicitly:
+
+| Harness kind | Slice 3b | Notes |
+| --- | --- | --- |
+| `codex` | live subprocess (`codex exec --skip-git-repo-check`, stdin) | native envelope parsed by the codex extractor |
+| `openCode` | live subprocess (`opencode run`, stdin) | |
+| `openClaw` | live subprocess (`openclaw agent --message-file`, 0600 file) | |
+| `grokBuild` | live subprocess (`grok --prompt-file`, 0600 file) | |
+| `primeAgent` | live subprocess (`prime-agent --print --mode json --no-session`, stdin) | |
+| `agy` | live subprocess (stream-json user event on stdin) | |
+| `hermesAgent`, `piAgent` | Fake-only | inventory-only in the desktop catalog: no documented prompt-safe local invoke |
+| `custom` | Fake-only | operator-owned container image: no local binary contract |
+| empty kind | Fake-only | names no process; fails closed to hold |
+
+Tests: Fake still drives every slice-2/3 unit test (no model calls anywhere
+in unit). Slice 3b adds `internal/standing/process_test.go` (stub `Runner`
+for session/streaming/validation semantics; stub shell binaries for the real
+`ExecRunner` stdin/file transports, failure, and missing-CLI paths) and
+`internal/runapi/chat_standing_process_test.go` (native reply end to end
+through `queueChatTurn`: verbatim output, no double wrap, warm reuse, peer
+child on its own session, failure and Fake-only kinds keep hold).
+
 ## NEXT (slice 4 and beyond)
 
-1. **Real harness process** behind the same `standing.Backend` + gate
-   (model session per thread, provider credentials outside the API's Secret
-   surface), then retire the envelope wrapper.
+1. **Persistent native session resume** (pass a harness session ID across
+   turns where the CLI supports it) now that the process path is live; then
+   retire the envelope wrapper entirely once no Fake-only live path remains.
+   Provider credentials stay outside the API's Secret surface throughout.
 2. **Controller-hold yield + multi-replica claim** for API-owned standing
    turns (annotation claim the controller respects), so the
    `InProcessNotWired` hold can never race a live stream.
