@@ -77,10 +77,14 @@ type SessionHandle struct {
 // TokenEvent is one streamed unit of a standing turn. Seq orders tokens
 // within the turn; the final event carries Done with the remainder of the
 // reply (possibly empty) so the full reply is always recoverable from the
-// stream even if a client joins late.
+// stream even if a client joins late. ThreadID/TurnID bind the token to the
+// durable turn identity; RunName carries the append-only AgentRun created for
+// the turn so a future long-lived subscription can multiplex tokens from many
+// turns over one stream.
 type TokenEvent struct {
 	ThreadID string `json:"threadId"`
 	TurnID   string `json:"turnId"`
+	RunName  string `json:"runName,omitempty"`
 	Seq      int    `json:"seq"`
 	Token    string `json:"token"`
 	Done     bool   `json:"done"`
