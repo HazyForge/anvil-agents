@@ -1,7 +1,7 @@
 package substrate
 
 import (
-	"crypto/sha1"
+	"crypto/sha256"
 	"encoding/hex"
 	"strings"
 )
@@ -41,7 +41,7 @@ func ActorNameForThread(threadID string) string {
 	if len(name) <= maxActorNameLen {
 		return name
 	}
-	digest := sha1.Sum([]byte(threadID))
+	digest := sha256.Sum256([]byte(threadID))
 	suffix := hex.EncodeToString(digest[:])[:12]
 	keep := maxActorNameLen - len(actorNamePrefix) - len(suffix) - 1
 	return actorNamePrefix + sanitized[:keep] + "-" + suffix
