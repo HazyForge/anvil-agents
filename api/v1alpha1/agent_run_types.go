@@ -835,8 +835,9 @@ type AgentRunHarnessExecutionSpec struct {
 	// Empty defaults to Job: exactly one Kubernetes Job per AgentRun. Set to
 	// SubstrateActor to select the optional warm-actor plane for
 	// standing/manager chat turns; scouts and batch runs must stay on Jobs.
-	// Live Substrate dispatch is not wired yet, so the controller holds
-	// SubstrateActor runs without creating a Job. See docs/substrate-spike.md.
+	// The controller never creates a Job for SubstrateActor runs: with the
+	// live gate off it holds them as SubstrateActorNotWired, with the gate on
+	// it binds the warm actor. See docs/substrate-spike.md.
 	// +kubebuilder:validation:Enum=Job;SubstrateActor
 	// +optional
 	Runtime AgentRunExecutionRuntime `json:"runtime,omitempty"`
@@ -1095,8 +1096,9 @@ type AgentRunStatus struct {
 	// runs written before this field means the default Job plane.
 	// +optional
 	ExecutionRuntime string `json:"executionRuntime,omitempty"`
-	// SubstrateActor records the bound Substrate actor identity once live
-	// actor dispatch lands. The spike surface never populates it; Jobs ignore it.
+	// SubstrateActor records the bound Substrate actor identity. The controller
+	// populates it when the live gate binds the warm actor; the API-first hold
+	// leaves it empty and Jobs ignore it.
 	// +optional
 	SubstrateActor          *AgentRunSubstrateActorStatus         `json:"substrateActor,omitempty"`
 	PlannedJobRef           *NamespacedObjectReference            `json:"plannedJobRef,omitempty"`

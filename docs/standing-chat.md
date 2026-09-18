@@ -139,7 +139,8 @@ admits the API node's egress address before enabling chat.
 ## Optional Substrate actors (spike)
 
 A new conversation can select a harness profile whose `execution.runtime` is
-`SubstrateActor` to make its turns eligible for the warm-actor plane once live
-dispatch lands. Existing conversations keep their selected harness, and the
-controller currently holds SubstrateActor runs without creating a Job. See
+`SubstrateActor` to make its turns eligible for the warm-actor plane. Existing
+conversations keep their selected harness, and the controller never creates a
+Job for SubstrateActor runs: with the live gate off it holds them as
+`SubstrateActorNotWired`, with the gate on it binds the warm actor. See
 [Substrate spike](substrate-spike.md).

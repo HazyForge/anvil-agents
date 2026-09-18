@@ -15,6 +15,7 @@ import (
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 
 	agentsv1alpha1 "github.com/hazyforge/anvil-agents/api/v1alpha1"
+	"github.com/hazyforge/anvil-agents/internal/substrate"
 )
 
 func Run(ctx context.Context, options *Options) error {
@@ -91,6 +92,21 @@ func Run(ctx context.Context, options *Options) error {
 		APIReader:  mgr.GetAPIReader(),
 		Options:    options,
 	}
+	// Optional live Substrate plane (standing-chat spike slice 2). The gate is
+	// off by default; enabling it without an endpoint keeps the safe hold.
+	// The token travels only as an Authorization header and is never logged.
+	var substrateClient substrate.Client
+	if options.SubstrateActorsEnabled && strings.TrimSpace(options.SubstrateEndpoint) != "" {
+		gate := substrate.GateConfigFromEnv()
+		live, err := substrate.NewLiveClient(substrate.LiveConfig{
+			Endpoint:  strings.TrimSpace(options.SubstrateEndpoint),
+			AuthToken: gate.Token,
+		})
+		if err != nil {
+			return fmt.Errorf("configure Substrate live client: %w", err)
+		}
+		substrateClient = live
+	}
 	registrations := []struct {
 		name  string
 		setup func(ctrl.Manager) error
@@ -100,7 +116,7 @@ func Run(ctx context.Context, options *Options) error {
 		{"AgentAuthSession", (&AgentAuthSessionReconciler{Client: mgr.GetClient(), Scheme: mgr.GetScheme(), CommonReconcilerOptions: common}).SetupWithManager},
 		{"AgentDataVolumeCopy", (&AgentDataVolumeCopyReconciler{Client: mgr.GetClient(), Scheme: mgr.GetScheme(), CommonReconcilerOptions: common}).SetupWithManager},
 		{"AgentRunControl", (&AgentRunControlReconciler{Client: mgr.GetClient(), Scheme: mgr.GetScheme()}).SetupWithManager},
-		{"AgentRun", (&AgentRunReconciler{Client: mgr.GetClient(), Scheme: mgr.GetScheme(), CommonReconcilerOptions: common, AgentRunArchive: archiveStore}).SetupWithManager},
+		{"AgentRun", (&AgentRunReconciler{Client: mgr.GetClient(), Scheme: mgr.GetScheme(), CommonReconcilerOptions: common, AgentRunArchive: archiveStore, SubstrateClient: substrateClient}).SetupWithManager},
 		{"AgentSchedule", (&AgentScheduleReconciler{Client: mgr.GetClient(), Scheme: mgr.GetScheme()}).SetupWithManager},
 		{"AgentExternalTrigger", (&AgentExternalTriggerReconciler{
 			Client:                  mgr.GetClient(),

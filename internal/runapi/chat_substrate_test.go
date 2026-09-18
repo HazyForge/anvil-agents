@@ -6,6 +6,7 @@ import (
 
 	agentsv1alpha1 "github.com/hazyforge/anvil-agents/api/v1alpha1"
 	"github.com/hazyforge/anvil-agents/internal/chat"
+	"github.com/hazyforge/anvil-agents/internal/substrate"
 )
 
 // A standing-chat turn addresses its harness only through the thread's
@@ -86,14 +87,62 @@ func TestChatHarnessExecutionRuntimeSelection(t *testing.T) {
 	if job.UsesSubstrateActors() {
 		t.Fatal("empty execution must stay on the Job plane")
 	}
-	substrate := agentsv1alpha1.AgentRunHarnessExecutionSpec{
+	substrateExec := agentsv1alpha1.AgentRunHarnessExecutionSpec{
 		Runtime:   agentsv1alpha1.AgentRunExecutionRuntimeSubstrateActor,
 		Substrate: &agentsv1alpha1.AgentRunSubstrateActorSpec{ActorClass: "standing-chat"},
 	}
-	if !substrate.UsesSubstrateActors() {
+	if !substrateExec.UsesSubstrateActors() {
 		t.Fatal("substrate harness profile execution must select the actor plane")
 	}
-	if reason, message := agentsv1alpha1.ValidateSubstrateExecution(&substrate); reason != "" {
+	if reason, message := agentsv1alpha1.ValidateSubstrateExecution(&substrateExec); reason != "" {
 		t.Fatalf("substrate chat execution invalid: %s %s", reason, message)
+	}
+}
+
+// Peer deliveries resume the recipient thread actor through the same mapping
+// as a direct turn: the child run carries the child thread as its ChatThread
+// source, so substrate.ThreadIDForRun resolves the recipient thread and
+// ActorNameForThread addresses exactly one stable actor. Retried deliveries
+// keep their deterministic request ID (see dispatchChatCoordination), and the
+// existing durable wait for busy recipients still owns queueing — the warm
+// actor only skips the cold start and never drops a queued peer turn.
+func TestPeerChildRunMapsToRecipientThreadActor(t *testing.T) {
+	t.Parallel()
+
+	metadata, err := json.Marshal(map[string]string{
+		"sourceTurnId":      "parent-turn",
+		"sourceThreadId":    "parent-thread",
+		"sourceProfileName": "desktop-manager",
+	})
+	if err != nil {
+		t.Fatalf("metadata: %v", err)
+	}
+	child, err := buildChatRun("agents", "chat-turn-3", "review the proposal", chat.Thread{
+		ID: "child-id", Namespace: "agents", ProfileName: "desktop-reviewer", Metadata: metadata,
+	})
+	if err != nil {
+		t.Fatalf("peer child buildChatRun: %v", err)
+	}
+	if child.Spec.SourceRef.Kind != "ChatThread" || child.Spec.SourceRef.Name != "child-id" {
+		t.Fatalf("peer child source = %+v, want ChatThread/child-id", child.Spec.SourceRef)
+	}
+	threadID := substrate.ThreadIDForRun(child.Spec.SourceRef.Kind, child.Spec.SourceRef.Name, child.Name)
+	if threadID != "child-id" {
+		t.Fatalf("peer thread id = %q, want child-id", threadID)
+	}
+	actor := substrate.ActorNameForThread(threadID)
+	if actor == "" || actor != substrate.ActorNameForThread("child-id") {
+		t.Fatalf("peer actor = %q, want the stable recipient thread actor", actor)
+	}
+	if actor == substrate.ActorNameForThread("parent-thread") {
+		t.Fatal("peer recipient actor must not collide with the parent thread actor")
+	}
+	direct, err := buildChatRun("agents", "chat-turn-4", "hello", chat.Thread{ID: "parent-thread", Namespace: "agents", ProfileName: "desktop-manager"})
+	if err != nil {
+		t.Fatalf("direct buildChatRun: %v", err)
+	}
+	directThread := substrate.ThreadIDForRun(direct.Spec.SourceRef.Kind, direct.Spec.SourceRef.Name, direct.Name)
+	if directThread != "parent-thread" {
+		t.Fatalf("direct thread id = %q, want parent-thread", directThread)
 	}
 }

@@ -66,6 +66,10 @@ func (r *AgentRunReconciler) reconcileTerminalAgentRun(ctx context.Context, run 
 	if run == nil {
 		return ctrl.Result{}, nil
 	}
+	// Optional live Substrate plane: release the actor worker once the turn
+	// goes idle. Best-effort by design; failures must not block terminal
+	// bookkeeping. Job runs never reach this helper with an actor client.
+	r.suspendSubstrateActorOnTerminal(ctx, run)
 	// Activate Job garbage collection only after the terminal run result is
 	// durable. A controller crash can then leak a Job temporarily, but cannot
 	// lose the only execution record and launch a duplicate.

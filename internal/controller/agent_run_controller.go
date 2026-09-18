@@ -32,6 +32,7 @@ import (
 
 	controlv1alpha1 "github.com/hazyforge/anvil-agents/api/v1alpha1"
 	"github.com/hazyforge/anvil-agents/internal/archive"
+	"github.com/hazyforge/anvil-agents/internal/substrate"
 )
 
 const (
@@ -123,6 +124,11 @@ type AgentRunReconciler struct {
 	CommonReconcilerOptions
 	ReadPodLogs     func(ctx context.Context, namespace, pod string) (string, error)
 	AgentRunArchive archive.AgentRunArchiveStore
+	// SubstrateClient is the optional live actor backend (standing-chat spike
+	// slice 2). Nil keeps the API-first hold. It is only consulted when the
+	// SubstrateActorsEnabled gate and SubstrateEndpoint are both configured;
+	// the default Job path never touches it.
+	SubstrateClient substrate.Client
 }
 
 func (r *AgentRunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -463,6 +469,14 @@ func (r *AgentRunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		}
 		if paused {
 			return r.patchAgentRunLaunchPausedStatus(ctx, original, obj, &status, pauseReason, pauseMessage, pauseRequeueAfter)
+		}
+		// Optional live Substrate plane (standing-chat spike slice 2). Actor
+		// runs bind their warm actor here, before any Job-launch receipt is
+		// written, so the Job plane keeps treating them as unlaunched and no
+		// Job is ever created for them. The default Job path falls through
+		// unchanged.
+		if r.substrateLiveClient() != nil && effective.Spec.Harness.Execution.UsesSubstrateActors() {
+			return r.reconcileSubstrateActorRun(ctx, original, obj, &status, effective, now)
 		}
 		prompt := buildAgentRunPrompt(effective)
 		promptHash := shortHash(prompt)
@@ -3580,8 +3594,14 @@ func (r *AgentRunReconciler) agentRunBackendValidation(obj *controlv1alpha1.Agen
 // Kubernetes Job before live actor dispatch exists. It runs after backend
 // validation so adapter misconfiguration still surfaces first; scouts and
 // batch runs never reach it because they stay on the default Job runtime.
+// When the explicit live gate is on with a configured backend, the hold lifts
+// and reconcileSubstrateActorRun binds the warm actor instead (still with no
+// Job).
 func (r *AgentRunReconciler) agentRunSubstrateHold(obj *controlv1alpha1.AgentRun) (controlv1alpha1.AgentRunPhase, string, string) {
 	if obj == nil || !obj.Spec.Harness.Execution.UsesSubstrateActors() {
+		return "", "", ""
+	}
+	if r.substrateLiveClient() != nil {
 		return "", "", ""
 	}
 	return controlv1alpha1.AgentRunPhaseNeedsHuman, "SubstrateActorNotWired",
