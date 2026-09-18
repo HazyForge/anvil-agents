@@ -441,4 +441,40 @@ helm template "${release}" "${chart}" "${api_args[@]}" \
 grep -A5 'ANVIL_AGENTS_CHAT_DATABASE_URL' "${tmp_dir}/chat-override.yaml" | grep -Eq 'name: "?chat-only"?' || fail "chat override Secret name was not rendered"
 grep -A5 'ANVIL_AGENTS_CHAT_DATABASE_URL' "${tmp_dir}/chat-override.yaml" | grep -Eq 'key: "?url"?' || fail "chat override Secret key was not rendered"
 
+# Standing live turns (slice 5c) are opt-in: without standing.liveEnabled the
+# API role stays read-only on AgentRuns; with it the role gains exactly the
+# claim stamp (update/patch agentruns) and the Succeeded mark (update
+# agentruns/status) — and never Secret access.
+if grep -q 'agentruns/status' "${tmp_dir}/rbac.yaml"; then
+  fail "default API RBAC must not grant agentruns/status"
+fi
+if grep -A8 'resources: \["agentruns"\]' "${tmp_dir}/rbac.yaml" | grep -Eq ' - (update|patch)'; then
+  fail "default API RBAC must not grant agentruns update/patch"
+fi
+helm template "${release}" "${chart}" "${api_args[@]}" \
+  --set api.config.standing.liveEnabled=true \
+  --show-only templates/api-clusterrole.yaml >"${tmp_dir}/rbac-standing-live.yaml"
+grep -A8 'resources: \["agentruns"\]' "${tmp_dir}/rbac-standing-live.yaml" | grep -q ' - update' || fail "standing live RBAC missing agentruns update (claim stamp)"
+grep -A8 'resources: \["agentruns"\]' "${tmp_dir}/rbac-standing-live.yaml" | grep -q ' - patch' || fail "standing live RBAC missing agentruns patch (claim stamp)"
+grep -q 'resources: \["agentruns/status"\]' "${tmp_dir}/rbac-standing-live.yaml" || fail "standing live RBAC missing agentruns/status (Succeeded mark)"
+grep -A4 'resources: \["agentruns/status"\]' "${tmp_dir}/rbac-standing-live.yaml" | grep -q ' - update' || fail "standing live RBAC missing agentruns/status update"
+if grep -A4 'resources: \["agentruns/status"\]' "${tmp_dir}/rbac-standing-live.yaml" | grep -Eq ' - (patch|delete|create)'; then
+  fail "standing live status RBAC must be update-only"
+fi
+if grep -q 'secrets' "${tmp_dir}/rbac-standing-live.yaml"; then
+  fail "standing live API RBAC must never grant secrets"
+fi
+helm template "${release}" "${chart}" "${api_args[@]}" \
+  --set api.config.standing.liveEnabled=true \
+  --show-only templates/api-configmap.yaml >"${tmp_dir}/standing-live-config.yaml"
+grep -q 'liveEnabled: true' "${tmp_dir}/standing-live-config.yaml" || fail "standing.liveEnabled was not rendered into the API config"
+helm template "${release}" "${chart}" "${api_args[@]}" \
+  --set api.config.standing.liveEnabled=true \
+  --set api.config.externalTriggers.enabled=true \
+  --show-only templates/api-clusterrole.yaml >"${tmp_dir}/rbac-standing-live-triggers.yaml"
+grep -q 'resources: \["agentruns/status"\]' "${tmp_dir}/rbac-standing-live-triggers.yaml" || fail "standing live + externalTriggers RBAC missing agentruns/status"
+if [[ "$(grep -c ' - update' "${tmp_dir}/rbac-standing-live-triggers.yaml")" -ne 3 ]]; then
+  fail "standing live + externalTriggers RBAC must not duplicate update verbs"
+fi
+
 printf 'AgentRun API chart contract passed\n'

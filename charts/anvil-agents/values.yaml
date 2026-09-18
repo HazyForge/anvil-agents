@@ -225,6 +225,14 @@ api:
     # ANVIL_AGENTS_CHAT_DATABASE_URL from a Secret (archive Secret by default).
     chat:
       enabled: false
+    # Standing in-process live turns (slice 5c). Disabled by default. When
+    # true, the API drives API-owned standing turns: it stamps the
+    # multi-replica claim (update/patch agentruns) and marks the streamed
+    # turn Succeeded (update agentruns/status). The chart grants exactly
+    # that RBAC and nothing else — no Secret access. Without it the slice-4
+    # claim degrades to hold behavior. See docs/standing-inprocess-harness.md.
+    standing:
+      liveEnabled: false
     # Cluster-scoped AgentRunControl launch gates (pause/resume from the console).
     # GitOps-owned controls remain read-only; operator-created controls are
     # writable when writeEnabled is true.
