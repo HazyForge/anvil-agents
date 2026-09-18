@@ -17,9 +17,10 @@ import (
 
 	agentsv1alpha1 "github.com/hazyforge/anvil-agents/api/v1alpha1"
 	"github.com/hazyforge/anvil-agents/internal/chat"
+	"github.com/hazyforge/anvil-agents/internal/standing"
 )
 
-const chatTurnLabel = "control.anvil.hazyforge.io/chat-turn"
+const chatTurnLabel = agentsv1alpha1.AgentRunChatTurnLabel
 const chatThreadLabel = "control.anvil.hazyforge.io/chat-thread"
 const chatPromptLimit = 192 * 1024
 
@@ -308,6 +309,14 @@ func (server *Server) reconcileChatTurn(ctx context.Context, turn *chat.Turn) er
 		server.suspendStandingTurn(ctx, turn.Namespace, turn.ThreadID, turn.ID)
 		return completeErr
 	case agentsv1alpha1.AgentRunPhaseNeedsHuman:
+		if _, live := standing.ClaimForTurn(run.Annotations, turn.ID, time.Now(), standing.ClaimTTL); live {
+			// API-owned standing turn: the claiming replica is driving (or
+			// about to drive) the stream while the controller yields its
+			// hold. Keep the turn active so the holder can complete it;
+			// never fail it with hold guidance mid-stream.
+			turn.Status = "running"
+			return nil
+		}
 		reason := strings.TrimSpace(run.Status.Error)
 		if reason == "" {
 			for i := len(run.Status.Conditions) - 1; i >= 0; i-- {

@@ -17,7 +17,7 @@ import (
 
 const (
 	agentRunChatStartupBudget  = 5 * time.Minute
-	agentRunChatTurnLabel      = "control.anvil.hazyforge.io/chat-turn"
+	agentRunChatTurnLabel      = controlv1alpha1.AgentRunChatTurnLabel
 	agentRunChatStartupReason  = "ChatStartupDeadlineExceeded"
 	agentRunChatStartupMessage = "This chat turn did not start within 5 minutes. No runner Job was found. Send a new message to try again."
 )

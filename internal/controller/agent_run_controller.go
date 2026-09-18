@@ -32,6 +32,7 @@ import (
 
 	controlv1alpha1 "github.com/hazyforge/anvil-agents/api/v1alpha1"
 	"github.com/hazyforge/anvil-agents/internal/archive"
+	"github.com/hazyforge/anvil-agents/internal/standing"
 	"github.com/hazyforge/anvil-agents/internal/substrate"
 )
 
@@ -3616,13 +3617,19 @@ func (r *AgentRunReconciler) agentRunSubstrateHold(obj *controlv1alpha1.AgentRun
 // Kubernetes Job before a live standing-harness backend exists. It runs after
 // backend validation so adapter misconfiguration still surfaces first; scouts
 // and batch runs never reach it because they stay on the default Job runtime.
-// Slice 1 is API-first (selection + session/stream contract + Fake backend in
-// internal/standing), so the hold always applies until a later slice wires a
-// live backend behind an explicit opt-in gate. See
-// docs/standing-inprocess-harness.md.
+// Slice 4 adds the controller half of the standing-turn claim: when the run
+// carries a live API claim for its chat turn, the controller yields with
+// StandingClaimed — still no Job — instead of racing the live stream with
+// InProcessNotWired. Absent, malformed, mismatched, or stale claims keep the
+// original hold byte-identical, and gate-off runs never carry a claim at all.
+// See docs/standing-inprocess-harness.md.
 func (r *AgentRunReconciler) agentRunInProcessHold(obj *controlv1alpha1.AgentRun) (controlv1alpha1.AgentRunPhase, string, string) {
 	if obj == nil || !obj.Spec.Harness.Execution.UsesInProcess() {
 		return "", "", ""
+	}
+	if claim, ok := standing.ClaimForTurn(obj.Annotations, strings.TrimSpace(obj.Labels[agentRunChatTurnLabel]), time.Now(), standing.ClaimTTL); ok {
+		return controlv1alpha1.AgentRunPhaseNeedsHuman, "StandingClaimed",
+			fmt.Sprintf("execution.runtime InProcess standing turn %q is owned by API replica %q; the controller yields and created no Kubernetes Job. See docs/standing-inprocess-harness.md (slice 4).", claim.TurnID, claim.Owner)
 	}
 	return controlv1alpha1.AgentRunPhaseNeedsHuman, "InProcessNotWired",
 		"execution.runtime InProcess is an API-first slice-1 surface; no standing in-process harness backend is wired in this build, so no Kubernetes Job was created. See docs/standing-inprocess-harness.md for the live-backend follow-up."

@@ -53,6 +53,10 @@ type Server struct {
 	// stream it twice in this process. It is a pointer so Server stays
 	// trivially copyable.
 	standingGuard *standingTurnGuard
+	// standingOwner identifies this API process in standing-turn claims
+	// (hostname/pid). The annotation write decides the cross-replica winner;
+	// the owner is observability plus the same-process re-entry fast path.
+	standingOwner string
 	// standingHub fans stamped standing token events out to open WebSocket
 	// stream subscribers for the same thread. Process-local, like the guard
 	// above; SSE never subscribes.
@@ -76,6 +80,7 @@ func NewServer(config Config, authenticator AccessTokenAuthenticator, runs clien
 		limiter:       newStreamLimiter(config.Stream.MaxConnections, config.Stream.MaxConnectionsPerSubject),
 		standingGuard: newStandingTurnGuard(),
 		standingHub:   newStandingTokenHub(),
+		standingOwner: standing.NewOwnerID(),
 	}
 	if writeClient, ok := runs.(client.Client); ok {
 		server.writes = writeClient
