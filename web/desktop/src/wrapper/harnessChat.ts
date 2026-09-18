@@ -22,6 +22,12 @@ import {
   type CreateAgentInput,
   type CreateAgentResult,
 } from "./createAgent";
+import {
+  createChatLatencyTracker,
+  formatChatLatencyReport,
+  withChatLatency,
+  type ChatLatencyReport,
+} from "./chatLatency";
 import { formatTurnError } from "./turn";
 
 export { MANAGER_PROFILE_NAMES };
@@ -345,21 +351,43 @@ export async function streamDesktopChat(opts: {
   onDelta?: (text: string) => void;
   onChips?: (chips: ChatChip[]) => void;
   onStatus?: (status: ChatTurnStatus) => void;
+  /** Optional per-send latency observer. Defaults to a console.debug one-liner. */
+  onLatency?: (report: ChatLatencyReport) => void;
+  /** Clock override for tests. Defaults to Date.now. */
+  now?: () => number;
 }): Promise<HarnessChatResult> {
   const text = opts.text.trim();
   if (!text) {
     return { text: NO_HARNESS_CHAT, source: "honest" };
   }
+  // Measure every send: send → waiting → firstToken → running → replyReady (or failed).
+  const { opts: tracked, tracker } = withChatLatency(
+    {
+      onDelta: opts.onDelta,
+      onStatus: (status: string) => opts.onStatus?.(status as ChatTurnStatus),
+    },
+    createChatLatencyTracker(opts.now ?? (() => Date.now())),
+  );
+  const settleLatency = () => {
+    const report = tracker.report();
+    try {
+      opts.onLatency?.(report);
+    } catch {
+      // Latency observers must never break chat.
+    }
+    console.debug(formatChatLatencyReport(report));
+    return report;
+  };
   let threadId: string | undefined;
   try {
-    opts.onStatus?.("waiting");
+    tracked.onStatus?.("waiting");
     const reply = await proxyManagerHarnessChat({
       token: opts.token,
       namespace: opts.namespace,
       text,
-      onDelta: opts.onDelta,
+      onDelta: tracked.onDelta,
       onChips: opts.onChips,
-      onStatus: opts.onStatus,
+      onStatus: tracked.onStatus,
     });
     threadId = reply.threadId;
     const history = await loadManagerHarnessHistory({ token: opts.token, namespace: opts.namespace }).catch(
@@ -383,6 +411,8 @@ export async function streamDesktopChat(opts: {
     if (fulfilled.chips.length > 0) {
       opts.onChips?.(fulfilled.chips);
     }
+    tracker.markReplyReady();
+    settleLatency();
     return {
       text: replyText + receiptText,
       source: "harness",
@@ -397,6 +427,8 @@ export async function streamDesktopChat(opts: {
     );
     const recovered = history ? recoveredReplyForUser(history.lines, text) : undefined;
     if (recovered) {
+      tracker.markReplyReady();
+      settleLatency();
       return {
         text: recovered.content,
         source: "harness",
@@ -406,7 +438,8 @@ export async function streamDesktopChat(opts: {
         targetAgent: recovered.targetAgent,
       };
     }
-    opts.onStatus?.("failed");
+    tracked.onStatus?.("failed");
+    settleLatency();
     return {
       text: `${NO_HARNESS_CHAT} (${formatTurnError(err)})`,
       source: "honest",
@@ -420,6 +453,13 @@ export async function sendDesktopChat(opts: {
   token: string;
   namespace: string;
   text: string;
+  writeEnabled?: boolean;
+  chatEnabled?: boolean;
+  onDelta?: (text: string) => void;
+  onChips?: (chips: ChatChip[]) => void;
+  onStatus?: (status: ChatTurnStatus) => void;
+  onLatency?: (report: ChatLatencyReport) => void;
+  now?: () => number;
 }): Promise<HarnessChatResult> {
   return streamDesktopChat(opts);
 }
