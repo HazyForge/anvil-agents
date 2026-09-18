@@ -28,11 +28,14 @@
 //     Service, matching upstream.
 //
 // Kind-only insecure escape hatch: ATEClientConfig.Insecure (gate env
-// ANVIL_AGENTS_SUBSTRATE_INSECURE / --substrate-insecure) dials plaintext
-// without TLS verification. It refuses every non-loopback endpoint, so it can
-// only reach a local port-forward on the developer's own machine. This exists
-// for Kind spikes where the podcert trust bundle is not yet wired into the
-// local kubeconfig; production and shared clusters must use verified TLS.
+// ANVIL_AGENTS_SUBSTRATE_INSECURE / --substrate-insecure) dials TLS with
+// certificate verification skipped (InsecureSkipVerify, TLS 1.3 minimum,
+// ServerName api.ate-system.svc). ateapi always serves TLS, so this is still
+// a TLS channel — never plaintext/h2c. It refuses every non-loopback
+// endpoint, so it can only reach a local port-forward on the developer's own
+// machine. This exists for Kind spikes where the podcert trust bundle is not
+// yet wired into the local kubeconfig; production and shared clusters must
+// use verified TLS.
 // The flag, the loopback guard, and this comment are the explicit marker the
 // task requires — insecure dial is never silent.
 package substrate
@@ -55,7 +58,6 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
-	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
 
 	"github.com/hazyforge/anvil-agents/internal/substrate/ateapipb"
@@ -459,7 +461,9 @@ func (g *grpcATEControl) PauseActor(ctx context.Context, ref ATEObjectRef) (ATEA
 // Secure path (default): verified TLS via the live ClusterTrustBundle, then
 // the bearer token (file > inline > minted ServiceAccount token), mirroring
 // upstream ateclient.NewClient. Insecure path (cfg.Insecure, Kind-only):
-// plaintext gRPC restricted to loopback endpoints, token optional.
+// TLS with certificate verification skipped, restricted to loopback
+// endpoints; bearer token attached like the secure path when available
+// (file > inline > minted ServiceAccount token).
 func DialATEControl(ctx context.Context, cfg ATEClientConfig, opts ATEDialOptions) (ATEControl, func(), error) {
 	if err := cfg.Validate(); err != nil {
 		return nil, nil, err
@@ -472,20 +476,32 @@ func DialATEControl(ctx context.Context, cfg ATEClientConfig, opts ATEDialOption
 		if !isLoopbackEndpoint(endpoint) {
 			return nil, nil, fmt.Errorf("substrate insecure-dev dial refuses non-loopback endpoint %q (set %s only for a local Kind port-forward)", endpoint, GateInsecureEnvVar)
 		}
-		// Kind-only plaintext: no TLS verification by explicit opt-in. The
-		// loopback guard above is what keeps this from ever reaching a
-		// shared cluster.
+		// Kind-only skip-verify TLS: ateapi always serves TLS, so the
+		// insecure escape hatch skips certificate verification on a TLS
+		// channel instead of dialing plaintext. The loopback guard above is
+		// what keeps this from ever reaching a shared cluster.
 		dialOpts := []grpc.DialOption{
-			grpc.WithTransportCredentials(insecure.NewCredentials()),
+			grpc.WithTransportCredentials(credentials.NewTLS(&tls.Config{
+				InsecureSkipVerify: true, //nolint:gosec // Kind loopback-only spike path; guarded above.
+				MinVersion:         tls.VersionTLS13,
+				ServerName:         ateAPIServerName,
+			})),
 			grpc.WithDefaultServiceConfig(roundRobinServiceConfig),
 		}
 		if strings.TrimSpace(cfg.TokenFile) != "" {
 			if _, err := loadTokenFromFile(strings.TrimSpace(cfg.TokenFile)); err != nil {
 				return nil, nil, err
 			}
-			dialOpts = append(dialOpts, grpc.WithPerRPCCredentials(fileBearerCreds{path: strings.TrimSpace(cfg.TokenFile)}))
+			dialOpts = append(dialOpts, grpc.WithPerRPCCredentials(fileBearerCreds{path: strings.TrimSpace(cfg.TokenFile), requireTLS: true}))
 		} else if strings.TrimSpace(cfg.Token) != "" {
-			dialOpts = append(dialOpts, grpc.WithPerRPCCredentials(staticBearerCreds{token: strings.TrimSpace(cfg.Token)}))
+			dialOpts = append(dialOpts, grpc.WithPerRPCCredentials(staticBearerCreds{token: strings.TrimSpace(cfg.Token), requireTLS: true}))
+		} else if clientset, err := ateKubernetesClientset(opts); err == nil {
+			// Best-effort mint like the secure path; without a kubeconfig or
+			// in-cluster RBAC there is nothing to mint, so dial without a
+			// token rather than failing the loopback spike.
+			if tokenOpt, err := resolveBearerCredentials(ctx, cfg, clientset, true); err == nil {
+				dialOpts = append(dialOpts, tokenOpt)
+			}
 		}
 		conn, err := grpc.NewClient(endpoint, dialOpts...)
 		if err != nil {

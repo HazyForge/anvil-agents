@@ -212,8 +212,10 @@ type ATEClientConfig struct {
 	// dialer only ever attaches it to the verified gRPC channel and it must
 	// never appear in status, logs, or API JSON.
 	Token string
-	// Insecure dials plaintext gRPC for a local Kind port-forward.
-	// Kind-only: the dialer refuses every non-loopback endpoint when set.
+	// Insecure dials TLS with certificate verification skipped for a local
+	// Kind port-forward. ateapi always serves TLS, so this is still a TLS
+	// channel — never plaintext. Kind-only: the dialer refuses every
+	// non-loopback endpoint when set.
 	// Production and shared clusters must use verified TLS (default).
 	Insecure bool
 }

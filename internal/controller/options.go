@@ -97,8 +97,9 @@ type Options struct {
 	// SubstrateTemplate is the default ActorTemplate when an actor spec
 	// leaves the actor class empty. Required for live dispatch.
 	SubstrateTemplate string
-	// SubstrateInsecure dials plaintext gRPC for a local Kind port-forward.
-	// Kind-only: the dialer refuses every non-loopback endpoint when set.
+	// SubstrateInsecure dials TLS with certificate verification skipped for a
+	// local Kind port-forward. Kind-only: the dialer refuses every non-loopback
+	// endpoint when set.
 	SubstrateInsecure bool
 }
 
