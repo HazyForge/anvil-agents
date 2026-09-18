@@ -38,9 +38,11 @@ import (
 // bound to the durable turn identity (thread/turn/run). There is no
 // continuously running native CLI session — session continuity across turns
 // is the process-local session identity plus warm-reuse reporting, exactly
-// like FakeBackend. Persistent native session resume (passing a harness
-// session ID across turns) is a later slice; the snappiness win here is
-// skipping the Job/Pod cold start, not skipping process start.
+// like FakeBackend, with persistent native resume on top where the CLI
+// documents it (see process_resume.go): the backend records the harness's
+// native session id per standing session and passes it back on the next
+// turn. The snappiness win here is skipping the Job/Pod cold start
+// (~8–44s measured on Primaris), not skipping process start.
 //
 // Harness kinds without a documented prompt-safe local invoke stay Fake-only:
 // hermesAgent and piAgent are inventory-only in the desktop catalog, custom
@@ -58,44 +60,66 @@ const (
 )
 
 // processRecipe is the constant argv recipe for one harness kind. Args are
-// catalog constants; nothing is derived from user input.
+// catalog constants; nothing is derived from user input. Resume selects the
+// kind's documented native resume surface (see process_resume.go); the zero
+// value runs cold and records nothing.
 type processRecipe struct {
 	binaries []string
 	args     []string
 	mode     processPromptMode
 	fileFlag string
+	resume   nativeResumeMode
 }
 
 // processRecipes mirrors the delegatable desktop catalog entries
 // (internal/desktop Catalog). Kinds absent here are Fake-only.
 var processRecipes = map[string]processRecipe{
 	"codex": {
+		// --json matches the Job runner image (docker/agent-run-codex) and
+		// the native envelope the codex reply extractor parses; it also
+		// surfaces the thread.started event the resume path records.
 		binaries: []string{"codex"},
-		args:     []string{"exec", "--skip-git-repo-check"},
+		args:     []string{"exec", "--skip-git-repo-check", "--json"},
 		mode:     processPromptStdin,
+		resume:   resumeCodexSubcommand,
 	},
 	"openCode": {
+		// --format json matches the Job runner image
+		// (docker/agent-run-opencode) and the native text events the
+		// openCode reply extractor parses; every json event carries the
+		// sessionID the resume path records.
 		binaries: []string{"opencode"},
-		args:     []string{"run"},
+		args:     []string{"run", "--format", "json"},
 		mode:     processPromptStdin,
+		resume:   resumeSessionFlag,
 	},
 	"openClaw": {
+		// --session-key is passed per turn (stable per standing session,
+		// see NativeSessionKey), mirroring the Job runner image
+		// (docker/agent-run-openclaw) which passes a fresh --session-key
+		// per AgentRun.
 		binaries: []string{"openclaw"},
 		args:     []string{"agent"},
 		mode:     processPromptFile,
 		fileFlag: "--message-file",
+		resume:   resumeSessionKey,
 	},
 	"grokBuild": {
+		// No documented resume flag: one-shot JSON output, always cold.
 		binaries: []string{"grok"},
 		mode:     processPromptFile,
 		fileFlag: "--prompt-file",
 	},
 	"primeAgent": {
+		// Explicitly --no-session: native resume is disabled by
+		// construction, always cold.
 		binaries: []string{"prime-agent"},
 		args:     []string{"--print", "--mode", "json", "--no-session"},
 		mode:     processPromptStdin,
 	},
 	"agy": {
+		// Single-turn stream-json execution with no documented persistent
+		// conversation surface, always cold.
 		binaries: []string{"agy"},
 		args:     []string{"--dangerously-skip-permissions", "--input-format", "stream-json", "--output-format", "stream-json"},
 		mode:     processPromptAgyStream,
@@ -170,12 +194,50 @@ func (r *ExecRunner) timeout() time.Duration {
 	return defaultProcessTimeout
 }
 
-// Run implements Runner.
+// Run implements Runner. It runs the cold recipe argv: one subprocess per
+// turn with no native resume token. Backends prefer RunWithResume below when
+// the harness kind supports native resume.
 func (r *ExecRunner) Run(ctx context.Context, harnessKind, prompt string, emit func(chunk string) error) (string, error) {
 	recipe, ok := processRecipes[harnessKind]
 	if !ok {
 		return "", fmt.Errorf("standing process backend has no local recipe for harness kind %q (Fake-only)", harnessKind)
 	}
+	return r.execTurn(ctx, harnessKind, recipe, append([]string(nil), recipe.args...), prompt, emit)
+}
+
+// RunWithResume implements SessionRunner. When the kind supports native
+// resume and a well-formed recorded id (or derived session key) is
+// available, the turn runs with the documented resume argv so the CLI keeps
+// model context; otherwise it runs the cold recipe argv exactly like Run.
+// The returned id is the native session the CLI actually served under (""
+// when the kind carries no discoverable id); callers must ignore it when err
+// is non-nil.
+func (r *ExecRunner) RunWithResume(ctx context.Context, handle SessionHandle, turnID, prompt, resumeID string, emit func(chunk string) error) (string, string, error) {
+	_ = turnID // turn identity binds tokens at the backend sink layer; the CLI receives the frozen prompt only.
+	recipe, ok := processRecipes[handle.HarnessKind]
+	if !ok {
+		return "", "", fmt.Errorf("standing process backend has no local recipe for harness kind %q (Fake-only)", handle.HarnessKind)
+	}
+	argv := append([]string(nil), recipe.args...)
+	if recipe.resume != resumeUnsupported {
+		var key string
+		if recipe.resume == resumeSessionKey {
+			key = NativeSessionKey(handle.Namespace, handle.SessionName)
+		}
+		if resumeArgv, ok := recipe.resumeArgs(resumeID, key); ok {
+			argv = resumeArgv
+		}
+	}
+	reply, err := r.execTurn(ctx, handle.HarnessKind, recipe, argv, prompt, emit)
+	if err != nil {
+		return "", "", err
+	}
+	return reply, discoverNativeSessionID(recipe, handle, reply), nil
+}
+
+// execTurn executes one harness turn with explicit argv (cold recipe args or
+// resume args) and returns the full native stdout.
+func (r *ExecRunner) execTurn(ctx context.Context, harnessKind string, recipe processRecipe, argv []string, prompt string, emit func(chunk string) error) (string, error) {
 	var bin string
 	for _, name := range recipe.binaries {
 		resolved, err := r.lookPath(name)
@@ -194,7 +256,7 @@ func (r *ExecRunner) Run(ctx context.Context, harnessKind, prompt string, emit f
 	runCtx, cancel := context.WithTimeout(ctx, r.timeout())
 	defer cancel()
 
-	args := append([]string(nil), recipe.args...)
+	args := append([]string(nil), argv...)
 	var stdin *strings.Reader
 	switch recipe.mode {
 	case processPromptStdin:
@@ -364,6 +426,12 @@ type processSession struct {
 	spec   SessionSpec
 	handle SessionHandle
 	turns  int
+	// nativeID is the harness CLI's durable session id for this standing
+	// session, recorded from a previous turn's output (or derived for
+	// key-based kinds) and resumed on the next turn where the recipe
+	// supports it. Empty means the next turn goes cold. It never carries
+	// credentials — only the CLI's opaque session token.
+	nativeID string
 	// turnMu serializes subprocesses for one thread. Peer child threads own
 	// their own sessions, so peer fanout still runs concurrently across
 	// threads; the runapi per-turn singleflight additionally serializes
@@ -489,6 +557,13 @@ func (b *ProcessBackend) SuspendSession(ctx context.Context, namespace, name str
 // durable turn record; streaming is delivery, not storage. Fake-only harness
 // kinds, a missing CLI on PATH, a non-zero exit, or a timeout all return an
 // error so the turn path keeps today's hold behavior.
+//
+// Where the harness kind supports native resume (SupportsNativeResume) and
+// the runner implements SessionRunner, the turn resumes the session's
+// recorded native id and records the id the CLI served under for the next
+// turn. A resume the CLI rejects fails the turn back to hold and clears the
+// recorded id, so the next turn re-discovers cold instead of wedging on a
+// dead session. Plain Runners run every turn cold, exactly like slice 3b.
 func (b *ProcessBackend) StreamTurn(ctx context.Context, handle SessionHandle, turnID, prompt string, sink Sink) (string, error) {
 	if err := ctx.Err(); err != nil {
 		return "", err
@@ -511,6 +586,14 @@ func (b *ProcessBackend) StreamTurn(ctx context.Context, handle SessionHandle, t
 	if runner == nil {
 		runner = &ExecRunner{}
 	}
+	var resumeID string
+	resumeSupported := false
+	if recipe, ok := processRecipes[handle.HarnessKind]; ok && recipe.resume != resumeUnsupported {
+		resumeSupported = true
+		resumeID = session.nativeID
+		// Key-based kinds (openClaw) derive their stable session key from
+		// the handle inside RunWithResume, so nothing extra travels here.
+	}
 	b.mu.Unlock()
 
 	seq := 0
@@ -531,9 +614,34 @@ func (b *ProcessBackend) StreamTurn(ctx context.Context, handle SessionHandle, t
 		seq++
 		return sink.OnToken(ctx, event)
 	}
-	reply, err := runner.Run(ctx, handle.HarnessKind, prompt, emit)
-	if err != nil {
-		return "", err
+	var reply string
+	if sr, ok := runner.(SessionRunner); ok && resumeSupported {
+		newID := ""
+		var runErr error
+		reply, newID, runErr = sr.RunWithResume(ctx, handle, strings.TrimSpace(turnID), prompt, resumeID, emit)
+		if runErr != nil {
+			if strings.TrimSpace(resumeID) != "" {
+				// The recorded id is stale (or the resume surface moved):
+				// drop it so the next turn re-discovers cold. This turn
+				// still fails back to hold — there is no silent cold retry
+				// inside a failed turn.
+				b.mu.Lock()
+				session.nativeID = ""
+				b.mu.Unlock()
+			}
+			return "", runErr
+		}
+		if id := strings.TrimSpace(newID); id != "" && len(id) <= 512 {
+			b.mu.Lock()
+			session.nativeID = id
+			b.mu.Unlock()
+		}
+	} else {
+		var runErr error
+		reply, runErr = runner.Run(ctx, handle.HarnessKind, prompt, emit)
+		if runErr != nil {
+			return "", runErr
+		}
 	}
 	if strings.TrimSpace(reply) == "" {
 		return "", fmt.Errorf("standing process backend: harness %q returned empty output", handle.HarnessKind)
@@ -559,6 +667,23 @@ func (b *ProcessBackend) Created() int {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	return len(b.sessions)
+}
+
+// NativeSessionID reports the harness CLI's recorded native session id for
+// a standing session, or false when no id is recorded (cold next turn).
+// Unsupported kinds never record an id.
+func (b *ProcessBackend) NativeSessionID(namespace, name string) (string, bool) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	session, _, err := b.lookup(namespace, name)
+	if err != nil {
+		return "", false
+	}
+	id := strings.TrimSpace(session.nativeID)
+	if id == "" {
+		return "", false
+	}
+	return id, true
 }
 
 // Turns reports how many streamed turns the backend has served.
