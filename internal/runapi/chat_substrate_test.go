@@ -47,6 +47,35 @@ func TestBuildChatRunPreservesSubstrateHarnessSelection(t *testing.T) {
 	}
 }
 
+// Peer child threads carry the recipient profile and defer the harness choice
+// to that profile, so a peer is eligible for the actor plane exactly when its
+// own configured harness selects it. The live backend then resumes the
+// recipient's thread actor (see substrate.ActorNameForThread).
+func TestBuildPeerChildRunDefersHarnessToRecipientProfile(t *testing.T) {
+	t.Parallel()
+
+	metadata, err := json.Marshal(map[string]string{
+		"sourceTurnId":      "parent-turn",
+		"sourceThreadId":    "parent-thread",
+		"sourceProfileName": "desktop-manager",
+	})
+	if err != nil {
+		t.Fatalf("metadata: %v", err)
+	}
+	child, err := buildChatRun("agents", "chat-turn-3", "review the proposal", chat.Thread{
+		ID: "child-id", Namespace: "agents", ProfileName: "desktop-reviewer", Metadata: metadata,
+	})
+	if err != nil {
+		t.Fatalf("peer child buildChatRun: %v", err)
+	}
+	if child.Spec.ProfileRef == nil || child.Spec.ProfileRef.Name != "desktop-reviewer" {
+		t.Fatalf("peer child profile ref = %+v, want desktop-reviewer", child.Spec.ProfileRef)
+	}
+	if child.Spec.HarnessProfileRef != nil {
+		t.Fatalf("peer child must not inherit the parent harness: %+v", child.Spec.HarnessProfileRef)
+	}
+}
+
 // The resolved execution beside the selected harness profile is what opts a
 // chat turn into the actor plane. A Job harness profile must keep resolving
 // to the Job plane even after the Substrate fields exist.

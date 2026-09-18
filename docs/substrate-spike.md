@@ -30,6 +30,13 @@ Boundaries that do not move in this spike:
 
 - AgentRun stays append-only; new execution intent creates a new AgentRun.
 - `create-agent` stays Wrapper/manager-only; peers request via `requestPeer`.
+  Snappy peer messaging is not gated on that tool: any Wrapper, manager, or
+  peer thread whose harness profile selects `SubstrateActor` is eligible for
+  the warm-actor plane, because eligibility is per harness profile, not per role.
+- Every accepted message already triggers meaningful work: a direct turn and
+  each peer child turn each create a real AgentRun through the same turn path
+  (`queueChatTurn` / durable peer dispatch), so the actor plane accelerates
+  work rather than replacing it.
 - Substrate is early and its APIs will churn, so the Anvil side binds only to
   stable lifecycle concepts behind the `substrate.Client` interface
   (`internal/substrate`): Create/Resume/Suspend/Pause plus describe. A future
@@ -61,11 +68,31 @@ Boundaries that do not move in this spike:
   default Job path is asserted unchanged.
 - Sample: `config/samples/control_v1alpha1_agentharnessprofile_substrate.yaml`.
 
+## Peer messaging maps onto ResumeActor
+
+Peer coordination already creates one durable child thread per recipient
+profile with a deterministic ID and queues each delivery through the same turn
+construction as a direct message; each recipient runs its own configured
+harness. The live backend therefore needs no new peer protocol:
+
+- Thread ID maps to a stable actor name via `substrate.ActorNameForThread`
+  (one actor per thread for Wrapper, manager, and peer threads alike).
+- A peer message resumes the recipient's thread actor (`ResumeActor`), runs
+  the turn as a real AgentRun, then suspends on idle (`SuspendActor`).
+- Deterministic delivery request IDs keep retried peer messages idempotent
+  end to end; the existing durable wait for busy recipients carries over, so
+  a warm actor must never silently drop a queued peer turn.
+
+`requestPeer` siblings created through the public run-create path resolve
+their harness the same way (profile/harness selection plus the existing
+backend-kind overlay, which stays orthogonal to the runtime plane).
+
 ## What is NOT in this slice
 
 - No live Substrate transport, no actor CRD/controller, no Kind e2e against a
   real Substrate cluster, and no chat-log replay onto actors. Those are the
-  follow-up.
+  follow-up. Peer resume against live actors is specified above but also lands
+  with the live backend.
 
 ## Spike path (follow-up)
 
@@ -89,7 +116,10 @@ spike, and do not change Primaris Argo sync policy.
 ## NEXT
 
 - [ ] Kind-local Substrate install note from the spike path above.
-- [ ] Live `Client` implementation behind an explicit opt-in gate.
+- [ ] Live `Client` implementation behind an explicit opt-in gate, including
+  peer resume per the mapping above with a warm-actor latency check for peer
+  turns specifically (busy-recipient durable wait must hold).
 - [ ] Actor identity in `status.substrateActor` and turn-to-actor binding.
-- [ ] Latency compare (Job cold start vs warm actor resume) with numbers.
+- [ ] Latency compare (Job cold start vs warm actor resume) with numbers,
+  covering direct turns and peer deliveries, not only standing Wrapper chat.
 - [ ] Decision: promote, reshape, or retire the `SubstrateActor` surface.
