@@ -836,8 +836,10 @@ type AgentRunHarnessExecutionSpec struct {
 	// SubstrateActor to select the optional warm-actor plane for
 	// standing/manager chat turns; scouts and batch runs must stay on Jobs.
 	// The controller never creates a Job for SubstrateActor runs: with the
-	// live gate off it holds them as SubstrateActorNotWired, with the gate on
-	// it binds the warm actor. See docs/substrate-spike.md.
+	// live gate off it holds them as SubstrateActorNotWired, and with the
+	// gate on it will bind the warm actor once the pending ATE dialer lands
+	// (until then the operator fails fast with the gate enabled).
+	// See docs/substrate-spike.md.
 	// +kubebuilder:validation:Enum=Job;SubstrateActor
 	// +optional
 	Runtime AgentRunExecutionRuntime `json:"runtime,omitempty"`

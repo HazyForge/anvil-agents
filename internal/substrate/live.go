@@ -1,317 +1,460 @@
+// Live Substrate ATE transport for the standing-chat actor backend.
+//
+// This file binds substrate.Client to the real Agent Substrate (ATE) surface
+// in agent-substrate/substrate — the ateapi gRPC service
+// (pkg/proto/ateapipb/ateapi.proto, service ateapi.Control) driven the same
+// way cmd/kubectl-ate drives it — instead of any invented HTTP mapping. No
+// upstream generated types are vendored here: ATEControl is a narrow,
+// proto-agnostic seam shaped 1:1 on the five lifecycle RPCs, so a future
+// generated-stub dialer (ateapipb.ControlClient) can implement it without
+// touching Client callers, merge rules, or chat selection.
+//
+// Upstream lifecycle mapping (see docs/substrate-spike.md for the full table):
+//
+//	CreateActor   -> Control/CreateActor  (kubectl ate create actor <name> -a <atespace> --template <template>)
+//	ResumeActor   -> Control/ResumeActor  (kubectl ate resume actor <name> -a <atespace>)
+//	SuspendActor  -> Control/SuspendActor (kubectl ate suspend actor <name> -a <atespace>)
+//	PauseActor    -> Control/PauseActor   (kubectl ate pause actor <name> -a <atespace>)
+//	DescribeActor -> Control/GetActor     (kubectl ate get actor <name> -a <atespace>)
+//
+// Addressing: a Kubernetes namespace maps to the ATE atespace of the same
+// name (both are k8s short-names), unless ATEClientConfig.Atespace overrides
+// it. ActorSpec.ActorClass names the ActorTemplate in the actor's atespace;
+// empty ActorClass falls back to ATEClientConfig.Template. ActorSpec.Pool
+// becomes a worker_selector match label (see WorkerSelectorPoolLabel).
+//
+// The opt-in gate itself lives in gate.go (GateConfig): the controller and
+// the latency harness consult GateConfig.LiveEnabled, then build the client
+// below. Until the dialer lands the operator keeps the safe hold when the
+// gate requests live dispatch instead of silently running Jobs-only.
+//
+// TODO(ate-grpc-dial): implement the network dialer that returns an
+// ATEControl over gRPC using generated ateapipb stubs. It must keep parity
+// with upstream internal/ateclient.NewClient: TLS verified before any bearer
+// token is attached, token loaded from ATEClientConfig.TokenFile (mirroring
+// kubectl-ate --token-file, never an inline env token), target from
+// ATEClientConfig.Address (mirroring --endpoint, e.g.
+// ate-api-server.ate-system.svc:443, with a local-dev fallback to
+// port-forwarding the ate-api-server Service like kubectl-ate does when
+// --endpoint is omitted). Until that lands, construct ATEClient with an
+// injected ATEControl (tests use an in-memory fake); the mapping below is
+// already the live transport contract.
 package substrate
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
-	"net/http"
-	"net/url"
 	"strings"
-	"time"
+	"sync"
 )
 
-// liveAPIVersion pins the spike to one lifecycle path prefix. Substrate is
-// early and its APIs will churn; keeping the versioned prefix in a single
-// constant lets a future transport swap re-point it without touching callers.
-const liveAPIVersion = "v1"
+// maxATEActorNameLen is the k8s short-name bound ATE enforces on actor names
+// (ResourceMetadata.name, +k8s:format=k8s-short-name). Thread IDs in practice
+// are UUIDs, so ActorNameForThread output ("chat-" + uuid, 41 chars) fits;
+// overlong derived names fail fast in CreateActor instead of being sent to
+// a server that would reject them.
+const maxATEActorNameLen = 63
 
-// liveBodyLimit caps lifecycle responses so a misbehaving gateway cannot force
-// unbounded reads out of the controller.
-const liveBodyLimit = 1 << 20
+// WorkerSelectorPoolLabel carries ActorSpec.Pool into the ATE per-actor
+// worker_selector, ANDed server-side with the template's own selector. The
+// key is provisional: ATE matches opaque worker-pool labels defined by the
+// fleet, so align this with the fleet's pool label before promoting past the
+// spike. TODO(ate-pool-label): confirm against the Kind fleet's WorkerPool
+// labels (see hack/install-ate-kind.sh overlay) and fleet docs.
+const WorkerSelectorPoolLabel = "anvil.hazyforge.io/worker-pool"
 
-// LiveConfig configures the HTTP lifecycle transport. Endpoint is the gateway
-// origin (scheme + host, for example http://substrate-gateway.substrate:8080
-// on the Kind spike cluster). AuthToken is optional and, when set, is only
-// ever sent as an Authorization header.
-type LiveConfig struct {
-	Endpoint   string
-	AuthToken  string
-	HTTPClient *http.Client
-	Timeout    time.Duration
+// ATEActorState mirrors the ateapi.ActorState lifecycle vocabulary. Only the
+// states the Anvil side can observe through ATEControl are listed.
+type ATEActorState string
+
+const (
+	ATEActorStateUnspecified ATEActorState = "Unspecified"
+	ATEActorStateResuming    ATEActorState = "Resuming"
+	ATEActorStateRunning     ATEActorState = "Running"
+	ATEActorStateSuspending  ATEActorState = "Suspending"
+	ATEActorStateSuspended   ATEActorState = "Suspended"
+	ATEActorStatePausing     ATEActorState = "Pausing"
+	ATEActorStatePaused      ATEActorState = "Paused"
+	ATEActorStateCrashed     ATEActorState = "Crashed"
+	ATEActorStateDeleting    ATEActorState = "Deleting"
+)
+
+// ATEObjectRef addresses one ATE resource. It mirrors ateapi.ObjectRef for
+// atespaced resources: atespace is required, name is the actor name.
+type ATEObjectRef struct {
+	Atespace string
+	Name     string
 }
 
-// liveActorPayload is the JSON body exchanged with the gateway for every
-// lifecycle op. Field names stay provider-neutral on purpose: the Anvil side
-// binds only to stable lifecycle concepts, never to vendored Substrate types.
-type liveActorPayload struct {
-	Namespace   string            `json:"namespace,omitempty"`
-	Name        string            `json:"name,omitempty"`
-	ID          string            `json:"id,omitempty"`
-	State       string            `json:"state,omitempty"`
-	Resumes     int               `json:"resumes,omitempty"`
-	ActorClass  string            `json:"actorClass,omitempty"`
-	Pool        string            `json:"pool,omitempty"`
-	HarnessKind string            `json:"harnessKind,omitempty"`
-	Labels      map[string]string `json:"labels,omitempty"`
+// ATEActor is the Anvil-side projection of an ateapi.Actor: identity plus the
+// lifecycle state. Template and placement fields are echoed so tests and
+// operators can verify what a create actually requested.
+type ATEActor struct {
+	Atespace         string
+	Name             string
+	UID              string
+	TemplateAtespace string
+	TemplateName     string
+	WorkerSelector   map[string]string
+	State            ATEActorState
 }
 
-// LiveClient is the opt-in live substrate.Client. It speaks the stable actor
-// lifecycle (create-or-reuse, resume, suspend, pause, describe) over HTTPS to
-// a gateway without vendoring Substrate API types.
-type LiveClient struct {
-	endpoint   string
-	authToken  string
-	httpClient *http.Client
-	timeout    time.Duration
+// ATECreateSpec is the create payload for ATEControl.CreateActor, mirroring
+// the actor field of ateapi.CreateActorRequest (metadata + actor_template
+// ref + worker_selector).
+type ATECreateSpec struct {
+	Atespace         string
+	Name             string
+	TemplateAtespace string
+	TemplateName     string
+	WorkerSelector   map[string]string
 }
 
-// NewLiveClient validates the endpoint and returns a live Client. The gate
-// itself lives in GateConfig; this constructor only guards transport shape.
-func NewLiveClient(cfg LiveConfig) (*LiveClient, error) {
-	endpoint := strings.TrimSpace(cfg.Endpoint)
-	if endpoint == "" {
-		return nil, errors.New("substrate endpoint is required")
-	}
-	parsed, err := url.Parse(endpoint)
-	if err != nil || strings.TrimSpace(parsed.Scheme) == "" || strings.TrimSpace(parsed.Host) == "" {
-		return nil, fmt.Errorf("substrate endpoint must be an absolute URL with a host")
-	}
-	if parsed.Scheme != "http" && parsed.Scheme != "https" {
-		return nil, fmt.Errorf("substrate endpoint scheme must be http or https")
-	}
-	if strings.TrimSpace(parsed.User.String()) != "" || strings.TrimSpace(parsed.RawQuery) != "" || strings.TrimSpace(parsed.Fragment) != "" {
-		return nil, errors.New("substrate endpoint must not carry userinfo, query, or fragment")
-	}
-	endpoint = strings.TrimRight(endpoint, "/")
-	timeout := cfg.Timeout
-	if timeout <= 0 {
-		timeout = 10 * time.Second
-	}
-	httpClient := cfg.HTTPClient
-	if httpClient == nil {
-		httpClient = &http.Client{Timeout: 15 * time.Second}
-	}
-	return &LiveClient{endpoint: endpoint, authToken: cfg.AuthToken, httpClient: httpClient, timeout: timeout}, nil
+// ATECode classifies transport-agnostic ATE failures so the mapping onto
+// Client semantics (notably ErrActorNotFound) does not depend on gRPC status
+// codes at the call site. The future generated-stub adapter maps
+// codes.NotFound -> ATECodeNotFound, codes.AlreadyExists ->
+// ATECodeAlreadyExists, and everything else to ATECodeOther.
+type ATECode string
+
+const (
+	ATECodeNotFound      ATECode = "NotFound"
+	ATECodeAlreadyExists ATECode = "AlreadyExists"
+	ATECodeOther         ATECode = "Other"
+)
+
+// ATEError is the failure shape returned by ATEControl implementations.
+type ATEError struct {
+	Code ATECode
+	Err  error
 }
 
-// NewLiveClientFromEnv builds the live Client from GateConfigFromEnv. It
-// returns (nil, false, nil) when the gate is off so callers keep the safe
-// hold without branching on env parsing themselves.
-func NewLiveClientFromEnv() (*LiveClient, bool, error) {
-	gate := GateConfigFromEnv()
-	if !gate.LiveEnabled() {
-		return nil, false, nil
+func (e *ATEError) Error() string {
+	if e == nil || e.Err == nil {
+		return "substrate ATE error"
 	}
-	client, err := NewLiveClient(LiveConfig{Endpoint: gate.Endpoint, AuthToken: gate.Token})
-	if err != nil {
-		return nil, false, err
-	}
-	return client, true, nil
+	return e.Err.Error()
 }
 
-// Endpoint returns the configured gateway origin without credentials. The auth
-// token is never exposed through this or any other accessor.
-func (c *LiveClient) Endpoint() string {
-	if c == nil {
-		return ""
+// Unwrap lets errors.Is/As see through to the cause and to *ATEError itself.
+func (e *ATEError) Unwrap() error {
+	if e == nil {
+		return nil
 	}
-	return c.endpoint
+	return e.Err
 }
 
-func (c *LiveClient) actorPath(namespace, name string, action string) (string, error) {
-	if strings.TrimSpace(namespace) == "" || strings.TrimSpace(name) == "" {
-		return "", errors.New("substrate actor namespace and name are required")
+// IsATENotFound reports whether err is an ATE missing-actor failure. The
+// generated-stub adapter must surface server codes.NotFound (which ateapi
+// returns for unknown actors on every lifecycle RPC) through this path.
+func IsATENotFound(err error) bool {
+	var ateErr *ATEError
+	if errors.As(err, &ateErr) {
+		return ateErr.Code == ATECodeNotFound
 	}
-	path := "/" + liveAPIVersion + "/actors/" + url.PathEscape(namespace) + "/" + url.PathEscape(name)
-	if strings.TrimSpace(action) != "" {
-		path += "/" + url.PathEscape(strings.TrimSpace(action))
-	}
-	return c.endpoint + path, nil
+	return false
 }
 
-func (c *LiveClient) do(ctx context.Context, method, requestURL, namespace, name string, body *liveActorPayload) (liveActorPayload, int, error) {
-	var reader io.Reader
-	if body != nil {
-		encoded, err := json.Marshal(body)
-		if err != nil {
-			return liveActorPayload{}, 0, err
-		}
-		reader = bytes.NewReader(encoded)
+// IsATEAlreadyExists reports whether err signals the actor already exists
+// (server codes.AlreadyExists on CreateActor), which the client treats as
+// warm reuse rather than failure.
+func IsATEAlreadyExists(err error) bool {
+	var ateErr *ATEError
+	if errors.As(err, &ateErr) {
+		return ateErr.Code == ATECodeAlreadyExists
 	}
-	callCtx, cancel := context.WithTimeout(ctx, c.timeout)
-	defer cancel()
-	request, err := http.NewRequestWithContext(callCtx, method, requestURL, reader)
-	if err != nil {
-		return liveActorPayload{}, 0, err
-	}
-	if body != nil {
-		request.Header.Set("Content-Type", "application/json")
-	}
-	request.Header.Set("Accept", "application/json")
-	if strings.TrimSpace(c.authToken) != "" {
-		request.Header.Set("Authorization", "Bearer "+strings.TrimSpace(c.authToken))
-	}
-	response, err := c.httpClient.Do(request)
-	if err != nil {
-		return liveActorPayload{}, 0, err
-	}
-	defer response.Body.Close()
-	raw, err := io.ReadAll(io.LimitReader(response.Body, liveBodyLimit+1))
-	if err != nil {
-		return liveActorPayload{}, response.StatusCode, err
-	}
-	if len(raw) > liveBodyLimit {
-		return liveActorPayload{}, response.StatusCode, errors.New("substrate response exceeds the size limit")
-	}
-	if response.StatusCode == http.StatusNotFound {
-		return liveActorPayload{}, response.StatusCode, fmt.Errorf("%w: %s", ErrActorNotFound, ActorKey(namespace, name))
-	}
-	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return liveActorPayload{}, response.StatusCode, fmt.Errorf("substrate lifecycle call failed with status %d", response.StatusCode)
-	}
-	if len(bytes.TrimSpace(raw)) == 0 {
-		return liveActorPayload{}, response.StatusCode, nil
-	}
-	var payload liveActorPayload
-	if err := json.Unmarshal(raw, &payload); err != nil {
-		return liveActorPayload{}, response.StatusCode, fmt.Errorf("decode substrate lifecycle response: %w", err)
-	}
-	return payload, response.StatusCode, nil
+	return false
 }
 
-func payloadToHandle(payload liveActorPayload, namespace, name string) ActorHandle {
-	resolvedNamespace := strings.TrimSpace(payload.Namespace)
-	if resolvedNamespace == "" {
-		resolvedNamespace = strings.TrimSpace(namespace)
+func ateNotFoundf(format string, args ...any) error {
+	return &ATEError{Code: ATECodeNotFound, Err: fmt.Errorf(format, args...)}
+}
+
+// ATEControl is the narrow slice of ateapi.Control the Anvil side needs. Each
+// method documents its exact upstream RPC (service ateapi.Control in
+// pkg/proto/ateapipb/ateapi.proto) and the kubectl-ate equivalent so the
+// future generated-stub adapter is mechanical and reviewers can verify the
+// binding without reading generated code.
+type ATEControl interface {
+	// GetActor issues Control/GetActor (kubectl ate get actor <name> -a
+	// <atespace>). Unknown actors surface as ATECodeNotFound.
+	GetActor(ctx context.Context, ref ATEObjectRef) (ATEActor, error)
+	// CreateActor issues Control/CreateActor with the actor deriving from the
+	// given ActorTemplate (kubectl ate create actor <name> -a <atespace>
+	// --template <template>). An existing name surfaces as
+	// ATECodeAlreadyExists.
+	CreateActor(ctx context.Context, spec ATECreateSpec) (ATEActor, error)
+	// ResumeActor issues Control/ResumeActor (kubectl ate resume actor <name>
+	// -a <atespace>). The resumed flag mirrors
+	// ResumeActorResponse.resumed: false when the actor was already RUNNING
+	// (warm no-op), true when a resume workflow ran. Unknown actors surface
+	// as ATECodeNotFound.
+	ResumeActor(ctx context.Context, ref ATEObjectRef) (ATEActor, bool, error)
+	// SuspendActor issues Control/SuspendActor, checkpointing a running actor
+	// or uploading the node-local snapshot of a paused one (kubectl ate
+	// suspend actor <name> -a <atespace>). Unknown actors surface as
+	// ATECodeNotFound.
+	SuspendActor(ctx context.Context, ref ATEObjectRef) (ATEActor, error)
+	// PauseActor issues Control/PauseActor, keeping snapshots on the node VM
+	// (kubectl ate pause actor <name> -a <atespace>). Unknown actors surface
+	// as ATECodeNotFound.
+	PauseActor(ctx context.Context, ref ATEObjectRef) (ATEActor, error)
+}
+
+// ATEClientConfig configures the live ATE plane. Address points at ateapi
+// (kubectl-ate --endpoint); TokenFile holds the bearer token (kubectl-ate
+// --token-file). The opt-in gate itself lives in GateConfig; this struct
+// carries only transport parameters. Address and the token-file path (never
+// token bytes) may appear in diagnostics; they must stay out of status.
+type ATEClientConfig struct {
+	// Address is the ateapi gRPC target. Required.
+	Address string
+	// Atespace forces one atespace for every actor. Empty maps each
+	// Kubernetes namespace to the same-named atespace.
+	Atespace string
+	// Template is the default ActorTemplate when ActorSpec.ActorClass is
+	// empty. Required because CreateActor always derives from a template.
+	Template string
+	// TokenFile is the path to the file holding the ateapi bearer token.
+	TokenFile string
+}
+
+// ATEClientConfigFromGate bridges the opt-in gate to the transport config.
+func ATEClientConfigFromGate(gate GateConfig) ATEClientConfig {
+	return ATEClientConfig{
+		Address:   strings.TrimSpace(gate.Endpoint),
+		Atespace:  strings.TrimSpace(gate.Atespace),
+		Template:  strings.TrimSpace(gate.Template),
+		TokenFile: strings.TrimSpace(gate.TokenFile),
 	}
-	resolvedName := strings.TrimSpace(payload.Name)
-	if resolvedName == "" {
-		resolvedName = strings.TrimSpace(name)
+}
+
+// Validate rejects configurations that can never reach ateapi.
+func (c ATEClientConfig) Validate() error {
+	if c.Address == "" {
+		return fmt.Errorf("substrate ATE address is required (see %s)", GateEndpointEnvVar)
 	}
+	if c.Template == "" {
+		return fmt.Errorf("substrate ATE template is required (see %s)", GateTemplateEnvVar)
+	}
+	return nil
+}
+
+// NewATEClient binds the Client lifecycle onto a real ATE backend behind
+// cfg. control is the ATEControl transport (a future generated-stub dialer;
+// tests inject an in-memory fake).
+func NewATEClient(cfg ATEClientConfig, control ATEControl) (Client, error) {
+	if err := cfg.Validate(); err != nil {
+		return nil, err
+	}
+	if control == nil {
+		return nil, fmt.Errorf("substrate ATE control transport is required")
+	}
+	return &ATEClient{cfg: cfg, control: control, resumes: map[string]int{}}, nil
+}
+
+// ATEClient implements Client against a live ATE backend.
+//
+// Create/Resume mapping (the warm-actor property the spike depends on):
+//   - CreateActor is create-or-reuse: GetActor first; a hit returns the warm
+//     actor unchanged, a miss creates from the ActorTemplate, and an
+//     AlreadyExists race re-reads. Re-creation never resets the resume
+//     counter, so warm reuse stays observable like FakeClient.
+//   - ResumeActor runs the turn's resume: the server reports whether a resume
+//     workflow ran (ResumeActorResponse.resumed), which feeds the handle's
+//     Resumes count; an already-RUNNING actor is a warm no-op.
+//   - Peer turns resume the recipient's thread actor (see
+//     ActorNameForThread) and suspend on idle, exactly as FakeClient models.
+type ATEClient struct {
+	cfg     ATEClientConfig
+	control ATEControl
+
+	mu      sync.Mutex
+	resumes map[string]int
+}
+
+// ref resolves a namespace/name pair to the ATE address. Namespaces map to
+// same-named atespaces unless the config forces one.
+func (c *ATEClient) ref(namespace, name string) ATEObjectRef {
+	atespace := c.cfg.Atespace
+	if atespace == "" {
+		atespace = strings.TrimSpace(namespace)
+	}
+	return ATEObjectRef{Atespace: atespace, Name: strings.TrimSpace(name)}
+}
+
+// createSpec resolves an ActorSpec to the ATE create payload: template from
+// ActorClass (or the configured default) in the actor's atespace, placement
+// from Pool.
+func (c *ATEClient) createSpec(spec ActorSpec) ATECreateSpec {
+	ref := c.ref(spec.Namespace, spec.Name)
+	template := strings.TrimSpace(spec.ActorClass)
+	if template == "" {
+		template = c.cfg.Template
+	}
+	return ATECreateSpec{
+		Atespace:         ref.Atespace,
+		Name:             ref.Name,
+		TemplateAtespace: ref.Atespace,
+		TemplateName:     template,
+		WorkerSelector:   selectorForPool(spec.Pool),
+	}
+}
+
+// selectorForPool carries an optional pool into the per-actor
+// worker_selector. Empty pools leave placement to the template default.
+func selectorForPool(pool string) map[string]string {
+	if strings.TrimSpace(pool) == "" {
+		return nil
+	}
+	return map[string]string{WorkerSelectorPoolLabel: strings.TrimSpace(pool)}
+}
+
+// MapATEState folds the ateapi.ActorState vocabulary onto the Client
+// tri-state. Transitional states map to their target (Resuming->Active,
+// Suspending->Suspended, Pausing->Paused). Crashed holds no worker like
+// Suspended, so it maps there and the next Resume either rehydrates or fails
+// loudly. Deleting/Unspecified/unknown values map to Active so Describe never
+// fails on a valid server state; callers observing them should re-Describe.
+// TODO(ate-terminal-states): surface Crashed/Deleting distinctly once the
+// controller consumes live states instead of the SubstrateActorNotWired hold.
+func MapATEState(state ATEActorState) ActorState {
+	switch state {
+	case ATEActorStateRunning, ATEActorStateResuming:
+		return ActorStateActive
+	case ATEActorStateSuspended, ATEActorStateSuspending, ATEActorStateCrashed:
+		return ActorStateSuspended
+	case ATEActorStatePaused, ATEActorStatePausing:
+		return ActorStatePaused
+	default:
+		return ActorStateActive
+	}
+}
+
+// handle builds the observed Client handle, attaching the client-side resume
+// count for warm-vs-cold observability.
+func (c *ATEClient) handle(actor ATEActor) ActorHandle {
+	key := ActorKey(actor.Atespace, actor.Name)
+	c.mu.Lock()
+	resumes := c.resumes[key]
+	c.mu.Unlock()
 	return ActorHandle{
-		Namespace: resolvedNamespace,
-		Name:      resolvedName,
-		ID:        strings.TrimSpace(payload.ID),
-		State:     ActorState(strings.TrimSpace(payload.State)),
-		Resumes:   payload.Resumes,
+		Namespace: actor.Atespace,
+		Name:      actor.Name,
+		ID:        actor.UID,
+		State:     MapATEState(actor.State),
+		Resumes:   resumes,
 	}
 }
 
-func specToPayload(spec ActorSpec) *liveActorPayload {
-	return &liveActorPayload{
-		Namespace:   strings.TrimSpace(spec.Namespace),
-		Name:        strings.TrimSpace(spec.Name),
-		ActorClass:  strings.TrimSpace(spec.ActorClass),
-		Pool:        strings.TrimSpace(spec.Pool),
-		HarnessKind: strings.TrimSpace(spec.HarnessKind),
-		Labels:      spec.Labels,
-	}
+// noteResumed records a server-executed resume workflow for warm-vs-cold
+// observability. Best-effort and client-local: it counts resume workflows
+// this client observed, not a server-side total.
+func (c *ATEClient) noteResumed(actor ATEActor) {
+	key := ActorKey(actor.Atespace, actor.Name)
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.resumes[key]++
 }
 
-// CreateActor creates the actor or reuses the existing warm actor. The gateway
-// upserts on PUT so retries of the same turn stay idempotent.
-func (c *LiveClient) CreateActor(ctx context.Context, spec ActorSpec) (ActorHandle, error) {
-	if c == nil {
-		return ActorHandle{}, errors.New("substrate live client is not configured")
+// notFoundAsClient maps ATE missing-actor failures onto ErrActorNotFound so
+// callers stay transport-agnostic (errors.Is(err, ErrActorNotFound) holds for
+// both FakeClient and ATEClient).
+func notFoundAsClient(ref ATEObjectRef, err error) error {
+	if IsATENotFound(err) {
+		return fmt.Errorf("%w: %s/%s", ErrActorNotFound, ref.Atespace, ref.Name)
+	}
+	return err
+}
+
+// CreateActor creates the actor from its template, or returns the existing
+// warm actor when the name is already known (see ATEClient for the mapping).
+func (c *ATEClient) CreateActor(ctx context.Context, spec ActorSpec) (ActorHandle, error) {
+	if err := ctx.Err(); err != nil {
+		return ActorHandle{}, err
 	}
 	if err := ValidateSpec(spec); err != nil {
 		return ActorHandle{}, err
 	}
-	requestURL, err := c.actorPath(spec.Namespace, spec.Name, "")
-	if err != nil {
-		return ActorHandle{}, err
+	if len(strings.TrimSpace(spec.Name)) > maxATEActorNameLen {
+		return ActorHandle{}, fmt.Errorf("substrate actor name %q exceeds the ATE short-name bound of %d characters", strings.TrimSpace(spec.Name), maxATEActorNameLen)
 	}
-	payload, _, err := c.do(ctx, http.MethodPut, requestURL, spec.Namespace, spec.Name, specToPayload(spec))
-	if err != nil {
-		return ActorHandle{}, err
-	}
-	handle := payloadToHandle(payload, spec.Namespace, spec.Name)
-	if handle.ID == "" {
-		handle.ID = fakeID(spec.Namespace, spec.Name)
-	}
-	if strings.TrimSpace(string(handle.State)) == "" {
-		handle.State = ActorStateActive
-	}
-	return handle, nil
-}
+	create := c.createSpec(spec)
+	ref := ATEObjectRef{Atespace: create.Atespace, Name: create.Name}
 
-// ResumeActor resumes a suspended actor before a turn.
-func (c *LiveClient) ResumeActor(ctx context.Context, namespace, name string) (ActorHandle, error) {
-	if c == nil {
-		return ActorHandle{}, errors.New("substrate live client is not configured")
-	}
-	requestURL, err := c.actorPath(namespace, name, "resume")
-	if err != nil {
+	if existing, err := c.control.GetActor(ctx, ref); err == nil {
+		return c.handle(existing), nil
+	} else if !IsATENotFound(err) {
 		return ActorHandle{}, err
 	}
-	payload, _, err := c.do(ctx, http.MethodPost, requestURL, namespace, name, nil)
+
+	created, err := c.control.CreateActor(ctx, create)
 	if err != nil {
-		if errors.Is(err, ErrActorNotFound) {
-			return ActorHandle{}, fmt.Errorf("%w: %s", ErrActorNotFound, ActorKey(namespace, name))
+		if IsATEAlreadyExists(err) {
+			existing, getErr := c.control.GetActor(ctx, ref)
+			if getErr != nil {
+				return ActorHandle{}, notFoundAsClient(ref, getErr)
+			}
+			return c.handle(existing), nil
 		}
 		return ActorHandle{}, err
 	}
-	handle := payloadToHandle(payload, namespace, name)
-	if strings.TrimSpace(string(handle.State)) == "" {
-		handle.State = ActorStateActive
-	}
-	return handle, nil
+	return c.handle(created), nil
 }
 
-// SuspendActor persists actor state and releases the worker.
-func (c *LiveClient) SuspendActor(ctx context.Context, namespace, name string) (ActorHandle, error) {
-	if c == nil {
-		return ActorHandle{}, errors.New("substrate live client is not configured")
-	}
-	requestURL, err := c.actorPath(namespace, name, "suspend")
-	if err != nil {
+// ResumeActor resumes the actor before a turn, counting the resume when the
+// server ran a resume workflow.
+func (c *ATEClient) ResumeActor(ctx context.Context, namespace, name string) (ActorHandle, error) {
+	if err := ctx.Err(); err != nil {
 		return ActorHandle{}, err
 	}
-	payload, _, err := c.do(ctx, http.MethodPost, requestURL, namespace, name, nil)
+	ref := c.ref(namespace, name)
+	actor, resumed, err := c.control.ResumeActor(ctx, ref)
 	if err != nil {
-		if errors.Is(err, ErrActorNotFound) {
-			return ActorHandle{}, fmt.Errorf("%w: %s", ErrActorNotFound, ActorKey(namespace, name))
-		}
+		return ActorHandle{}, notFoundAsClient(ref, err)
+	}
+	if resumed {
+		c.noteResumed(actor)
+	}
+	return c.handle(actor), nil
+}
+
+// SuspendActor checkpoints the actor and releases its worker.
+func (c *ATEClient) SuspendActor(ctx context.Context, namespace, name string) (ActorHandle, error) {
+	if err := ctx.Err(); err != nil {
 		return ActorHandle{}, err
 	}
-	handle := payloadToHandle(payload, namespace, name)
-	if strings.TrimSpace(string(handle.State)) == "" {
-		handle.State = ActorStateSuspended
+	ref := c.ref(namespace, name)
+	actor, err := c.control.SuspendActor(ctx, ref)
+	if err != nil {
+		return ActorHandle{}, notFoundAsClient(ref, err)
 	}
-	return handle, nil
+	return c.handle(actor), nil
 }
 
 // PauseActor keeps the actor resident but unscheduled.
-func (c *LiveClient) PauseActor(ctx context.Context, namespace, name string) (ActorHandle, error) {
-	if c == nil {
-		return ActorHandle{}, errors.New("substrate live client is not configured")
-	}
-	requestURL, err := c.actorPath(namespace, name, "pause")
-	if err != nil {
+func (c *ATEClient) PauseActor(ctx context.Context, namespace, name string) (ActorHandle, error) {
+	if err := ctx.Err(); err != nil {
 		return ActorHandle{}, err
 	}
-	payload, _, err := c.do(ctx, http.MethodPost, requestURL, namespace, name, nil)
+	ref := c.ref(namespace, name)
+	actor, err := c.control.PauseActor(ctx, ref)
 	if err != nil {
-		if errors.Is(err, ErrActorNotFound) {
-			return ActorHandle{}, fmt.Errorf("%w: %s", ErrActorNotFound, ActorKey(namespace, name))
-		}
-		return ActorHandle{}, err
+		return ActorHandle{}, notFoundAsClient(ref, err)
 	}
-	handle := payloadToHandle(payload, namespace, name)
-	if strings.TrimSpace(string(handle.State)) == "" {
-		handle.State = ActorStatePaused
-	}
-	return handle, nil
+	return c.handle(actor), nil
 }
 
 // DescribeActor returns the current handle without changing lifecycle state.
-func (c *LiveClient) DescribeActor(ctx context.Context, namespace, name string) (ActorHandle, error) {
-	if c == nil {
-		return ActorHandle{}, errors.New("substrate live client is not configured")
-	}
-	requestURL, err := c.actorPath(namespace, name, "")
-	if err != nil {
+func (c *ATEClient) DescribeActor(ctx context.Context, namespace, name string) (ActorHandle, error) {
+	if err := ctx.Err(); err != nil {
 		return ActorHandle{}, err
 	}
-	payload, _, err := c.do(ctx, http.MethodGet, requestURL, namespace, name, nil)
+	ref := c.ref(namespace, name)
+	actor, err := c.control.GetActor(ctx, ref)
 	if err != nil {
-		if errors.Is(err, ErrActorNotFound) {
-			return ActorHandle{}, fmt.Errorf("%w: %s", ErrActorNotFound, ActorKey(namespace, name))
-		}
-		return ActorHandle{}, err
+		return ActorHandle{}, notFoundAsClient(ref, err)
 	}
-	return payloadToHandle(payload, namespace, name), nil
+	return c.handle(actor), nil
 }

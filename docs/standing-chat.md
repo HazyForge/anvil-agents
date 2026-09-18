@@ -142,5 +142,7 @@ A new conversation can select a harness profile whose `execution.runtime` is
 `SubstrateActor` to make its turns eligible for the warm-actor plane. Existing
 conversations keep their selected harness, and the controller never creates a
 Job for SubstrateActor runs: with the live gate off it holds them as
-`SubstrateActorNotWired`, with the gate on it binds the warm actor. See
+`SubstrateActorNotWired`, and with the gate on it will bind the warm actor
+once the pending ATE dialer lands (until then the operator fails fast with
+the gate enabled). See
 [Substrate spike](substrate-spike.md).

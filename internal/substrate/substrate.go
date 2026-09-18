@@ -10,10 +10,12 @@
 // until live dispatch lands (see docs/substrate-spike.md).
 //
 // Substrate is early and its APIs are expected to churn, so this package binds
-// only to stable lifecycle concepts behind the Client interface. A future
-// live implementation can swap the transport without touching AgentRun types,
-// merge rules, or chat selection. Tests use FakeClient; no test needs a live
-// Substrate cluster.
+// only to stable lifecycle concepts behind the Client interface. The live ATE
+// binding (live.go) maps that interface onto the real ateapi Control RPCs
+// (Create/Resume/Suspend/Pause/GetActor) without vendoring upstream generated
+// types, so swapping in a generated-stub dialer later touches only the
+// transport. Tests use FakeClient and an in-memory ATEControl fake; no test
+// needs a live Substrate cluster.
 package substrate
 
 import (

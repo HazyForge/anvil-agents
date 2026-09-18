@@ -1,7 +1,7 @@
 # Substrate standing-chat spike
 
-Status: architectural spike, slice 2 (live dispatch behind an explicit
-opt-in gate; Kind numbers still open).
+Status: architectural spike, slice 2 (live ATE binding behind an explicit
+opt-in gate; generated-stub dial pending; Kind numbers still open).
 
 ## Why
 
@@ -25,10 +25,13 @@ selects where it runs:
 - `SubstrateActor` (optional spike surface): the turn is eligible to run on a
   warm Substrate actor. Select it per `AgentHarnessProfile`
   (`execution.runtime` + `execution.substrate`), so Wrapper/manager standing
-  chat can opt in while every other profile keeps Job semantics. Slice 2 adds
-  the opt-in live backend (`internal/substrate` live `Client` + controller
-  dispatch behind `ANVIL_AGENTS_SUBSTRATE_ACTORS_ENABLED`); with the gate off
-  the controller keeps holding these runs without creating a Job.
+  chat can opt in while every other profile keeps Job semantics. Slice 2 binds
+  the opt-in live backend onto ATE's real surface (`internal/substrate` ATE
+  `Client` + controller dispatch behind
+  `ANVIL_AGENTS_SUBSTRATE_ACTORS_ENABLED`); with the gate off
+  the controller keeps holding these runs without creating a Job. The
+  generated-stub gRPC dial is still pending (see below), so a gate-on
+  operator currently fails fast instead of dispatching anywhere.
 
 Boundaries that do not move in this spike:
 
@@ -43,14 +46,19 @@ Boundaries that do not move in this spike:
   work rather than replacing it.
 - Substrate is early and its APIs will churn, so the Anvil side binds only to
   stable lifecycle concepts behind the `substrate.Client` interface
-  (`internal/substrate`): Create/Resume/Suspend/Pause plus describe. A future
-  live implementation swaps the transport without touching AgentRun types,
-  merge rules, or chat selection.
+  (`internal/substrate`): Create/Resume/Suspend/Pause plus describe. The live
+  binding maps that interface onto the real ateapi `Control` RPCs — the same
+  calls `kubectl ate` makes — without vendoring upstream generated types, so
+  the pending generated-stub dialer swaps only the transport without touching
+  AgentRun types, merge rules, or chat selection.
 - The controller never creates a Job for a SubstrateActor run. With the live
   gate off it holds the run as `NeedsHuman/SubstrateActorNotWired` with
-  guidance instead, and records `status.executionRuntime`. With the gate on it
-  binds the warm actor (`Create`/`Resume` via `ActorNameForThread`), records
-  `status.substrateActor`, suspends on idle, and still never creates a Job.
+  guidance instead, and records `status.executionRuntime`. With the gate on
+  (plus an ateapi endpoint) it will bind the warm actor (`Create`/`Resume`
+  via `ActorNameForThread`), record `status.substrateActor`, suspend on idle,
+  and still never create a Job — once the pending ATE dialer lands. Until
+  then the operator refuses to start with the gate enabled (fail-fast) instead
+  of silently holding.
   Malformed selections (substrate section on a Job runtime, missing section on
   an actor runtime) fail closed as `InvalidSubstrateSpec`.
 - The OIDC API, RBAC posture, Secret handling, and Primaris Argo sync policy
@@ -94,21 +102,40 @@ harness. The live backend therefore needs no new peer protocol:
 their harness the same way (profile/harness selection plus the existing
 backend-kind overlay, which stays orthogonal to the runtime plane).
 
-## What is in slice 2 (live dispatch behind a gate)
+## What is in slice 2 (live ATE binding behind a gate)
 
-- Live `substrate.Client` (`internal/substrate/live.go`) speaking only the
-  stable lifecycle (create-or-reuse, resume, suspend, pause, describe) over
-  HTTP to a gateway origin. No vendored Substrate API types; the versioned
-  path prefix lives in one constant so a churning upstream only re-points the
-  transport. Covered by `httptest` round-trip tests, including 404 mapping to
-  `ErrActorNotFound` and endpoint validation that rejects userinfo, query, and
-  fragment (access tokens never travel in query strings).
+- Live `substrate.Client` (`internal/substrate/live.go`) speaking ATE's real
+  surface: the stable lifecycle (create-or-reuse, resume, suspend, pause,
+  describe) mapped onto ateapi `Control` RPCs — the same calls `kubectl ate`
+  makes — with no vendored Substrate API types and no invented HTTP mapping:
+
+  | `substrate.Client` | ateapi `Control` RPC | `kubectl ate` equivalent |
+  | --- | --- | --- |
+  | `CreateActor` | `CreateActor` (after `GetActor`; `AlreadyExists` re-reads) | `create actor <name> -a <atespace> --template <template>` |
+  | `ResumeActor` | `ResumeActor` (`resumed` feeds the handle count) | `resume actor <name> -a <atespace>` |
+  | `SuspendActor` | `SuspendActor` | `suspend actor <name> -a <atespace>` |
+  | `PauseActor` | `PauseActor` | `pause actor <name> -a <atespace>` |
+  | `DescribeActor` | `GetActor` | `get actor <name> -a <atespace>` |
+
+  Unknown actors surface as gRPC `NotFound` on every lifecycle RPC and map to
+  `ErrActorNotFound`; ATE states fold onto the client tri-state
+  (`RUNNING`/`RESUMING` → Active, `SUSPENDED`/`SUSPENDING`/`CRASHED` →
+  Suspended, `PAUSED`/`PAUSING` → Paused). Covered by in-memory `ATEControl`
+  fake tests, including warm reuse with resume-count preservation. The
+  generated-stub gRPC dial is still pending (`TODO(ate-grpc-dial)` in
+  `live.go`): `ATEClient` takes an injected `ATEControl` until it lands, so no
+  socket speaks to ateapi yet.
 - Explicit opt-in gate, off by default: `ANVIL_AGENTS_SUBSTRATE_ACTORS_ENABLED`
-  plus `ANVIL_AGENTS_SUBSTRATE_ENDPOINT` (controller flags
+  plus `ANVIL_AGENTS_SUBSTRATE_ENDPOINT` — now the ateapi gRPC target
+  (`kubectl ate --endpoint` parallel, e.g. `ate-api-server.ate-system.svc:443`
+  or a localhost port-forward), with `ANVIL_AGENTS_SUBSTRATE_TEMPLATE` as the
+  default ActorTemplate, optional `ANVIL_AGENTS_SUBSTRATE_ATESPACE`, and
+  `ANVIL_AGENTS_SUBSTRATE_TOKEN_FILE` preferred over the inline
+  `ANVIL_AGENTS_SUBSTRATE_TOKEN` (controller flags
   `--substrate-actors-enabled` / `--substrate-endpoint` mirror the same env).
-  An endpoint alone never enables dispatch, and the optional
-  `ANVIL_AGENTS_SUBSTRATE_TOKEN` travels only as an `Authorization` header —
-  never in status, logs, or API JSON.
+  An endpoint alone never enables dispatch, and token material never lands in
+  status, logs, or API JSON. Until the ATE dialer lands, enabling the gate
+  fails fast at operator startup instead of silently holding.
 - Controller dispatch (`internal/controller/agent_run_substrate_live.go`): with
   the gate on, a well-formed SubstrateActor run binds its thread actor through
   `EnsureTurnActor`, records `status.substrateActor` (turn-to-actor binding),
@@ -132,32 +159,36 @@ backend-kind overlay, which stays orthogonal to the runtime plane).
 
 ## What is NOT in this slice
 
-- No actor CRD/controller, no Kind e2e against a real Substrate cluster in CI,
-  and no chat-log replay onto actors. Peer resume against live actors is wired
-  and tested via fakes; the remaining gap is live cluster numbers.
-- The live gateway path prefix (`/v1/actors/...`) is a spike mapping, not a
-  pinned upstream contract: Substrate is early and its APIs will churn. If the
-  upstream Kind install serves a different lifecycle surface, re-point
+- No generated-stub gRPC dialer yet (`TODO(ate-grpc-dial)` in
+  `internal/substrate/live.go`): the ATE mapping is implemented and
+  fake-tested, but no socket speaks to ateapi, so there is no Kind e2e against
+  a real Substrate cluster in CI and no chat-log replay onto actors. Peer
+  resume against live actors is mapped and tested via fakes (thread-actor
+  naming plus Resume-then-Suspend); the remaining gap is the dialer plus live
+  cluster numbers.
+- If upstream churns the lifecycle surface, re-point
   `internal/substrate/live.go` only — AgentRun types, merge rules, chat
   selection, and the controller dispatch branch do not change.
 
 ## Kind-local spike install
 
-Prefer the Kind-local install docs from Substrate itself
-(`hack/create-kind-cluster.sh` / `install-ate-kind` in
-agent-substrate/substrate); Substrate is early, so treat the upstream README
-as authoritative if script names drift. Do not require GKE for the spike, and
+Prefer the Kind-local install from Substrate itself
+(`hack/install-ate-kind.sh` in agent-substrate/substrate, wrapping
+`hack/install-ate.sh` with Kind defaults); treat the upstream README as
+authoritative if script names drift. Do not require GKE for the spike, and
 do not change Primaris Argo sync policy. The spike needs only:
 
 1. A Kind cluster from the upstream script (Austin's cluster or WSL Kind both
-   work; CI does not install Substrate).
-2. The Substrate control plane + a lifecycle gateway reachable from the
-   controller as one origin URL, for example
-   `http://substrate-gateway.substrate:8080`. The Anvil live client only needs
-   the stable lifecycle (create-or-reuse, resume, suspend, pause, describe);
-   point the gateway paths at `/v1/actors/{namespace}/{name}` with
-   `/resume`, `/suspend`, `/pause` actions, or re-point `live.go` to match
-   whatever the install serves.
+   work; CI does not install Substrate). The script pins a local registry,
+   host-arch images, and an explicit `KUBECTL_CONTEXT=kind-<name>` so the
+   install lands on the Kind cluster.
+2. The Substrate control plane with ateapi reachable from the controller at
+   its gRPC target: in-cluster `ate-api-server.ate-system.svc:443`, or a
+   localhost port-forward of the ate-api-server Service the way `kubectl ate`
+   works when `--endpoint` is omitted. Prove the lifecycle with the counter
+   demo first (`demos/counter`: atespace plus `counter` ActorTemplate, then
+   `kubectl ate create actor my-counter-1 -a ate-demo-counter --template
+   counter`) before pointing a standing-chat harness profile at it.
 3. A harness profile selecting the actor plane (sample:
    `config/samples/control_v1alpha1_agentharnessprofile_substrate.yaml`).
 
@@ -166,12 +197,16 @@ Primaris sync changes):
 
 ```bash
 export ANVIL_AGENTS_SUBSTRATE_ACTORS_ENABLED=true
-export ANVIL_AGENTS_SUBSTRATE_ENDPOINT=http://substrate-gateway.substrate:8080
-# Optional: export ANVIL_AGENTS_SUBSTRATE_TOKEN=... (header-only, never logged)
+export ANVIL_AGENTS_SUBSTRATE_ENDPOINT=ate-api-server.ate-system.svc:443
+export ANVIL_AGENTS_SUBSTRATE_TEMPLATE=standing-chat
+# Optional: export ANVIL_AGENTS_SUBSTRATE_TOKEN_FILE=/run/ate/token (preferred)
+# and/or ANVIL_AGENTS_SUBSTRATE_ATESPACE=... to force one atespace.
+# NOTE: the generated-stub dialer is still pending, so the operator currently
+# refuses to start with the gate enabled; unset the gate to keep the hold.
 ```
 
 Or the equivalent flags: `--substrate-actors-enabled --substrate-endpoint
-http://substrate-gateway.substrate:8080`. With the gate off (the default),
+ate-api-server.ate-system.svc:443`. With the gate off (the default),
 SubstrateActor runs keep holding as `SubstrateActorNotWired` with no Job.
 
 ## Latency compare (direct turns and peer deliveries)
@@ -187,7 +222,9 @@ SubstrateActor runs keep holding as `SubstrateActorNotWired` with no Job.
 hack/substrate-latency-compare.sh --iterations 20 --out /tmp/substrate-latency-fake.json
 ```
 
-3. Live compare on the Kind spike cluster (Austin's cluster/WSL Kind):
+3. Live compare on the Kind spike cluster (Austin's cluster/WSL Kind) —
+   blocked on the ATE dialer: the harness fails fast with the gate on until
+   the dialer lands, so live numbers come after it:
 
 ```bash
 hack/substrate-latency-compare.sh --live --iterations 20 \
@@ -233,10 +270,14 @@ the same cluster shape:
 ## NEXT
 
 - [x] Kind-local Substrate install note from the spike path above.
-- [x] Live `Client` implementation behind an explicit opt-in gate, including
-  peer resume per the mapping above with a warm-actor latency check for peer
-  turns specifically (busy-recipient durable wait must hold). Tested via fakes
-  and the `httptest` gateway; live Kind numbers still open.
+- [x] Live `Client` binding onto real ATE lifecycle behind an explicit opt-in
+  gate, including peer resume per the mapping above. Tested via fakes (warm
+  reuse + `ErrActorNotFound`); the generated-stub dialer and the warm-actor
+  latency check for peer turns specifically (busy-recipient durable wait must
+  hold) are still open, so live Kind numbers are too.
+- [ ] Generated-stub gRPC dialer (`TODO(ate-grpc-dial)` in
+  `internal/substrate/live.go`) with TLS/token parity to upstream `ateclient`,
+  unblocking gate-on dispatch and live Kind numbers.
 - [x] Actor identity in `status.substrateActor` and turn-to-actor binding.
 - [x] Latency harness (Job cold start vs warm actor resume) covering direct
   turns and peer deliveries, not only standing Wrapper chat. Fake-backend

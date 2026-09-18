@@ -8,6 +8,9 @@ func TestGateDefaultsOff(t *testing.T) {
 	t.Setenv(GateEnabledEnvVar, "")
 	t.Setenv(GateEndpointEnvVar, "")
 	t.Setenv(GateTokenEnvVar, "")
+	t.Setenv(GateTokenFileEnvVar, "")
+	t.Setenv(GateAtespaceEnvVar, "")
+	t.Setenv(GateTemplateEnvVar, "")
 	gate := GateConfigFromEnv()
 	if gate.Enabled {
 		t.Fatal("gate must default to disabled")
@@ -15,8 +18,8 @@ func TestGateDefaultsOff(t *testing.T) {
 	if gate.LiveEnabled() {
 		t.Fatal("gate without endpoint must not enable live dispatch")
 	}
-	if _, ok, err := NewLiveClientFromEnv(); err != nil || ok {
-		t.Fatalf("live client from disabled gate = ok=%v err=%v, want disabled", ok, err)
+	if _, err := NewATEClient(ATEClientConfigFromGate(gate), newFakeATEControl()); err == nil {
+		t.Fatal("live client from disabled gate must fail validation")
 	}
 }
 
@@ -26,15 +29,15 @@ func TestGateRequiresExplicitOptIn(t *testing.T) {
 	if got := GateConfigFromEnv(); !got.Enabled || got.LiveEnabled() {
 		t.Fatalf("gate without endpoint = %+v, want enabled-but-not-live", got)
 	}
-	if _, ok, err := NewLiveClientFromEnv(); err != nil || ok {
-		t.Fatalf("live client without endpoint = ok=%v err=%v, want disabled", ok, err)
+	if _, err := NewATEClient(ATEClientConfigFromGate(GateConfigFromEnv()), newFakeATEControl()); err == nil {
+		t.Fatal("live client without endpoint must fail validation")
 	}
 }
 
 func TestGateTruthySpellings(t *testing.T) {
 	for _, raw := range []string{"1", "true", "TRUE", "yes", "on", " True "} {
 		t.Setenv(GateEnabledEnvVar, raw)
-		t.Setenv(GateEndpointEnvVar, "http://substrate-gateway.substrate:8080")
+		t.Setenv(GateEndpointEnvVar, "ate-api-server.ate-system.svc:443")
 		if !GateConfigFromEnv().LiveEnabled() {
 			t.Fatalf("gate value %q must enable live dispatch", raw)
 		}
@@ -44,10 +47,27 @@ func TestGateTruthySpellings(t *testing.T) {
 func TestGateRejectsFalsySpellings(t *testing.T) {
 	for _, raw := range []string{"0", "false", "no", "off", "maybe", "enabled"} {
 		t.Setenv(GateEnabledEnvVar, raw)
-		t.Setenv(GateEndpointEnvVar, "http://substrate-gateway.substrate:8080")
+		t.Setenv(GateEndpointEnvVar, "ate-api-server.ate-system.svc:443")
 		if GateConfigFromEnv().LiveEnabled() {
 			t.Fatalf("gate value %q must not enable live dispatch", raw)
 		}
+	}
+}
+
+func TestGateParsesATEPlaneFields(t *testing.T) {
+	t.Setenv(GateEnabledEnvVar, "true")
+	t.Setenv(GateEndpointEnvVar, "ate-api-server.ate-system.svc:443")
+	t.Setenv(GateTokenEnvVar, "inline-token")
+	t.Setenv(GateTokenFileEnvVar, "/run/ate/token")
+	t.Setenv(GateAtespaceEnvVar, "agents")
+	t.Setenv(GateTemplateEnvVar, "standing-chat")
+
+	gate := GateConfigFromEnv()
+	if !gate.LiveEnabled() {
+		t.Fatalf("gate = %+v, want live", gate)
+	}
+	if gate.Token != "inline-token" || gate.TokenFile != "/run/ate/token" || gate.Atespace != "agents" || gate.Template != "standing-chat" {
+		t.Fatalf("gate ATE fields = %+v, want token/token-file/atespace/template", gate)
 	}
 }
 
