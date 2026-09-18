@@ -38,15 +38,17 @@ import (
 //     today's behavior: the run holds as InProcessNotWired and no Job is
 //     ever created for it.
 //
-// Stubbed vs live in this slice: unit tests drive standing.FakeBackend
-// (deterministic word-streamed prose, no model calls, no credentials, no
-// harness subprocess). The envelope wrapper below is stub glue so the fake's
+// Stubbed vs live: unit tests drive standing.FakeBackend (deterministic
+// word-streamed prose, no model calls, no credentials, no harness
+// subprocess). The envelope wrapper below is stub glue so the fake's
 // plain-text reply parses through the existing per-harness reply extractors;
-// a real harness process returns native-enveloped output directly and this
-// wrapper goes away with it. Crash recovery between create and the Succeeded
-// mark re-streams at least once; the singleflight guard only serializes one
-// process (the chart runs one API replica), so a multi-replica claim and a
-// controller-hold yield are the documented next steps, not this slice.
+// a real harness process (standing.ProcessBackend, slice 3b) returns
+// native-enveloped output directly and skips this wrapper via the
+// nativeEnvelopeBackend gate. Crash recovery between create and the
+// Succeeded mark re-streams at least once; the singleflight guard only
+// serializes one process (the chart runs one API replica), so a
+// multi-replica claim and a controller-hold yield are the documented next
+// steps, not this slice.
 
 // standingTurnGuard serializes live standing execution per turn ID within one
 // API process. Queue, read-refresh, and background recovery can reconcile the
@@ -147,7 +149,7 @@ func (server *Server) reconcileStandingTurn(ctx context.Context, turn *chat.Turn
 	harnessKind := agentsv1alpha1.AgentRunHarnessBackendKind(handle.HarnessKind)
 	run.Status.Phase = agentsv1alpha1.AgentRunPhaseSucceeded
 	run.Status.Backend = string(harnessKind)
-	run.Status.Output = standingRunOutput(harnessKind, strings.TrimSpace(reply))
+	run.Status.Output = standingTurnOutput(server.standing, harnessKind, strings.TrimSpace(reply))
 	completed := metav1.NewTime(time.Now())
 	run.Status.CompletedAt = &completed
 	if err := server.writes.Status().Update(ctx, run); err != nil {
@@ -231,6 +233,26 @@ func (sink *standingRunSink) OnToken(ctx context.Context, event standing.TokenEv
 		return sink.downstream.OnToken(ctx, event)
 	}
 	return nil
+}
+
+// nativeEnvelopeBackend is implemented by standing backends whose StreamTurn
+// returns the harness's native output directly (a real harness process, slice
+// 3b). Stub backends return plain text and need the envelope wrapper below;
+// without it the shared Succeeded path's per-harness extractors would reject
+// the reply and the turn would never complete.
+type nativeEnvelopeBackend interface {
+	ReturnsNativeEnvelope() bool
+}
+
+// standingTurnOutput persists a streamed standing reply as the run output.
+// Stub backends are wrapped in the harness's native envelope so the existing
+// extractors accept them; native backends pass through unwrapped so a reply
+// containing quotes can never be double-wrapped.
+func standingTurnOutput(backend standing.Backend, harnessKind agentsv1alpha1.AgentRunHarnessBackendKind, reply string) string {
+	if native, ok := backend.(nativeEnvelopeBackend); ok && native.ReturnsNativeEnvelope() {
+		return reply
+	}
+	return standingRunOutput(harnessKind, reply)
 }
 
 // standingRunOutput wraps a stub backend's plain-text reply in the harness's
