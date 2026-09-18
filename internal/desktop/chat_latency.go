@@ -155,7 +155,7 @@ func (s *Server) handleChatLatency(writer http.ResponseWriter, request *http.Req
 			return
 		}
 	}
-	file, err := os.OpenFile(s.chatLatencyPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	file, err := os.OpenFile(s.chatLatencyPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
 		writeError(writer, http.StatusInternalServerError, "write_failed", "unable to persist chat-latency report")
 		return
