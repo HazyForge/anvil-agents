@@ -31,6 +31,8 @@ const (
 	piAgentRunnerImageEnv           = "ANVIL_AGENTS_RUNNER_IMAGE_PI_AGENT"
 	primeAgentRunnerImageEnv        = "ANVIL_AGENTS_RUNNER_IMAGE_PRIME_AGENT"
 	agyRunnerImageEnv               = "ANVIL_AGENTS_RUNNER_IMAGE_AGY"
+	substrateActorsEnabledEnv       = "ANVIL_AGENTS_SUBSTRATE_ACTORS_ENABLED"
+	substrateEndpointEnv            = "ANVIL_AGENTS_SUBSTRATE_ENDPOINT"
 )
 
 var defaultGitHubAPIAllowedHosts = []string{"api.github.com"}
@@ -68,6 +70,15 @@ type Options struct {
 	AgyRunnerImage               string
 	ExternalTriggersEnabled      bool
 	ExternalTriggerHTTPRoute     ExternalTriggerHTTPRouteConfig
+	// SubstrateActorsEnabled is the explicit opt-in gate for live Substrate
+	// actor dispatch (slice 2 of the standing-chat spike). Off by default:
+	// well-formed SubstrateActor runs hold without creating a Job until the
+	// operator enables this gate and configures SubstrateEndpoint.
+	SubstrateActorsEnabled bool
+	// SubstrateEndpoint is the Substrate lifecycle gateway origin backing the
+	// live substrate.Client (Kind-local for the spike). Empty disables live
+	// dispatch even when the gate flag is set.
+	SubstrateEndpoint string
 }
 
 func DefaultOptions() *Options {
@@ -91,6 +102,8 @@ func DefaultOptions() *Options {
 		PiAgentRunnerImage:           firstNonEmpty(strings.TrimSpace(os.Getenv(piAgentRunnerImageEnv)), agentRunDefaultPiAgentImage),
 		PrimeAgentRunnerImage:        firstNonEmpty(strings.TrimSpace(os.Getenv(primeAgentRunnerImageEnv)), agentRunDefaultPrimeAgentImage),
 		AgyRunnerImage:               firstNonEmpty(strings.TrimSpace(os.Getenv(agyRunnerImageEnv)), agentRunDefaultAgyImage),
+		SubstrateActorsEnabled:       boolEnv(substrateActorsEnabledEnv),
+		SubstrateEndpoint:            strings.TrimSpace(os.Getenv(substrateEndpointEnv)),
 	}
 }
 
