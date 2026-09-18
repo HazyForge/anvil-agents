@@ -155,7 +155,9 @@ standing/manager chat turns on warm Substrate actors instead of cold Jobs.
 Scouts and batch runs stay on Jobs. With the live gate off (the default), the
 controller holds those runs without creating a Job; with
 `ANVIL_AGENTS_SUBSTRATE_ACTORS_ENABLED=true` plus
-`ANVIL_AGENTS_SUBSTRATE_ENDPOINT` it binds the warm actor instead (still with
-no Job). See
+`ANVIL_AGENTS_SUBSTRATE_ENDPOINT` (the ateapi target) it will bind the warm
+actor instead (still with no Job) once the pending ATE dialer lands — until
+then the operator fails fast with the gate enabled rather than dispatching
+anywhere. See
 [Substrate spike](substrate-spike.md) and the sample
 `config/samples/control_v1alpha1_agentharnessprofile_substrate.yaml`.

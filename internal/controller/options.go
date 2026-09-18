@@ -75,8 +75,9 @@ type Options struct {
 	// well-formed SubstrateActor runs hold without creating a Job until the
 	// operator enables this gate and configures SubstrateEndpoint.
 	SubstrateActorsEnabled bool
-	// SubstrateEndpoint is the Substrate lifecycle gateway origin backing the
-	// live substrate.Client (Kind-local for the spike). Empty disables live
+	// SubstrateEndpoint is the ateapi gRPC target backing the live
+	// substrate.Client (Kind-local for the spike, e.g.
+	// ate-api-server.ate-system.svc:443). Empty disables live
 	// dispatch even when the gate flag is set.
 	SubstrateEndpoint string
 }

@@ -2,10 +2,11 @@
 // create for standing-chat turns, covering both direct turns and peer
 // deliveries (slice 2 of the Substrate spike).
 //
-// API-first by default: without the live gate it drives the in-memory
-// FakeClient, so CI stays green with no cluster. On a Kind cluster with the
-// Substrate spike gateway installed, set ANVIL_AGENTS_SUBSTRATE_ACTORS_ENABLED
-// and ANVIL_AGENTS_SUBSTRATE_ENDPOINT to measure the live backend instead.
+// Fake-backend by default: without the live gate it drives the in-memory
+// FakeClient, so CI stays green with no cluster. The live ATE backend is
+// pending the generated-stub gRPC dialer (TODO(ate-grpc-dial) in
+// internal/substrate/live.go), so requesting live measurement with the gate
+// fails fast with guidance instead of measuring the wrong backend.
 //
 // The Job cold-start baseline cannot be measured from this process (it needs a
 // real cluster scheduler), so pass the observed baseline explicitly with
@@ -16,10 +17,6 @@
 // Usage:
 //
 //	go run ./cmd/substrate-latency -n 20 -out /tmp/substrate-latency.json
-//	ANVIL_AGENTS_SUBSTRATE_ACTORS_ENABLED=true \
-//	  ANVIL_AGENTS_SUBSTRATE_ENDPOINT=http://substrate-gateway.substrate:8080 \
-//	  go run ./cmd/substrate-latency -n 20 \
-//	    -job-baseline-p50-ms 12000 -job-baseline-p95-ms 44000
 package main
 
 import (
@@ -160,17 +157,11 @@ func main() {
 	}
 	ctx := context.Background()
 	backendName := "fake"
-	var client substrate.Client
-	if live, ok, err := substrate.NewLiveClientFromEnv(); err != nil {
-		fmt.Fprintf(os.Stderr, "error: live substrate client: %v\n", err)
+	var client substrate.Client = substrate.NewFakeClient()
+	if gate := substrate.GateConfigFromEnv(); gate.LiveEnabled() {
+		fmt.Fprintln(os.Stderr, "error: live ATE measurement is pending the generated-stub gRPC dialer (see TODO(ate-grpc-dial) in internal/substrate/live.go); unset ANVIL_AGENTS_SUBSTRATE_ACTORS_ENABLED to measure the fake backend")
 		os.Exit(1)
-	} else if ok {
-		backendName = "live"
-		client = live
-	} else {
-		client = substrate.NewFakeClient()
 	}
-	gate := substrate.GateConfigFromEnv()
 
 	directCold, err := measureCold(ctx, client, *namespace, "direct", *harness, *actorClass, *pool, *iterations)
 	if err != nil {
@@ -201,7 +192,7 @@ func main() {
 	report := latencyReport{
 		Tool:        "substrate-latency",
 		Backend:     backendName,
-		GateEnabled: gate.LiveEnabled(),
+		GateEnabled: false,
 		Iterations:  *iterations,
 		Namespace:   *namespace,
 		GeneratedAt: time.Now().UTC().Format(time.RFC3339Nano),

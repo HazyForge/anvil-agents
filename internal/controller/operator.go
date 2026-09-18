@@ -92,20 +92,15 @@ func Run(ctx context.Context, options *Options) error {
 		APIReader:  mgr.GetAPIReader(),
 		Options:    options,
 	}
-	// Optional live Substrate plane (standing-chat spike slice 2). The gate is
-	// off by default; enabling it without an endpoint keeps the safe hold.
-	// The token travels only as an Authorization header and is never logged.
+	// Optional live Substrate plane (standing-chat spike slice 2, ATE binding).
+	// The gate is off by default; the ATE transport mapping is implemented
+	// and fake-tested, but the generated-stub gRPC dialer is still pending
+	// (TODO(ate-grpc-dial) in internal/substrate/live.go), so requesting live
+	// dispatch fails fast here instead of silently holding. No token material
+	// is ever logged.
 	var substrateClient substrate.Client
 	if options.SubstrateActorsEnabled && strings.TrimSpace(options.SubstrateEndpoint) != "" {
-		gate := substrate.GateConfigFromEnv()
-		live, err := substrate.NewLiveClient(substrate.LiveConfig{
-			Endpoint:  strings.TrimSpace(options.SubstrateEndpoint),
-			AuthToken: gate.Token,
-		})
-		if err != nil {
-			return fmt.Errorf("configure Substrate live client: %w", err)
-		}
-		substrateClient = live
+		return fmt.Errorf("live Substrate actor dispatch is pending the ateapi gRPC dialer (see TODO(ate-grpc-dial) in internal/substrate/live.go and docs/substrate-spike.md); unset --substrate-actors-enabled to keep the SubstrateActorNotWired hold")
 	}
 	registrations := []struct {
 		name  string

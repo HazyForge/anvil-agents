@@ -20,7 +20,8 @@ const (
 	// AgentRunExecutionRuntimeSubstrateActor routes execution to a warm
 	// Substrate actor (agent-substrate/substrate) instead of a Job. With the
 	// live gate off the controller holds these runs without creating a Job;
-	// with the gate on it binds the warm actor (still with no Job).
+	// with the gate on it will bind the warm actor (still with no Job) once
+	// the pending ATE dialer lands.
 	AgentRunExecutionRuntimeSubstrateActor AgentRunExecutionRuntime = "SubstrateActor"
 )
 

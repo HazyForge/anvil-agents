@@ -2,9 +2,11 @@
 # substrate-latency-compare.sh — Job cold-start baseline vs warm Substrate
 # resume for a direct turn AND a peer delivery (standing-chat spike, slice 2).
 #
-# API-first by default: the fake-backend run needs no cluster and is safe in
-# CI. The live run needs a Kind cluster with the Substrate spike gateway (see
-# docs/substrate-spike.md) plus Austin's observed Job baseline flags.
+# Fake-backend by default: the fake run needs no cluster and is safe in
+# CI. The live run needs a Kind cluster with Substrate ATE (see
+# docs/substrate-spike.md) plus Austin's observed Job baseline flags, and is
+# pending the generated-stub gRPC dialer (the harness fails fast with --live
+# until the dialer lands).
 #
 # Usage:
 #   hack/substrate-latency-compare.sh [--iterations 20] [--out /tmp/substrate-latency.json]
@@ -46,7 +48,7 @@ if [[ "$LIVE" -eq 1 ]]; then
     exit 2
   fi
   if [[ -z "${ANVIL_AGENTS_SUBSTRATE_ENDPOINT:-}" ]]; then
-    echo "error: --live requires ANVIL_AGENTS_SUBSTRATE_ENDPOINT (Kind gateway origin)" >&2
+    echo "error: --live requires ANVIL_AGENTS_SUBSTRATE_ENDPOINT (ateapi address)" >&2
     exit 2
   fi
 fi
