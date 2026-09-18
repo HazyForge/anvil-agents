@@ -21,6 +21,7 @@ import (
 
 	agentsv1alpha1 "github.com/hazyforge/anvil-agents/api/v1alpha1"
 	"github.com/hazyforge/anvil-agents/internal/chat"
+	"github.com/hazyforge/anvil-agents/internal/standing"
 )
 
 type principalContextKey struct{}
@@ -43,6 +44,10 @@ type Server struct {
 	httpServer *http.Server
 	limiter    *streamLimiter
 	chatStore  chat.Store
+	// standing is the optional standing in-process harness backend. When nil,
+	// the chat stream endpoint stays transport-only and every thread
+	// terminates with job_plane.
+	standing standing.Backend
 }
 
 func NewServer(config Config, authenticator AccessTokenAuthenticator, runs client.Reader, logs AgentRunLogSource, log logr.Logger) (*Server, error) {
