@@ -25,6 +25,7 @@ import {
 import {
   createChatLatencyTracker,
   formatChatLatencyReport,
+  persistChatLatencyReport,
   withChatLatency,
   type ChatLatencyReport,
 } from "./chatLatency";
@@ -376,6 +377,13 @@ export async function streamDesktopChat(opts: {
       // Latency observers must never break chat.
     }
     console.debug(formatChatLatencyReport(report));
+    // Durable sink for Austin's PC: ANVIL_CHAT_LATENCY_JSONL absolute path.
+    // Unset/relative/non-Node runtimes are a safe no-op (console.debug only).
+    try {
+      persistChatLatencyReport(report, { source: "desktop-chat" });
+    } catch {
+      // Latency persistence must never break chat.
+    }
     return report;
   };
   let threadId: string | undefined;

@@ -7,14 +7,21 @@
  * Run: node --experimental-strip-types --test hack/desktop-chat-latency.mjs
  */
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
 import {
+  appendChatLatencyReport,
+  CHAT_LATENCY_JSONL_ENV,
   createChatLatencyTracker,
+  formatChatLatencyJsonLine,
   formatChatLatencyReport,
+  isAbsoluteLatencyPath,
+  persistChatLatencyReport,
+  resolveChatLatencyJsonlPath,
   withChatLatency,
 } from "../web/desktop/src/wrapper/chatLatency.ts";
 
@@ -180,9 +187,118 @@ test("streamDesktopChat is wired to the latency tracker", () => {
     "createChatLatencyTracker",
     "markReplyReady",
     "formatChatLatencyReport",
+    "persistChatLatencyReport",
+    "ANVIL_CHAT_LATENCY_JSONL",
     "onLatency",
     "streamDesktopChat",
   ]) {
     assert.ok(src.includes(needle), `harnessChat.ts should reference ${needle}`);
   }
+});
+
+test("JSONL sink resolves only absolute ANVIL_CHAT_LATENCY_JSONL paths", () => {
+  assert.equal(CHAT_LATENCY_JSONL_ENV, "ANVIL_CHAT_LATENCY_JSONL");
+  assert.equal(resolveChatLatencyJsonlPath({}), undefined);
+  assert.equal(resolveChatLatencyJsonlPath({ [CHAT_LATENCY_JSONL_ENV]: "" }), undefined);
+  assert.equal(resolveChatLatencyJsonlPath({ [CHAT_LATENCY_JSONL_ENV]: "relative/latency.jsonl" }), undefined);
+  assert.equal(
+    resolveChatLatencyJsonlPath({ [CHAT_LATENCY_JSONL_ENV]: join(tmpdir(), "chat-latency.jsonl") }),
+    join(tmpdir(), "chat-latency.jsonl"),
+  );
+  assert.ok(isAbsoluteLatencyPath(join(tmpdir(), "x.jsonl")));
+  assert.equal(isAbsoluteLatencyPath("relative/x.jsonl"), false);
+  assert.equal(isAbsoluteLatencyPath(""), false);
+});
+
+test("formatChatLatencyJsonLine emits ISO ts + durations + source as one line", () => {
+  const line = formatChatLatencyJsonLine(
+    {
+      marks: { sendStartedAt: 0 },
+      waitingMs: 12,
+      firstTokenMs: 48,
+      runningMs: 60,
+      replyReadyMs: 300,
+    },
+    { source: "desktop-chat", now: () => Date.parse("2026-09-18T04:20:00.000Z") },
+  );
+  assert.ok(line.endsWith("\n"));
+  assert.equal(line.trim().split("\n").length, 1);
+  const parsed = JSON.parse(line);
+  assert.equal(parsed.ts, "2026-09-18T04:20:00.000Z");
+  assert.equal(parsed.waitingMs, 12);
+  assert.equal(parsed.firstTokenMs, 48);
+  assert.equal(parsed.runningMs, 60);
+  assert.equal(parsed.replyReadyMs, 300);
+  assert.equal(parsed.failedMs, undefined);
+  assert.equal(parsed.source, "desktop-chat");
+});
+
+test("appendChatLatencyReport appends one JSONL line per settled report", () => {
+  const dir = mkdtempSync(join(tmpdir(), "chat-latency-"));
+  const path = join(dir, "chat-latency.jsonl");
+  const report = {
+    marks: { sendStartedAt: 0 },
+    waitingMs: 5,
+    firstTokenMs: 40,
+    runningMs: 42,
+    replyReadyMs: 210,
+  };
+  assert.equal(appendChatLatencyReport(report, { path, source: "stub-test" }), true);
+  assert.equal(
+    appendChatLatencyReport({ marks: { sendStartedAt: 0 }, failedMs: 99 }, { path }),
+    true,
+  );
+  const lines = readFileSync(path, "utf8").trim().split("\n");
+  assert.equal(lines.length, 2);
+  assert.equal(JSON.parse(lines[0]).replyReadyMs, 210);
+  assert.equal(JSON.parse(lines[0]).source, "stub-test");
+  assert.equal(JSON.parse(lines[1]).failedMs, 99);
+  assert.equal("source" in JSON.parse(lines[1]), false);
+});
+
+test("appendChatLatencyReport never throws and skips non-absolute paths", () => {
+  const report = { marks: { sendStartedAt: 0 }, waitingMs: 1 };
+  assert.equal(appendChatLatencyReport(report, { path: "relative/latency.jsonl" }), false);
+  assert.equal(appendChatLatencyReport(report, { path: "" }), false);
+  assert.equal(
+    appendChatLatencyReport(report, {
+      path: join(tmpdir(), "chat-latency.jsonl"),
+      appendFileSync: () => {
+        throw new Error("disk unavailable");
+      },
+    }),
+    false,
+  );
+});
+
+test("persistChatLatencyReport writes only when the env path is set", () => {
+  const dir = mkdtempSync(join(tmpdir(), "chat-latency-env-"));
+  const path = join(dir, "chat-latency.jsonl");
+  const report = { marks: { sendStartedAt: 0 }, waitingMs: 2, replyReadyMs: 50 };
+  assert.equal(persistChatLatencyReport(report, { env: {} }), false);
+  assert.equal(
+    persistChatLatencyReport(report, { env: { [CHAT_LATENCY_JSONL_ENV]: "relative.jsonl" } }),
+    false,
+  );
+  let calls = 0;
+  assert.equal(
+    persistChatLatencyReport(report, {
+      env: {},
+      appendFileSync: () => {
+        calls += 1;
+      },
+    }),
+    false,
+  );
+  assert.equal(calls, 0);
+  assert.equal(
+    persistChatLatencyReport(report, {
+      env: { [CHAT_LATENCY_JSONL_ENV]: path },
+      source: "desktop-chat",
+    }),
+    true,
+  );
+  const parsed = JSON.parse(readFileSync(path, "utf8").trim());
+  assert.equal(parsed.replyReadyMs, 50);
+  assert.equal(parsed.source, "desktop-chat");
 });
