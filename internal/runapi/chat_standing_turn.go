@@ -221,25 +221,63 @@ func (sink *standingRunSink) OnToken(ctx context.Context, event standing.TokenEv
 // native envelope so the existing per-harness reply extractor accepts it on
 // the shared Succeeded path. Backends whose extractor already accepts plain
 // text (openCode, piAgent, grokBuild, custom, unset) pass through unwrapped.
+// Envelopes are built with structured marshaling only — never string
+// concatenation — so a reply containing quotes cannot break the framing. The
+// OpenClaw envelope keeps its native key order (payloads before meta) via an
+// ordered struct because its prefix parser reads the public payloads first.
 // A real harness process returns native-enveloped output directly and does
 // not need this wrapper.
 func standingRunOutput(backend agentsv1alpha1.AgentRunHarnessBackendKind, reply string) string {
-	text, err := json.Marshal(reply)
-	if err != nil {
-		return reply
+	marshal := func(value any) string {
+		raw, err := json.Marshal(value)
+		if err != nil {
+			return reply
+		}
+		return string(raw)
 	}
-	quoted := string(text)
 	switch backend {
 	case agentsv1alpha1.AgentRunHarnessBackendCodex:
-		return `{"type":"item.completed","item":{"type":"agent_message","text":` + quoted + `}}`
+		return marshal(map[string]any{
+			"type": "item.completed",
+			"item": map[string]any{"type": "agent_message", "text": reply},
+		})
 	case agentsv1alpha1.AgentRunHarnessBackendHermesAgent:
-		return `{"type":"anvil.hermes.final","version":1,"role":"assistant","text":` + quoted + `}`
+		return marshal(map[string]any{
+			"type": "anvil.hermes.final", "version": 1, "role": "assistant", "text": reply,
+		})
 	case agentsv1alpha1.AgentRunHarnessBackendOpenClaw:
-		return `{"payloads":[{"text":` + quoted + `}],"meta":{"agentMeta":{"provider":"standing-stub","model":"standing-stub"},"aborted":false}}`
+		type payload struct {
+			Text string `json:"text"`
+		}
+		type agentMeta struct {
+			Provider string `json:"provider"`
+			Model    string `json:"model"`
+		}
+		type meta struct {
+			AgentMeta agentMeta `json:"agentMeta"`
+			Aborted   bool      `json:"aborted"`
+		}
+		type envelope struct {
+			Payloads []payload `json:"payloads"`
+			Meta     meta      `json:"meta"`
+		}
+		return marshal(envelope{
+			Payloads: []payload{{Text: reply}},
+			Meta:     meta{AgentMeta: agentMeta{Provider: "standing-stub", Model: "standing-stub"}},
+		})
 	case agentsv1alpha1.AgentRunHarnessBackendPrimeAgent:
-		return `{"type":"message_end","message":{"role":"assistant","stopReason":"stop","content":[{"type":"text","text":` + quoted + `}]}}`
+		return marshal(map[string]any{
+			"type": "message_end",
+			"message": map[string]any{
+				"role": "assistant", "stopReason": "stop",
+				"content": []any{map[string]any{"type": "text", "text": reply}},
+			},
+		})
 	case agentsv1alpha1.AgentRunHarnessBackendAgy:
-		return `{"event":"result","result":{"status":"SUCCESS","response":` + quoted + `}}`
+		return marshal(map[string]any{
+			"event":  "result",
+			"result": map[string]any{"status": "SUCCESS", "response": reply},
+		})
 	default:
 		return reply
 	}

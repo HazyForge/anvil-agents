@@ -395,7 +395,9 @@ func (recorder *runNameRecorder) OnToken(_ context.Context, event standing.Token
 }
 
 func TestStandingRunOutputRoundTripsExtractors(t *testing.T) {
-	reply := "Standing stub reply, two lines.\nSecond line with punctuation: yes!"
+	// Adversarial quoting: a reply containing quotes, backslashes, and
+	// newlines must survive the envelope without breaking its framing.
+	reply := "Standing \"stub\" reply, two lines.\nSecond line with \\ and \"quotes\"."
 	for _, backend := range []agentsv1alpha1.AgentRunHarnessBackendKind{
 		agentsv1alpha1.AgentRunHarnessBackendCodex,
 		agentsv1alpha1.AgentRunHarnessBackendOpenCode,
