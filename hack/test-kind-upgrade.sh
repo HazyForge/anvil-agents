@@ -94,7 +94,8 @@ else
 fi
 
 expected_crd_count="$(find "${root_dir}/config/crd/bases" -maxdepth 1 -type f -name '*.yaml' | wc -l)"
-expected_baseline_count=8
+# AgentExternalTrigger is a non-growth baseline CRD (not in the skip list above).
+expected_baseline_count=9
 baseline_count="$(kubectl --context "${kube_context}" get crd --output=name | rg -c 'control\.anvil\.hazyforge\.io')"
 [[ "${baseline_count}" -eq "${expected_baseline_count}" ]] || {
 	echo "baseline rendered ${baseline_count} agent CRDs, want ${expected_baseline_count}" >&2
