@@ -1,11 +1,12 @@
 # Standing in-process harness + WebSocket chat delivery
 
-Status: slice 4 (controller-hold yield + multi-replica claim for API-owned
-standing turns) on top of slice 3b (real harness process behind
-`standing.Backend`) — exactly one API replica drives a standing turn through
-an annotation claim the controller respects, while open standing streams
-multiplex live token frames during the turn and the durable turn record stays
-the source of truth. Architectural direction locked by Austin 2026-09-18.
+Status: slice 5a (standing vs Job latency compare harness) on top of slice 4
+(controller-hold yield + multi-replica claim for API-owned standing turns) and
+slice 3b (real harness process behind `standing.Backend`) — exactly one API
+replica drives a standing turn through an annotation claim the controller
+respects, while open standing streams multiplex live token frames during the
+turn and the durable turn record stays the source of truth. Architectural
+direction locked by Austin 2026-09-18.
 
 ## Direction
 
@@ -355,7 +356,74 @@ without double-driving one. It composes with every `standing.Backend`
 Stubbed vs live, explicitly: tests drive `FakeBackend` (no model calls, no
 harness subprocess). Full Desktop e2e stays a later slice.
 
-## NEXT (slice 5 and beyond)
+## Slice 5a: standing vs Job latency compare harness (this slice)
+
+Slice 5a measures the standing InProcess warm path against the documented Job
+cold-start baseline, for a direct turn AND a peer delivery, with explicit
+promote/reshape/retire bars mirroring the Substrate spike. The turn-based
+model does not move: one append-only AgentRun per accepted message, frozen
+intent in, `Succeeded` completion out; Jobs stay the default for scouts and
+batch; no Primaris Argo changes; no Secret expansion.
+
+- **What it measures** (`cmd/standing-latency`): per thread plane (direct
+  thread, peer child thread) it times session cold-create (`EnsureTurnSession`
+  on a fresh thread), warm resume (pre-bound session, `warmOps` counts the
+  resumes), the full warm turn (resume + `StreamTurn`), and time-to-first-token
+  from `StreamTurn` start (Desktop `firstTokenMs` vocabulary). Eight scenarios
+  (`directEnsureCold`, `directEnsureWarm`, `directTurnWarm`,
+  `directFirstToken`, plus the four `peer…` peers), each with
+  `count/minMs/meanMs/p50Ms/p95Ms/maxMs`.
+- **Backends.** `fake` (default) drives `standing.FakeBackend`: deterministic,
+  no cluster, no subprocess, no model call — CI-safe. `process-stub` runs the
+  real `ProcessBackend` session/streaming code behind a fixed-latency stub
+  runner (still no PATH binary, no credentials). `process-exec` (optional
+  local only) runs one real harness subprocess per measured turn through
+  `ExecRunner` with the desktop delegate's filtered env; it fails closed when
+  the harness CLI is missing and never reads Secrets.
+- **Job baseline.** The harness cannot measure Job scheduling itself, so the
+  comparison defaults to the documented Primaris Pod-ready figures (~12s p50 /
+  ~44s p95, `-job-baseline-p50-ms` / `-job-baseline-p95-ms`). Those figures
+  cover Job create to Pod ready only — full turn time (harness/model time on
+  top) is separate; compare full turns via the Desktop chat-latency JSONL
+  (`waitingMs`/`firstTokenMs`/`runningMs`/`replyReadyMs`, see
+  `internal/desktop/chat_latency.go`). Pass `0`/`0` for raw warm-path numbers
+  with no comparison.
+- **How to run.**
+
+```bash
+# Deterministic CI path (default): FakeBackend, artifact under .runtime/.
+hack/standing-latency-compare.sh --iterations 20 --out .runtime/standing-latency-fake.json
+
+# Stubbed ProcessBackend code path (still no binary, no credentials).
+hack/standing-latency-compare.sh --process-stub --iterations 20 --out .runtime/standing-latency-stub.json
+
+# Optional local live path: real CLI per turn (needs e.g. codex on PATH).
+hack/standing-latency-compare.sh --live --harness codex -n 10 --out .runtime/standing-latency-live.json
+# Equivalent direct binary run:
+# go run ./cmd/standing-latency -backend process-exec -harness codex -n 10 -out .runtime/standing-latency-live.json
+```
+
+The report is gitignored local JSON (`.runtime/standing-latency-*.json`,
+also printed to stdout) with the eight scenarios, `jobBaseline`,
+`comparisonMs` savings of warm turn and first-token against the Job
+baseline, and a `verdict` + `verdictReason`. Deterministic backends always
+report `harness-ok` — fake numbers prove the harness and the warm-reuse
+contract, never a promotion. Only `process-exec` live numbers on the same
+cluster shape as the baseline feed the bars:
+
+| Verdict | Bar |
+| --- | --- |
+| `promote` | Warm turn p95 an order of magnitude under the Job p95 (≤ p95/10) for BOTH direct and peer, with first-token p95 in the low single seconds (≤ 5000ms). Promoting means graduating the opt-in gate toward default-on for Wrapper/manager standing chat while scouts and batch stay on Jobs. |
+| `reshape` | Direct wins clearly but peer does not (direct turn p95 ≤ p95/10, peer turn p95 above it). Keep standing for direct turns, route peer fanout back to Jobs — or reshape the peer path (per-recipient warmth) and re-measure before promoting peers. |
+| `retire` | Warm turn p50 within noise of the Job p50 (under a 2x win). The standing plane does not pay for itself; remove the live backend wiring while keeping the `execution.runtime` API surface parked per a planned migration. |
+| `inconclusive-live` / `harness-ok` / `no-baseline` | Between the bars, deterministic-only, or no baseline passed: collect more live iterations on the same cluster shape before deciding. |
+
+Tests: `cmd/standing-latency/main_test.go` pins the report shape, warmOps
+per warm scenario, the documented baseline defaults, the fail-closed backend
+selection, and the `harness-ok` ceiling for deterministic backends — all with
+no cluster and no subprocess.
+
+## NEXT (slice 5b and beyond)
 
 1. **Persistent native session resume** (pass a harness session ID across
    turns where the CLI supports it) now that the process path is live; then
@@ -365,7 +433,9 @@ harness subprocess). Full Desktop e2e stays a later slice.
    `agentruns` (claim stamp) and `update` on `agentruns/status` (Succeeded
    mark) — the slice-4 claim degrades to hold behavior without them, so no
    chart change rode slice 4.
-2. **Latency compare** (direct turns AND peer deliveries, warm resume vs the
-   Job cold-start baseline on the same cluster shape) with promote/reshape/
-   retire bars mirroring the Substrate spike, then wire Desktop chat to
-   `openChatThreadStream` end to end.
+2. **Live numbers + Desktop e2e.** The slice-5a harness is green on
+   deterministic backends; `process-exec` live numbers on the same cluster
+   shape as the Job baseline are still open (needs a harness CLI with local
+   auth), then wire Desktop chat to `openChatThreadStream` end to end and
+   apply the promote/reshape/retire bars above. Persistent session resume
+   (slice 5b) composes with the same harness — re-measure after it lands.
