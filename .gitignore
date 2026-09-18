@@ -2,6 +2,7 @@
 /dist/
 /coverage.out
 /.env
+/.runtime/
 /.idea/
 /.vscode/
 /web/console/node_modules/
