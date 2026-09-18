@@ -1,9 +1,11 @@
 # Standing in-process harness + WebSocket chat delivery
 
-Status: slice 3 (long-lived WebSocket token subscription, Fake-backed) —
-open standing streams multiplex live token frames during a turn while the
-durable turn record stays the source of truth. Architectural direction
-locked by Austin 2026-09-18.
+Status: slice 4 (controller-hold yield + multi-replica claim for API-owned
+standing turns, Fake-backed) — exactly one API replica drives a standing
+turn through an annotation claim the controller respects, while open
+standing streams multiplex live token frames during the turn and the durable
+turn record stays the source of truth. Architectural direction locked by
+Austin 2026-09-18.
 
 ## Direction
 
@@ -214,9 +216,9 @@ the existing reply extractors; a real harness process returns
 native-enveloped output directly and the wrapper goes away with it. Crash
 recovery between create and the `Succeeded` mark re-streams at least once;
 a multi-replica claim and a controller-hold yield for API-owned standing
-turns are later-slice work, not this slice.
+turns landed in slice 4.
 
-## Slice 3: long-lived WebSocket token subscription (this slice)
+## Slice 3: long-lived WebSocket token subscription (landed)
 
 Slice 3 keeps an open standing WebSocket stream past the snapshot so it
 receives live `token` frames during an InProcess turn — not only the
@@ -248,15 +250,58 @@ harness subprocess). Desktop's `openChatThreadStream` already handles generic
 event types, so token frames flow through its `onEvent` handler with no
 protocol break; full Desktop e2e stays a later slice.
 
-## NEXT (slice 4 and beyond)
+## NEXT (slice 5 and beyond)
 
 1. **Real harness process** behind the same `standing.Backend` + gate
    (model session per thread, provider credentials outside the API's Secret
-   surface), then retire the envelope wrapper.
-2. **Controller-hold yield + multi-replica claim** for API-owned standing
-   turns (annotation claim the controller respects), so the
-   `InProcessNotWired` hold can never race a live stream.
-3. **Latency compare** (direct turns AND peer deliveries, warm resume vs the
+   surface), then retire the envelope wrapper. Production enablement also
+   needs the API role granted `update`/`patch` on `agentruns` (claim stamp)
+   and `update` on `agentruns/status` (Succeeded mark) — the slice-4 claim
+   degrades to hold behavior without them, so no chart change rides this
+   slice.
+2. **Latency compare** (direct turns AND peer deliveries, warm resume vs the
    Job cold-start baseline on the same cluster shape) with promote/reshape/
    retire bars mirroring the Substrate spike, then wire Desktop chat to
    `openChatThreadStream` end to end.
+
+## Slice 4: controller-hold yield + multi-replica claim (this slice)
+
+Slice 4 keeps the turn-based model (one append-only AgentRun per accepted
+message, frozen intent in, `Succeeded` completion out) and adds the
+ownership contract so multiple API replicas can safely own standing turns
+without double-driving one. It composes with every `standing.Backend`
+(`FakeBackend` in tests, `ProcessBackend` live): claiming happens around
+`StreamTurn`, never inside it.
+
+- **Claim contract.** Before streaming, the driving replica stamps
+  `control.anvil.hazyforge.io/standing-claim` on the turn's AgentRun
+  (`internal/standing.Claim`: durable turn ID + replica owner
+  `hostname/pid` + Unix-seconds timestamp, structured JSON, no secrets).
+  The winner is decided by optimistic concurrency — the first metadata
+  `Update` to land owns the turn. A lost write (conflict) or an already-live
+  foreign claim keeps today's hold behavior: the loser never streams and
+  observes the winner's `Succeeded` mark on a later pass. Gate off writes no
+  claim, so gate-off / Job-plane / scout paths stay byte-identical.
+- **Controller yield.** `agentRunInProcessHold` checks the same
+  `standing.ClaimForTurn` predicate: a live claim for the run's chat turn
+  yields `NeedsHuman/StandingClaimed` (still no Job) instead of racing the
+  live stream with `InProcessNotWired`. Absent, malformed, mismatched, or
+  stale claims keep the original hold. The yield needs no new RBAC — the
+  controller only reads the annotation.
+- **Takeover and liveness.** Claims expire after `standing.ClaimTTL` (90s)
+  so an owner crash cannot wedge the turn: any replica may overwrite a stale
+  claim and re-stream (at-least-once, matching existing crash recovery), and
+  a `NeedsHuman` hold carrying this turn's stale-or-own claim is re-driven
+  instead of failed. A `NeedsHuman` hold carrying a *live* claim never fails
+  the turn — the holder completes it. A `NeedsHuman` hold with no claim
+  still fails with guidance, exactly as before.
+- **Tests.** `internal/standing/claim_test.go` pins encode/parse/liveness;
+  `internal/runapi/chat_standing_claim_test.go` drives two replicas over one
+  shared fake client + chat store (winner drives + stamps, loser holds and
+  completes off the winner, stale takeover re-streams exactly once, live
+  foreign hold stays active, unclaimed hold still fails);
+  `internal/controller/agent_run_inprocess_test.go` pins the
+  yield-vs-`InProcessNotWired` boundary.
+
+Stubbed vs live, explicitly: tests drive `FakeBackend` (no model calls, no
+harness subprocess). Full Desktop e2e stays a later slice.
