@@ -188,6 +188,26 @@ monitoring, capacity, and row-retention policy outside the controller. The
 standalone API and CLI currently read live Kubernetes AgentRuns, not archived
 rows.
 
+## Markdown rendering of archived/run/chat prose
+
+Wherever archived or historical agent text is shown, the UIs render it as
+sanitized GFM Markdown via the maintained `react-markdown` + `remark-gfm` +
+`rehype-sanitize` stack — no custom Markdown parser, no raw
+`dangerouslySetInnerHTML` of model output:
+
+- Console run detail (`web/console/src/components/RunDetail.tsx`): decision
+  summary, report summary/detail, humanFollowUp, and run.output.
+- Console standing chat (`web/console/src/pages/ChatPage.tsx`) and Desktop
+  chat transcripts (`EntityChatPage`, `LocalChatPage`): assistant/user
+  message bodies.
+- Shared components: `web/console/src/components/MarkdownBody.tsx` and
+  `web/desktop/src/components/MarkdownBody.tsx` (small per-app duplicates;
+  the monorepo has no shared web package). Both sanitize HTML, force
+  `rel="noreferrer noopener" target="_blank"` on http(s) links, keep a
+  plain-text fallback if parsing throws, and render progressively for
+  in-flight turns (live log streams stay plain text). No syntax-highlighter
+  dependency is bundled; code blocks use theme `.markdown-body` CSS.
+
 Standing chat can share this same Secret and URI. Enable
 `api.config.chat.enabled` and the API mounts `ANVIL_AGENTS_CHAT_DATABASE_URL`
 from the archive Secret by default, writing to schema `anvil_agents_chat`

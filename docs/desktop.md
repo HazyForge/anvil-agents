@@ -120,3 +120,17 @@ make desktop-package
 
 `make desktop-chat-tests` is the continuous drop/stall/wrong-routing +
 create-agent allowlist gate (pure parser unit tests, no browser or cluster).
+
+## Chat Markdown rendering
+
+Assistant and user message bodies in Chat transcripts (remote
+`EntityChatPage`, local `LocalChatPage`) render as sanitized GFM Markdown via
+the maintained `react-markdown` + `remark-gfm` + `rehype-sanitize` stack
+(`web/desktop/src/components/MarkdownBody.tsx`; no custom parser, no syntax
+highlighter — code blocks use theme CSS to keep the bundle small).
+`rehype-sanitize` strips `<script>`/`<style>` and unsafe URLs, http(s) links
+open with `target="_blank" rel="noreferrer noopener"`, and a plain-text
+fallback renders if parsing ever throws. Transcripts show complete persisted
+messages, so `MarkdownBody` renders progressively rather than toggling
+between plain and rich text mid-turn. Smoke tests:
+`cd web/desktop && node --test tests/markdown.test.mjs`.

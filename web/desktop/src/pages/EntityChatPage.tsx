@@ -6,6 +6,7 @@ import { loadNamespace, saveNamespace } from '../state/namespace';
 import { readChatDraft, saveChatDraft, readSelectedChat, saveSelectedChat, readNewChatConfig, saveNewChatConfig, type NewChatConfig } from '../state/chatWorkspace';
 import { RemoteTurnActivity } from '../components/RemoteTurnActivity';
 import { AgentAvatar } from '../components/AgentAvatar';
+import { MarkdownBody } from '../components/MarkdownBody';
 import { ProjectSwitcher, remoteChatProjects, projectManagers } from '../components/ProjectSwitcher';
 import { LiveStream } from '../components/LiveStream';
 import { CreateAgentPanel } from '../components/CreateAgentPanel';
@@ -508,7 +509,7 @@ export function EntityChatPage({token, config}: Props) {
               : null;
             return <article key={message.id} className={`chat-bubble ${message.role === 'user' ? 'chat-bubble-user' : 'chat-bubble-run'}`}>
             <header className="chat-bubble-header"><span className="chat-bubble-role">{message.role === 'user' ? ((message.metadata as {authorProfile?: string} | undefined)?.authorProfile || 'You') : message.role === 'tool' ? 'Coordination' : detail.profileName || 'Agent'}</span></header>
-            <pre className="chat-bubble-body">{message.content}</pre>
+            <div className="chat-bubble-body"><MarkdownBody content={message.content}/></div>
             {jevCaption && <p className="remote-chat-caption">{jevCaption}</p>}
             {showCreateAffordance && (
               <div className="remote-chat-caption" role="note" aria-label="Requested agent create">
@@ -538,7 +539,7 @@ export function EntityChatPage({token, config}: Props) {
           })}
           {optimisticVisible && <article className="chat-bubble chat-bubble-user" aria-label="Your pending message">
             <header className="chat-bubble-header"><span className="chat-bubble-role">You</span></header>
-            <pre className="chat-bubble-body">{optimistic.content}</pre>
+            <div className="chat-bubble-body"><MarkdownBody content={optimistic.content}/></div>
           </article>}
           {optimistic && <div className="remote-turn-status" role="status">{busy ? (sendPhase === 'saving' ? 'Saving conversation…' : 'Sending message…') : 'Message not confirmed. Retry to check delivery.'}{retryPending && !busy && <button type="button" className="btn btn-ghost" disabled={Boolean(active) || unavailable || initializing} onClick={() => {if (pending.current) void submit(undefined, {content: pending.current.content});}}>Check retry delivery</button>}</div>}
           <RemoteTurnActivity token={token} namespace={namespace} turn={active ?? (optimistic ? undefined : detail?.turns?.at(-1))} recoveryPending={detail?.recoveryPending} agentLabel={detail?.profileName || profile || harness}/>
