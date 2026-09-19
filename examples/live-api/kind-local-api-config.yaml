@@ -1,0 +1,61 @@
+# Kind-local API config for Desktop standing-chat latency work.
+#
+# TEST ONLY. Isolated development only: the http loopback issuer below relies
+# on `allowInsecureIssuer`, which must never be enabled on an exposed
+# installation (see docs/live-agent-run-stream.md). Production uses Zitadel
+# over HTTPS with exact issuer, audience, claim binding, namespace
+# authorization, and CORS origins.
+#
+# Local process (WSL-friendly: API, issuer, and Desktop share loopback):
+#
+#   1. go run ./cmd/kind-oidc-issuer --key-file /tmp/kind-oidc.key.json &
+#   2. ANVIL_AGENTS_CHAT_DATABASE_URL=postgresql://... go run ./cmd/anvil-agents-api \
+#        --config examples/live-api/kind-local-api-config.yaml
+#      (KUBECONFIG must point at Kind; chat.enabled needs PostgreSQL, e.g.
+#      hack/test-archive-postgres.sh for the migration + store shape.)
+#   3. go run ./cmd/kind-oidc-issuer mint --key-file /tmp/kind-oidc.key.json \
+#        --issuer http://127.0.0.1:18081 --audience anvil-agents \
+#        --subject kind-local-desktop --roles kind-local-desktop \
+#        --namespaces agents
+#   4. ANVIL_AGENTS_ACCESS_TOKEN=<minted> node --experimental-strip-types \
+#        hack/desktop-standing-chat-live.mjs --live \
+#        --api-origin http://127.0.0.1:18080 --namespace agents --thread <id>
+#
+# Full runbook: docs/standing-inprocess-harness.md ("Desktop chat e2e over
+# the standing WebSocket"). Never commit minted tokens or the key file.
+bindAddress: 127.0.0.1:18080
+oidc:
+  issuer: http://127.0.0.1:18081
+  audiences:
+    - anvil-agents
+  allowInsecureIssuer: true
+authorization:
+  bindings:
+    # Matches the kind-oidc-issuer mint defaults (--roles kind-local-desktop
+    # --namespaces agents). Chat append additionally requires runs:create
+    # (see docs/standing-chat.md); runs:read keeps the current-work
+    # inventory and failure views working.
+    - name: kind-local-desktop
+      roles:
+        - kind-local-desktop
+      permissions:
+        - anvil-agents:runs:read
+        - anvil-agents:runs:stream
+        - anvil-agents:runs:create
+        - anvil-agents:chat:read
+        - anvil-agents:chat:write
+      namespaces:
+        - agents
+cors:
+  allowedOrigins:
+    - http://127.0.0.1:1738
+    - http://127.0.0.1:5174
+ui:
+  desktop:
+    oidcClientId: anvil-agents-desktop
+runs:
+  createEnabled: true
+chat:
+  enabled: true
+standing:
+  liveEnabled: true

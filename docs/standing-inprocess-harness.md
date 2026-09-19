@@ -655,18 +655,101 @@ need real OIDC (Kind-local issuer or Zitadel) plus a standing-enabled
 manager thread (`standing.liveEnabled` / `ANVIL_AGENTS_STANDING_LIVE` on the
 API). The fake path above is the CI gate; it never blocks on auth.
 
+### Kind-local signed-in samples (no Zitadel, no stub)
+
+`cmd/kind-oidc-issuer` is a minimal loopback-only test issuer that makes the
+Kind-local path runnable without standing up a full IdP: it serves OIDC
+discovery + JWKS on loopback and mints short-lived RS256 access tokens
+against the same key. It refuses non-loopback listen addresses, caps minted
+TTLs at one hour, and never changes API validation (provider selection stays
+issuer/audience/client-id only). `hack/desktop-standing-chat-live.mjs` is the
+scripted counterpart: it opens the standing WS with the minted bearer, sends
+one message, measures send→firstToken, settles from the durable thread, and
+appends one `source: "desktop-chat-live-signed-in"` line to
+`.runtime/chat-latency.jsonl`. Anything short of a delivered standing turn —
+no bearer, a 401 stub denial, a 503 verifier outage, a Job-plane snapshot —
+exits 0 with `skip`/`inconclusive` and writes nothing, so the sink never
+collects invented numbers. The bearer travels via `ANVIL_AGENTS_ACCESS_TOKEN`
+or `--token-file` only: never argv, never query strings, never logs, never
+the JSONL file. `examples/live-api/kind-local-api-config.yaml` is the
+matching API config (loopback bind, Kind-local issuer, the
+`kind-local-desktop` binding with chat + runs:create, loopback CORS, chat and
+standing live on).
+
+```bash
+# 0. Pure unit gates (no cluster, no OIDC).
+go test ./cmd/kind-oidc-issuer/
+node --experimental-strip-types --test hack/desktop-standing-chat-live.test.mjs
+
+# 1. Loopback issuer (terminal 1). The key file is 0600 and gitignored;
+#    never commit it or any minted token.
+go run ./cmd/kind-oidc-issuer --key-file /tmp/kind-oidc.key.json
+
+# 2. API against Kind from the same host (terminal 2; KUBECONFIG -> Kind,
+#    chat.enabled needs PostgreSQL, e.g. hack/test-archive-postgres.sh).
+ANVIL_AGENTS_STANDING_LIVE=1 ANVIL_AGENTS_CHAT_DATABASE_URL=postgresql://... \
+  go run ./cmd/anvil-agents-api --config examples/live-api/kind-local-api-config.yaml
+
+# 3. Mint a bearer (terminal 3) and create one standing-enabled manager
+#    thread (needs an InProcess harness profile on the thread's agent).
+go run ./cmd/kind-oidc-issuer mint --key-file /tmp/kind-oidc.key.json \
+  --issuer http://127.0.0.1:18081 --audience anvil-agents \
+  --subject kind-local-desktop --roles kind-local-desktop --namespaces agents
+export ANVIL_AGENTS_ACCESS_TOKEN=<minted-token>
+
+# 4. Probe one signed-in standing turn; appends the JSONL sample on delivery.
+node --experimental-strip-types hack/desktop-standing-chat-live.mjs --live \
+  --api-origin http://127.0.0.1:18080 --namespace agents --thread <thread-id> \
+  --out $PWD/.runtime/chat-latency.jsonl
+
+# 5. Read the real sample (source desktop-chat-live-signed-in, not a probe).
+cat .runtime/chat-latency.jsonl
+```
+
+Expected honest non-sample outcomes while the path is still blocked:
+`skip: no bearer`, `skip: stub-oidc-denied` (a stub `anvil-desktop-stub`
+session against the real API 401s on the thread read and the POST alike),
+`skip: oidc-unavailable` (API verifier down), `inconclusive: job-plane`
+(thread snapshot carries no `standing` session — the thread's harness is not
+`InProcess` or the API live gate is off). Desktop interactive sign-in keeps
+its existing fallback behavior; the probe is the scripted measurement hook,
+not a second login flow.
+
 Tests: `hack/desktop-standing-chat-stream.mjs` fakes the WS stream and
 asserts first-token timing, the standing/job classification, the
 never-send-twice fallback, and the JSONL fields; `internal/desktop/
-chat_latency_standing_test.go` pins the new sink fields server-side.
+chat_latency_standing_test.go` pins the new sink fields server-side;
+`cmd/kind-oidc-issuer/main_test.go` proves a minted token verifies through
+the production `OIDCAuthenticator` and authorizes chat write on `agents`
+(plus loopback refusal, TTL cap, and 0600 key handling);
+`hack/desktop-standing-chat-live.test.mjs` pins the skip/inconclusive
+contract, the 202 append shape, and token redaction;
+`internal/runapi/kind_local_example_test.go` keeps the example config
+loadable with its gates and binding intact.
 
-## NEXT (after slice 5c)
+## NEXT (after slice 5c + Kind-local signed-in scaffolding)
 
 Standing in-process harness + WebSocket is the **primary** interactive path
 (reaffirmed 2026-09-18); Substrate/ATE stays **optional** for
 isolation/density and is not promoted (see [Substrate
 spike](substrate-spike.md)).
 
+0. **Kind-local signed-in samples (scaffolding landed, live run open).**
+   `cmd/kind-oidc-issuer`, `hack/desktop-standing-chat-live.mjs`
+   (`source: "desktop-chat-live-signed-in"`), and
+   `examples/live-api/kind-local-api-config.yaml` land the full loopback
+   runbook above with an honest skip/inconclusive contract — but no live
+   sample is captured or committed here (no Kind cluster, harness CLI, or
+   Postgres in the agent environment). Next: Austin runs steps 1–5 on WSL
+   Kind, then applies the promote/reshape/retire bars in "Slice 5a" above.
+   Known blockers on that path, in order: (a) PostgreSQL for
+   `chat.enabled` (needs `ANVIL_AGENTS_CHAT_DATABASE_URL`); (b) a
+   standing-enabled manager thread (an `InProcess` harness profile bound to
+   the thread's agent plus `standing.liveEnabled` on the API); (c) a
+   harness CLI with local auth on the API host for `ProcessBackend` turns
+   (otherwise turns hold as `InProcessNotWired` and the probe reports a
+   delivered-turn failure, never a sample). Stub OIDC still denies by
+   design; the probe reports `skip: stub-oidc-denied` there.
 1. **Live numbers (the remaining open measurement item).** Desktop e2e is
    done (see "Desktop chat e2e over the standing WebSocket" above), the
    slice-5a harness is green on deterministic backends, slice-5b resume is
