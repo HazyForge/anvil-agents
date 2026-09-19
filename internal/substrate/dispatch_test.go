@@ -153,3 +153,44 @@ func TestEnsureTurnActorFailsClosed(t *testing.T) {
 		t.Fatal("cancelled context must fail closed")
 	}
 }
+
+// TestSuspendedActorResumesWarm pins the suspend-on-idle multiplexing
+// contract: suspending an idle actor releases the worker without losing the
+// actor, so the next turn resumes warm with stable identity instead of
+// paying another cold create.
+func TestSuspendedActorResumesWarm(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	client := NewFakeClient()
+	spec := ActorSpecForRun("agents", ActorNameForThread("thread-idle-1"), "openCode", "standing-chat", "warm",
+		map[string]string{"control.anvil.hazyforge.io/agent-run": "chat-turn-1"})
+
+	cold, warm, err := EnsureTurnActor(ctx, client, spec)
+	if err != nil || warm {
+		t.Fatalf("first ensure = warm=%v err=%v, want cold", warm, err)
+	}
+	if suspended, err := SuspendIdleActor(ctx, client, "agents", ActorNameForThread("thread-idle-1"), nil); err != nil || !suspended {
+		t.Fatalf("default suspend = %v/%v, want suspended", suspended, err)
+	}
+	described, err := client.DescribeActor(ctx, "agents", ActorNameForThread("thread-idle-1"))
+	if err != nil {
+		t.Fatalf("describe: %v", err)
+	}
+	if described.State != ActorStateSuspended {
+		t.Fatalf("idle actor state = %q, want Suspended", described.State)
+	}
+	resumed, warm, err := EnsureTurnActor(ctx, client, spec)
+	if err != nil || !warm {
+		t.Fatalf("post-idle ensure = warm=%v err=%v, want warm resume", warm, err)
+	}
+	if resumed.ID != cold.ID {
+		t.Fatalf("resumed actor = %q, want warm reuse of %q", resumed.ID, cold.ID)
+	}
+	if resumed.State != ActorStateActive {
+		t.Fatalf("resumed actor state = %q, want Active", resumed.State)
+	}
+	if got := client.Created(); got != 1 {
+		t.Fatalf("distinct actors = %d, want exactly one actor across suspend/resume", got)
+	}
+}
