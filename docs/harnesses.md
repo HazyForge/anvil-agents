@@ -53,16 +53,22 @@ into `AgentHarnessProfile` before offering runtime swaps. See
 
 ## Switching Harnesses From Anvil Agents Desktop
 
-Anvil Agents Desktop can switch `AgentRunProfile.spec.harnessProfileRef`
+Anvil Agents Desktop can migrate an agent to a new harness profile binding
 without kubectl and without deleting the agent. On a Primaris/remote agent
 conversation, Conversation details shows a Cluster harness picker with the
 same-namespace `AgentHarnessProfile` inventory (name, backend kind, model when
-set) and the currently selected harness. Saving PATCHes only the ref —
+set) and the currently selected harness. Saving PATCHes only the binding —
 `PATCH /api/v1/namespaces/{ns}/agent-run-profiles/{name}/harness` — so skills,
 tools, and scope are preserved and the next chat turn resolves the new
 harness. The endpoint requires `composition.writeEnabled`, the
 `anvil-agents:composition:write` permission, and a console-managed profile;
 GitOps-owned objects stay read-only.
+
+v1 scope: the switch does not migrate harness-local durable homes or internal
+harness memory (Codex home, Grok home, Pi home, …). A fresh home on the target
+harness is the expected outcome. Shared cross-chat memory is knowledge-base
+territory (later: granular/council-scoped KB instances); harness homes stay
+provider-specific and are out of scope for the v1 switch.
 
 ## OpenCode On Kubernetes
 

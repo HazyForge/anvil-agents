@@ -17,15 +17,18 @@ The Local page separately discovers installed workstation CLIs on native PATH
 or in WSL. Local activation never copies the OIDC token into CLI arguments,
 environment variables or prompt files.
 
-An agent's cluster harness — managers included — can be switched from Chat
+An agent's cluster harness — managers included — can be migrated from Chat
 without kubectl. Open the agent's conversation, expand Conversation details,
 and use the Cluster harness picker: it lists same-namespace
 `AgentHarnessProfile` objects (name, backend kind, model when set), shows the
 harness from `AgentRunProfile.spec.harnessProfileRef`, and PATCHes only that
-ref (`PATCH /api/v1/namespaces/{ns}/agent-run-profiles/{name}/harness`).
-Skills, tools, and scope are preserved and never rewritten; the next chat turn
-resolves the new harness. GitOps-owned or non-console-managed profiles stay
-read-only, and the picker requires `composition.writeEnabled` on the API.
+binding (`PATCH /api/v1/namespaces/{ns}/agent-run-profiles/{name}/harness`).
+It is a lightweight rebind, not a memory migration: skills, tools, and scope
+are preserved, the next chat turn resolves the new harness, and the agent
+starts with a fresh home on the target harness. Harness-local durable homes
+and internal harness memory (Codex home, Grok home, Pi home, …) are not
+migrated. GitOps-owned or non-console-managed profiles stay read-only, and the
+picker requires `composition.writeEnabled` on the API.
 
 The **wrapper** (`anvil-desktop-wrapper`) and **project manager** harnesses
 have a baked-in **create-agent** skill/tool: name + description →

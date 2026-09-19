@@ -73,8 +73,8 @@ export function AgentHarnessSwitcher({
       const updated = await patchRunProfileHarness(token, namespace, profileName, selected);
       setSaved(
         selected
-          ? `Harness switched to ${selected}. The next chat turn uses it.`
-          : "Harness cleared — the agent falls back to its inline harness.",
+          ? `Agent migrated to ${selected}. The next chat turn uses it with a fresh home on the new harness.`
+          : "Harness binding cleared — the agent falls back to its inline harness.",
       );
       onUpdated?.(updated);
     } catch (err) {
@@ -120,19 +120,21 @@ export function AgentHarnessSwitcher({
         </select>
       </div>
       {!writeEnabled ? (
-        <p className="remote-chat-caption">Composition write is disabled on this API — harness switching is unavailable.</p>
+        <p className="remote-chat-caption">Composition write is disabled on this API — harness migration is unavailable.</p>
       ) : blocked ? (
         <p className="remote-chat-caption">{blocked}</p>
       ) : null}
       {threadHarness ? (
         <p className="remote-chat-caption">
-          This conversation pins <strong>{threadHarness}</strong>. The switch below changes the agent
+          This conversation pins <strong>{threadHarness}</strong>. Migrating below rebinds the agent
           default used by standing conversations and new chats.
         </p>
       ) : (
         <p className="remote-chat-caption">
-          Switches <code>{profileName}</code> without deleting it. Skills, tools, and scope are preserved;
-          the next chat turn resolves the new harness.
+          Migrates <code>{profileName}</code> to a new harness profile binding without deleting it.
+          Skills, tools, and scope are preserved; the next chat turn resolves the new harness.
+          Harness-local durable homes and internal harness memory (Codex home, Grok home, Pi home, …)
+          are not migrated — the agent starts with a fresh home on the target harness.
         </p>
       )}
       {error ? (
@@ -143,7 +145,7 @@ export function AgentHarnessSwitcher({
       {saved ? <p className="remote-chat-caption">{saved}</p> : null}
       <div className="btn-row">
         <button type="button" className="btn btn-primary" disabled={!canSave} onClick={() => void onSave()}>
-          {saving ? "Switching…" : "Switch harness"}
+          {saving ? "Migrating…" : "Migrate harness"}
         </button>
       </div>
     </div>
