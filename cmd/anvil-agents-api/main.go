@@ -18,6 +18,7 @@ import (
 
 	agentsv1alpha1 "github.com/hazyforge/anvil-agents/api/v1alpha1"
 	"github.com/hazyforge/anvil-agents/internal/chat"
+	"github.com/hazyforge/anvil-agents/internal/jev"
 	"github.com/hazyforge/anvil-agents/internal/runapi"
 	"github.com/hazyforge/anvil-agents/internal/standing"
 )
@@ -41,6 +42,13 @@ func main() {
 	// never disables it; no chart values and no Primaris sync changes.
 	if enabled, err := strconv.ParseBool(strings.TrimSpace(os.Getenv("ANVIL_AGENTS_STANDING_LIVE"))); err == nil && enabled {
 		config.Standing.LiveEnabled = true
+	}
+	// Jev intent routing gate: explicit opt-in only, off by default. The
+	// environment variable can enable config-file chat.jevIntentEnabled but
+	// never disables it. Jev only classifies intent; it never generates
+	// chat text. See docs/jev-intent-routing.md.
+	if enabled, err := strconv.ParseBool(strings.TrimSpace(os.Getenv(runapi.JevIntentEnvVar))); err == nil && enabled {
+		config.Chat.JevIntentEnabled = true
 	}
 	restConfig, err := ctrl.GetConfig()
 	if err != nil {
@@ -105,6 +113,19 @@ func main() {
 	if config.Standing.LiveEnabled {
 		server.SetStandingBackend(standing.NewProcessBackend(nil))
 		log.Info("standing live process backend enabled", "supported", standing.SupportedProcessKinds())
+	}
+	// Jev intent routing backend: when the gate is on and TYPESAFE_API_KEY
+	// is set, turns classify through the live System One endpoint. Without
+	// the key no backend attaches and every turn falls back to today's
+	// behavior — never a hard fail. The key comes from the process
+	// environment only; the API gains no Secret access for this path.
+	if config.Chat.JevIntentEnabled {
+		if client, ok := jev.ClientFromEnv(); ok {
+			server.SetJevBackend(client)
+			log.Info("jev intent classification enabled", "model", jev.DefaultModel)
+		} else {
+			log.Info("jev intent gate is on but TYPESAFE_API_KEY is not set; chat turns keep today's behavior")
+		}
 	}
 	if chatStore != nil {
 		server.SetChatStore(chatStore)

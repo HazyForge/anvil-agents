@@ -1,11 +1,14 @@
-# Jev intent routing (spike)
+# Jev intent routing (live hook behind an opt-in gate)
 
-Status: spike — client + fixed intent router + probe landed; no turn-path
-wiring yet. Standing in-process chat plus WebSocket delivery remains the
-primary interactive path; Jobs stay the default for scouts/batch; Substrate
-stays optional. Direction set by Austin 2026-09-18: use Jev when something
-needs decision making at runtime (e.g. decide user intent and route based
-on intent) — NOT for chat generation.
+Status: live — the spike client + fixed intent router landed first; the
+chat-turn hook is now wired in `queueChatTurnAttempt`
+(`internal/runapi/chat_execution.go`, via `internal/runapi/chat_jev_intent.go`)
+behind an opt-in, deny-by-default gate. Standing in-process chat plus
+WebSocket delivery remains the primary interactive path; Jobs stay the
+default for scouts/batch; Substrate stays optional. Direction set by
+Austin 2026-09-18: use Jev when something needs decision making at runtime
+(e.g. decide user intent and route based on intent) — NOT for chat
+generation.
 
 ## What Jev is
 
@@ -53,8 +56,15 @@ turn path (`reconcileStandingTurn` in
 - Unit tests (`internal/jev/*_test.go`) — question/request validation,
   HTTP auth/shape/retry behavior against `httptest`, and FakeBackend-style
   routing deciding each intent plus the confidence gate.
+- Live hook (`internal/runapi/chat_jev_intent.go`, covered by
+  `internal/runapi/chat_jev_intent_test.go` with `FakeBackend`/error
+  fakes, no network): `queueChatTurnAttempt` classifies the incoming
+  message plus a small thread tail before `buildChatPrompt` freezes the
+  execution intent, folds a per-intent `ROUTING_HINT` into the prompt, and
+  records intent + confidence + serving model on the queued user message
+  metadata and the turn's AgentRun annotations. Details below.
 
-## Rules this spike holds
+## Rules this slice holds
 
 - Jev never replaces chat generation; there is no generation path here.
 - Substrate is untouched and out of scope.
@@ -65,28 +75,65 @@ turn path (`reconcileStandingTurn` in
   confidence bar in code at the fulfillment site, not in the router.
 - No invented live API responses: fakes in CI, live only behind the env key.
 
-## Where the intent hook plugs in (not yet wired)
+## The live hook (wired)
 
-The future hook is `queueChatTurnInternal` in
-`internal/runapi/chat_execution.go`, before `buildChatPrompt` freezes the
-execution intent: classify the incoming message (+ small thread tail),
-record the decision alongside the turn for observability, and let routing
-observe — never rewrite — the durable turn. The standing execution path
-itself (`reconcileStandingTurn`) does not change: one append-only AgentRun
-per accepted message, frozen intent in, `Succeeded` completion out, peer
-fanout through `dispatchChatCoordination` unchanged.
+`queueChatTurnAttempt` in `internal/runapi/chat_execution.go` calls
+`Server.classifyChatIntent` before `buildChatPromptWithIntent` freezes the
+execution intent: classify the incoming message (+ up to 6 prior thread
+messages for disambiguation), fold a `ROUTING_HINT` into the prompt, and
+record the decision alongside the turn for observability. Classification
+observes the message — it never rewrites the durable turn. The standing
+execution path itself (`reconcileStandingTurn`) does not change: one
+append-only AgentRun per accepted message, frozen intent in, `Succeeded`
+completion out, peer fanout through `dispatchChatCoordination` unchanged
+(child `queueChatTurnInternal` deliveries classify on their own path the
+same way).
 
-Remaining wiring to the live Desktop path:
+### Gate (opt-in, deny by default)
 
-1. Call `Router.ClassifyIntent` from the chat-append path behind an
-   opt-in gate (env/config, deny by default like `standing.liveEnabled`),
-   with Jev failures falling back to today's behavior (never route on a
-   guess).
-2. Decide what each intent drives: `peer_handoff` → `requestPeer`
-   coordination hints, `tool_run` → tool-first prompting, `unclear` →
-   clarification copy, `create_agent_request` → manager request flow.
-3. Surface the decision (intent + confidence + serving model) in turn
-   metadata/observability so thresholds can be tuned against real traffic.
-4. Tune the confidence floor (and the higher destructive-action bar) from
-   labeled Anvil traffic; pin a versioned model ID once thresholds are
-   tuned instead of tracking `jev-latest`.
+- Config: `chat.jevIntentEnabled` (default `false`; chart value
+  `api.config.chat.jevIntentEnabled`, rendered verbatim into the API
+  ConfigMap — no RBAC change, no Secret access).
+- Env: `ANVIL_AGENTS_JEV_INTENT=1` enables the config flag but never
+  disables it (same pattern as `ANVIL_AGENTS_STANDING_LIVE`).
+- Backend: the API attaches the live System One client only when the gate
+  is on AND `TYPESAFE_API_KEY` is set (`jev.ClientFromEnv` in
+  `cmd/anvil-agents-api/main.go`, env only — the API gains no Secret
+  access). Tests attach fakes via `Server.SetJevBackend`.
+- Fallback: gate off, no backend (missing key), or any Jev error (timeout
+  after 10s, transport/validation failure) keeps today's behavior —
+  `chat_reply`, unchanged prompt, no intent metadata, never a hard fail.
+  Gate-off turns are prompt- and metadata-byte-identical to before (pinned
+  by `TestChatJevPromptByteIdenticalWhenUnclassified`).
+
+### What each intent drives
+
+| Intent | Prompt | Ownership |
+| --- | --- | --- |
+| `chat_reply` | unchanged prompt path | — |
+| `create_agent_request` | hint routes toward requesting a Wrapper/manager through the existing manager-authorization path; names the Wrapper/manager-only boundary | Classification only — peers never create agents |
+| `peer_handoff` | soft hint to coordinate only through the existing coordination contract (`requestPeer` delivery); no send outside existing paths; without enabled coordination, answer directly | No new fanout |
+| `tool_run` | tool-first hint: run the harness tool step before finalizing, else note the needed lookup | Prompt hint only |
+| `unclear` (choice, unknown output, or sub-threshold confidence) | clarification-first hint: ask a brief clarifying question; no destructive/delegating/creating acts | — |
+
+### Observability (threshold tuning)
+
+- Queued user message metadata: `jevIntent`, `jevRawChoice`,
+  `jevConfidence`, `jevModel` (serving model), `jevUnclear` — alongside the
+  existing `authorKind` keys, visible in thread detail.
+- Turn AgentRun annotations: `control.anvil.hazyforge.io/jev-intent`,
+  `.../jev-confidence`, `.../jev-model` — `kubectl`-visible per turn.
+- The prompt hint itself carries `(Jev intent X, confidence N, model M)`.
+
+### What still needs a live `TYPESAFE_API_KEY` probe
+
+1. Live accuracy/latency numbers per intent against real Anvil traffic
+   (`TYPESAFE_API_KEY=... go run ./cmd/jev-probe -message "..."`); CI only
+   drives fakes, so no live responses are pinned anywhere.
+2. Tune the confidence floor (default 0.5) — and the higher
+   destructive-action bar at the fulfillment site — from labeled traffic;
+   pin a versioned model ID once thresholds are tuned instead of tracking
+   `jev-latest`.
+3. Confirm per-turn p70–p130 overhead stays inside the 70–500ms System One
+   envelope on the append path (the 10s cap is a wedge guard, not a
+   budget).
