@@ -10,6 +10,7 @@ import { APIError } from "../api/client";
 import { listComposition } from "../api/composition";
 import type { ChatMessage, ChatThread, ChatTurn } from "../api/types.chat";
 import { formatTime } from "../utils/format";
+import { MarkdownBody } from "../components/MarkdownBody";
 
 interface Props {
   token: string;
@@ -479,7 +480,7 @@ export function ChatPage({ token, namespace: activeNamespace, onViewNamespace }:
                           </span>
                         ) : null}
                       </header>
-                      <pre className="chat-bubble-body">{message.content}</pre>
+                      <div className="chat-bubble-body"><MarkdownBody content={message.content} /></div>
                     </article>
                   );
                 })}

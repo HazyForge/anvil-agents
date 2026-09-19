@@ -7,6 +7,7 @@ import {
   sourceLabel,
 } from "../utils/format";
 import { LiveStream } from "./LiveStream";
+import { MarkdownBody } from "./MarkdownBody";
 import { PhaseBadge } from "./PhaseBadge";
 
 interface Props {
@@ -91,7 +92,7 @@ export function RunDetail({ run, token, onRunUpdate }: Props) {
               <dt>Action</dt>
               <dd>{run.decision.action || "—"}</dd>
               <dt>Summary</dt>
-              <dd>{run.decision.summary || "—"}</dd>
+              <dd>{run.decision.summary ? <MarkdownBody content={run.decision.summary} /> : "—"}</dd>
               <dt>Residual risk</dt>
               <dd>{run.decision.residualRisk || "—"}</dd>
             </dl>
@@ -107,7 +108,7 @@ export function RunDetail({ run, token, onRunUpdate }: Props) {
         </div>
         <div className="panel-body">
           {followUp ? (
-            <p style={{ margin: 0, whiteSpace: "pre-wrap" }}>{followUp}</p>
+            <MarkdownBody content={followUp} />
           ) : (
             <div className="empty">No humanFollowUp on reports.</div>
           )}
@@ -133,13 +134,13 @@ export function RunDetail({ run, token, onRunUpdate }: Props) {
                     {report.stage ? <span>{report.stage}</span> : null}
                     {report.needsHuman ? <span className="phase phase-needshuman">needs human</span> : null}
                   </header>
-                  {report.summary ? <div>{report.summary}</div> : null}
+                  {report.summary ? <MarkdownBody content={report.summary} /> : null}
                   {report.action ? <div className="muted">action: {report.action}</div> : null}
-                  {report.detail ? <pre className="pre">{report.detail}</pre> : null}
+                  {report.detail ? <div className="pre pre-markdown"><MarkdownBody content={report.detail} /></div> : null}
                   {report.residualRisk ? <div className="muted">risk: {report.residualRisk}</div> : null}
                   {report.humanFollowUp ? (
                     <div className="banner banner-warn" style={{ marginBottom: 0, marginTop: "0.4rem" }}>
-                      {report.humanFollowUp}
+                      <MarkdownBody content={report.humanFollowUp} />
                     </div>
                   ) : null}
                   {report.pullRequestURL ? (
@@ -244,7 +245,7 @@ export function RunDetail({ run, token, onRunUpdate }: Props) {
           <h2 className="panel-title">Output</h2>
         </div>
         <div className="panel-body">
-          {run.output ? <pre className="pre">{run.output}</pre> : <div className="empty">No output.</div>}
+          {run.output ? <div className="pre pre-markdown"><MarkdownBody content={run.output} /></div> : <div className="empty">No output.</div>}
         </div>
       </section>
 

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { AgentAvatar } from '../components/AgentAvatar';
+import { MarkdownBody } from '../components/MarkdownBody';
 import type { UIConfig } from '../auth/config';
 import type { Snapshot } from '../api/types';
 import { activityFromLog } from '../api/runActivity';
@@ -181,7 +182,7 @@ export function LocalChatPage({snapshot, onBusyChange, signedIn = false, config,
         </details>
         <div className="chat-messages" aria-live="polite">
           {!thread.messages.length && <div className="agent-empty"><AgentAvatar name={thread.name} identity={thread.id} size="lg"/><h2>What should we work on?</h2><p>Messages with {thread.name} stay together here. Ask a question or give your agent something to do.</p></div>}
-          {thread?.messages.map((m, i) => <article key={i} className={`chat-bubble ${m.role === 'user' ? 'chat-bubble-user' : 'chat-bubble-run'}`}><header className="chat-bubble-header"><span className="chat-bubble-role">{m.role === 'user' ? 'You' : thread.name}</span></header><pre className="chat-bubble-body">{m.content}</pre></article>)}
+          {thread?.messages.map((m, i) => <article key={i} className={`chat-bubble ${m.role === 'user' ? 'chat-bubble-user' : 'chat-bubble-run'}`}><header className="chat-bubble-header"><span className="chat-bubble-role">{m.role === 'user' ? 'You' : thread.name}</span></header><div className="chat-bubble-body"><MarkdownBody content={m.content}/></div></article>)}
           {status && <section className="turn-activity" aria-label="Local agent activity"><div className="turn-activity-heading"><span className="turn-activity-indicator" aria-hidden="true"/><div><p role="status">{status}</p></div>{busy && <span className="turn-activity-elapsed" aria-hidden="true">{elapsed}s</span>}</div><ol className="turn-activity-events">{activity.map((a, i) => <li key={i}>{a}</li>)}</ol>{busy && Date.now() - reportedAt.current > 15000 && <p className="turn-activity-note">No new activity reported recently. Waiting for the next harness update.</p>}</section>}
           <div ref={end}/>
         </div>
