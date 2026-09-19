@@ -341,6 +341,140 @@ func TestChatJevUnclearHandoffCarriesNoFulfillment(t *testing.T) {
 	}
 }
 
+// TestChatJevToolRunFulfillmentSlice pins the tool fulfillment step after
+// classification, mirroring the create-agent and handoff slices: a
+// classified, non-unclear tool_run strengthens the ROUTING_HINT toward
+// tool-first behavior through the existing tool surface (the turn's
+// resolved AgentToolSet composition plus the harness tool step — no new
+// tool API, no new STATUS_JSON shape) plus a structured prompting flag on
+// the user message and the turn's AgentRun. The flag never authorizes
+// invented results, and the turn carries neither the create nor the
+// handoff request shape.
+func TestChatJevToolRunFulfillmentSlice(t *testing.T) {
+	server := chatTestServer(t, true)
+	server.config.Chat.JevIntentEnabled = true
+	server.SetJevBackend(cannedJevIntent(t, jev.IntentToolRun, 0.85))
+	result, promptAndMeta := queueJevTurn(t, server, "look up the kb article on refunds")
+	parts := strings.SplitN(promptAndMeta, "\n---USERMETA---\n", 2)
+	prompt, userMeta := parts[0], parts[1]
+	for _, want := range []string{"ROUTING_HINT", "tool-first", "AgentToolSet", "status.resolvedComposition.toolSetRefs", "unless a real tool confirms"} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("tool_run prompt missing %q: %s", want, prompt)
+		}
+	}
+	for _, banned := range []string{`"request":"create-agent"`, `"peerProfileName":"<existing-profile>"`, "ANVIL_AGENT_RUN_STATUS_JSON="} {
+		if strings.Contains(prompt, banned) {
+			t.Fatalf("tool_run prompt must not carry the create/handoff request shape %q: %s", banned, prompt)
+		}
+	}
+	var meta map[string]any
+	if err := json.Unmarshal([]byte(userMeta), &meta); err != nil {
+		t.Fatalf("user metadata is not JSON: %v", err)
+	}
+	if meta["jevIntent"] != jev.IntentToolRun {
+		t.Fatalf("jevIntent = %v, want %q (meta %s)", meta["jevIntent"], jev.IntentToolRun, userMeta)
+	}
+	if meta["jevNeedsToolRun"] != true {
+		t.Fatalf("jevNeedsToolRun missing/false on tool_run (meta %s)", userMeta)
+	}
+	if _, ok := meta["jevNeedsManagerCreate"]; ok {
+		t.Fatalf("tool_run turn must not carry jevNeedsManagerCreate (meta %s)", userMeta)
+	}
+	if _, ok := meta["jevNeedsPeerHandoff"]; ok {
+		t.Fatalf("tool_run turn must not carry jevNeedsPeerHandoff (meta %s)", userMeta)
+	}
+	stored := &agentsv1alpha1.AgentRun{}
+	if err := server.writes.Get(context.Background(), types.NamespacedName{Namespace: "agents", Name: result.Turn.RunName}, stored); err != nil {
+		t.Fatal(err)
+	}
+	if stored.Annotations[jevIntentAnnotation] != jev.IntentToolRun {
+		t.Fatalf("run annotation %q = %q, want %q", jevIntentAnnotation, stored.Annotations[jevIntentAnnotation], jev.IntentToolRun)
+	}
+	if stored.Annotations[jevNeedsToolRunAnnotation] != "true" {
+		t.Fatalf("run annotation %q = %q, want \"true\"", jevNeedsToolRunAnnotation, stored.Annotations[jevNeedsToolRunAnnotation])
+	}
+	if _, ok := stored.Annotations[jevNeedsManagerCreateAnnotation]; ok {
+		t.Fatalf("tool_run run must not carry %q", jevNeedsManagerCreateAnnotation)
+	}
+	if _, ok := stored.Annotations[jevNeedsPeerHandoffAnnotation]; ok {
+		t.Fatalf("tool_run run must not carry %q", jevNeedsPeerHandoffAnnotation)
+	}
+}
+
+// TestChatJevUnclearToolRunCarriesNoFulfillment ensures the confidence gate
+// suppresses tool fulfillment: a tool_run choice under the floor gates to
+// unclear, asks for clarification, and carries no tool-first hint, message
+// flag, or run annotation.
+func TestChatJevUnclearToolRunCarriesNoFulfillment(t *testing.T) {
+	server := chatTestServer(t, true)
+	server.config.Chat.JevIntentEnabled = true
+	server.SetJevBackend(cannedJevIntent(t, jev.IntentToolRun, 0.2))
+	result, promptAndMeta := queueJevTurn(t, server, "run it")
+	parts := strings.SplitN(promptAndMeta, "\n---USERMETA---\n", 2)
+	prompt, userMeta := parts[0], parts[1]
+	if !strings.Contains(strings.ToLower(prompt), "clarifying question") {
+		t.Fatalf("unclear turn must ask for clarification: %s", prompt)
+	}
+	if strings.Contains(prompt, "status.resolvedComposition.toolSetRefs") {
+		t.Fatalf("unclear turn must not carry the tool-first hint: %s", prompt)
+	}
+	var meta map[string]any
+	if err := json.Unmarshal([]byte(userMeta), &meta); err != nil {
+		t.Fatalf("user metadata is not JSON: %v", err)
+	}
+	if meta["jevIntent"] != jev.IntentUnclear {
+		t.Fatalf("jevIntent = %v, want unclear (meta %s)", meta["jevIntent"], userMeta)
+	}
+	if _, ok := meta["jevNeedsToolRun"]; ok {
+		t.Fatalf("unclear turn must not carry jevNeedsToolRun (meta %s)", userMeta)
+	}
+	stored := &agentsv1alpha1.AgentRun{}
+	if err := server.writes.Get(context.Background(), types.NamespacedName{Namespace: "agents", Name: result.Turn.RunName}, stored); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := stored.Annotations[jevNeedsToolRunAnnotation]; ok {
+		t.Fatalf("unclear run must not carry %q", jevNeedsToolRunAnnotation)
+	}
+}
+
+// TestChatJevNonToolRunIntentsCarryNoToolRunFlag ensures only the tool_run
+// path arms the tool-first flag: every other intent carries no
+// jevNeedsToolRun message flag, no run annotation, and no tool-first hint
+// shape.
+func TestChatJevNonToolRunIntentsCarryNoToolRunFlag(t *testing.T) {
+	for _, choice := range []string{jev.IntentChatReply, jev.IntentCreateAgentRequest, jev.IntentPeerHandoff, jev.IntentUnclear} {
+		t.Run(choice, func(t *testing.T) {
+			server := chatTestServer(t, true)
+			server.config.Chat.JevIntentEnabled = true
+			server.SetJevBackend(cannedJevIntent(t, choice, 0.9))
+			result, promptAndMeta := queueJevTurn(t, server, "route me")
+			parts := strings.SplitN(promptAndMeta, "\n---USERMETA---\n", 2)
+			userMeta := parts[1]
+			if choice != jev.IntentChatReply {
+				if strings.Contains(parts[0], "status.resolvedComposition.toolSetRefs") {
+					t.Fatalf("%s turn must not carry the tool-first hint: %s", choice, parts[0])
+				}
+			} else {
+				return
+			}
+			var meta map[string]any
+			if err := json.Unmarshal([]byte(userMeta), &meta); err != nil {
+				t.Fatalf("user metadata is not JSON: %v", err)
+			}
+			if _, ok := meta["jevNeedsToolRun"]; ok {
+				t.Fatalf("%s turn must not carry jevNeedsToolRun (meta %s)", choice, userMeta)
+			}
+			stored := &agentsv1alpha1.AgentRun{}
+			if err := server.writes.Get(context.Background(), types.NamespacedName{Namespace: "agents", Name: result.Turn.RunName}, stored); err != nil {
+				t.Fatal(err)
+			}
+			if _, ok := stored.Annotations[jevNeedsToolRunAnnotation]; ok {
+				t.Fatalf("%s run must not carry %q", choice, jevNeedsToolRunAnnotation)
+			}
+		})
+	}
+}
+
 // TestChatJevNonHandoffIntentsCarryNoHandoffFlag ensures only the
 // peer_handoff path arms the handoff request flag: every other intent
 // carries no jevNeedsPeerHandoff message flag and no run annotation.
