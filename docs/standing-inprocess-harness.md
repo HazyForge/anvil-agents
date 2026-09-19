@@ -788,8 +788,92 @@ ANVIL_AGENTS_STANDING_LIVE=1 go run ./cmd/anvil-agents-api --config <api-config-
   chat (Kind-local issuer or Zitadel), a standing-enabled manager thread
   (`standing.liveEnabled` / `ANVIL_AGENTS_STANDING_LIVE` plus an InProcess
   harness profile), and a harness CLI with local auth on the API host —
-  without the last, turns still hold as `InProcessNotWired`. No latency
-  numbers are captured here.
+  without the last, turns still hold as `InProcessNotWired` (next section
+  scripts exactly that gate). No latency numbers are captured here.
+
+## Kind-local harness CLI + local auth (blocker c, scripted)
+
+`hack/kind-standing-harness.sh` closes the last ordered blocker on the path
+to a real signed-in Desktop standing-chat latency sample: the harness CLI
+with that CLI's own local auth on the API host. It verifies the gate
+offline (no network, no Docker, no model call, no credentials read) and
+prints the exact remediation when blocked, so Kind-local standing turns stop
+holding as `InProcessNotWired`.
+
+Where `InProcessNotWired` is set, explicitly:
+
+- Controller: `agentRunInProcessHold`
+  (`internal/controller/agent_run_controller.go`) holds every well-formed
+  `InProcess` run as `NeedsHuman/InProcessNotWired` with no Job — except a
+  run carrying a live slice-4 standing claim, which yields as
+  `NeedsHuman/StandingClaimed` while the owning API replica streams.
+- API turn path: `reconcileStandingTurn`
+  (`internal/runapi/chat_standing_turn.go`) falls back to the same hold
+  (run created from the outbox-frozen intent, left untouched, no Job) when
+  the live gate is off, the thread's harness is unresolvable to `InProcess`,
+  or the backend errors: unknown session, oversized prompt, a missing CLI on
+  PATH, a non-zero exit, a timeout, empty output, or a Fake-only harness
+  kind (`hermesAgent`, `piAgent`, `custom`, empty).
+
+What auth the harness CLI needs (per kind, CLI-managed — never a Secret):
+
+| Harness kind | CLI on PATH | Provider auth home on the API host |
+| --- | --- | --- |
+| `codex` (Kind-local default) | `codex` | `${CODEX_HOME:-$HOME/.codex}/auth.json` via the CLI's own login flow |
+| `openCode` | `opencode` | `${XDG_DATA_HOME:-$HOME/.local/share}/opencode/auth.json` (also accepted: `$HOME/.config/opencode/auth.json`) |
+| `openClaw` | `openclaw` | CLI-managed home (no single `auth.json` contract): binary presence is the gate, confirm with one manual turn |
+| `grokBuild` | `grok` | `${GROK_HOME:-$HOME/.grok}/auth.json` via the Grok/xAI login flow |
+| `primeAgent` | `prime-agent` | CLI-managed home: binary presence is the gate, confirm with one manual turn |
+| `agy` | `agy` | native Google auth (an invented `~/.agy/auth.json` is NOT consumed): binary presence is the gate, confirm with one manual turn |
+
+The API bearer is a separate credential: `ANVIL_AGENTS_ACCESS_TOKEN` or
+`--token-file` (first non-blank line, same convention as
+`hack/desktop-standing-chat-live.mjs` and `hack/stream-agent-run.sh`;
+compatible with `kind-oidc-issuer mint` output saved to a 0600 file) proves
+the operator/probe to the API only. It never enters the harness child env:
+`standing.processChildEnv` strips bearer/token material, `*DATABASE_URL`,
+`KUBECONFIG`, and `KUBE*`/`KUBERNETES_*` while keeping `HOME`/`PATH` so the
+CLI's own auth home stays reachable (pinned by
+`internal/standing/process_local_auth_test.go`). The harness auth file
+contents and bearer bytes never appear in script output, logs, or JSONL.
+
+```bash
+# 0. Harness gate (offline): binary + CLI auth home (+ optional bearer).
+./hack/kind-standing-harness.sh --check
+./hack/kind-standing-harness.sh --check --require-bearer --token-file /tmp/kind-oidc.token
+./hack/kind-standing-harness.sh --print-auth-path  # resolved auth file for --harness
+
+# Full Kind-local chain (loopback only; KUBECONFIG -> Kind throughout):
+# 1. OIDC issuer (terminal 1): go run ./cmd/kind-oidc-issuer --key-file /tmp/kind-oidc.key.json
+# 2. Postgres (terminal 2):   eval "$(./hack/kind-chat-postgres.sh)"
+# 3. API (terminal 2):        ANVIL_AGENTS_STANDING_LIVE=1 go run ./cmd/anvil-agents-api \
+#                               --config examples/live-api/kind-local-api-config.yaml
+# 4. Mint + manager thread (terminal 3):
+go run ./cmd/kind-oidc-issuer mint --key-file /tmp/kind-oidc.key.json \
+  --issuer http://127.0.0.1:18081 --audience anvil-agents \
+  --subject kind-local-desktop --roles kind-local-desktop --namespaces agents \
+  > /tmp/kind-oidc.token && chmod 600 /tmp/kind-oidc.token
+export ANVIL_AGENTS_ACCESS_TOKEN="$(cat /tmp/kind-oidc.token)"
+kubectl apply -f examples/live-api/kind-local-standing-manager.yaml
+./hack/kind-standing-harness.sh --check --require-bearer   # must print ready (harness=codex)
+# 5. Probe one signed-in standing turn; appends the JSONL sample on delivery.
+node --experimental-strip-types hack/desktop-standing-chat-live.mjs --live \
+  --api-origin http://127.0.0.1:18080 --namespace agents --thread <thread-id> \
+  --out $PWD/.runtime/chat-latency.jsonl
+```
+
+Expected honest outcomes: `ready (harness=codex)` means the CLI and its
+local auth are present and the turn path can stream; `blocked: …` (exit 1)
+names the missing piece (`codex` not on PATH, `auth.json` missing/empty, no
+bearer under `--require-bearer`, Fake-only kind) with the remediation and
+the `InProcessNotWired` consequence — and writes no sample. The wired turn
+path itself (gate on + `ProcessBackend` attached ⇒ hold cleared) is pinned
+by `TestKindLocalHarnessWiredTurnClearsHold` with a stub runner returning
+the kind's native envelope (no model call), and the manifest-to-recipe tie
+(`kind-local-standing` names a live `SupportedProcessKinds` entry) by
+`TestKindLocalStandingManifestKindIsProcessLive` in
+`internal/runapi/kind_local_harness_test.go`. No latency numbers are
+captured here.
 
 ## NEXT (after slice 5c + Kind-local signed-in scaffolding)
 
@@ -817,15 +901,19 @@ spike](substrate-spike.md)).
    on the API, then create the thread per step 3 above; (c) a
    harness CLI with local auth on the API host for `ProcessBackend` turns
    (otherwise turns hold as `InProcessNotWired` and the probe reports a
-   delivered-turn failure, never a sample). Stub OIDC still denies by
-   design; the probe reports `skip: stub-oidc-denied` there.
+   delivered-turn failure, never a sample) — scripted since this slice
+   (`hack/kind-standing-harness.sh`, see "Kind-local harness CLI + local
+   auth" above; `./hack/kind-standing-harness.sh --check --require-bearer`
+   must print `ready (harness=codex)` before the step-4 probe). Stub OIDC
+   still denies by design; the probe reports `skip: stub-oidc-denied` there.
 1. **Live numbers (the remaining open measurement item).** Desktop e2e is
    done (see "Desktop chat e2e over the standing WebSocket" above), the
    slice-5a harness is green on deterministic backends, slice-5b resume is
    pinned against stub CLIs, and slice 5c wires the cold-first vs
    resumed-second turn scenarios plus the resume-aware stub end to end — but
    `process-exec` live numbers on the same cluster shape as the Job baseline
-   are still open (needs a harness CLI with local auth; none exists in the
+   are still open (gate the host first with
+   `./hack/kind-standing-harness.sh --check`; none exists in the
    agent environment, so no live numbers are captured or committed here).
    Next: collect more `process-exec` live samples against a local/Kind
    harness CLI (cold first turns AND resumed second turns), then apply the

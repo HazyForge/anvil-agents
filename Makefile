@@ -248,6 +248,9 @@ verify-runner-contract:
 	@bash -n hack/kind-chat-postgres.sh
 	@bash -n hack/kind-chat-postgres_test.sh
 	@hack/kind-chat-postgres_test.sh
+	@bash -n hack/kind-standing-harness.sh
+	@bash -n hack/kind-standing-harness_test.sh
+	@hack/kind-standing-harness_test.sh
 	@bash -n hack/package-chart.sh
 	@bash -n hack/package-chart_test.sh
 	@bash -n hack/test-kind.sh
