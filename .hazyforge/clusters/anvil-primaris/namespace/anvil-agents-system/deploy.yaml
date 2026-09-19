@@ -96,6 +96,13 @@ api:
       emptyDir: {}
     - name: standing-cli
       emptyDir: {}
+    # Operator-owned Grok OAuth for standing ProcessBackend (Secret not in git).
+    - name: standing-grok-auth
+      secret:
+        secretName: anvil-standing-grok-auth
+        items:
+          - key: auth.json
+            path: auth.json
   extraVolumeMounts:
     - name: chat-database-ca
       mountPath: /etc/anvilhub/inventory-database
@@ -107,6 +114,9 @@ api:
     - name: standing-cli
       mountPath: /opt/anvil/standing-cli
       readOnly: true
+    - name: standing-grok-auth
+      mountPath: /tmp/anvil-standing-home/.grok
+      readOnly: true
   # Copy grok from the reviewed runner image into standing-cli emptyDir so the
   # distroless/base API can exec it. Auth is NOT copied here — seed GROK_HOME
   # separately (see docs/standing-inprocess-harness.md Primaris section).
@@ -116,7 +126,7 @@ api:
       imagePullPolicy: IfNotPresent
       command: ["/bin/sh", "-c"]
       args:
-        - install -d -m 0755 /standing-cli && install -m 0755 /usr/local/bin/grok /standing-cli/grok && chmod 0755 /standing-cli
+        - install -d -m 0755 /standing-cli && install -m 0755 /usr/local/bin/grok /standing-cli/grok
       volumeMounts:
         - name: standing-cli
           mountPath: /standing-cli
