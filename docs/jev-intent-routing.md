@@ -137,3 +137,35 @@ same way).
 3. Confirm per-turn p70–p130 overhead stays inside the 70–500ms System One
    envelope on the append path (the 10s cap is a wedge guard, not a
    budget).
+
+### Live Kind-local Jev intent e2e validation (2026-09-18)
+
+First live end-to-end validation of the wired hook (Austin, 2026-09-18
+~8:36 PM CT, WSL): Kind-local API on `127.0.0.1:18180` with
+`ANVIL_AGENTS_STANDING_LIVE=1`, `ANVIL_AGENTS_JEV_INTENT=1`, and
+`TYPESAFE_API_KEY` from `~/CodingFiles/PROJECTS/typesafe-jev/.env`.
+
+- `"create an agent named Scout for research"` classified live as
+  `create_agent_request` with `jevConfidence=1`, `jevModel=jev-1.13.0`,
+  `jevUnclear=false` on the queued user message metadata; firstToken
+  ~522ms; the assistant reply followed the manager-only create routing
+  hint (request a Wrapper/manager through the existing
+  manager-authorization path — no peer creation).
+- Truncated `"create"` returned `jevRawChoice=create_agent_request` but
+  gated to `jevIntent=unclear` at `jevConfidence=0.42` under the default
+  0.5 floor — the confidence gate working as designed.
+- Plane boundaries held: standing in-process + WebSocket stayed the primary
+  interactive path (Jobs for scouts/batch, Substrate optional), and
+  `create-agent` stayed Wrapper/manager-only (classification only).
+
+Serving-model note: the live decision reported `jev-1.13.0` via the
+`jev-latest` alias (`jev.DefaultModel`; the turn path passes no model
+override and there is no `chat.jev*` model config field, so no pin is made
+here). Follow-up: pin a versioned model ID once thresholds are tuned
+instead of tracking `jev-latest` — that needs a new config/API field and is
+deliberately out of scope for this docs-only update.
+
+Remaining after this validation: confidence-floor tuning from labeled
+traffic (plus the higher destructive-action bar at the fulfillment site),
+and Desktop UI surfacing of the intent metadata (`jevIntent`,
+`jevConfidence`, `jevModel`, `jevUnclear`).
