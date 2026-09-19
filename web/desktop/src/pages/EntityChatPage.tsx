@@ -12,6 +12,10 @@ import { CreateAgentPanel } from '../components/CreateAgentPanel';
 import { ensureAccessToken } from '../auth/oidc';
 import { type PendingChatSend, readPendingSend, rememberPendingSend, clearPendingSend } from '../api/pendingChat';
 import { formatTurnError } from '../wrapper/turn';
+import {
+  mayShowCreateAffordance,
+  suggestCreateAgentInput,
+} from '../wrapper/jevManagerCreate';
 
 interface Props { token: string; config: UIConfig }
 const agentName = (name: string) => name.replace(/[-_]+/g, ' ').replace(/\bprimaris\b/gi, 'Primaris').replace(/\bagy\b/gi, 'AGY').replace(/\bprime\b/gi, 'Prime').replace(/^./, letter => letter.toUpperCase());
@@ -92,6 +96,11 @@ export function EntityChatPage({token, config}: Props) {
   const [sendPhase, setSendPhase] = useState<'saving' | 'sending' | 'unconfirmed'>('sending');
   const [rawActivityOpen, setRawActivityOpen] = useState(false);
   const [historicalOutput, setHistoricalOutput] = useState<{runName: string; backend: string} | undefined>();
+  // Jev manager-create prefill for the CreateAgentPanel below. Set when a
+  // Wrapper/manager taps "Review in create form" on a
+  // jevNeedsManagerCreate user message; the bumped nonce applies it once.
+  const [createPrefill, setCreatePrefill] = useState<{ name: string; description: string; systemPrompt: string; nonce: number } | null>(null);
+  const prefillNonce = useRef(0);
   const navigation = useRef(0);
   const agentRequest = useRef<AbortController | null>(null);
   const [standingIDs, setStandingIDs] = useState<Record<string, string>>({});
@@ -343,6 +352,28 @@ export function EntityChatPage({token, config}: Props) {
         </div>
   );
 
+  // Signed-in principal for create-agent fulfillment. Mirrors the
+  // CreateAgentPanel principal below: the open thread profile, else the
+  // first project manager. Peers never satisfy isCreateAgentPrincipal.
+  const createPrincipal = profile || managers[0]?.metadata.name || '';
+
+  // Prefill the existing CreateAgentPanel from a jevNeedsManagerCreate
+  // user message and bring the form into view. Fulfillment still runs
+  // through executeCreateAgent (composition write + manager authority).
+  function fulfillManagerCreate(content: string) {
+    const suggested = suggestCreateAgentInput(content);
+    prefillNonce.current += 1;
+    setCreatePrefill({
+      name: suggested?.name ?? '',
+      description: suggested?.description ?? suggested?.title ?? '',
+      systemPrompt: suggested?.systemPrompt ?? '',
+      nonce: prefillNonce.current,
+    });
+    requestAnimationFrame(() => {
+      document.getElementById('create-agent-panel')?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+    });
+  }
+
   return <div className="human-page">
     <div className="page-header"><div><h1 className="page-title">Chat</h1>
       <p className="page-sub">Your agents, their work, and your ongoing conversations. create-agent is a Wrapper/manager skill.</p>
@@ -353,10 +384,11 @@ export function EntityChatPage({token, config}: Props) {
       <CreateAgentPanel
         token={token}
         namespace={namespace}
-        principal={profile || managers[0]?.metadata.name || ''}
+        principal={createPrincipal}
         writeEnabled={Boolean(config.composition.writeEnabled)}
         chatEnabled={Boolean(config.chat?.enabled)}
         threadId={threadID || undefined}
+        prefill={createPrefill}
         onCreated={(result) => {
           if (result.ok) {
             void listRunProfiles(token, namespace).then(setProfiles).catch(() => { /* roster refresh is optional */ });
@@ -422,10 +454,31 @@ export function EntityChatPage({token, config}: Props) {
               return <aside key={message.id} className="remote-chat-caption" aria-label="Earlier reply unavailable"><strong>Earlier reply unavailable</strong><p>{metadata.backend === 'openClaw' ? 'This older answer could not be recovered from its runner output yet. Your message is saved. The answer will be saved permanently when recovery succeeds.' : 'An older Hermes runner did not separate its final answer from internal output. The original message has been preserved. Reasoning and original output can be inspected in the runner output while its logs are retained.'}</p>{metadata.runName && /^[a-z0-9]([a-z0-9.-]{0,251}[a-z0-9])?$/.test(metadata.runName) && <button type="button" className="btn btn-ghost" onClick={() => {setHistoricalOutput({runName: metadata.runName!, backend: metadata.backend!}); setRawActivityOpen(true);}}>View original runner output</button>}</aside>;
             }
             const jevCaption = jevIntentCaption(message);
+            // Manager-only affordance: a classified, non-unclear
+            // create_agent_request user message carries
+            // jevNeedsManagerCreate=true. Wrapper/manager principals get a
+            // "Requested create" receipt that prefills the existing
+            // CreateAgentPanel; peers keep the caption only (never a
+            // create button). Authority still lives in
+            // isCreateAgentPrincipal + executeCreateAgent.
+            const showCreateAffordance =
+              message.role === 'user' && mayShowCreateAffordance(message, createPrincipal);
             return <article key={message.id} className={`chat-bubble ${message.role === 'user' ? 'chat-bubble-user' : 'chat-bubble-run'}`}>
             <header className="chat-bubble-header"><span className="chat-bubble-role">{message.role === 'user' ? ((message.metadata as {authorProfile?: string} | undefined)?.authorProfile || 'You') : message.role === 'tool' ? 'Coordination' : detail.profileName || 'Agent'}</span></header>
             <pre className="chat-bubble-body">{message.content}</pre>
             {jevCaption && <p className="remote-chat-caption">{jevCaption}</p>}
+            {showCreateAffordance && (
+              <div className="remote-chat-caption" role="note" aria-label="Requested agent create">
+                <span>Requested create — needs a manager to fulfill.</span>{' '}
+                <button
+                  type="button"
+                  className="btn btn-ghost"
+                  onClick={() => fulfillManagerCreate(message.content)}
+                >
+                  Review in create form
+                </button>
+              </div>
+            )}
           </article>;
           })}
           {optimisticVisible && <article className="chat-bubble chat-bubble-user" aria-label="Your pending message">
