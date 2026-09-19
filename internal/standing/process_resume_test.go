@@ -341,10 +341,7 @@ func TestNativeSessionKey(t *testing.T) {
 func writeResumeStubBinary(t *testing.T, name, script, logPath string, envExtra []string) *ExecRunner {
 	t.Helper()
 	dir := t.TempDir()
-	path := filepath.Join(dir, name)
-	if err := os.WriteFile(path, []byte(script), 0o700); err != nil {
-		t.Fatal(err)
-	}
+	path := writeExecutableStub(t, dir, name, script)
 	env := append([]string{"ARGV_LOG=" + logPath}, envExtra...)
 	return &ExecRunner{
 		LookPath: func(file string) (string, error) {

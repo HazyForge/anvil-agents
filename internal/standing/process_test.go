@@ -220,13 +220,33 @@ func TestProcessBackendSuspendIsBestEffort(t *testing.T) {
 // writeStubBinary installs an executable stub harness CLI that replays canned
 // stdout lines, so the ExecRunner integration path spawns a real subprocess
 // with no model call and no credentials.
-func writeStubBinary(t *testing.T, name, script string) *ExecRunner {
+// writeExecutableStub writes script to dir/name with mode 0700 and fsyncs
+// before returning the path. WSL/overlay can otherwise surface ETXTBSY on the
+// first fork/exec of a just-written stub ("text file busy").
+func writeExecutableStub(t *testing.T, dir, name, script string) string {
 	t.Helper()
-	dir := t.TempDir()
 	path := filepath.Join(dir, name)
 	if err := os.WriteFile(path, []byte(script), 0o700); err != nil {
 		t.Fatal(err)
 	}
+	f, err := os.OpenFile(path, os.O_RDONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Sync(); err != nil {
+		_ = f.Close()
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func writeStubBinary(t *testing.T, name, script string) *ExecRunner {
+	t.Helper()
+	dir := t.TempDir()
+	path := writeExecutableStub(t, dir, name, script)
 	return &ExecRunner{
 		LookPath: func(file string) (string, error) {
 			if file == name {
