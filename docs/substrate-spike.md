@@ -1,7 +1,8 @@
 # Substrate standing-chat spike
 
 Status: architectural spike, slice 3 (live ATE gRPC dial behind an explicit
-opt-in gate; Kind numbers ready to collect).
+opt-in gate; live Kind numbers collected 2026-09-18, decision open —
+Austin decides).
 
 ## Why
 
@@ -177,8 +178,9 @@ backend-kind overlay, which stays orthogonal to the runtime plane).
 
 - No Kind e2e against a real Substrate cluster in CI and no chat-log replay
   onto actors. Peer resume against live actors is mapped and wire-tested
-  (thread-actor naming plus Resume-then-Suspend over real gRPC); the remaining
-  gap is live cluster numbers.
+  (thread-actor naming plus Resume-then-Suspend over real gRPC); live cluster
+  numbers landed 2026-09-18 (see the latency section) but the busy-recipient
+  durable-wait peer check still needs explicit confirmation.
 - If upstream churns the lifecycle surface, update the hand-written
   `internal/substrate/ateapipb` binding per its refresh procedure (field
   numbers are what matter on the wire) — AgentRun types, merge rules, chat
@@ -309,9 +311,43 @@ The report records `directCold`, `directWarm`, `peerCold`, and `peerWarm`
 scenarios with `count/minMs/meanMs/p50Ms/p95Ms/maxMs` (warm scenarios also
 report `warmOps`), plus `comparisonMs` savings of warm resume against the Job
 baseline when the baseline flags are passed. Fake-backend numbers only prove
-the harness and the warm-reuse contract; the promote/reshape/retire decision
-below needs the live Kind numbers, including a peer-delivery warm check with
-the busy-recipient durable wait holding.
+the harness and the warm-reuse contract.
+
+### Live Kind numbers (collected 2026-09-18, Austin's WSL Kind cluster)
+
+First real live compare against `kind-substrate-spike` (~6:45 PM CT,
+`n=10`, backend `ate-live`, namespace `ate-demo-counter`, counter demo via an
+INSECURE loopback dial to `127.0.0.1:8443`). The probe reported
+`reachable:true` with the gate on before the live run. The raw artifact lives
+at `.runtime/substrate-latency-live.json` on the WSL checkout (gitignored —
+do not commit the JSON; docs only). Job-baseline flags passed:
+`--job-baseline-p50-ms 12000 --job-baseline-p95-ms 44000`.
+
+| Scenario | p50Ms | p95Ms | count/warmOps |
+| --- | --- | --- | --- |
+| `directCold` | 7.49 | 27.70 | count 10 |
+| `directWarm` | 353.04 | 1233.01 | warmOps 10 |
+| `peerCold` | 7.47 | 8.62 | count 10 |
+| `peerWarm` | 301.54 | 398.70 | warmOps 10 |
+
+`comparisonMs` savings of warm resume vs the passed Job baseline:
+
+| Comparison | Saved ms |
+| --- | --- |
+| `directWarmSavedVsJobP50` | ≈11647 |
+| `peerWarmSavedVsJobP50` | ≈11698 |
+| `directWarmSavedVsJobP95` | ≈42767 |
+| `peerWarmSavedVsJobP95` | ≈43601 |
+
+Reading note: cold RPC times are much faster than warm resume here. That is
+expected if the cold path is create-only vs resume of a suspended actor — the
+promote/reshape/retire bars below compare warm resume to the Job cold-start
+baseline, not cold vs warm.
+
+Remaining open before any promote call: the busy-recipient durable-wait peer
+check still needs explicit confirmation; suspend-on-idle multiplex
+regressions are not yet stressed; upstream pin is currently `944abe3`. The
+promote/reshape/retire decision below stays open — Austin decides.
 
 ## Decision: promote, reshape, or retire
 
@@ -355,16 +391,26 @@ the same cluster shape:
 - [x] Actor identity in `status.substrateActor` and turn-to-actor binding.
 - [x] Latency harness (Job cold start vs warm actor resume) covering direct
   turns and peer deliveries, not only standing Wrapper chat. Fake-backend
-  green; live Kind numbers still open (Austin's cluster/WSL Kind). Before
-  any `--live` run, `hack/substrate-latency-compare.sh --probe` (or
-  `go run ./cmd/substrate-latency -probe-only`) dials ateapi once and
-  reports `{"reachable":true/false}` JSON with no timings — an unreachable
-  gateway surfaces as `reachable:false` instead of fabricated numbers.
+  green; live Kind numbers collected 2026-09-18 on `kind-substrate-spike`
+  (`n=10`, `ate-demo-counter`/`counter`, INSECURE loopback dial to
+  `127.0.0.1:8443`, probe `reachable:true` with the gate on — see the live
+  numbers in the latency section). Raw artifact
+  `.runtime/substrate-latency-live.json` stays gitignored on the WSL
+  checkout. Before any `--live` run, `hack/substrate-latency-compare.sh
+  --probe` (or `go run ./cmd/substrate-latency -probe-only`) dials ateapi
+  once and reports `{"reachable":true/false}` JSON with no timings — an
+  unreachable gateway surfaces as `reachable:false` instead of fabricated
+  numbers.
 - [x] Upstream alignment to `944abe3` (RevertActor #1675): the only
   lifecycle-subset drift vs the previous pin was the new
   `ACTOR_STATE_REVERTING = 9`, which folds onto Suspended (Revert targets
   SUSPENDED) while staying distinct on the seam; the five bound RPC
   signatures and all lifecycle field numbers are unchanged, and the spike
   binds no Revert/Delete RPCs.
-- [ ] Decision: promote, reshape, or retire the `SubstrateActor` surface once
-  live Kind numbers land.
+- [ ] Decision: promote, reshape, or retire the `SubstrateActor` surface.
+  Live p95 warm resume sits far under the passed Job baseline (directWarm
+  p95 1233.01ms and peerWarm p95 398.70ms vs Job p95 44000ms), which leans
+  promote on the latency bar alone — but Austin decides, and these stay open
+  first: busy-recipient durable-wait peer check needs explicit confirmation,
+  suspend-on-idle multiplex regressions are not yet stressed, upstream pin is
+  `944abe3`.
