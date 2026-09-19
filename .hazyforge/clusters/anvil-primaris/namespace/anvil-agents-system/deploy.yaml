@@ -114,11 +114,6 @@ api:
     - name: standing-cli
       mountPath: /opt/anvil/standing-cli
       readOnly: true
-    # File-only mount so emptyDir GROK_HOME stays writable for session files.
-    - name: standing-grok-auth
-      mountPath: /tmp/anvil-standing-home/.grok/auth.json
-      subPath: auth.json
-      readOnly: true
   # Copy grok from the reviewed runner image into standing-cli emptyDir so the
   # distroless/base API can exec it. Auth is NOT copied here — seed GROK_HOME
   # separately (see docs/standing-inprocess-harness.md Primaris section).
@@ -140,6 +135,31 @@ api:
         runAsUser: 10001
         runAsGroup: 10001
         readOnlyRootFilesystem: true
+    - name: standing-grok-auth-seed
+      image: ghcr.io/hazyforge/anvil-agent-run-grok-build@sha256:86b8d1a905c5e36af110fd880f2bb3db3efec5bc732bd16bff9ce8dc46f77f22
+      imagePullPolicy: IfNotPresent
+      command: ["/bin/sh", "-c"]
+      args:
+        - |
+          set -eu
+          mkdir -p /standing-home/.grok
+          cp /auth/auth.json /standing-home/.grok/auth.json
+          chmod 600 /standing-home/.grok/auth.json
+      volumeMounts:
+        - name: standing-home
+          mountPath: /standing-home
+        - name: standing-grok-auth
+          mountPath: /auth
+          readOnly: true
+      securityContext:
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop: [ALL]
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        readOnlyRootFilesystem: true
+
   # Keep the currently deployed scheduling and isolation settings explicit.
   replicaCount: 1
   # PostgreSQL admits this existing worker egress address.
