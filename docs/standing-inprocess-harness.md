@@ -727,6 +727,53 @@ contract, the 202 append shape, and token redaction;
 `internal/runapi/kind_local_example_test.go` keeps the example config
 loadable with its gates and binding intact.
 
+## Kind-local chat Postgres for standing chat (blocker 1, scripted)
+
+`chat.enabled=true` requires `ANVIL_AGENTS_CHAT_DATABASE_URL`, and the
+Kind-local host-run API has no database to point at — blocker (1) on the path
+to a real signed-in Desktop standing-chat latency sample.
+`hack/kind-chat-postgres.sh` closes exactly that gap: it starts a disposable
+loopback-only `postgres:17-alpine` container (same hardening as
+`hack/test-archive-postgres.sh` — UID/GID 70, `cap-drop ALL`,
+`no-new-privileges`, tmpfs data, `127.0.0.1` publish), waits for readiness,
+and prints the export line the host-run API needs. The API applies the
+`anvil_agents_chat` schema itself on startup (`OpenPostgresStore` →
+`Migrate`), so no manual SQL is needed.
+
+```bash
+# 1. Start disposable Postgres and export the URL it prints.
+eval "$(./hack/kind-chat-postgres.sh)"
+
+# 2. Start the host-run API with chat enabled (existing config flags).
+ANVIL_AGENTS_STANDING_LIVE=1 go run ./cmd/anvil-agents-api --config <api-config-with-chat.enabled>
+
+# 3. Reuse / inspect / tear down.
+./hack/kind-chat-postgres.sh --url    # reprint the export line for a new shell
+./hack/kind-chat-postgres.sh --stop   # destroy the container and its data
+```
+
+- The emitted URL is always `postgresql://…@127.0.0.1:<port>/…?sslmode=disable`
+  with a docker-assigned host port (pass `--port` to pin one). The default
+  credential is a dev-only placeholder; override with
+  `ANVIL_KIND_CHAT_POSTGRES_PASSWORD` (or `--password`) on any shared host.
+- `./hack/kind-chat-postgres.sh --check-url <url>` validates the shape
+  offline — no Docker, no network — and fails fast on non-loopback hosts,
+  missing userinfo/database, or a missing `sslmode=disable`. The same shape
+  is pinned parse-level by `TestKindChatPostgresURLShapeLoadable` (through
+  `pgxpool.ParseConfig`, the entry point `OpenPostgresStore` uses) and
+  end to end offline by `hack/kind-chat-postgres_test.sh`.
+- Scope: host-run Kind-local API only (loopback bind). The container is
+  unreachable from inside the Kind cluster; in-cluster installs use the
+  chart's `archive` standalone / cloudnativepg modes instead (see
+  [PostgreSQL Archive](archive.md)). Disposable only: `--stop` destroys all
+  data, and this URL must never leave loopback Kind-local bring-up.
+- Still blocked after this slice, in order: real OIDC for signed-in Desktop
+  chat (Kind-local issuer or Zitadel), a standing-enabled manager thread
+  (`standing.liveEnabled` / `ANVIL_AGENTS_STANDING_LIVE` plus an InProcess
+  harness profile), and a harness CLI with local auth on the API host —
+  without the last, turns still hold as `InProcessNotWired`. No latency
+  numbers are captured here.
+
 ## NEXT (after slice 5c + Kind-local signed-in scaffolding)
 
 Standing in-process harness + WebSocket is the **primary** interactive path
@@ -765,6 +812,8 @@ spike](substrate-spike.md)).
    signed-in Desktop chat, so live send→firstToken samples need real OIDC
    (Kind-local issuer or Zitadel) plus a standing-enabled manager thread
    (`standing.liveEnabled` / `ANVIL_AGENTS_STANDING_LIVE` on the API).
+   Disposable Postgres for `chat.enabled` is scripted
+   (`hack/kind-chat-postgres.sh`, see above) and no longer blocks bring-up.
    Next: sign in against real OIDC, Send chat messages over the standing WS
    path, and grow `.runtime/chat-latency.jsonl` with real `standing`-path
    samples.
