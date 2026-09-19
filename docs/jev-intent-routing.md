@@ -159,6 +159,49 @@ ANVIL_AGENTS_JEV_INTENT=1 ANVIL_AGENTS_JEV_MODEL=jev-1.13.0 \
    envelope on the append path (the 10s cap is a wedge guard, not a
    budget).
 
+### Kind-local runbook (validated model pin, gate via env only)
+
+Kind-local measurement setup that reproduces the live e2e below without
+flipping production defaults (`chat.jevIntentEnabled: false`,
+`chat.jevModel: ""` stay the shipped defaults in chart values).
+
+- Example config: `examples/live-api/kind-local-api-config.yaml` pins
+  `chat.jevModel: "jev-1.13.0"` (the validated serving model) and leaves
+  `chat.jevIntentEnabled` off. The gate is enabled per-process only.
+- Exact env pair for the measured run (plus the standing gate):
+
+```bash
+# 1. API key from the typesafe-jev checkout pattern (never commit the key).
+set -a; source ~/CodingFiles/PROJECTS/typesafe-jev/.env; set +a # provides TYPESAFE_API_KEY
+
+# 2. API on alt ports when 18080 is Zitadel: bind 127.0.0.1:18180, issuer on
+#    127.0.0.1:18181 (mirror examples/live-api/kind-local-api-config.yaml
+#    with bindAddress/issuer port-swapped, or port-forward accordingly).
+#    KUBECONFIG must point at Kind; chat.enabled needs PostgreSQL, e.g.
+#    eval "$(./hack/kind-chat-postgres.sh)".
+ANVIL_AGENTS_STANDING_LIVE=1 \
+ANVIL_AGENTS_JEV_INTENT=1 \
+ANVIL_AGENTS_JEV_MODEL=jev-1.13.0 \
+  go run ./cmd/anvil-agents-api --config examples/live-api/kind-local-api-config.yaml
+```
+
+- Quick classifier check (no cluster) before the turn path:
+
+```bash
+TYPESAFE_API_KEY=... go run ./cmd/jev-probe -message "create an agent named Scout for research" -model jev-1.13.0
+go run ./cmd/jev-probe -fake -message "create an agent named Scout for research"
+```
+
+- Verify on a live turn: thread detail carries `jevIntent`,
+  `jevRawChoice`, `jevConfidence`, `jevModel`, `jevUnclear` on the queued
+  user message metadata, and the turn's AgentRun carries
+  `control.anvil.hazyforge.io/jev-intent` / `.../jev-confidence` /
+  `.../jev-model` annotations (`kubectl get agentrun <turn> -o yaml`).
+  Desktop shows the read-only `jevIntent` caption on the user message when
+  present (no fulfillment action — `create_agent_request` still routes to
+  requesting a Wrapper/manager through the existing manager-authorization
+  path; peers never create agents).
+
 ### Live Kind-local Jev intent e2e validation (2026-09-18)
 
 First live end-to-end validation of the wired hook (Austin, 2026-09-18
@@ -188,6 +231,10 @@ thresholds are tuned, instead of tracking `jev-latest`. Empty
 `chat.jevModel` (the default) keeps the alias behavior unchanged.
 
 Remaining after this validation: confidence-floor tuning from labeled
-traffic (plus the higher destructive-action bar at the fulfillment site),
-and Desktop UI surfacing of the intent metadata (`jevIntent`,
-`jevConfidence`, `jevModel`, `jevUnclear`).
+traffic (plus the higher destructive-action bar at the fulfillment site).
+Desktop shows a minimal read-only `jevIntent` caption on classified user
+messages (`EntityChatPage`: intent plus confidence/model when present —
+display only, no fulfillment action). The validated model pin
+(`chat.jevModel: jev-1.13.0` in the Kind-local example,
+`ANVIL_AGENTS_JEV_MODEL` per-process) is landed with the gate still
+deny-by-default.

@@ -29,6 +29,16 @@ func TestKindLocalExampleConfigLoads(t *testing.T) {
 	if !config.OIDC.AllowInsecureIssuer || !config.Runs.CreateEnabled || !config.Chat.Enabled || !config.Standing.LiveEnabled {
 		t.Fatalf("example gates not set: %+v", config)
 	}
+	// Jev intent routing stays deny-by-default in the example: the gate flag
+	// is off (enabled per-process via ANVIL_AGENTS_JEV_INTENT=1), while the
+	// validated serving model is pinned for local measurement. See
+	// docs/jev-intent-routing.md ("Kind-local runbook").
+	if config.Chat.JevIntentEnabled {
+		t.Fatal("example config must leave chat.jevIntentEnabled off (enable via ANVIL_AGENTS_JEV_INTENT=1)")
+	}
+	if config.Chat.JevModel != "jev-1.13.0" {
+		t.Fatalf("example chat.jevModel = %q, want jev-1.13.0", config.Chat.JevModel)
+	}
 	authorizer := NewAuthorizer(config.Authorization)
 	principal := Principal{Roles: []string{"kind-local-desktop"}}
 	for _, permission := range []string{PermissionRunsRead, PermissionRunsStream, PermissionRunsCreate, PermissionChatRead, PermissionChatWrite} {

@@ -1054,13 +1054,23 @@ spike](substrate-spike.md)).
 3. **Retire the envelope wrapper** entirely once no Fake-only live path
    remains. Provider credentials stay outside the API's Secret surface
    throughout.
-4. **Jev intent routing live e2e (recorded 2026-09-18).** The opt-in Jev
+4. **Jev intent routing live e2e (recorded 2026-09-18; Kind-local pin landed).** The opt-in Jev
    intent hook (`chat.jevIntentEnabled` / `ANVIL_AGENTS_JEV_INTENT`, see
    [Jev intent routing](jev-intent-routing.md)) classified live Kind-local
    traffic (`create_agent_request` at confidence 1, model `jev-1.13.0`;
    truncated `create` gated to `unclear` at 0.42 under the 0.5 floor).
    Standing in-process + WebSocket stays primary, Jobs stay default for
    scouts/batch, Substrate stays optional, and `create-agent` stays
-   Wrapper/manager-only. Remaining: confidence-floor tuning from labeled
-   traffic, Desktop UI surfacing of intent metadata, and pinning a
-   versioned model ID (new config/API surface, not added here).
+   Wrapper/manager-only. Kind-local measurement reuses the standing runbook
+   above plus the Jev env pair (`TYPESAFE_API_KEY` from the
+   `~/CodingFiles/PROJECTS/typesafe-jev/.env` pattern,
+   `ANVIL_AGENTS_JEV_INTENT=1`, `ANVIL_AGENTS_JEV_MODEL=jev-1.13.0`) with
+   the API on alt ports `127.0.0.1:18180`/`18181` when `18080` is Zitadel —
+   see [Jev intent routing](jev-intent-routing.md) ("Kind-local runbook");
+   `examples/live-api/kind-local-api-config.yaml` pins
+   `chat.jevModel: "jev-1.13.0"` with the gate still deny-by-default.
+   Remaining: confidence-floor tuning from labeled
+   traffic (plus the higher destructive-action bar at the fulfillment site).
+   Desktop shows the read-only `jevIntent` caption on classified user
+   messages; the versioned model pin (`chat.jevModel` /
+   `ANVIL_AGENTS_JEV_MODEL`) is landed.

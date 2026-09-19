@@ -23,6 +23,12 @@
 #
 # Full runbook: docs/standing-inprocess-harness.md ("Desktop chat e2e over
 # the standing WebSocket"). Never commit minted tokens or the key file.
+#
+# Jev intent routing (local measurement only): this example pins
+# chat.jevModel to the validated serving model but leaves the gate off.
+# Enable per-process with ANVIL_AGENTS_JEV_INTENT=1 (plus TYPESAFE_API_KEY);
+# see docs/jev-intent-routing.md ("Kind-local runbook"). When 18080/18081
+# are occupied (e.g. local Zitadel), run the API on alt ports 18180/18181.
 bindAddress: 127.0.0.1:18080
 oidc:
   issuer: http://127.0.0.1:18081
@@ -57,5 +63,15 @@ runs:
   createEnabled: true
 chat:
   enabled: true
+  # Jev intent routing stays deny-by-default here: jevIntentEnabled defaults
+  # to false (production default — this example does not flip it). Enable
+  # Kind-local measurement via env only:
+  #   ANVIL_AGENTS_JEV_INTENT=1 ANVIL_AGENTS_JEV_MODEL=jev-1.13.0
+  # jevIntentEnabled: false
+  # Validated serving-model pin for local measurement (jev-1.13.0, live
+  # Kind-local e2e 2026-09-18, see docs/jev-intent-routing.md). The gate is
+  # still deny-by-default: classification runs only with
+  # ANVIL_AGENTS_JEV_INTENT=1 AND TYPESAFE_API_KEY set.
+  jevModel: "jev-1.13.0"
 standing:
   liveEnabled: true
