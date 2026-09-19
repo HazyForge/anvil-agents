@@ -16,6 +16,11 @@ import {
   mayShowCreateAffordance,
   suggestCreateAgentInput,
 } from '../wrapper/jevManagerCreate';
+import {
+  mayShowHandoffAffordance,
+  peerHandoffTargetFromMessage,
+  suggestPeerHandoffTarget,
+} from '../wrapper/jevPeerHandoff';
 
 interface Props { token: string; config: UIConfig }
 const agentName = (name: string) => name.replace(/[-_]+/g, ' ').replace(/\bprimaris\b/gi, 'Primaris').replace(/\bagy\b/gi, 'AGY').replace(/\bprime\b/gi, 'Prime').replace(/^./, letter => letter.toUpperCase());
@@ -374,6 +379,27 @@ export function EntityChatPage({token, config}: Props) {
     });
   }
 
+  // Complete a jevNeedsPeerHandoff (or equivalent requestPeer handoff
+  // hint) through existing coordination only: open the named existing
+  // peer's standing conversation when it names one, else bring the
+  // thread's coordination controls into view. Never creates a teammate;
+  // standing in-process chat + WebSocket stays the primary path.
+  function fulfillPeerHandoff(content: string) {
+    const fromStatus = peerHandoffTargetFromMessage({ content })?.peerProfileName?.trim();
+    const target =
+      fromStatus ||
+      suggestPeerHandoffTarget(content, profiles.map(item => item.metadata.name));
+    if (target) {
+      void openAgent(target);
+      return;
+    }
+    requestAnimationFrame(() => {
+      const details = document.getElementById('conversation-details');
+      if (details instanceof HTMLDetailsElement) details.open = true;
+      details?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+    });
+  }
+
   return <div className="human-page">
     <div className="page-header"><div><h1 className="page-title">Chat</h1>
       <p className="page-sub">Your agents, their work, and your ongoing conversations. create-agent is a Wrapper/manager skill.</p>
@@ -429,7 +455,7 @@ export function EntityChatPage({token, config}: Props) {
             <div>{isManager && <span className="agent-role-badge">Project manager</span>}<h2 className="agent-name" title={profile || harness}>{profile || harness ? agentName(profile || harness) : 'Chat with a harness'}</h2><p className="agent-meta">{initializing ? 'Opening your conversation…' : profile ? (standingIDs[profile] === threadID ? 'Standing conversation' : 'Saved conversation') : 'Choose a remote harness below'}</p>{isManager && <p className="agent-manager-description">Coordinates work, schedules, and agent instructions for {selectedProject?.name || 'this project'}.</p>}</div>
           </div>
         </header>
-        <details className="agent-settings" key={threadID || 'new'} open={!threadID && !profile}>
+        <details className="agent-settings" id="conversation-details" key={threadID || 'new'} open={!threadID && !profile}>
           <summary>Conversation details</summary>
           <p className="remote-chat-caption">Project: {selectedProject?.name}. Namespace: <code>{namespace}</code></p>
           {isManager && <p className="remote-chat-caption">Changes follow this agent’s configured tools and project permissions. Some changes may require review.</p>}
@@ -463,6 +489,21 @@ export function EntityChatPage({token, config}: Props) {
             // isCreateAgentPrincipal + executeCreateAgent.
             const showCreateAffordance =
               message.role === 'user' && mayShowCreateAffordance(message, createPrincipal);
+            // Handoff affordance: a classified, non-unclear peer_handoff
+            // user message carries jevNeedsPeerHandoff=true, or any
+            // message carries an equivalent existing-peer requestPeer
+            // STATUS_JSON hint. Wrapper/manager principals get a handoff
+            // receipt that opens the named peer's standing conversation
+            // (existing coordination only); peers keep the caption only
+            // (never a handoff button that could create). Handoff never
+            // creates a teammate.
+            const showHandoffAffordance =
+              (message.role === 'user' || message.role === 'assistant') &&
+              mayShowHandoffAffordance(message, createPrincipal);
+            const handoffTarget = showHandoffAffordance
+              ? (peerHandoffTargetFromMessage(message)?.peerProfileName?.trim() ||
+                suggestPeerHandoffTarget(message.content, profiles.map(item => item.metadata.name)))
+              : null;
             return <article key={message.id} className={`chat-bubble ${message.role === 'user' ? 'chat-bubble-user' : 'chat-bubble-run'}`}>
             <header className="chat-bubble-header"><span className="chat-bubble-role">{message.role === 'user' ? ((message.metadata as {authorProfile?: string} | undefined)?.authorProfile || 'You') : message.role === 'tool' ? 'Coordination' : detail.profileName || 'Agent'}</span></header>
             <pre className="chat-bubble-body">{message.content}</pre>
@@ -476,6 +517,18 @@ export function EntityChatPage({token, config}: Props) {
                   onClick={() => fulfillManagerCreate(message.content)}
                 >
                   Review in create form
+                </button>
+              </div>
+            )}
+            {showHandoffAffordance && (
+              <div className="remote-chat-caption" role="note" aria-label="Requested peer handoff">
+                <span>Handoff requested — coordinate with an existing peer{handoffTarget ? ` (${handoffTarget})` : ''}. Never creates a teammate.</span>{' '}
+                <button
+                  type="button"
+                  className="btn btn-ghost"
+                  onClick={() => fulfillPeerHandoff(message.content)}
+                >
+                  {handoffTarget ? `Open ${handoffTarget} conversation` : 'Review coordination'}
                 </button>
               </div>
             )}

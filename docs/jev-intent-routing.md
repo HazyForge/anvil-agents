@@ -224,17 +224,15 @@ sides, and this slice wires the classified intent to it.
   `TestChatJevUnclearHandoffCarriesNoFulfillment`,  `TestChatJevNonHandoffIntentsCarryNoHandoffFlag`, plus the updated
   `TestChatJevNonCreateIntentsCarryNoManagerRequest` (pins the create
   shape absent on every other intent, handoff included).
-- Desktop in this slice: docs-only. There is no existing peer-handoff UI
-  to extend (`EntityChatPage` has only the read-only `jevIntent` caption
-  plus the manager-create receipt; `WrapperPage`'s `RequestPeerMonitor`
-  watches runner signals, not Jev flags), so no Desktop code changes here
-  — the STATUS_JSON shape is pinned in the Go tests above. Remaining
-  Desktop work: if a handoff affordance is ever wanted, watch
-  `jevNeedsPeerHandoff` on thread detail / the `jev-needs-peer-handoff`
-  run annotation and surface existing coordination UI (e.g. deep-link the
-  named peer's chat thread or prefill a `requestPeer` line); peers and
-  managers see the same read-only `jevIntent` caption until then. Jev
-  never generates; Substrate untouched; standing primary.
+- Desktop: shipped — `EntityChatPage` surfaces a Wrapper/manager-facing
+  handoff receipt on `jevNeedsPeerHandoff` user messages (plus equivalent
+  existing-peer `requestPeer` STATUS_JSON hints anywhere in the thread).
+  The receipt names the target when one is present and deep-links that
+  peer's standing conversation via the existing `openAgent` path, else it
+  opens the thread's coordination controls. Peers keep the read-only
+  `jevIntent` caption only. Handoff never creates; the STATUS_JSON shape
+  stays pinned in the Go tests above plus `hack/desktop-jev-peer-handoff.mjs`.
+  See "Desktop Wrapper handoff affordance (shipped)" below.
 
 ### Desktop Wrapper affordance (shipped)
 
@@ -260,6 +258,39 @@ sides, and this slice wires the classified intent to it.
 - Cover: `hack/desktop-jev-manager-create.mjs` (wired into
   `make desktop-chat-tests`): strict flag/annotation matching, latest
   flagged message, Wrapper/manager-only gating, parse-without-invention.
+
+### Desktop Wrapper handoff affordance (shipped)
+
+`EntityChatPage` consumes the handoff signal from thread detail,
+mirroring the manager-create pattern one intent over:
+
+- Detection: `messageNeedsPeerHandoff` in
+  `web/desktop/src/wrapper/jevPeerHandoff.ts` reads user-message
+  metadata `jevNeedsPeerHandoff === true` (strict boolean); the same
+  module covers the run annotation
+  `control.anvil.hazyforge.io/jev-needs-peer-handoff=true` via
+  `runNeedsPeerHandoff` for kubectl-found turns. Equivalent harness
+  hints are covered too: `handoffStatusTargets` parses existing-peer
+  `requestPeer` STATUS_JSON (`action=requestPeer` with `peerProfileName`/
+  `summary`) from message content, excluding `request=create-agent`
+  variants (those stay on the manager-create affordance).
+- Manager path: when `mayShowHandoffAffordance` (flag-or-hint AND
+  `isCreateAgentPrincipal`) holds, the bubble shows a
+  `Handoff requested — coordinate with an existing peer` receipt with an
+  `Open <peer> conversation` button. The button deep-links the named
+  peer's standing conversation through the existing `openAgent` path
+  (STATUS_JSON target first, else the roster-matched name from
+  `suggestPeerHandoffTarget` — never invented; no match opens the
+  thread's coordination controls). Fulfillment stays on existing
+  coordination: standing chat + WebSocket primary, no new fanout.
+- Peer path: flag or hint, non-Wrapper/manager principals see the
+  read-only `jevIntent` caption only — never a handoff button, and the
+  handoff path never creates teammates (`create-agent` stays
+  Wrapper/manager-only via `isCreateAgentPrincipal` + `executeCreateAgent`).
+- Cover: `hack/desktop-jev-peer-handoff.mjs` (wired into
+  `make desktop-chat-tests`): strict flag/annotation matching, latest
+  flagged message, STATUS_JSON hint detection excluding create-agent,
+  Wrapper/manager-only gating, suggest-without-invention.
 
 ### Observability (threshold tuning)
 
