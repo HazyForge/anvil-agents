@@ -9,7 +9,7 @@ RELEASE_REPO ?= HazyForge/anvil-agents
 RELEASE_DEPLOY_VALUES ?= .hazyforge/clusters/anvil-primaris/namespace/anvil-agents-system/deploy.yaml
 RELEASE_IMAGE_LOCK ?= $(RELEASE_OUTPUT)/images-$(VERSION).lock.tsv
 
-.PHONY: generate manifests test verify verify-runner-contract security security-govulncheck security-gosec security-trivy security-all build console-build console-typecheck console-embed console-embed-restore desktop-build desktop-typecheck desktop-embed desktop-embed-restore desktop-run desktop-package desktop-package-check docker-build images image-checks helm-lint archive-postgres-integration chart-package release-tag release-tag-push release-local release-publish release-github release-local-all release-pin-deploy release-primaris release-primaris-fast release-primaris-hot deploy-primaris judge-prerequisites judge-kind-e2e kind-upgrade-e2e kind-e2e
+.PHONY: generate manifests test verify verify-runner-contract security security-govulncheck security-gosec security-trivy security-all build console-build console-typecheck console-embed console-embed-restore desktop-build desktop-typecheck desktop-chat-tests desktop-embed desktop-embed-restore desktop-run desktop-package desktop-package-check docker-build images image-checks helm-lint archive-postgres-integration chart-package release-tag release-tag-push release-local release-publish release-github release-local-all release-pin-deploy release-primaris release-primaris-fast release-primaris-hot deploy-primaris judge-prerequisites judge-kind-e2e kind-upgrade-e2e kind-e2e
 
 generate:
 	$(CONTROLLER_GEN) object paths=./api/...
@@ -93,6 +93,12 @@ desktop-build:
 
 desktop-typecheck:
 	cd web/desktop && npm ci && npm run typecheck
+
+# Continuous Desktop peer/chat reliability gate: drop/stall/wrong-routing +
+# create-agent allowlist checks. Pure parser unit tests, no browser or cluster.
+desktop-chat-tests:
+	node --experimental-strip-types --test hack/desktop-chat-reliability.mjs
+	node --experimental-strip-types --test hack/desktop-create-agent.mjs
 
 # Copy built desktop assets into the go:embed tree used by anvil-desktop.
 # WARNING: replaces committed stub files under internal/desktop/uifs/dist.

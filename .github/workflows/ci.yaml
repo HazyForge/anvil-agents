@@ -33,6 +33,18 @@ jobs:
       - name: Build controller image
         run: ./hack/build-images.sh --component controller --tag test
 
+  desktop-chat-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
+      - name: Desktop peer/chat reliability (drop/stall/routing + create-agent allowlist)
+        run: make desktop-chat-tests
+
   runner-images:
     runs-on: ubuntu-latest
     strategy:
