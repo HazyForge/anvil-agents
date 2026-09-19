@@ -259,7 +259,7 @@ export async function runLiveProbe(opts, deps = {}) {
     tokenFile: opts.tokenFile,
   });
   if (!opts.threadId.trim()) {
-    failLive("missing --thread (create a standing-enabled manager thread first)", tokenResult.token);
+    failLive("missing --thread (ensure one with hack/kind-standing-thread.sh first)", tokenResult.token);
     return;
   }
   if (tokenResult.error) {
