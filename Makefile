@@ -245,6 +245,9 @@ verify-runner-contract:
 	@bash -n hack/test-api-chart.sh
 	@bash -n hack/test-archive-chart.sh
 	@bash -n hack/test-archive-postgres.sh
+	@bash -n hack/kind-chat-postgres.sh
+	@bash -n hack/kind-chat-postgres_test.sh
+	@hack/kind-chat-postgres_test.sh
 	@bash -n hack/package-chart.sh
 	@bash -n hack/package-chart_test.sh
 	@bash -n hack/test-kind.sh
