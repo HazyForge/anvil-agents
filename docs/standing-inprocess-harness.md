@@ -698,22 +698,21 @@ ANVIL_AGENTS_STANDING_LIVE=1 ANVIL_AGENTS_CHAT_DATABASE_URL=postgresql://... \
   go run ./cmd/anvil-agents-api --config examples/live-api/kind-local-api-config.yaml
 
 # 3. Mint a bearer (terminal 3), apply the standing-enabled manager
-#    composition, and create one manager thread on it.
+#    composition, and ensure one manager thread on it (idempotent:
+#    201 created, 200 existing).
 go run ./cmd/kind-oidc-issuer mint --key-file /tmp/kind-oidc.key.json \
   --issuer http://127.0.0.1:18081 --audience anvil-agents \
   --subject kind-local-desktop --roles kind-local-desktop --namespaces agents
 export ANVIL_AGENTS_ACCESS_TOKEN=<minted-token>
 kubectl apply -f examples/live-api/kind-local-standing-manager.yaml
-curl -sS -X POST -H "Authorization: Bearer $ANVIL_AGENTS_ACCESS_TOKEN" \
-  -H 'Content-Type: application/json' \
-  http://127.0.0.1:18080/api/v1/namespaces/agents/chat/threads \
-  -d '{"profileName":"kind-local-manager","mode":"persona","title":"Kind-local standing manager"}'
-# Record the returned thread id for step 4. A standing-enabled thread
-# snapshot then carries `standing: {sessionName, harness, warm, resumes}`.
+thread="$(hack/kind-standing-thread.sh | tail -n 1)"
+# The ensure script converges on one thread instead of minting a new one
+# per run. A standing-enabled thread snapshot then carries
+# `standing: {sessionName, harness, warm, resumes}`.
 
 # 4. Probe one signed-in standing turn; appends the JSONL sample on delivery.
 node --experimental-strip-types hack/desktop-standing-chat-live.mjs --live \
-  --api-origin http://127.0.0.1:18080 --namespace agents --thread <thread-id> \
+  --api-origin http://127.0.0.1:18080 --namespace agents --thread "${thread}" \
   --out $PWD/.runtime/chat-latency.jsonl
 
 # 5. Read the real sample (source desktop-chat-live-signed-in, not a probe).
@@ -742,7 +741,9 @@ contract, the 202 append shape, and token redaction;
 loadable with its gates and binding intact, plus the standing-manager
 manifest loadable with `execution.runtime: InProcess` (no `substrate`
 section) on `kind-local-standing` and a `harnessProfileRef` from
-`kind-local-manager` to it.
+`kind-local-manager` to it; `hack/kind-standing-thread_test.sh` fakes
+curl on PATH and pins the ensure-thread contract (idempotent 201/200,
+bearer in the Authorization header only, honest 401/400 errors).
 
 ## Kind-local chat Postgres for standing chat (blocker 1, scripted)
 
@@ -898,7 +899,8 @@ spike](substrate-spike.md)).
    standing-enabled manager thread — now concrete: apply
    `examples/live-api/kind-local-standing-manager.yaml` (an `InProcess`
    harness profile bound to the thread's agent) with `standing.liveEnabled`
-   on the API, then create the thread per step 3 above; (c) a
+   on the API, then ensure the thread per step 3 above
+   (`hack/kind-standing-thread.sh`: 201 created, 200 existing); (c) a
    harness CLI with local auth on the API host for `ProcessBackend` turns
    (otherwise turns hold as `InProcessNotWired` and the probe reports a
    delivered-turn failure, never a sample) — scripted since this slice
