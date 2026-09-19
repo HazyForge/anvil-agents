@@ -157,6 +157,10 @@ api:
   # Optional API-only mounts, including CA certificates referenced by the chat database URL.
   extraVolumes: []
   extraVolumeMounts: []
+  # Optional init containers (e.g. copy a standing ProcessBackend CLI such as
+  # grok into an emptyDir mounted on PATH). Empty by default. See
+  # docs/standing-inprocess-harness.md Primaris section.
+  initContainers: []
   enabled: false
   replicaCount: 1
   serviceAccount:
