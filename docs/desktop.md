@@ -102,3 +102,8 @@ make desktop-run
 # or: ./hack/run-anvil-desktop.sh --open --detach --api-origin http://127.0.0.1:18080
 make desktop-package
 ```
+
+## Peer/chat reliability
+
+`make desktop-chat-tests` is the continuous drop/stall/wrong-routing +
+create-agent allowlist gate (pure parser unit tests, no browser or cluster).
