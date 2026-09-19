@@ -35,6 +35,10 @@ spec:
       imagePullSecrets:
 {{ toYaml . | indent 8 }}
       {{- end }}
+      {{- with .Values.api.initContainers }}
+      initContainers:
+{{ toYaml . | indent 8 }}
+      {{- end }}
       containers:
         - name: api
           image: {{ default (default (printf "%s:%s" .Values.image.repository .Values.image.tag) .Values.image.reference) .Values.api.image.reference | quote }}
