@@ -1069,8 +1069,12 @@ spike](substrate-spike.md)).
    see [Jev intent routing](jev-intent-routing.md) ("Kind-local runbook");
    `examples/live-api/kind-local-api-config.yaml` pins
    `chat.jevModel: "jev-1.13.0"` with the gate still deny-by-default.
-   Remaining: confidence-floor tuning from labeled
-   traffic (plus the higher destructive-action bar at the fulfillment site).
+   Remaining: retune `DefaultConfidenceThreshold` (0.5) and
+   `DestructiveActionConfidenceBar` (0.8) from live labeled traffic.
+   The FakeBackend labeled-fixture suite and the fulfillment-site bar
+   (`create_agent_request` / `peer_handoff` needs-* flags and STATUS_JSON
+   hints; `tool_run` and `chat_reply` stay on the classify floor) are
+   landed; the gate stays deny-by-default via `ANVIL_AGENTS_JEV_INTENT`.
    Desktop shows the read-only `jevIntent` caption on classified user
    messages; the versioned model pin (`chat.jevModel` /
    `ANVIL_AGENTS_JEV_MODEL`) is landed.

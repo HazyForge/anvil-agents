@@ -50,10 +50,21 @@ const (
 const IntentQuestionID = "intent"
 
 // DefaultConfidenceThreshold is the review floor: below it the decision
-// gates to unclear. It mirrors the docs' example review floor (0.5);
-// destructive actions (e.g. fulfilling create_agent_request) must apply a
-// higher bar in code at the fulfillment site, not here.
+// gates to unclear. It mirrors the docs' example review floor (0.5).
+// tool_run and chat_reply fulfill at this floor. Destructive actions
+// (create_agent_request / peer_handoff needs-* flags and STATUS_JSON
+// hints) must apply DestructiveActionConfidenceBar at the fulfillment
+// site — Router.ClassifyIntent does not consult that bar.
 const DefaultConfidenceThreshold = 0.5
+
+// DestructiveActionConfidenceBar is the fulfillment-site bar for
+// create_agent_request and peer_handoff. Classification still stands
+// between DefaultConfidenceThreshold and this bar so observability
+// keeps jevIntent / jevRawChoice / jevConfidence; callers must not set
+// needs-* flags or encourage requestPeer STATUS_JSON below it.
+// Starting value 0.8 (TypeSafe's high-stakes example is 0.9) — retune
+// from labeled traffic; not a validated production number.
+const DestructiveActionConfidenceBar = 0.8
 
 // IntentCriteria is the fixed routing rubric. Descriptions name what
 // belongs to each option and how neighbors differ, per the Choice guidance;
@@ -143,6 +154,15 @@ type Decision struct {
 	Probabilities map[string]float64 `json:"probabilities"`
 	Model         string             `json:"model"`
 	Unclear       bool               `json:"unclear"`
+}
+
+// MeetsDestructiveActionBar reports whether confidence is at or above
+// DestructiveActionConfidenceBar. Classification may still stand below
+// this bar; fulfillment sites must consult this before setting needs-*
+// flags or encouraging STATUS_JSON. Router.ClassifyIntent does not
+// call it.
+func (d Decision) MeetsDestructiveActionBar() bool {
+	return d.Confidence >= DestructiveActionConfidenceBar
 }
 
 // Router classifies standing-turn messages with a Jev Backend. The zero
