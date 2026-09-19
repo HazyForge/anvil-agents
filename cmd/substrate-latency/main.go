@@ -1,6 +1,7 @@
 // Command substrate-latency measures warm actor resume versus cold actor
 // create for standing-chat turns, covering both direct turns and peer
-// deliveries (Substrate spike).
+// deliveries (Substrate spike), plus the busy-recipient durable-wait peer
+// path (peerBusyWaitWarm).
 //
 // Fake-backend by default: without the live gate it drives the in-memory
 // FakeClient, so CI stays green with no cluster. With the live gate on
@@ -10,7 +11,9 @@
 // minted ServiceAccount token), Kind-only skip-verify TLS behind
 // ANVIL_AGENTS_SUBSTRATE_INSECURE for a loopback port-forward — and measures
 // real Create/Resume timings. See docs/substrate-spike.md for the Kind
-// port-forward setup.
+// port-forward setup. The busy-recipient scenario occupies one warm
+// recipient, queues a peer delivery that waits, then resumes the same actor
+// (never drop, no second Create) on FakeClient and on the live gate alike.
 //
 // The Job cold-start baseline cannot be measured from this process (it needs a
 // real cluster scheduler), so pass the observed baseline explicitly with
@@ -59,10 +62,22 @@ type latencyReport struct {
 	GateEnabled  bool                     `json:"gateEnabled"`
 	Iterations   int                      `json:"iterations"`
 	Namespace    string                   `json:"namespace"`
+	BusyHoldMs   float64                  `json:"busyHoldMs,omitempty"`
 	GeneratedAt  string                   `json:"generatedAt"`
 	Scenarios    map[string]scenarioStats `json:"scenarios"`
 	JobBaseline  *scenarioStats           `json:"jobBaseline,omitempty"`
 	ComparisonMs map[string]float64       `json:"comparisonMs,omitempty"`
+}
+
+type measureConfig struct {
+	iterations int
+	namespace  string
+	harness    string
+	actorClass string
+	pool       string
+	busyHold   time.Duration
+	jobP50     float64
+	jobP95     float64
 }
 
 // probeReport answers "is live Kind ATE reachable?" with no latency numbers
@@ -242,6 +257,155 @@ func measureWarm(ctx context.Context, client substrate.Client, namespace, thread
 	return durations, warmOps, nil
 }
 
+// measurePeerBusyWaitWarm occupies one recipient actor with a warm turn,
+// then times a queued peer delivery that durable-waits until that turn
+// completes and resumes the same actor. The path never drops the waiter and
+// never issues a second Create (CountingClient stays at 1). Works against
+// FakeClient (CI) and a live ATE Client (kind-substrate-spike --live).
+func measurePeerBusyWaitWarm(ctx context.Context, client substrate.Client, namespace, threadID, harness, class, pool string, iterations int, busyHold time.Duration) ([]time.Duration, int, error) {
+	if busyHold < 0 {
+		return nil, 0, fmt.Errorf("busy hold must not be negative")
+	}
+	counter := &substrate.CountingClient{Client: client}
+	spec := substrate.ActorSpecForRun(namespace, substrate.ActorNameForThread(threadID), harness, class, pool, nil)
+	// Pre-bind once so Occupy is a warm turn, not a cold create.
+	bound, warm, err := substrate.EnsureTurnActor(ctx, counter, spec)
+	if err != nil {
+		return nil, 0, err
+	}
+	if warm {
+		return nil, 0, fmt.Errorf("busy-wait pre-bind resumed an existing actor; want a dedicated recipient")
+	}
+	if bound.ID == "" {
+		return nil, 0, fmt.Errorf("busy-wait pre-bind returned an empty actor id")
+	}
+
+	occ := substrate.NewBusyRecipient(spec)
+	durations := make([]time.Duration, 0, iterations)
+	warmOps := 0
+	for i := 0; i < iterations; i++ {
+		if _, occupyWarm, err := occ.Occupy(ctx, counter); err != nil {
+			return nil, 0, err
+		} else if !occupyWarm {
+			return nil, 0, fmt.Errorf("busy-wait occupy %d created a new actor instead of a warm turn", i)
+		}
+		released := make(chan error, 1)
+		go func() {
+			if busyHold > 0 {
+				select {
+				case <-ctx.Done():
+					released <- ctx.Err()
+					return
+				case <-time.After(busyHold):
+				}
+			}
+			released <- occ.Release(ctx, counter)
+		}()
+		start := time.Now()
+		resumed, waitWarm, err := occ.WaitThenEnsure(ctx, counter)
+		if err != nil {
+			return nil, 0, err
+		}
+		if relErr := <-released; relErr != nil {
+			return nil, 0, relErr
+		}
+		if !waitWarm {
+			return nil, 0, fmt.Errorf("busy-wait peer delivery %d created a new actor instead of warm resume", i)
+		}
+		if resumed.ID != bound.ID {
+			return nil, 0, fmt.Errorf("busy-wait resume identity %q != occupied %q", resumed.ID, bound.ID)
+		}
+		durations = append(durations, time.Since(start))
+		warmOps++
+	}
+	if got := counter.Creates(); got != 1 {
+		return nil, 0, fmt.Errorf("busy-wait path issued %d CreateActor calls, want exactly 1", got)
+	}
+	if _, err := substrate.SuspendIdleActor(ctx, counter, namespace, spec.Name, nil); err != nil {
+		return nil, 0, err
+	}
+	return durations, warmOps, nil
+}
+
+func collectReport(ctx context.Context, client substrate.Client, backend string, gateEnabled bool, cfg measureConfig) (latencyReport, error) {
+	directCold, err := measureCold(ctx, client, cfg.namespace, "direct", cfg.harness, cfg.actorClass, cfg.pool, cfg.iterations)
+	if err != nil {
+		return latencyReport{}, fmt.Errorf("direct cold: %w", err)
+	}
+	// Warm actors get a fresh thread ID per run: reusing a fixed thread after
+	// a failed resume can rebind a CRASHED/stuck actor on a stale worker
+	// (ateom.sock errors) instead of measuring a clean warm resume.
+	runID := time.Now().UnixNano()
+	directWarm, directWarmOps, err := measureWarm(ctx, client, cfg.namespace, fmt.Sprintf("latency-direct-thread-%d", runID), cfg.harness, cfg.actorClass, cfg.pool, cfg.iterations)
+	if err != nil {
+		return latencyReport{}, fmt.Errorf("direct warm: %w", err)
+	}
+	peerCold, err := measureCold(ctx, client, cfg.namespace, "peer-child", cfg.harness, cfg.actorClass, cfg.pool, cfg.iterations)
+	if err != nil {
+		return latencyReport{}, fmt.Errorf("peer cold: %w", err)
+	}
+	peerWarm, peerWarmOps, err := measureWarm(ctx, client, cfg.namespace, fmt.Sprintf("latency-peer-child-thread-%d", runID), cfg.harness, cfg.actorClass, cfg.pool, cfg.iterations)
+	if err != nil {
+		return latencyReport{}, fmt.Errorf("peer warm: %w", err)
+	}
+	peerBusy, peerBusyOps, err := measurePeerBusyWaitWarm(ctx, client, cfg.namespace, fmt.Sprintf("latency-peer-busy-child-thread-%d", runID), cfg.harness, cfg.actorClass, cfg.pool, cfg.iterations, cfg.busyHold)
+	if err != nil {
+		return latencyReport{}, fmt.Errorf("peer busy-wait warm: %w", err)
+	}
+
+	directColdStats := summarize(directCold, 0)
+	directWarmStats := summarize(directWarm, directWarmOps)
+	peerColdStats := summarize(peerCold, 0)
+	peerWarmStats := summarize(peerWarm, peerWarmOps)
+	peerBusyStats := summarize(peerBusy, peerBusyOps)
+
+	report := latencyReport{
+		Tool:        "substrate-latency",
+		Backend:     backend,
+		GateEnabled: gateEnabled,
+		Iterations:  cfg.iterations,
+		Namespace:   cfg.namespace,
+		BusyHoldMs:  float64(cfg.busyHold.Nanoseconds()) / 1e6,
+		GeneratedAt: time.Now().UTC().Format(time.RFC3339Nano),
+		Scenarios: map[string]scenarioStats{
+			"directCold":       directColdStats,
+			"directWarm":       directWarmStats,
+			"peerCold":         peerColdStats,
+			"peerWarm":         peerWarmStats,
+			"peerBusyWaitWarm": peerBusyStats,
+		},
+	}
+	if cfg.jobP50 > 0 || cfg.jobP95 > 0 {
+		report.JobBaseline = &scenarioStats{Count: cfg.iterations, P50Ms: cfg.jobP50, P95Ms: cfg.jobP95}
+		report.ComparisonMs = map[string]float64{
+			"directWarmSavedVsJobP50":       cfg.jobP50 - directWarmStats.P50Ms,
+			"directWarmSavedVsJobP95":       cfg.jobP95 - directWarmStats.P95Ms,
+			"peerWarmSavedVsJobP50":         cfg.jobP50 - peerWarmStats.P50Ms,
+			"peerWarmSavedVsJobP95":         cfg.jobP95 - peerWarmStats.P95Ms,
+			"peerBusyWaitWarmSavedVsJobP50": cfg.jobP50 - peerBusyStats.P50Ms,
+			"peerBusyWaitWarmSavedVsJobP95": cfg.jobP95 - peerBusyStats.P95Ms,
+		}
+	}
+	return report, nil
+}
+
+func writeReport(report latencyReport, outPath string) error {
+	encoded, err := json.MarshalIndent(report, "", "  ")
+	if err != nil {
+		return fmt.Errorf("encode report: %w", err)
+	}
+	encoded = append(encoded, '\n')
+	if trimmed := strings.TrimSpace(outPath); trimmed != "" {
+		if err := os.WriteFile(trimmed, encoded, 0o600); err != nil {
+			return fmt.Errorf("write report: %w", err)
+		}
+	}
+	if _, err := os.Stdout.Write(encoded); err != nil {
+		return fmt.Errorf("write stdout: %w", err)
+	}
+	return nil
+}
+
 func main() {
 	iterations := flag.Int("n", 20, "Timed operations per scenario.")
 	namespace := flag.String("namespace", "agents", "Actor namespace for the measurement.")
@@ -251,6 +415,7 @@ func main() {
 	outPath := flag.String("out", "", "Optional JSON report path (written with 0600 permissions).")
 	jobP50 := flag.Float64("job-baseline-p50-ms", 0, "Observed Job cold-start p50 in ms for comparison (0 omits the baseline).")
 	jobP95 := flag.Float64("job-baseline-p95-ms", 0, "Observed Job cold-start p95 in ms for comparison (0 omits the baseline).")
+	busyHold := flag.Duration("busy-hold", 25*time.Millisecond, "How long the occupying warm turn holds the recipient before the queued peer delivery may resume (durable wait). Included in peerBusyWaitWarm samples.")
 	probeOnly := flag.Bool("probe-only", false, "Dial ateapi once and report reachability as JSON (no timings, no iterations). Exits 0 when ateapi answered, 1 otherwise.")
 	flag.Parse()
 
@@ -279,74 +444,23 @@ func main() {
 		gateEnabled = true
 	}
 
-	directCold, err := measureCold(ctx, client, *namespace, "direct", *harness, *actorClass, *pool, *iterations)
+	cfg := measureConfig{
+		iterations: *iterations,
+		namespace:  *namespace,
+		harness:    *harness,
+		actorClass: *actorClass,
+		pool:       *pool,
+		busyHold:   *busyHold,
+		jobP50:     *jobP50,
+		jobP95:     *jobP95,
+	}
+	report, err := collectReport(ctx, client, backendName, gateEnabled, cfg)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: direct cold: %v\n", err)
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}
-	// Warm actors get a fresh thread ID per run: reusing a fixed thread after
-	// a failed resume can rebind a CRASHED/stuck actor on a stale worker
-	// (ateom.sock errors) instead of measuring a clean warm resume.
-	runID := time.Now().UnixNano()
-	directWarm, directWarmOps, err := measureWarm(ctx, client, *namespace, fmt.Sprintf("latency-direct-thread-%d", runID), *harness, *actorClass, *pool, *iterations)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: direct warm: %v\n", err)
-		os.Exit(1)
-	}
-	peerCold, err := measureCold(ctx, client, *namespace, "peer-child", *harness, *actorClass, *pool, *iterations)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: peer cold: %v\n", err)
-		os.Exit(1)
-	}
-	peerWarm, peerWarmOps, err := measureWarm(ctx, client, *namespace, fmt.Sprintf("latency-peer-child-thread-%d", runID), *harness, *actorClass, *pool, *iterations)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: peer warm: %v\n", err)
-		os.Exit(1)
-	}
-
-	directColdStats := summarize(directCold, 0)
-	directWarmStats := summarize(directWarm, directWarmOps)
-	peerColdStats := summarize(peerCold, 0)
-	peerWarmStats := summarize(peerWarm, peerWarmOps)
-
-	report := latencyReport{
-		Tool:        "substrate-latency",
-		Backend:     backendName,
-		GateEnabled: gateEnabled,
-		Iterations:  *iterations,
-		Namespace:   *namespace,
-		GeneratedAt: time.Now().UTC().Format(time.RFC3339Nano),
-		Scenarios: map[string]scenarioStats{
-			"directCold": directColdStats,
-			"directWarm": directWarmStats,
-			"peerCold":   peerColdStats,
-			"peerWarm":   peerWarmStats,
-		},
-	}
-	if *jobP50 > 0 || *jobP95 > 0 {
-		report.JobBaseline = &scenarioStats{Count: *iterations, P50Ms: *jobP50, P95Ms: *jobP95}
-		report.ComparisonMs = map[string]float64{
-			"directWarmSavedVsJobP50": *jobP50 - directWarmStats.P50Ms,
-			"directWarmSavedVsJobP95": *jobP95 - directWarmStats.P95Ms,
-			"peerWarmSavedVsJobP50":   *jobP50 - peerWarmStats.P50Ms,
-			"peerWarmSavedVsJobP95":   *jobP95 - peerWarmStats.P95Ms,
-		}
-	}
-
-	encoded, err := json.MarshalIndent(report, "", "  ")
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: encode report: %v\n", err)
-		os.Exit(1)
-	}
-	encoded = append(encoded, '\n')
-	if trimmed := strings.TrimSpace(*outPath); trimmed != "" {
-		if err := os.WriteFile(trimmed, encoded, 0o600); err != nil {
-			fmt.Fprintf(os.Stderr, "error: write report: %v\n", err)
-			os.Exit(1)
-		}
-	}
-	if _, err := os.Stdout.Write(encoded); err != nil {
-		fmt.Fprintf(os.Stderr, "error: write stdout: %v\n", err)
+	if err := writeReport(report, *outPath); err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}
 }

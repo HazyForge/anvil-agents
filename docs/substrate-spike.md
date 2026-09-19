@@ -173,9 +173,10 @@ backend-kind overlay, which stays orthogonal to the runtime plane).
   queueing, so a warm actor never drops a queued peer turn.
 - Latency harness (`cmd/substrate-latency` + `hack/substrate-latency-compare.sh`):
   records cold create vs warm resume for a direct turn AND a peer delivery
-  with p50/p95 fields, against an explicit Job baseline. Fake-backend by
-  default (CI-safe); live on Kind with the gate on. See the latency section
-  below.
+  with p50/p95 fields, plus the busy-recipient durable-wait peer path
+  (`peerBusyWaitWarm`: occupy a warm recipient, wait, resume the same actor),
+  against an explicit Job baseline. Fake-backend by default (CI-safe); live
+  on Kind with the gate on. See the latency section below.
 
 ## What is NOT in this slice
 
@@ -184,8 +185,10 @@ backend-kind overlay, which stays orthogonal to the runtime plane).
   (thread-actor naming plus Resume-then-Suspend over real gRPC); live cluster
   numbers landed 2026-09-18 (see the latency section); the busy-recipient
   durable-wait peer check is confirmed at the unit level
-  (`TestPeerSubstrateBusyRecipientDurableWait`, FakeClient, no cluster) with
-  only its live Kind numbers still open, and suspend-on-idle multiplexing is
+  (`TestPeerSubstrateBusyRecipientDurableWait`, FakeClient, no cluster) and
+  the live scenario harness now records `peerBusyWaitWarm` (wait+resume of
+  the same warm actor; FakeClient-tested, `--live` on kind-substrate-spike
+  collects the Kind numbers). Suspend-on-idle multiplexing is
   stressed at the unit level (many-actor warm resume, rapid
   Create→Suspend→Resume cycles, concurrent peer+direct resume — see the
   latency section).
@@ -284,7 +287,8 @@ hack/substrate-latency-compare.sh --live -n 10 \
 The harness dials `ANVIL_AGENTS_SUBSTRATE_ENDPOINT` with the same TLS/token
 rules as the controller (`KUBECONFIG` selects the cluster for trust-bundle
 fetch and token minting), runs cold-create vs warm-resume for a direct turn
-AND a peer delivery, and writes the JSON report. Probe first —
+AND a peer delivery, plus the busy-recipient durable-wait peer path
+(`peerBusyWaitWarm`), and writes the JSON report. Probe first —
 `hack/substrate-latency-compare.sh --probe [--out /tmp/substrate-probe.json]`
 reports `{"reachable":true/false}` with no timings, so an unavailable gateway
 is honest instead of blocking or fabricating numbers. Unset
@@ -315,15 +319,22 @@ hack/substrate-latency-compare.sh --live -n 10 \
   --out /tmp/substrate-latency-live.json
 ```
 
-The report records `directCold`, `directWarm`, `peerCold`, and `peerWarm`
-scenarios with `count/minMs/meanMs/p50Ms/p95Ms/maxMs` (warm scenarios also
-report `warmOps`), plus `comparisonMs` savings of warm resume against the Job
-baseline when the baseline flags are passed. Fake-backend numbers only prove
-the harness and the warm-reuse contract. The peer-delivery warm check with the
-busy-recipient durable wait holding is confirmed at the unit level
-(`TestPeerSubstrateBusyRecipientDurableWait` in `internal/runapi` plus
-`TestSuspendedActorResumesWarm` in `internal/substrate`, both FakeClient, no
-cluster); only the live Kind numbers for that path are still open.
+The report records `directCold`, `directWarm`, `peerCold`, `peerWarm`, and
+`peerBusyWaitWarm` scenarios with `count/minMs/meanMs/p50Ms/p95Ms/maxMs`
+(warm scenarios also report `warmOps`), plus `comparisonMs` savings of warm
+resume (and the busy-wait+resume path) against the Job baseline when the
+baseline flags are passed. `peerBusyWaitWarm` occupies one recipient actor
+with a warm turn, queues a peer delivery that durable-waits, then resumes
+the same actor (never drop, no second Create). `-busy-hold` (default 25ms;
+`--busy-hold` on the wrapper script) is the occupying hold included in those
+samples. Fake-backend numbers only prove the harness and the warm-reuse
+contract. The busy-recipient durable wait is confirmed at the unit level
+(`TestPeerSubstrateBusyRecipientDurableWait` in `internal/runapi`,
+`TestBusyRecipientWaitThenWarmResumeSameActor` in `internal/substrate`, and
+`TestMeasurePeerBusyWaitWarmFakeClient` in `cmd/substrate-latency`, all
+FakeClient, no cluster). The same harness collects live Kind numbers on
+`kind-substrate-spike` via `--live` (optional follow-up; Substrate stays
+optional / not promoted).
 
 ### Live Kind numbers (collected 2026-09-18, Austin's WSL Kind cluster)
 
@@ -342,6 +353,10 @@ do not commit the JSON; docs only). Job-baseline flags passed:
 | `peerCold` | 7.47 | 8.62 | count 10 |
 | `peerWarm` | 301.54 | 398.70 | warmOps 10 |
 
+`peerBusyWaitWarm` was not in this 2026-09-18 run. The harness now records
+it (FakeClient unit coverage; collect live Kind numbers with the same
+`--live` command — optional follow-up, not a promote).
+
 `comparisonMs` savings of warm resume vs the passed Job baseline:
 
 | Comparison | Saved ms |
@@ -358,8 +373,9 @@ baseline, not cold vs warm.
 
 Remaining opens, tracked as optional follow-ups (not promote blockers — the
 2026-09-18 decision keeps Substrate optional regardless): the busy-recipient
-durable-wait peer check is confirmed at the unit level with only its live
-Kind numbers still open; suspend-on-idle multiplexing is stressed at the unit
+durable-wait peer check has a live scenario harness (`peerBusyWaitWarm` in
+`cmd/substrate-latency`; collect Kind numbers with `--live` on
+`kind-substrate-spike`); suspend-on-idle multiplexing is stressed at the unit
 level (many actors, rapid Create→Suspend→Resume cycles, concurrent
 peer+direct resume warm without identity churn or drops — `TestSuspendIdleMultiplexManyActorsWarmResume`,
 `TestSuspendIdleRapidCreateSuspendResumeCycles`,
@@ -418,23 +434,26 @@ the same cluster shape:
   unit level (peer delivery durable-queues as `waiting` while the recipient
   is busy, then runs and binds the same warm actor with no drop:
   `TestPeerSubstrateBusyRecipientDurableWait`; suspend-then-warm-resume:
-  `TestSuspendedActorResumesWarm`); suspend-on-idle multiplexing is stressed
+  `TestSuspendedActorResumesWarm`; actor-plane wait+resume:
+  `TestBusyRecipientWaitThenWarmResumeSameActor`) and the latency harness
+  records `peerBusyWaitWarm` on FakeClient and under `--live` (collect Kind
+  numbers on `kind-substrate-spike` as an optional follow-up — Substrate
+  stays optional / not promoted); suspend-on-idle multiplexing is stressed
   at the unit level (many-actor warm resume, rapid Create→Suspend→Resume
   cycles, concurrent peer+direct resume warm without identity churn or drops:
   `TestSuspendIdleMultiplexManyActorsWarmResume`,
   `TestSuspendIdleRapidCreateSuspendResumeCycles`,
   `TestSuspendIdleConcurrentPeerDirectResumeWarm`,
   `TestATEClientSuspendIdleMultiplexStress`, plus gate-on reconcile
-  multiplexing: `TestSubstrateLiveSuspendIdleMultiplexStress`); the live Kind
-  numbers for peer turns (warm-actor
-  latency check with the durable wait holding) stay open as an optional follow-up.
+  multiplexing: `TestSubstrateLiveSuspendIdleMultiplexStress`).
 - [x] Live gRPC dialer (`internal/substrate/ate_grpc.go` over hand-written
   `ateapipb` stubs) with TLS/token parity to upstream `ateclient`, plus a
   Kind-only insecure-dev loopback dial. Gate-on dispatch and live Kind
   numbers are unblocked.
 - [x] Actor identity in `status.substrateActor` and turn-to-actor binding.
 - [x] Latency harness (Job cold start vs warm actor resume) covering direct
-  turns and peer deliveries, not only standing Wrapper chat. Fake-backend
+  turns, peer deliveries, and the busy-recipient durable-wait peer path
+  (`peerBusyWaitWarm`). Fake-backend
   green; live Kind numbers collected 2026-09-18 on `kind-substrate-spike`
   (`n=10`, `ate-demo-counter`/`counter`, INSECURE loopback dial to
   `127.0.0.1:8443`, probe `reachable:true` with the gate on — see the live
@@ -457,8 +476,9 @@ the same cluster shape:
   398.70ms vs Job p95 44000ms — see the latency section) show warm resume far
   under the Job baseline, but the call is keep-optional regardless. Remaining
   opens are optional follow-ups, not promote blockers: busy-recipient
-  durable-wait peer check is confirmed at the unit level (only its live Kind
-  numbers stay open), suspend-on-idle multiplexing is stressed at the unit
+  durable-wait peer check has a live scenario harness (`peerBusyWaitWarm`;
+  FakeClient unit coverage plus `--live` on kind-substrate-spike),
+  suspend-on-idle multiplexing is stressed at the unit
   level (many-actor warm resume, rapid Create→Suspend→Resume cycles,
   concurrent peer+direct resume warm without identity churn or drops),
   upstream pin is `944abe3`.

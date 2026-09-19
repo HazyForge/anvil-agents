@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # substrate-latency-compare.sh — Job cold-start baseline vs warm Substrate
-# resume for a direct turn AND a peer delivery (standing-chat spike).
+# resume for a direct turn, a peer delivery, AND the busy-recipient
+# durable-wait peer path (peerBusyWaitWarm) on the standing-chat spike.
 #
 # Fake-backend by default: the fake run needs no cluster and is safe in
 # CI. The live run dials a Kind cluster's Substrate ATE over gRPC (see
@@ -18,6 +19,8 @@
 #     --namespace ate-demo-counter --actor-class counter --pool '' \
 #     --job-baseline-p50-ms 12000 --job-baseline-p95-ms 44000 \
 #     --out /tmp/substrate-latency-counter.json
+#   # Optional: --busy-hold 25ms (default) is the occupying warm-turn hold
+#   # included in peerBusyWaitWarm wait+resume samples.
 #
 # --probe dials ateapi once and reports {"reachable":true/false} JSON with no
 # timings: run it before --live so an unreachable gateway is reported honestly
@@ -43,6 +46,7 @@ NAMESPACE="agents"
 ACTOR_CLASS="standing-chat"
 POOL="warm"
 JOB_ARGS=()
+BUSY_HOLD=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -53,9 +57,10 @@ while [[ $# -gt 0 ]]; do
     --namespace) NAMESPACE="$2"; shift 2 ;;
     --actor-class) ACTOR_CLASS="$2"; shift 2 ;;
     --pool) POOL="$2"; shift 2 ;;
+    --busy-hold) BUSY_HOLD="$2"; shift 2 ;;
     --job-baseline-p50-ms|--job-baseline-p95-ms) JOB_ARGS+=("$1" "$2"); shift 2 ;;
     -h|--help)
-      sed -n '2,27p' "$0"
+      sed -n '2,30p' "$0"
       exit 0
       ;;
     *)
@@ -100,6 +105,9 @@ if [[ "$LIVE" -eq 1 ]]; then
 fi
 
 BIN_ARGS=(-n "$ITERATIONS" -namespace "$NAMESPACE" -actor-class "$ACTOR_CLASS" -pool "$POOL" "${JOB_ARGS[@]}")
+if [[ -n "$BUSY_HOLD" ]]; then
+  BIN_ARGS+=(-busy-hold "$BUSY_HOLD")
+fi
 
 if [[ -n "$OUT" ]]; then
   "$BIN" "${BIN_ARGS[@]}" -out "$OUT"
