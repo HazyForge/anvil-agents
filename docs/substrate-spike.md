@@ -314,7 +314,11 @@ The report records `directCold`, `directWarm`, `peerCold`, and `peerWarm`
 scenarios with `count/minMs/meanMs/p50Ms/p95Ms/maxMs` (warm scenarios also
 report `warmOps`), plus `comparisonMs` savings of warm resume against the Job
 baseline when the baseline flags are passed. Fake-backend numbers only prove
-the harness and the warm-reuse contract.
+the harness and the warm-reuse contract. The peer-delivery warm check with the
+busy-recipient durable wait holding is confirmed at the unit level
+(`TestPeerSubstrateBusyRecipientDurableWait` in `internal/runapi` plus
+`TestSuspendedActorResumesWarm` in `internal/substrate`, both FakeClient, no
+cluster); only the live Kind numbers for that path are still open.
 
 ### Live Kind numbers (collected 2026-09-18, Austin's WSL Kind cluster)
 
@@ -397,9 +401,13 @@ the same cluster shape:
 - [x] Live `Client` binding onto real ATE lifecycle behind an explicit opt-in
   gate, including peer resume per the mapping above. Tested via fakes (warm
   reuse + `ErrActorNotFound`) plus in-process gRPC round-trips. Live Kind
-  numbers landed 2026-09-18 (see the latency section below); the warm-actor
-  latency check for peer turns specifically (busy-recipient durable wait must
-  hold) stays open as an optional follow-up.
+  numbers landed 2026-09-18 (see the latency section below). The
+  busy-recipient durable wait on the warm-actor peer path is confirmed at the
+  unit level (peer delivery durable-queues as `waiting` while the recipient
+  is busy, then runs and binds the same warm actor with no drop:
+  `TestPeerSubstrateBusyRecipientDurableWait`; suspend-then-warm-resume:
+  `TestSuspendedActorResumesWarm`); the live Kind numbers for peer turns (warm-actor
+  latency check with the durable wait holding) stay open as an optional follow-up.
 - [x] Live gRPC dialer (`internal/substrate/ate_grpc.go` over hand-written
   `ateapipb` stubs) with TLS/token parity to upstream `ateclient`, plus a
   Kind-only insecure-dev loopback dial. Gate-on dispatch and live Kind
