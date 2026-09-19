@@ -114,8 +114,10 @@ api:
     - name: standing-cli
       mountPath: /opt/anvil/standing-cli
       readOnly: true
+    # File-only mount so emptyDir GROK_HOME stays writable for session files.
     - name: standing-grok-auth
-      mountPath: /tmp/anvil-standing-home/.grok
+      mountPath: /tmp/anvil-standing-home/.grok/auth.json
+      subPath: auth.json
       readOnly: true
   # Copy grok from the reviewed runner image into standing-cli emptyDir so the
   # distroless/base API can exec it. Auth is NOT copied here — seed GROK_HOME
