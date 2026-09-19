@@ -9,6 +9,7 @@ import { AgentAvatar } from '../components/AgentAvatar';
 import { ProjectSwitcher, remoteChatProjects, projectManagers } from '../components/ProjectSwitcher';
 import { LiveStream } from '../components/LiveStream';
 import { CreateAgentPanel } from '../components/CreateAgentPanel';
+import { AgentHarnessSwitcher } from '../components/AgentHarnessSwitcher';
 import { ensureAccessToken } from '../auth/oidc';
 import { type PendingChatSend, readPendingSend, rememberPendingSend, clearPendingSend } from '../api/pendingChat';
 import { formatTurnError } from '../wrapper/turn';
@@ -465,6 +466,7 @@ export function EntityChatPage({token, config}: Props) {
             {threads.filter(thread => profile ? thread.profileName === profile : !thread.profileName).map(thread => <option value={thread.id} key={thread.id}>{standingIDs[profile] === thread.id ? 'Standing · ' : ''}{thread.title || thread.profileName || threadHarness(thread)}</option>)}
           </select></label>}
           {configuration}
+          {selectedProfile && <AgentHarnessSwitcher token={token} namespace={namespace} profileName={profile} profile={selectedProfile} harnesses={harnesses} writeEnabled={Boolean(config.composition?.writeEnabled)} disabled={busy || initializing} threadHarness={threadID ? harness : ''} onUpdated={(doc) => setProfiles(previous => previous.map(item => item.metadata.name === doc.metadata.name ? doc : item))}/>}
           {threadID && <button type="button" className="btn btn-ghost" disabled={busy} onClick={() => newChat()}>Start a separate conversation</button>}
         </details>
         <div className="chat-messages" aria-live="polite">
