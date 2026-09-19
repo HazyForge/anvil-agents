@@ -126,7 +126,7 @@ api:
       imagePullPolicy: IfNotPresent
       command: ["/bin/sh", "-c"]
       args:
-        - install -d -m 0755 /standing-cli && install -m 0755 /usr/local/bin/grok /standing-cli/grok
+        - mkdir -p /standing-cli && cp /usr/local/bin/grok /standing-cli/grok && chmod 0755 /standing-cli/grok
       volumeMounts:
         - name: standing-cli
           mountPath: /standing-cli
