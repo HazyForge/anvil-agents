@@ -89,6 +89,16 @@ func run(ctx context.Context, args []string) int {
 	}
 
 	if err := server.Start(ctx); err != nil && err != context.Canceled {
+		if *openWindow && desktop.IsAddrInUse(err) {
+			existing := desktop.ListenURL(*listen)
+			fmt.Fprintf(os.Stderr, "anvil-desktop already running at %s; opening existing instance\n", existing)
+			if openErr := desktop.OpenWindow(existing); openErr != nil {
+				fmt.Fprintf(os.Stderr, "error: %s\n", err)
+				fmt.Fprintf(os.Stderr, "warning: open existing instance: %s\n", openErr)
+				return 1
+			}
+			return 0
+		}
 		fmt.Fprintf(os.Stderr, "error: %s\n", err)
 		return 1
 	}

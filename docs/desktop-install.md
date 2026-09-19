@@ -45,7 +45,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1
 Uninstall: `Anvil-Agents-Desktop-Setup.exe --uninstall` or
 `install.ps1 -Uninstall`.
 
-The host listens on **`http://127.0.0.1:1738`** only. The process defaults to
+The host listens on **`http://127.0.0.1:1738`** only. If it is already running, a second launch (`anvil-desktop --open`, e.g. a second Start Menu click) opens the existing instance in the default browser and exits 0 instead of failing with a bind error. The process defaults to
 API origin `https://agents.anvil.hazyforge.io`. Sign-in uses `{apiOrigin}/ui-config.json`
 (issuer/audience). Prefer `desktop.oidcClientId` (Zitadel Native PKCE). Do not
 stay on Console `oidc.clientId` once Native exists; the sign-in gate warns if
