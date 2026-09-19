@@ -58,15 +58,21 @@ const JevModelEnvVar = "ANVIL_AGENTS_JEV_MODEL"
 // kubectl-visible observability. The user message metadata carries the same
 // decision plus confidence detail; see chatAuthorMetadataWithIntent.
 // jevNeedsManagerCreateAnnotation marks the one actionable fulfillment case:
-// a classified, non-unclear create_agent_request. It is a request flag for a
+// a classified, non-unclear create_agent_request at or above
+// jev.DestructiveActionConfidenceBar. It is a request flag for a
 // Wrapper/manager to fulfill through the existing manager-authorization
 // path — never a grant for this peer to create. Desktop Wrapper may watch
 // it later; peers must still request via requestPeer STATUS_JSON.
+// Below the bar the intent stays on jev-intent for observability and this
+// annotation is omitted.
 // jevNeedsPeerHandoffAnnotation marks the actionable handoff case: a
-// classified, non-unclear peer_handoff. It is a request flag for the
+// classified, non-unclear peer_handoff at or above
+// jev.DestructiveActionConfidenceBar. It is a request flag for the
 // harness to fulfill through the existing coordination contract
 // (coordination JSON in chat, requestPeer STATUS_JSON on the runner path)
 // — never a grant to create agents or to send outside existing paths.
+// Below the bar the intent stays on jev-intent and this annotation is
+// omitted.
 // jevNeedsToolRunAnnotation marks the actionable tool case: a classified,
 // non-unclear tool_run. It is a prompting flag for the harness to run the
 // matching configured tool (the turn's resolved AgentToolSet composition)
@@ -154,32 +160,38 @@ func (server *Server) classifyChatIntent(ctx context.Context, content string, me
 }
 
 // jevNeedsManagerCreate reports the one actionable fulfillment case: a
-// classified, non-unclear create_agent_request. Gated (unclear) turns,
-// unclassified fallbacks, and every other intent return false, so unclear
-// never produces a fulfillment signal. The flag is request-only — the
-// existing manager-authorization path (controller create-agent skill
-// injection/stripping plus Desktop isCreateAgentPrincipal) still owns the
-// decision, and peers never gain create authority from it.
+// classified, non-unclear create_agent_request at or above
+// jev.DestructiveActionConfidenceBar. Below that bar the classification
+// stays on the message/run for observability, but this returns false so
+// no needs-* flag and no STATUS_JSON hint. Gated (unclear) turns,
+// unclassified fallbacks, and every other intent also return false. The
+// flag is request-only — the existing manager-authorization path
+// (controller create-agent skill injection/stripping plus Desktop
+// isCreateAgentPrincipal) still owns the decision, and peers never gain
+// create authority from it.
 func jevNeedsManagerCreate(decision jev.Decision, classified bool) bool {
-	return classified && !decision.Unclear && decision.Intent == jev.IntentCreateAgentRequest
+	return classified && !decision.Unclear && decision.Intent == jev.IntentCreateAgentRequest && decision.MeetsDestructiveActionBar()
 }
 
 // jevNeedsPeerHandoff reports the actionable handoff case: a classified,
-// non-unclear peer_handoff. Gated (unclear) turns, unclassified fallbacks,
-// and every other intent return false, so unclear never produces a
-// fulfillment signal. The flag is request-only — fulfillment still goes
-// through the existing coordination contract (coordination JSON in chat,
+// non-unclear peer_handoff at or above jev.DestructiveActionConfidenceBar.
+// Below that bar the classification stays for observability, but this
+// returns false so no needs-* flag and no STATUS_JSON hint. Gated
+// (unclear) turns, unclassified fallbacks, and every other intent also
+// return false. The flag is request-only — fulfillment still goes through
+// the existing coordination contract (coordination JSON in chat,
 // requestPeer STATUS_JSON on the runner path), and it never authorizes
 // agent creation or sends outside existing paths.
 func jevNeedsPeerHandoff(decision jev.Decision, classified bool) bool {
-	return classified && !decision.Unclear && decision.Intent == jev.IntentPeerHandoff
+	return classified && !decision.Unclear && decision.Intent == jev.IntentPeerHandoff && decision.MeetsDestructiveActionBar()
 }
 
 // jevNeedsToolRun reports the actionable tool case: a classified,
-// non-unclear tool_run. Gated (unclear) turns, unclassified fallbacks,
-// and every other intent return false, so unclear never produces a
-// fulfillment signal. The flag is prompting-only — fulfillment still runs
-// the matching configured tool from the turn's resolved AgentToolSet
+// non-unclear tool_run. tool_run stays on the classify floor
+// (jev.DefaultConfidenceThreshold); the destructive-action bar does not
+// apply. Gated (unclear) turns, unclassified fallbacks, and every other
+// intent return false. The flag is prompting-only — fulfillment still
+// runs the matching configured tool from the turn's resolved AgentToolSet
 // composition through the harness tool step, and it never authorizes
 // invented results or tools outside the configured sets.
 func jevNeedsToolRun(decision jev.Decision, classified bool) bool {
@@ -198,8 +210,14 @@ func jevIntentPromptHint(decision jev.Decision, classified bool) string {
 	provenance := fmt.Sprintf(" (Jev intent %s, confidence %.2f, model %s)", decision.Intent, decision.Confidence, decision.Model)
 	switch decision.Intent {
 	case jev.IntentCreateAgentRequest:
+		if !jevNeedsManagerCreate(decision, classified) {
+			return "\nROUTING_HINT" + provenance + ": the author may be asking for a NEW agent, but confidence is below the destructive-action bar. Ask a brief clarifying question before acting; do not emit requestPeer STATUS_JSON and do not create, spawn, or provision an agent. create-agent stays Wrapper/manager-only.\n"
+		}
 		return "\nROUTING_HINT" + provenance + ": the author may be asking for a NEW agent. Do NOT create, spawn, provision, or claim to have created an agent from this peer path — create-agent stays Wrapper/manager-only. Peer-safe fulfillment is request-only through the existing runner STATUS_JSON path so a Wrapper/manager can fulfill (the controller strips create-agent from peers; Desktop refuses peer creation): " + jevCreateAgentStatusJSONExample + " Fill name/description from the request; otherwise reply explaining that creating an agent requires a manager and ask what the new agent should do.\n"
 	case jev.IntentPeerHandoff:
+		if !jevNeedsPeerHandoff(decision, classified) {
+			return "\nROUTING_HINT" + provenance + ": the author may want handoff to another EXISTING agent or peer, but confidence is below the destructive-action bar. Ask a brief clarifying question before acting; do not emit requestPeer STATUS_JSON, never create an agent, and never send outside existing paths.\n"
+		}
 		return "\nROUTING_HINT" + provenance + ": the author may want handoff to another EXISTING agent or peer — never a new agent. Coordinate only through the existing coordination contract: in chat, the coordination JSON this thread's config allows (messages to an allowed profile); on the runner path, the existing requestPeer STATUS_JSON shape so delivery stays inside existing paths: " + jevPeerHandoffStatusJSONExample + " Fill peerProfileName with the existing target profile and summary from the request. Never create, spawn, or provision an agent for a handoff, and never send outside existing paths. If coordination is not enabled on this thread, answer directly or explain the handoff needs an enabled coordination target.\n"
 	case jev.IntentToolRun:
 		return "\nROUTING_HINT" + provenance + ": the reply depends on a tool, command, lookup, query, build, or deploy result. Be tool-first through the existing tool surface only: run the matching configured tool from this turn's resolved AgentToolSet composition (profile/run toolSets refs, visible as status.resolvedComposition.toolSetRefs) through the harness tool step before finalizing the reply. Never invent the tool result, never claim a lookup succeeded unless a real tool confirms it, and never reach for tools outside the configured sets. If no configured tool covers the request, say what lookup is needed instead of guessing the result.\n"
@@ -232,13 +250,16 @@ func buildChatPromptWithIntent(thread chat.Thread, messages []chat.Message, cont
 // user message metadata so intent + confidence + serving model persist
 // alongside the turn for threshold tuning. Unclassified turns return
 // today's metadata byte-identical. Classified, non-unclear
-// create_agent_request turns additionally carry jevNeedsManagerCreate=true:
-// the structured outbox hint a Wrapper/manager harness can act on later
-// (Desktop Wrapper fulfillment via executeCreateAgent). Classified,
-// non-unclear peer_handoff turns additionally carry
+// create_agent_request turns at or above DestructiveActionConfidenceBar
+// additionally carry jevNeedsManagerCreate=true: the structured outbox
+// hint a Wrapper/manager harness can act on later (Desktop Wrapper
+// fulfillment via executeCreateAgent). Classified, non-unclear
+// peer_handoff turns at or above that bar additionally carry
 // jevNeedsPeerHandoff=true: the structured outbox hint a harness can act
-// on later through the existing coordination contract. Classified,
-// non-unclear tool_run turns additionally carry jevNeedsToolRun=true:
+// on later through the existing coordination contract. Below the bar
+// those intents stay in jevIntent for observability with neither flag
+// nor STATUS_JSON. Classified, non-unclear tool_run turns (classify
+// floor only) additionally carry jevNeedsToolRun=true:
 // the structured prompting hint a harness can act on later by running the
 // matching configured tool before finalizing. All three grant no
 // authority — peers still request via requestPeer STATUS_JSON, no flag
@@ -275,16 +296,18 @@ func chatAuthorMetadataWithIntent(thread chat.Thread, deferred bool, decision je
 
 // annotateChatRunWithIntent stamps the routing decision on the turn's
 // AgentRun for kubectl-visible observability. Unclassified turns leave the
-// run untouched. Classified, non-unclear create_agent_request turns
-// additionally carry the jev-needs-manager-create=true annotation so a
-// Wrapper/manager can find actionable turns with kubectl; it is a request
-// flag, never a create grant. Classified, non-unclear peer_handoff turns
+// run untouched. Classified, non-unclear create_agent_request turns at or
+// above DestructiveActionConfidenceBar additionally carry the
+// jev-needs-manager-create=true annotation so a Wrapper/manager can find
+// actionable turns with kubectl; it is a request flag, never a create
+// grant. Classified, non-unclear peer_handoff turns at or above that bar
 // additionally carry the jev-needs-peer-handoff=true annotation; it is a
 // coordination-request flag, never a create grant and never a new fanout
-// path. Classified, non-unclear tool_run turns additionally carry the
-// jev-needs-tool-run=true annotation; it is a tool-first prompting flag,
-// never a license to invent results or to call tools outside the
-// configured sets.
+// path. Below the bar those intents stay on jev-intent with neither
+// needs-* annotation. Classified, non-unclear tool_run turns (classify
+// floor only) additionally carry the jev-needs-tool-run=true annotation;
+// it is a tool-first prompting flag, never a license to invent results or
+// to call tools outside the configured sets.
 func annotateChatRunWithIntent(annotations map[string]string, decision jev.Decision, classified bool) map[string]string {
 	if !classified {
 		return annotations

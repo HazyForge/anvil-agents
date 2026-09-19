@@ -46,16 +46,23 @@ turn path (`reconcileStandingTurn` in
   `FakeBackend`/`FuncBackend` fakes. The key is never hardcoded, logged,
   or persisted.
 - `internal/jev/intent.go` — `Router.ClassifyIntent`: a `Choice` over the
-  fixed intent set with a confidence gate (default 0.5, mirroring the
-  docs' example review floor). Below the floor — or on an unknown choice —
-  the decision gates to `unclear` (human/clarification path) while keeping
-  the raw model choice visible for observability.
+  fixed intent set with a confidence gate (`DefaultConfidenceThreshold`
+  0.5, mirroring the docs' example review floor). Below the floor — or on
+  an unknown choice — the decision gates to `unclear` (human/clarification
+  path) while keeping the raw model choice visible for observability.
+  Fulfillment of `create_agent_request` and `peer_handoff` applies a
+  higher named bar (`DestructiveActionConfidenceBar` 0.8) at the
+  fulfillment site, not in the router. `tool_run` and `chat_reply` stay
+  on the classify floor. Labeled-fixture coverage (FakeBackend, no
+  network) pins high-confidence keep-class, near-floor gate to unclear,
+  and ambiguous/truncated to unclear.
 - `cmd/jev-probe` — one-message classifier printing the routing decision
   as JSON. Live with `TYPESAFE_API_KEY=... go run ./cmd/jev-probe -message
   "hello"`; fake (no network) with `-fake` or no key set.
 - Unit tests (`internal/jev/*_test.go`) — question/request validation,
-  HTTP auth/shape/retry behavior against `httptest`, and FakeBackend-style
-  routing deciding each intent plus the confidence gate.
+  HTTP auth/shape/retry behavior against `httptest`, FakeBackend-style
+  routing deciding each intent plus the confidence gate, and the labeled
+  confidence-floor fixture suite (`TestIntentConfidenceFloorLabeledFixtures`).
 - Live hook (`internal/runapi/chat_jev_intent.go`, covered by
   `internal/runapi/chat_jev_intent_test.go` with `FakeBackend`/error
   fakes, no network): `queueChatTurnAttempt` classifies the incoming
@@ -73,9 +80,11 @@ turn path (`reconcileStandingTurn` in
   names the existing `requestPeer` STATUS_JSON shape and carries a
   structured `jevNeedsManagerCreate` request flag for a Wrapper/manager to
   fulfill later (the existing manager-authorization path still owns that
-  decision) — peers never create agents. Destructive fulfillment must apply
-  a higher confidence bar in code at the fulfillment site, not in the
-  router.
+  decision) — peers never create agents. Destructive fulfillment applies
+  `jev.DestructiveActionConfidenceBar` (0.8) in code at the fulfillment
+  site (`jevNeedsManagerCreate` / `jevNeedsPeerHandoff` / STATUS_JSON
+  hints), not in the router. Below the bar the classified intent stays
+  for observability; needs-* flags and STATUS_JSON are withheld.
 - `peer_handoff` stays coordination-only. The hint names the existing-peer
   `requestPeer` STATUS_JSON shape (plus the chat coordination JSON
   equivalent) and the turn carries a structured `jevNeedsPeerHandoff`
@@ -132,9 +141,9 @@ same way).
 | Intent | Prompt | Ownership |
 | --- | --- | --- |
 | `chat_reply` | unchanged prompt path | — |
-| `create_agent_request` | hint names the concrete peer-safe request shape (`requestPeer` STATUS_JSON with `request=create-agent`, mirroring `skills/create-agent/SKILL.md` and the controller's injected skill content) and the turn carries a structured `jevNeedsManagerCreate` request flag; still Wrapper/manager-only | Request-only — peers never create agents (controller strips `create-agent` from peers; Desktop `isCreateAgentPrincipal` refuses) |
-| `peer_handoff` | hint names the concrete existing-peer `requestPeer` STATUS_JSON shape (`action=requestPeer` with `peerProfileName`/`summary`, mirroring `web/desktop/src/wrapper/requestPeer.ts` and the controller's `requestPeer` decision parsing) and the turn carries a structured `jevNeedsPeerHandoff` request flag; still coordination-only, never creation | Request-only — no new fanout; without enabled coordination, answer directly |
-| `tool_run` | tool-first hint naming the existing tool surface (the turn's resolved `AgentToolSet` composition — profile/run `toolSets` refs, `status.resolvedComposition.toolSetRefs` — run through the harness tool step before finalizing; never invent results, never tools outside the configured sets) and the turn carries a structured `jevNeedsToolRun` prompting flag | Prompting-only — no new tool API; without a covering configured tool, name the needed lookup instead of guessing |
+| `create_agent_request` | at/above `DestructiveActionConfidenceBar` (0.8): hint names the concrete peer-safe request shape (`requestPeer` STATUS_JSON with `request=create-agent`, mirroring `skills/create-agent/SKILL.md` and the controller's injected skill content) and the turn carries a structured `jevNeedsManagerCreate` request flag; still Wrapper/manager-only. Between the 0.5 classify floor and the bar: intent kept for observability, no flag, no STATUS_JSON, ask to clarify. | Request-only — peers never create agents (controller strips `create-agent` from peers; Desktop `isCreateAgentPrincipal` refuses) |
+| `peer_handoff` | at/above the destructive bar: hint names the concrete existing-peer `requestPeer` STATUS_JSON shape (`action=requestPeer` with `peerProfileName`/`summary`, mirroring `web/desktop/src/wrapper/requestPeer.ts` and the controller's `requestPeer` decision parsing) and the turn carries a structured `jevNeedsPeerHandoff` request flag; still coordination-only, never creation. Between floor and bar: intent kept, no flag, no STATUS_JSON, ask to clarify. | Request-only — no new fanout; without enabled coordination, answer directly |
+| `tool_run` | tool-first hint naming the existing tool surface (the turn's resolved `AgentToolSet` composition — profile/run `toolSets` refs, `status.resolvedComposition.toolSetRefs` — run through the harness tool step before finalizing; never invent results, never tools outside the configured sets) and the turn carries a structured `jevNeedsToolRun` prompting flag. Stays on the 0.5 classify floor; the destructive bar does not apply. | Prompting-only — no new tool API; without a covering configured tool, name the needed lookup instead of guessing |
 | `unclear` (choice, unknown output, or sub-threshold confidence) | clarification-first hint: ask a brief clarifying question; no destructive/delegating/creating acts | — |
 
 ### `create_agent_request` fulfillment slice (this change)
@@ -152,14 +161,19 @@ both sides, and this slice wires the classified intent to it.
   peers request through the existing `requestPeer` STATUS_JSON mesh
   (`skills/create-agent/SKILL.md`,
   `web/desktop/src/wrapper/requestPeer.ts`).
-- What a classified, non-`unclear` `create_agent_request` turn now carries:
-  the `ROUTING_HINT` names the exact peer-safe line the harness should
-  emit (same shape the controller skill and the Desktop parser accept):
+- What a classified, non-`unclear` `create_agent_request` at or above
+  `DestructiveActionConfidenceBar` (0.8) now carries: the `ROUTING_HINT`
+  names the exact peer-safe line the harness should emit (same shape the
+  controller skill and the Desktop parser accept):
   `ANVIL_AGENT_RUN_STATUS_JSON={"type":"decision","action":"requestPeer","request":"create-agent","name":"<dns-label>","description":"<why>","peerProfileName":"desktop-manager"}`
   (fill `name`/`description` from the request). The queued user message
   carries `jevNeedsManagerCreate: true` and the turn's AgentRun carries
   `control.anvil.hazyforge.io/jev-needs-manager-create=true` — the
   structured outbox hint a Wrapper/manager harness can consume.
+  Between `DefaultConfidenceThreshold` (0.5) and the bar: `jevIntent`
+  stays `create_agent_request` (plus `jevRawChoice` / `jevConfidence` /
+  run annotations) for observability; no needs-* flag, no STATUS_JSON
+  in the hint — ask to clarify.
 - What fulfillment looks like live: the standing assistant replies by
   emitting that `requestPeer` STATUS_JSON line through the existing runner
   output path (or, when it cannot emit STATUS_JSON, by replying that
@@ -169,13 +183,17 @@ both sides, and this slice wires the classified intent to it.
   `Requested create: <name>` receipt. Peers still cannot create: the hint
   says `Do NOT create...`, the controller strips the skill from peers,
   and Desktop refuses non-Wrapper/manager principals.
-- `unclear` (including a sub-threshold `create_agent_request` choice)
-  carries no request shape and no flag — clarification only.
+- `unclear` (including a sub-threshold `create_agent_request` choice
+  below the 0.5 classify floor) carries no request shape and no flag —
+  clarification only. A classified create below the destructive bar is
+  not `unclear`: observability keeps the class, fulfillment is withheld.
 - Unit cover (`internal/runapi/chat_jev_intent_test.go`, `FakeBackend`,
   no network): `TestChatJevCreateAgentFulfillmentSlice` (hint shape +
   message flag + run annotation), `TestChatJevUnclearCreateCarriesNoFulfillment`,
-  `TestChatJevNonCreateIntentsCarryNoManagerRequest`, plus the
-  strengthened `TestChatJevCreateAgentHintNeverAuthorizesPeerCreation`.
+  `TestChatJevNonCreateIntentsCarryNoManagerRequest`, the
+  strengthened `TestChatJevCreateAgentHintNeverAuthorizesPeerCreation`,
+  plus `TestJevDestructiveActionBarAtFulfillmentSite` and
+  `TestChatJevConfidenceFloorAndDestructiveBarLabeledFixtures`.
 - Remaining Desktop Wrapper work (not in this slice): watch
   `jevNeedsManagerCreate` on thread detail / the
   `jev-needs-manager-create` run annotation and surface a
@@ -202,33 +220,40 @@ sides, and this slice wires the classified intent to it.
   `parseRequestPeerFromLogLine` in
   `web/desktop/src/wrapper/requestPeer.ts`). No `request=create-agent`
   extension, no new fields.
-- What a classified, non-`unclear` `peer_handoff` turn now carries: the
-  `ROUTING_HINT` names the exact existing-peer line the harness should
-  emit on the runner path (same shape the controller parser and the
-  Desktop parser accept):
+- What a classified, non-`unclear` `peer_handoff` at or above
+  `DestructiveActionConfidenceBar` (0.8) now carries: the `ROUTING_HINT`
+  names the exact existing-peer line the harness should emit on the
+  runner path (same shape the controller parser and the Desktop parser
+  accept):
   `ANVIL_AGENT_RUN_STATUS_JSON={"type":"decision","action":"requestPeer","peerProfileName":"<existing-profile>","summary":"<why>"}`
   (fill `peerProfileName` with the existing target profile and `summary`
   from the request; in chat, use the coordination JSON equivalent to an
   allowed profile). The queued user message carries
   `jevNeedsPeerHandoff: true` and the turn's AgentRun carries
   `control.anvil.hazyforge.io/jev-needs-peer-handoff=true` — the
-  structured outbox hint a harness can consume.
+  structured outbox hint a harness can consume. Between the 0.5 classify
+  floor and the bar: `jevIntent` stays `peer_handoff` for observability;
+  no needs-* flag, no STATUS_JSON in the hint — ask to clarify.
 - Peers vs managers: both fulfill through the same existing coordination
   contract — a handoff never creates an agent and never sends outside
   existing paths. The hint says `Never create, spawn, or provision an
   agent for a handoff`; `create-agent` stays Wrapper/manager-only
   (controller strips the skill from peers; Desktop
   `isCreateAgentPrincipal` refuses). `unclear` (including a
-  sub-threshold `peer_handoff` choice) carries no request shape and no
-  flag — clarification only. Without enabled coordination, the harness
-  answers directly or explains the handoff needs an enabled coordination
-  target.
+  sub-threshold `peer_handoff` choice below the 0.5 classify floor)
+  carries no request shape and no flag — clarification only. A
+  classified handoff below the destructive bar is not `unclear`:
+  observability keeps the class, fulfillment is withheld. Without
+  enabled coordination, the harness answers directly or explains the
+  handoff needs an enabled coordination target.
 - Unit cover (`internal/runapi/chat_jev_intent_test.go`, `FakeBackend`,
   no network): `TestChatJevPeerHandoffFulfillmentSlice` (hint shape +
   message flag + run annotation, and no create path), 
   `TestChatJevUnclearHandoffCarriesNoFulfillment`,  `TestChatJevNonHandoffIntentsCarryNoHandoffFlag`, plus the updated
   `TestChatJevNonCreateIntentsCarryNoManagerRequest` (pins the create
-  shape absent on every other intent, handoff included).
+  shape absent on every other intent, handoff included) and the
+  destructive-bar labeled fixtures (below-bar handoff keeps class, no
+  flag, no STATUS_JSON).
 - Desktop: shipped — `EntityChatPage` surfaces a Wrapper/manager-facing
   handoff receipt on `jevNeedsPeerHandoff` user messages (plus equivalent
   existing-peer `requestPeer` STATUS_JSON hints anywhere in the thread).
@@ -266,7 +291,9 @@ to it.
   configured tool, name the needed lookup instead of guessing. The queued
   user message carries `jevNeedsToolRun: true` and the turn's AgentRun
   carries `control.anvil.hazyforge.io/jev-needs-tool-run=true` — the
-  structured prompting hint a harness can consume.
+  structured prompting hint a harness can consume. `tool_run` stays on
+  `DefaultConfidenceThreshold` (0.5); the destructive-action bar does
+  not apply, so a 0.6 tool classification still arms the prompting flag.
 - `unclear` (including a sub-threshold `tool_run` choice) carries no
   tool-first hint and no flag — clarification only. The turn carries
   neither the create nor the handoff request shape.
@@ -350,24 +377,30 @@ mirroring the manager-create pattern one intent over:
 - Queued user message metadata: `jevIntent`, `jevRawChoice`,
   `jevConfidence`, `jevModel` (serving model), `jevUnclear` — alongside the
   existing `authorKind` keys, visible in thread detail. Classified,
-  non-unclear `create_agent_request` turns additionally carry
+  non-unclear `create_agent_request` turns at or above
+  `DestructiveActionConfidenceBar` additionally carry
   `jevNeedsManagerCreate: true`: the structured outbox hint a
   Wrapper/manager harness can act on later. It grants no authority.
-  Classified, non-unclear `peer_handoff` turns additionally carry
-  `jevNeedsPeerHandoff: true`, and classified, non-unclear `tool_run`
-  turns additionally carry `jevNeedsToolRun: true` — the same
-  request/prompting-only shape, one flag per intent.
+  Classified, non-unclear `peer_handoff` turns at or above that bar
+  additionally carry `jevNeedsPeerHandoff: true`, and classified,
+  non-unclear `tool_run` turns (classify floor only) additionally carry
+  `jevNeedsToolRun: true` — the same request/prompting-only shape, one
+  flag per intent. Below the destructive bar, create/handoff keep
+  `jevIntent` for observability with no needs-* flag.
 - Turn AgentRun annotations: `control.anvil.hazyforge.io/jev-intent`,
   `.../jev-confidence`, `.../jev-model` — `kubectl`-visible per turn.
-  Classified, non-unclear `create_agent_request` turns additionally carry
+  Classified, non-unclear `create_agent_request` turns at or above the
+  destructive bar additionally carry
   `control.anvil.hazyforge.io/jev-needs-manager-create=true` so a
   Wrapper/manager can find actionable turns with `kubectl`; it is a request
   flag, never a create grant. Classified, non-unclear `peer_handoff`
-  turns additionally carry `.../jev-needs-peer-handoff=true`, and
-  classified, non-unclear `tool_run` turns additionally carry
-  `.../jev-needs-tool-run=true` — same flag-only shape.
-  `unclear` turns (including sub-threshold `create_agent_request`,
-  `peer_handoff`, and `tool_run` choices) carry none of the three flags.
+  turns at or above the bar additionally carry
+  `.../jev-needs-peer-handoff=true`, and classified, non-unclear
+  `tool_run` turns additionally carry `.../jev-needs-tool-run=true` —
+  same flag-only shape. `unclear` turns (including sub-threshold
+  `create_agent_request`, `peer_handoff`, and `tool_run` choices below
+  the 0.5 classify floor) carry none of the three flags; classified
+  create/handoff below the destructive bar also carry none.
 - The prompt hint itself carries `(Jev intent X, confidence N, model M)`.
 
 ### What still needs a live `TYPESAFE_API_KEY` probe
@@ -375,11 +408,16 @@ mirroring the manager-create pattern one intent over:
 1. Live accuracy/latency numbers per intent against real Anvil traffic
    (`TYPESAFE_API_KEY=... go run ./cmd/jev-probe -message "..."`); CI only
    drives fakes, so no live responses are pinned anywhere.
-2. Tune the confidence floor (default 0.5) — and the higher
-   destructive-action bar at the fulfillment site — from labeled traffic;
-   then pin the validated serving model ID via `chat.jevModel` (chart
-   `api.config.chat.jevModel`, or `ANVIL_AGENTS_JEV_MODEL`) instead of
-   tracking `jev-latest`:
+2. Retune `DefaultConfidenceThreshold` (0.5) and
+   `DestructiveActionConfidenceBar` (0.8, applied at
+   `jevNeedsManagerCreate` / `jevNeedsPeerHandoff` / STATUS_JSON hints;
+   `tool_run` and `chat_reply` stay on the classify floor) from live
+   labeled traffic. The FakeBackend labeled-fixture suite already pins
+   the starting floors (high-confidence keep-class, near-floor and
+   truncated/ambiguous to unclear, below-bar create/handoff classified
+   without fulfillment). Then pin the validated serving model ID via
+   `chat.jevModel` (chart `api.config.chat.jevModel`, or
+   `ANVIL_AGENTS_JEV_MODEL`) instead of tracking `jev-latest`:
 
 ```yaml
 chat:
@@ -432,16 +470,17 @@ go run ./cmd/jev-probe -fake -message "create an agent named Scout for research"
 - Verify on a live turn: thread detail carries `jevIntent`,
   `jevRawChoice`, `jevConfidence`, `jevModel`, `jevUnclear` on the queued
   user message metadata (plus `jevNeedsManagerCreate: true` on classified,
-  non-unclear `create_agent_request`), and the turn's AgentRun carries
+  non-unclear `create_agent_request` at or above
+  `DestructiveActionConfidenceBar`), and the turn's AgentRun carries
   `control.anvil.hazyforge.io/jev-intent` / `.../jev-confidence` /
   `.../jev-model` annotations (plus
   `.../jev-needs-manager-create=true` on the actionable create path;
   `kubectl get agentrun <turn> -o yaml`).
   Desktop shows the read-only `jevIntent` caption on the user message when
-  present; `create_agent_request` now also carries the request-only
-  fulfillment hint (peer-safe `requestPeer` STATUS_JSON shape in the
-  prompt plus the structured request flag) for a Wrapper/manager to
-  fulfill — peers never create agents.
+  present; above-bar `create_agent_request` now also carries the
+  request-only fulfillment hint (peer-safe `requestPeer` STATUS_JSON
+  shape in the prompt plus the structured request flag) for a
+  Wrapper/manager to fulfill — peers never create agents.
 
 ### Live Kind-local Jev intent e2e validation (2026-09-18)
 
@@ -472,16 +511,21 @@ from this run: pin it with `chat.jevModel: jev-1.13.0` (chart
 thresholds are tuned, instead of tracking `jev-latest`. Empty
 `chat.jevModel` (the default) keeps the alias behavior unchanged.
 
-Remaining after this validation: confidence-floor tuning from labeled
-traffic (plus the higher destructive-action bar at the fulfillment site).
-Desktop shows a minimal read-only `jevIntent` caption on classified user
-messages (`EntityChatPage`: intent plus confidence/model when present —
-display only). The `create_agent_request` fulfillment slice wires that
-classification to the existing peer-safe `requestPeer` STATUS_JSON shape
-plus the `jevNeedsManagerCreate` / `jev-needs-manager-create` request
-flag (see "`create_agent_request` fulfillment slice" above); remaining
-Desktop Wrapper work is to consume that flag with a manager-facing
-affordance. The validated model pin
-(`chat.jevModel: jev-1.13.0` in the Kind-local example,
+Remaining after this validation: retune `DefaultConfidenceThreshold`
+(0.5) and `DestructiveActionConfidenceBar` (0.8) from live labeled
+traffic. The FakeBackend labeled-fixture suite and the fulfillment-site
+bar (`create_agent_request` / `peer_handoff` needs-* flags and
+STATUS_JSON hints withheld below 0.8; `tool_run` and `chat_reply` stay
+on the classify floor) are landed; the gate stays deny-by-default via
+`ANVIL_AGENTS_JEV_INTENT`. Desktop shows a minimal read-only
+`jevIntent` caption on classified user messages (`EntityChatPage`:
+intent plus confidence/model when present — display only), including
+below-bar create/handoff where the class is kept for observability
+without a needs-* flag. The `create_agent_request` fulfillment slice
+wires above-bar classification to the existing peer-safe `requestPeer`
+STATUS_JSON shape plus the `jevNeedsManagerCreate` /
+`jev-needs-manager-create` request flag (see
+"`create_agent_request` fulfillment slice" above). The validated model
+pin (`chat.jevModel: jev-1.13.0` in the Kind-local example,
 `ANVIL_AGENTS_JEV_MODEL` per-process) is landed with the gate still
 deny-by-default.

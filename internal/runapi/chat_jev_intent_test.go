@@ -665,3 +665,322 @@ func TestChatJevPromptByteIdenticalWhenUnclassified(t *testing.T) {
 		t.Fatalf("unclassified metadata differs: %q vs %q", base, withIntent)
 	}
 }
+
+// TestJevDestructiveActionBarAtFulfillmentSite pins the named bar on the
+// needs-* helpers and STATUS_JSON hints. Classification (intent) is not
+// rewritten here — the router already kept it above the 0.5 floor.
+func TestJevDestructiveActionBarAtFulfillmentSite(t *testing.T) {
+	const classified = true
+	cases := []struct {
+		name           string
+		intent         string
+		confidence     float64
+		unclear        bool
+		wantCreate     bool
+		wantHandoff    bool
+		wantTool       bool
+		wantStatusJSON bool
+	}{
+		{
+			name:           "create at bar fulfills",
+			intent:         jev.IntentCreateAgentRequest,
+			confidence:     jev.DestructiveActionConfidenceBar,
+			wantCreate:     true,
+			wantStatusJSON: true,
+		},
+		{
+			name:           "create above bar fulfills",
+			intent:         jev.IntentCreateAgentRequest,
+			confidence:     0.92,
+			wantCreate:     true,
+			wantStatusJSON: true,
+		},
+		{
+			name:       "create between floor and bar keeps class without fulfillment",
+			intent:     jev.IntentCreateAgentRequest,
+			confidence: 0.6,
+		},
+		{
+			name:       "create just below bar keeps class without fulfillment",
+			intent:     jev.IntentCreateAgentRequest,
+			confidence: 0.79,
+		},
+		{
+			name:           "handoff at bar fulfills",
+			intent:         jev.IntentPeerHandoff,
+			confidence:     jev.DestructiveActionConfidenceBar,
+			wantHandoff:    true,
+			wantStatusJSON: true,
+		},
+		{
+			name:           "handoff above bar fulfills",
+			intent:         jev.IntentPeerHandoff,
+			confidence:     0.88,
+			wantHandoff:    true,
+			wantStatusJSON: true,
+		},
+		{
+			name:       "handoff between floor and bar keeps class without fulfillment",
+			intent:     jev.IntentPeerHandoff,
+			confidence: 0.6,
+		},
+		{
+			name:       "tool_run between floor and bar still fulfills",
+			intent:     jev.IntentToolRun,
+			confidence: 0.6,
+			wantTool:   true,
+		},
+		{
+			name:       "chat_reply between floor and bar has no flags",
+			intent:     jev.IntentChatReply,
+			confidence: 0.6,
+		},
+		{
+			name:       "unclear create has no flags",
+			intent:     jev.IntentUnclear,
+			confidence: 0.92,
+			unclear:    true,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			decision := jev.Decision{
+				Intent:     tc.intent,
+				RawChoice:  tc.intent,
+				Confidence: tc.confidence,
+				Unclear:    tc.unclear,
+				Model:      "fake-intent-router",
+			}
+			if got := jevNeedsManagerCreate(decision, classified); got != tc.wantCreate {
+				t.Fatalf("jevNeedsManagerCreate = %v, want %v", got, tc.wantCreate)
+			}
+			if got := jevNeedsPeerHandoff(decision, classified); got != tc.wantHandoff {
+				t.Fatalf("jevNeedsPeerHandoff = %v, want %v", got, tc.wantHandoff)
+			}
+			if got := jevNeedsToolRun(decision, classified); got != tc.wantTool {
+				t.Fatalf("jevNeedsToolRun = %v, want %v", got, tc.wantTool)
+			}
+			hint := jevIntentPromptHint(decision, classified)
+			if tc.wantStatusJSON {
+				if !strings.Contains(hint, "ANVIL_AGENT_RUN_STATUS_JSON=") {
+					t.Fatalf("fulfillment hint missing STATUS_JSON: %s", hint)
+				}
+			} else if strings.Contains(hint, "ANVIL_AGENT_RUN_STATUS_JSON=") {
+				t.Fatalf("non-fulfillment hint must not encourage STATUS_JSON: %s", hint)
+			}
+			meta := chatAuthorMetadataWithIntent(chat.Thread{Namespace: "agents", ProfileName: "grok45"}, false, decision, classified)
+			var parsed map[string]any
+			if err := json.Unmarshal(meta, &parsed); err != nil {
+				t.Fatalf("metadata: %v", err)
+			}
+			if parsed["jevIntent"] != tc.intent {
+				t.Fatalf("jevIntent = %v, want classified %q", parsed["jevIntent"], tc.intent)
+			}
+			_, hasCreate := parsed["jevNeedsManagerCreate"]
+			_, hasHandoff := parsed["jevNeedsPeerHandoff"]
+			_, hasTool := parsed["jevNeedsToolRun"]
+			if hasCreate != tc.wantCreate {
+				t.Fatalf("metadata jevNeedsManagerCreate present=%v, want %v (%s)", hasCreate, tc.wantCreate, meta)
+			}
+			if hasHandoff != tc.wantHandoff {
+				t.Fatalf("metadata jevNeedsPeerHandoff present=%v, want %v (%s)", hasHandoff, tc.wantHandoff, meta)
+			}
+			if hasTool != tc.wantTool {
+				t.Fatalf("metadata jevNeedsToolRun present=%v, want %v (%s)", hasTool, tc.wantTool, meta)
+			}
+			annotations := annotateChatRunWithIntent(nil, decision, classified)
+			_, hasCreateAnn := annotations[jevNeedsManagerCreateAnnotation]
+			_, hasHandoffAnn := annotations[jevNeedsPeerHandoffAnnotation]
+			_, hasToolAnn := annotations[jevNeedsToolRunAnnotation]
+			if hasCreateAnn != tc.wantCreate {
+				t.Fatalf("annotation manager-create present=%v, want %v", hasCreateAnn, tc.wantCreate)
+			}
+			if hasHandoffAnn != tc.wantHandoff {
+				t.Fatalf("annotation peer-handoff present=%v, want %v", hasHandoffAnn, tc.wantHandoff)
+			}
+			if hasToolAnn != tc.wantTool {
+				t.Fatalf("annotation tool-run present=%v, want %v", hasToolAnn, tc.wantTool)
+			}
+		})
+	}
+}
+
+// TestChatJevConfidenceFloorAndDestructiveBarLabeledFixtures drives the
+// chat-turn path with FakeBackend labeled traffic: high-confidence
+// keep-class, near-floor gate to unclear, truncated/ambiguous to unclear,
+// and the destructive bar withholding needs-* / STATUS_JSON while keeping
+// the classified intent. tool_run stays on the classify floor.
+func TestChatJevConfidenceFloorAndDestructiveBarLabeledFixtures(t *testing.T) {
+	type fixture struct {
+		name           string
+		message        string
+		choice         string
+		confidence     float64
+		wantIntent     string
+		wantUnclear    bool
+		wantCreate     bool
+		wantHandoff    bool
+		wantTool       bool
+		wantStatusJSON bool
+		wantClarify    bool
+	}
+	fixtures := []fixture{
+		{
+			name:           "high-confidence create scout fulfills",
+			message:        "create an agent named Scout for research",
+			choice:         jev.IntentCreateAgentRequest,
+			confidence:     1.0,
+			wantIntent:     jev.IntentCreateAgentRequest,
+			wantCreate:     true,
+			wantStatusJSON: true,
+		},
+		{
+			name:       "high-confidence chat reply unchanged",
+			message:    "hello, how are you?",
+			choice:     jev.IntentChatReply,
+			confidence: 0.9,
+			wantIntent: jev.IntentChatReply,
+		},
+		{
+			name:           "high-confidence handoff fulfills",
+			message:        "delegate this to the reviewer peer",
+			choice:         jev.IntentPeerHandoff,
+			confidence:     0.88,
+			wantIntent:     jev.IntentPeerHandoff,
+			wantHandoff:    true,
+			wantStatusJSON: true,
+		},
+		{
+			name:       "high-confidence tool run fulfills",
+			message:    "look up the kb article on refunds",
+			choice:     jev.IntentToolRun,
+			confidence: 0.85,
+			wantIntent: jev.IntentToolRun,
+			wantTool:   true,
+		},
+		{
+			name:        "near-floor create gates to unclear",
+			message:     "please create a helper agent for triage",
+			choice:      jev.IntentCreateAgentRequest,
+			confidence:  0.49,
+			wantIntent:  jev.IntentUnclear,
+			wantUnclear: true,
+			wantClarify: true,
+		},
+		{
+			name:        "truncated create gates to unclear",
+			message:     "create",
+			choice:      jev.IntentCreateAgentRequest,
+			confidence:  0.42,
+			wantIntent:  jev.IntentUnclear,
+			wantUnclear: true,
+			wantClarify: true,
+		},
+		{
+			name:        "ambiguous truncated handoff gates to unclear",
+			message:     "hand off",
+			choice:      jev.IntentPeerHandoff,
+			confidence:  0.42,
+			wantIntent:  jev.IntentUnclear,
+			wantUnclear: true,
+			wantClarify: true,
+		},
+		{
+			name:        "create between floor and bar keeps class without fulfillment",
+			message:     "please create a helper agent for triage",
+			choice:      jev.IntentCreateAgentRequest,
+			confidence:  0.6,
+			wantIntent:  jev.IntentCreateAgentRequest,
+			wantClarify: true,
+		},
+		{
+			name:        "handoff between floor and bar keeps class without fulfillment",
+			message:     "delegate this to the reviewer peer",
+			choice:      jev.IntentPeerHandoff,
+			confidence:  0.6,
+			wantIntent:  jev.IntentPeerHandoff,
+			wantClarify: true,
+		},
+		{
+			name:       "tool_run between floor and bar still fulfills",
+			message:    "look up the kb article on refunds",
+			choice:     jev.IntentToolRun,
+			confidence: 0.6,
+			wantIntent: jev.IntentToolRun,
+			wantTool:   true,
+		},
+		{
+			name:           "create at destructive bar fulfills",
+			message:        "create an agent named Scout for research",
+			choice:         jev.IntentCreateAgentRequest,
+			confidence:     jev.DestructiveActionConfidenceBar,
+			wantIntent:     jev.IntentCreateAgentRequest,
+			wantCreate:     true,
+			wantStatusJSON: true,
+		},
+	}
+	for _, fx := range fixtures {
+		t.Run(fx.name, func(t *testing.T) {
+			server := chatTestServer(t, true)
+			server.config.Chat.JevIntentEnabled = true
+			server.SetJevBackend(cannedJevIntent(t, fx.choice, fx.confidence))
+			result, promptAndMeta := queueJevTurn(t, server, fx.message)
+			parts := strings.SplitN(promptAndMeta, "\n---USERMETA---\n", 2)
+			prompt, userMeta := parts[0], parts[1]
+			if fx.wantStatusJSON {
+				if !strings.Contains(prompt, "ANVIL_AGENT_RUN_STATUS_JSON=") {
+					t.Fatalf("prompt missing STATUS_JSON: %s", prompt)
+				}
+			} else if strings.Contains(prompt, "ANVIL_AGENT_RUN_STATUS_JSON=") {
+				t.Fatalf("prompt must not encourage STATUS_JSON: %s", prompt)
+			}
+			if fx.wantClarify && !strings.Contains(strings.ToLower(prompt), "clarifying question") {
+				t.Fatalf("prompt should ask to clarify: %s", prompt)
+			}
+			var meta map[string]any
+			if err := json.Unmarshal([]byte(userMeta), &meta); err != nil {
+				t.Fatalf("user metadata is not JSON: %v", err)
+			}
+			if meta["jevIntent"] != fx.wantIntent {
+				t.Fatalf("jevIntent = %v, want %q (meta %s)", meta["jevIntent"], fx.wantIntent, userMeta)
+			}
+			if meta["jevRawChoice"] != fx.choice {
+				t.Fatalf("jevRawChoice = %v, want labeled %q", meta["jevRawChoice"], fx.choice)
+			}
+			if unclear, _ := meta["jevUnclear"].(bool); unclear != fx.wantUnclear {
+				t.Fatalf("jevUnclear = %v, want %v", meta["jevUnclear"], fx.wantUnclear)
+			}
+			_, hasCreate := meta["jevNeedsManagerCreate"]
+			_, hasHandoff := meta["jevNeedsPeerHandoff"]
+			_, hasTool := meta["jevNeedsToolRun"]
+			if hasCreate != fx.wantCreate {
+				t.Fatalf("jevNeedsManagerCreate present=%v, want %v (meta %s)", hasCreate, fx.wantCreate, userMeta)
+			}
+			if hasHandoff != fx.wantHandoff {
+				t.Fatalf("jevNeedsPeerHandoff present=%v, want %v (meta %s)", hasHandoff, fx.wantHandoff, userMeta)
+			}
+			if hasTool != fx.wantTool {
+				t.Fatalf("jevNeedsToolRun present=%v, want %v (meta %s)", hasTool, fx.wantTool, userMeta)
+			}
+			stored := &agentsv1alpha1.AgentRun{}
+			if err := server.writes.Get(context.Background(), types.NamespacedName{Namespace: "agents", Name: result.Turn.RunName}, stored); err != nil {
+				t.Fatal(err)
+			}
+			if stored.Annotations[jevIntentAnnotation] != fx.wantIntent {
+				t.Fatalf("run annotation %q = %q, want %q", jevIntentAnnotation, stored.Annotations[jevIntentAnnotation], fx.wantIntent)
+			}
+			_, hasCreateAnn := stored.Annotations[jevNeedsManagerCreateAnnotation]
+			_, hasHandoffAnn := stored.Annotations[jevNeedsPeerHandoffAnnotation]
+			_, hasToolAnn := stored.Annotations[jevNeedsToolRunAnnotation]
+			if hasCreateAnn != fx.wantCreate {
+				t.Fatalf("run manager-create present=%v, want %v", hasCreateAnn, fx.wantCreate)
+			}
+			if hasHandoffAnn != fx.wantHandoff {
+				t.Fatalf("run peer-handoff present=%v, want %v", hasHandoffAnn, fx.wantHandoff)
+			}
+			if hasToolAnn != fx.wantTool {
+				t.Fatalf("run tool-run present=%v, want %v", hasToolAnn, fx.wantTool)
+			}
+		})
+	}
+}

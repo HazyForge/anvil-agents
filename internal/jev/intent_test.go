@@ -165,3 +165,153 @@ func TestKeywordFakeBackendRoutes(t *testing.T) {
 		}
 	}
 }
+
+func TestDestructiveBarIsStricterThanClassifyFloor(t *testing.T) {
+	if DestructiveActionConfidenceBar <= DefaultConfidenceThreshold {
+		t.Fatalf("DestructiveActionConfidenceBar = %v, want > DefaultConfidenceThreshold %v", DestructiveActionConfidenceBar, DefaultConfidenceThreshold)
+	}
+}
+
+func TestDecisionMeetsDestructiveActionBar(t *testing.T) {
+	cases := []struct {
+		confidence float64
+		want       bool
+	}{
+		{confidence: 0.0, want: false},
+		{confidence: DefaultConfidenceThreshold, want: false},
+		{confidence: 0.79, want: false},
+		{confidence: DestructiveActionConfidenceBar, want: true},
+		{confidence: 0.92, want: true},
+		{confidence: 1.0, want: true},
+	}
+	for _, tc := range cases {
+		got := Decision{Confidence: tc.confidence}.MeetsDestructiveActionBar()
+		if got != tc.want {
+			t.Fatalf("confidence %v: MeetsDestructiveActionBar = %v, want %v", tc.confidence, got, tc.want)
+		}
+	}
+}
+
+// TestIntentConfidenceFloorLabeledFixtures pins classify-floor behavior
+// against labeled (message, canned choice, confidence) traffic. FakeBackend
+// only — no network. High-confidence rows keep the class; near-floor and
+// ambiguous/truncated rows gate to unclear while RawChoice stays on the
+// labeled model output for observability.
+func TestIntentConfidenceFloorLabeledFixtures(t *testing.T) {
+	type fixture struct {
+		name        string
+		message     string
+		recent      []string
+		choice      string
+		confidence  float64
+		wantIntent  string
+		wantUnclear bool
+	}
+	fixtures := []fixture{
+		{
+			name:       "high-confidence keep-class: create scout",
+			message:    "create an agent named Scout for research",
+			choice:     IntentCreateAgentRequest,
+			confidence: 1.0,
+			wantIntent: IntentCreateAgentRequest,
+		},
+		{
+			name:       "high-confidence keep-class: chat reply",
+			message:    "hello, how are you?",
+			choice:     IntentChatReply,
+			confidence: 0.9,
+			wantIntent: IntentChatReply,
+		},
+		{
+			name:       "high-confidence keep-class: peer handoff",
+			message:    "delegate this to the reviewer peer",
+			choice:     IntentPeerHandoff,
+			confidence: 0.88,
+			wantIntent: IntentPeerHandoff,
+		},
+		{
+			name:       "high-confidence keep-class: tool run",
+			message:    "look up the kb article on refunds",
+			choice:     IntentToolRun,
+			confidence: 0.85,
+			wantIntent: IntentToolRun,
+		},
+		{
+			name:       "at classify floor keeps class",
+			message:    "please create a helper agent for triage",
+			choice:     IntentCreateAgentRequest,
+			confidence: DefaultConfidenceThreshold,
+			wantIntent: IntentCreateAgentRequest,
+		},
+		{
+			name:        "near-floor gate to unclear",
+			message:     "please create a helper agent for triage",
+			choice:      IntentCreateAgentRequest,
+			confidence:  0.49,
+			wantIntent:  IntentUnclear,
+			wantUnclear: true,
+		},
+		{
+			name:        "truncated create gates to unclear",
+			message:     "create",
+			choice:      IntentCreateAgentRequest,
+			confidence:  0.42,
+			wantIntent:  IntentUnclear,
+			wantUnclear: true,
+		},
+		{
+			name:        "truncated handoff gates to unclear",
+			message:     "hand off",
+			choice:      IntentPeerHandoff,
+			confidence:  0.42,
+			wantIntent:  IntentUnclear,
+			wantUnclear: true,
+		},
+		{
+			name:        "truncated tool run gates to unclear",
+			message:     "run it",
+			choice:      IntentToolRun,
+			confidence:  0.3,
+			wantIntent:  IntentUnclear,
+			wantUnclear: true,
+		},
+		{
+			name:        "ambiguous unclear choice stays unclear",
+			message:     "do it",
+			recent:      []string{"should we create a scout or hand this to the reviewer?"},
+			choice:      IntentUnclear,
+			confidence:  0.7,
+			wantIntent:  IntentUnclear,
+			wantUnclear: true,
+		},
+		{
+			name:        "ambiguous mid-sentence truncated gates to unclear",
+			message:     "maybe create something?",
+			choice:      IntentCreateAgentRequest,
+			confidence:  0.48,
+			wantIntent:  IntentUnclear,
+			wantUnclear: true,
+		},
+	}
+	for _, fx := range fixtures {
+		t.Run(fx.name, func(t *testing.T) {
+			router := &Router{Backend: cannedChoice(t, fx.choice, fx.confidence)}
+			decision, err := router.ClassifyIntent(context.Background(), MessageContext{Message: fx.message, Recent: fx.recent})
+			if err != nil {
+				t.Fatalf("ClassifyIntent: %v", err)
+			}
+			if decision.RawChoice != fx.choice {
+				t.Fatalf("rawChoice = %q, want labeled %q", decision.RawChoice, fx.choice)
+			}
+			if decision.Confidence != fx.confidence {
+				t.Fatalf("confidence = %v, want labeled %v", decision.Confidence, fx.confidence)
+			}
+			if decision.Intent != fx.wantIntent {
+				t.Fatalf("intent = %q, want %q (raw %q conf %.2f)", decision.Intent, fx.wantIntent, decision.RawChoice, decision.Confidence)
+			}
+			if decision.Unclear != fx.wantUnclear {
+				t.Fatalf("unclear = %v, want %v", decision.Unclear, fx.wantUnclear)
+			}
+		})
+	}
+}
