@@ -128,6 +128,31 @@ func extractChatReply(backend agents.AgentRunHarnessBackendKind, output string) 
 			// its tool trace. Accept only that explicit final field.
 			if backend == agents.AgentRunHarnessBackendGrokBuild && typ == "" && name == "" && replyString(event["stopReason"]) == "end_turn" {
 				final = replyString(event["text"])
+				if final == "" {
+					final = replyString(event["response"])
+				}
+				if final == "" {
+					final = replyContent(event["content"])
+				}
+			}
+			// Grok may emit message_end / message envelopes (same vocabulary as
+			// other xAI CLIs) — take the last assistant text completion only.
+			if backend == agents.AgentRunHarnessBackendGrokBuild && (typ == "message_end" || typ == "message") {
+				var message struct {
+					Role       string `json:"role"`
+					StopReason string `json:"stopReason"`
+					Content    json.RawMessage `json:"content"`
+					Text       string `json:"text"`
+				}
+				if json.Unmarshal(event["message"], &message) == nil && message.Role == "assistant" {
+					if message.StopReason == "" || message.StopReason == "end_turn" || message.StopReason == "stop" || message.StopReason == "length" {
+						if t := strings.TrimSpace(message.Text); t != "" {
+							final = t
+						} else if t := strings.TrimSpace(replyContent(message.Content)); t != "" {
+							final = t
+						}
+					}
+				}
 			}
 			if replyString(event["role"]) == "assistant" {
 				parts = append(parts, replyContent(event["content"]))
@@ -139,6 +164,15 @@ func extractChatReply(backend agents.AgentRunHarnessBackendKind, output string) 
 	}
 	if text := strings.TrimSpace(strings.Join(parts, "\n")); text != "" {
 		return text, nil
+	}
+	// Grok Job/standing turns often mix structured tool frames with a trailing
+	// plain-text assistant answer. Prefer identifiable JSON above, but when
+	// nothing parsed, keep non-JSON plain lines so a Succeeded run still
+	// persists a reply instead of "harness completed without a persisted reply".
+	if backend == agents.AgentRunHarnessBackendGrokBuild {
+		if text := strings.TrimSpace(strings.Join(plain, "\n")); text != "" {
+			return text, nil
+		}
 	}
 	if !structured && backend != agents.AgentRunHarnessBackendHermesAgent && backend != agents.AgentRunHarnessBackendCodex && backend != agents.AgentRunHarnessBackendAgy && backend != agents.AgentRunHarnessBackendPrimeAgent {
 		if text := strings.TrimSpace(strings.Join(plain, "\n")); text != "" {

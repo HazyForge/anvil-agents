@@ -33,7 +33,9 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
     go build -trimpath -ldflags="-s -w" -o /out/anvil-agents-api ./cmd/anvil-agents-api
 
-FROM gcr.io/distroless/static-debian12:nonroot
+# base (not static): standing ProcessBackend may exec PATH harness CLIs
+# (e.g. grok) that are dynamically linked against glibc.
+FROM gcr.io/distroless/base-debian12:nonroot
 LABEL org.opencontainers.image.source=https://github.com/HazyForge/anvil-agents
 COPY --from=build /out/anvil-agents /usr/local/bin/anvil-agents
 COPY --from=build /out/anvil-agents-api /usr/local/bin/anvil-agents-api

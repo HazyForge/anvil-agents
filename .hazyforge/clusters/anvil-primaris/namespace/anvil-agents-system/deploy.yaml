@@ -55,7 +55,7 @@ extraRBACRules:
     resources: [applicationreleases, artifactbuilds, iosbuilds, anviltasks, testruns]
     verbs: [get, list, watch]
 archive:
-  restartToken: standing-chat-20260914
+  restartToken: standing-live-20260919
   databaseURLSecret:
     name: anvilhub-inventory-database
     key: database-url
@@ -68,6 +68,16 @@ api:
   extraEnv:
     - name: DISABLE_HTTP2
       value: "true"
+    # Standing ProcessBackend: resolve grok from the init-copied CLI dir and
+    # keep prompt-file CreateTemp + GROK_HOME writable under readOnlyRootFilesystem.
+    - name: PATH
+      value: /opt/anvil/standing-cli:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+    - name: HOME
+      value: /tmp/anvil-standing-home
+    - name: GROK_HOME
+      value: /tmp/anvil-standing-home/.grok
+    - name: TMPDIR
+      value: /tmp
   # API-only chat fixes can roll independently of the healthy controller.
   image:
     reference: ghcr.io/hazyforge/anvil-agents@sha256:7e85685edacae5dd34c923977260b6ab737956ba4eeba5c58b3875c01f4cfa3e
@@ -79,10 +89,45 @@ api:
         items:
           - key: ca.crt
             path: ca.crt
+    # Standing ProcessBackend scratch: prompt files + GROK_HOME seed target.
+    - name: standing-tmp
+      emptyDir: {}
+    - name: standing-home
+      emptyDir: {}
+    - name: standing-cli
+      emptyDir: {}
   extraVolumeMounts:
     - name: chat-database-ca
       mountPath: /etc/anvilhub/inventory-database
       readOnly: true
+    - name: standing-tmp
+      mountPath: /tmp
+    - name: standing-home
+      mountPath: /tmp/anvil-standing-home
+    - name: standing-cli
+      mountPath: /opt/anvil/standing-cli
+      readOnly: true
+  # Copy grok from the reviewed runner image into standing-cli emptyDir so the
+  # distroless/base API can exec it. Auth is NOT copied here — seed GROK_HOME
+  # separately (see docs/standing-inprocess-harness.md Primaris section).
+  initContainers:
+    - name: standing-cli-grok
+      image: ghcr.io/hazyforge/anvil-agent-run-grok-build@sha256:86b8d1a905c5e36af110fd880f2bb3db3efec5bc732bd16bff9ce8dc46f77f22
+      imagePullPolicy: IfNotPresent
+      command: ["/bin/sh", "-c"]
+      args:
+        - install -d -m 0755 /standing-cli && install -m 0755 /usr/local/bin/grok /standing-cli/grok && chmod 0755 /standing-cli
+      volumeMounts:
+        - name: standing-cli
+          mountPath: /standing-cli
+      securityContext:
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop: [ALL]
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        readOnlyRootFilesystem: true
   # Keep the currently deployed scheduling and isolation settings explicit.
   replicaCount: 1
   # PostgreSQL admits this existing worker egress address.
@@ -93,6 +138,9 @@ api:
   resources: {}
   podSecurityContext:
     runAsNonRoot: true
+    runAsUser: 65532
+    runAsGroup: 65532
+    fsGroup: 65532
     seccompProfile:
       type: RuntimeDefault
   securityContext:
@@ -125,6 +173,12 @@ api:
       # The API receives ANVIL_AGENTS_CHAT_DATABASE_URL via secretKeyRef from
       # archive.databaseURLSecret above. No database URI belongs in this file.
       enabled: true
+    # Standing in-process + WebSocket is the primary interactive Desktop path
+    # (see docs/standing-inprocess-harness.md). Gate on grants claim/status
+    # RBAC so the API can own InProcess turns. Jobs remain default for
+    # scouts/batch; Substrate/ATE stays optional.
+    standing:
+      liveEnabled: true
     authorization:
       roleClaims: []
       roleObjectClaims:
@@ -508,6 +562,63 @@ extraObjects:
         summary: Answer user messages and coordinate with explicitly permitted peers.
       harnessProfileRef:
         name: desktop-agy
+      harness:
+        intent: observe
+        systemPrompt: |
+          Answer the user's message clearly and concisely. Work in text only.
+          Do not mutate files, repositories, services, or cluster resources;
+          do not execute shell commands, contact third-party services, or spend money.
+          Coordinate only with peers explicitly permitted by this conversation.
+
+  - apiVersion: control.anvil.hazyforge.io/v1alpha1
+    kind: AgentHarnessProfile
+    metadata:
+      name: desktop-standing-grok
+      namespace: anvilhub
+      labels:
+        app.kubernetes.io/part-of: desktop-chat
+        control.anvil.hazyforge.io/application: desktop-chat
+        control.anvil.hazyforge.io/ownership: helm
+        control.anvil.hazyforge.io/standing: "true"
+    spec:
+      description: Standing InProcess Grok Build for snappy Desktop chat (no Job cold start). Jobs stay default for scouts/batch.
+      backend:
+        kind: grokBuild
+        modelProvider: xai
+        providerAuthMode: oauth
+        grokBuild:
+          model: grok-4.5
+          reasoningEffort: low
+      execution:
+        runtime: InProcess
+        serviceAccountName: anvil-opencode-observe
+        # No substrate section — Substrate/ATE stays optional.
+        timeoutSeconds: 120
+        resources:
+          requests:
+            cpu: 50m
+            memory: 128Mi
+          limits:
+            cpu: "1"
+            memory: 512Mi
+  - apiVersion: control.anvil.hazyforge.io/v1alpha1
+    kind: AgentRunProfile
+    metadata:
+      name: desktop-standing-assistant
+      namespace: anvilhub
+      labels:
+        app.kubernetes.io/part-of: desktop-chat
+        control.anvil.hazyforge.io/application: desktop-chat
+        control.anvil.hazyforge.io/ownership: helm
+        control.anvil.hazyforge.io/standing: "true"
+    spec:
+      description: Interactive Desktop assistant on the standing InProcess Grok path.
+      scope:
+        applicationRef:
+          name: desktop-chat
+        summary: Answer user Desktop chat quickly via standing in-process harness. No cluster mutations.
+      harnessProfileRef:
+        name: desktop-standing-grok
       harness:
         intent: observe
         systemPrompt: |
