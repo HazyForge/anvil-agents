@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import type { ChatChip } from "../api/types.chat";
 import {
   CREATE_AGENT_SKILL_DESCRIPTION,
@@ -20,6 +20,13 @@ interface Props {
   chatEnabled: boolean;
   threadId?: string;
   pendingRequests?: CreateAgentRequest[];
+  /**
+   * Jev manager-create prefill: when EntityChatPage spots
+   * jevNeedsManagerCreate on a user message, it hands the parsed
+   * name/description here. Bumped nonce applies the prefill into the
+   * form fields; undefined clears nothing.
+   */
+  prefill?: { name?: string; description?: string; systemPrompt?: string; nonce: number } | null;
   onCreated?: (result: CreateAgentResult) => void;
 }
 
@@ -31,6 +38,7 @@ export function CreateAgentPanel({
   chatEnabled,
   threadId,
   pendingRequests = [],
+  prefill = null,
   onCreated,
 }: Props) {
   const [name, setName] = useState("");
@@ -40,6 +48,17 @@ export function CreateAgentPanel({
   const [receipt, setReceipt] = useState<string | null>(null);
   const [chips, setChips] = useState<ChatChip[]>([]);
   const allowed = isCreateAgentPrincipal(principal);
+
+  // Apply a manager-create prefill once per nonce. The panel stays the
+  // single create-agent fulfillment surface (executeCreateAgent); this
+  // only fills the existing Name/Description/System prompt inputs.
+  useEffect(() => {
+    if (!prefill) return;
+    if (typeof prefill.name === "string") setName(prefill.name);
+    if (typeof prefill.description === "string") setDescription(prefill.description);
+    if (typeof prefill.systemPrompt === "string") setSystemPrompt(prefill.systemPrompt);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [prefill?.nonce]);
 
   async function onSubmit(event?: FormEvent) {
     event?.preventDefault();
@@ -71,7 +90,7 @@ export function CreateAgentPanel({
   }
 
   return (
-    <section className="panel create-agent-panel">
+    <section className="panel create-agent-panel" id="create-agent-panel">
       <div className="panel-header">
         <h2 className="panel-title">{CREATE_AGENT_TOOL}</h2>
         <span className={`chip ${allowed ? "chip-ok" : "chip-fail"}`}>

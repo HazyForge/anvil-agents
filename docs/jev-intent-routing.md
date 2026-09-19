@@ -174,6 +174,31 @@ both sides, and this slice wires the classified intent to it.
   Wrapper/manager; keep the read-only `jevIntent` caption as-is for
   peers. No peer create path.
 
+### Desktop Wrapper affordance (shipped)
+
+`EntityChatPage` consumes the request flag from thread detail:
+
+- Detection: `messageNeedsManagerCreate` in
+  `web/desktop/src/wrapper/jevManagerCreate.ts` reads user-message
+  metadata `jevNeedsManagerCreate === true` (strict boolean); the same
+  module covers the run annotation
+  `control.anvil.hazyforge.io/jev-needs-manager-create=true` via
+  `runNeedsManagerCreate` for kubectl-found turns.
+- Manager path: when `mayShowCreateAffordance` (flag AND
+  `isCreateAgentPrincipal`) holds, the user bubble shows a
+  `Requested create — needs a manager to fulfill` receipt with a
+  `Review in create form` button. The button prefills the existing
+  `CreateAgentPanel` (`suggestCreateAgentInput` parses the message text
+  with the existing `parseCreateAgentIntent` — no invented names; vague
+  requests leave the form blank) and scrolls to it. Fulfillment still
+  runs through the existing `executeCreateAgent` composition POST behind
+  the panel's Wrapper/manager + composition-write gates.
+- Peer path: flag or not, non-Wrapper/manager principals see the
+  read-only `jevIntent` caption only — never a create button.
+- Cover: `hack/desktop-jev-manager-create.mjs` (wired into
+  `make desktop-chat-tests`): strict flag/annotation matching, latest
+  flagged message, Wrapper/manager-only gating, parse-without-invention.
+
 ### Observability (threshold tuning)
 
 - Queued user message metadata: `jevIntent`, `jevRawChoice`,

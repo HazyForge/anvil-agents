@@ -99,6 +99,7 @@ desktop-typecheck:
 desktop-chat-tests:
 	node --experimental-strip-types --test hack/desktop-chat-reliability.mjs
 	node --experimental-strip-types --test hack/desktop-create-agent.mjs
+	node --experimental-strip-types --test hack/desktop-jev-manager-create.mjs
 
 # Copy built desktop assets into the go:embed tree used by anvil-desktop.
 # WARNING: replaces committed stub files under internal/desktop/uifs/dist.
