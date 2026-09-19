@@ -69,10 +69,13 @@ turn path (`reconcileStandingTurn` in
 - Jev never replaces chat generation; there is no generation path here.
 - Substrate is untouched and out of scope.
 - `create-agent` stays Wrapper/manager-only. The `create_agent_request`
-  intent is classification only: fulfillment must request a manager (the
-  existing manager-authorization path still owns that decision) — peers
-  never create agents. Destructive fulfillment must apply a higher
-  confidence bar in code at the fulfillment site, not in the router.
+  intent is classification plus a request-only fulfillment hint: the turn
+  names the existing `requestPeer` STATUS_JSON shape and carries a
+  structured `jevNeedsManagerCreate` request flag for a Wrapper/manager to
+  fulfill later (the existing manager-authorization path still owns that
+  decision) — peers never create agents. Destructive fulfillment must apply
+  a higher confidence bar in code at the fulfillment site, not in the
+  router.
 - No invented live API responses: fakes in CI, live only behind the env key.
 
 ## The live hook (wired)
@@ -119,18 +122,73 @@ same way).
 | Intent | Prompt | Ownership |
 | --- | --- | --- |
 | `chat_reply` | unchanged prompt path | — |
-| `create_agent_request` | hint routes toward requesting a Wrapper/manager through the existing manager-authorization path; names the Wrapper/manager-only boundary | Classification only — peers never create agents |
+| `create_agent_request` | hint names the concrete peer-safe request shape (`requestPeer` STATUS_JSON with `request=create-agent`, mirroring `skills/create-agent/SKILL.md` and the controller's injected skill content) and the turn carries a structured `jevNeedsManagerCreate` request flag; still Wrapper/manager-only | Request-only — peers never create agents (controller strips `create-agent` from peers; Desktop `isCreateAgentPrincipal` refuses) |
 | `peer_handoff` | soft hint to coordinate only through the existing coordination contract (`requestPeer` delivery); no send outside existing paths; without enabled coordination, answer directly | No new fanout |
 | `tool_run` | tool-first hint: run the harness tool step before finalizing, else note the needed lookup | Prompt hint only |
 | `unclear` (choice, unknown output, or sub-threshold confidence) | clarification-first hint: ask a brief clarifying question; no destructive/delegating/creating acts | — |
+
+### `create_agent_request` fulfillment slice (this change)
+
+No new tool or API was invented: the peer-safe surface already exists on
+both sides, and this slice wires the classified intent to it.
+
+- Existing surfaces found: the controller injects the baked-in
+  `create-agent` skill into Wrapper/manager profiles and strips it from
+  everyone else (`internal/controller/create_agent.go`,
+  `profileMayCreateAgent`); Desktop Wrapper fulfills creation through the
+  composition API behind `isCreateAgentPrincipal`
+  (`web/desktop/src/wrapper/createAgent.ts`,
+  `createAgentPolicy.ts`) and refuses peer calls with a visible receipt;
+  peers request through the existing `requestPeer` STATUS_JSON mesh
+  (`skills/create-agent/SKILL.md`,
+  `web/desktop/src/wrapper/requestPeer.ts`).
+- What a classified, non-`unclear` `create_agent_request` turn now carries:
+  the `ROUTING_HINT` names the exact peer-safe line the harness should
+  emit (same shape the controller skill and the Desktop parser accept):
+  `ANVIL_AGENT_RUN_STATUS_JSON={"type":"decision","action":"requestPeer","request":"create-agent","name":"<dns-label>","description":"<why>","peerProfileName":"desktop-manager"}`
+  (fill `name`/`description` from the request). The queued user message
+  carries `jevNeedsManagerCreate: true` and the turn's AgentRun carries
+  `control.anvil.hazyforge.io/jev-needs-manager-create=true` — the
+  structured outbox hint a Wrapper/manager harness can consume.
+- What fulfillment looks like live: the standing assistant replies by
+  emitting that `requestPeer` STATUS_JSON line through the existing runner
+  output path (or, when it cannot emit STATUS_JSON, by replying that
+  creating an agent requires a manager and asking what the new agent
+  should do). A Wrapper/manager harness fulfills it with the existing
+  `executeCreateAgent` composition POST; Desktop shows the existing
+  `Requested create: <name>` receipt. Peers still cannot create: the hint
+  says `Do NOT create...`, the controller strips the skill from peers,
+  and Desktop refuses non-Wrapper/manager principals.
+- `unclear` (including a sub-threshold `create_agent_request` choice)
+  carries no request shape and no flag — clarification only.
+- Unit cover (`internal/runapi/chat_jev_intent_test.go`, `FakeBackend`,
+  no network): `TestChatJevCreateAgentFulfillmentSlice` (hint shape +
+  message flag + run annotation), `TestChatJevUnclearCreateCarriesNoFulfillment`,
+  `TestChatJevNonCreateIntentsCarryNoManagerRequest`, plus the
+  strengthened `TestChatJevCreateAgentHintNeverAuthorizesPeerCreation`.
+- Remaining Desktop Wrapper work (not in this slice): watch
+  `jevNeedsManagerCreate` on thread detail / the
+  `jev-needs-manager-create` run annotation and surface a
+  manager-facing affordance (e.g. prefill the existing `CreateAgentPanel`
+  or raise a `Requested create` receipt) when the signed-in principal is
+  Wrapper/manager; keep the read-only `jevIntent` caption as-is for
+  peers. No peer create path.
 
 ### Observability (threshold tuning)
 
 - Queued user message metadata: `jevIntent`, `jevRawChoice`,
   `jevConfidence`, `jevModel` (serving model), `jevUnclear` — alongside the
-  existing `authorKind` keys, visible in thread detail.
+  existing `authorKind` keys, visible in thread detail. Classified,
+  non-unclear `create_agent_request` turns additionally carry
+  `jevNeedsManagerCreate: true`: the structured outbox hint a
+  Wrapper/manager harness can act on later. It grants no authority.
 - Turn AgentRun annotations: `control.anvil.hazyforge.io/jev-intent`,
   `.../jev-confidence`, `.../jev-model` — `kubectl`-visible per turn.
+  Classified, non-unclear `create_agent_request` turns additionally carry
+  `control.anvil.hazyforge.io/jev-needs-manager-create=true` so a
+  Wrapper/manager can find actionable turns with `kubectl`; it is a request
+  flag, never a create grant. `unclear` turns (including sub-threshold
+  `create_agent_request` choices) carry neither flag.
 - The prompt hint itself carries `(Jev intent X, confidence N, model M)`.
 
 ### What still needs a live `TYPESAFE_API_KEY` probe
@@ -194,13 +252,17 @@ go run ./cmd/jev-probe -fake -message "create an agent named Scout for research"
 
 - Verify on a live turn: thread detail carries `jevIntent`,
   `jevRawChoice`, `jevConfidence`, `jevModel`, `jevUnclear` on the queued
-  user message metadata, and the turn's AgentRun carries
+  user message metadata (plus `jevNeedsManagerCreate: true` on classified,
+  non-unclear `create_agent_request`), and the turn's AgentRun carries
   `control.anvil.hazyforge.io/jev-intent` / `.../jev-confidence` /
-  `.../jev-model` annotations (`kubectl get agentrun <turn> -o yaml`).
+  `.../jev-model` annotations (plus
+  `.../jev-needs-manager-create=true` on the actionable create path;
+  `kubectl get agentrun <turn> -o yaml`).
   Desktop shows the read-only `jevIntent` caption on the user message when
-  present (no fulfillment action — `create_agent_request` still routes to
-  requesting a Wrapper/manager through the existing manager-authorization
-  path; peers never create agents).
+  present; `create_agent_request` now also carries the request-only
+  fulfillment hint (peer-safe `requestPeer` STATUS_JSON shape in the
+  prompt plus the structured request flag) for a Wrapper/manager to
+  fulfill — peers never create agents.
 
 ### Live Kind-local Jev intent e2e validation (2026-09-18)
 
@@ -220,7 +282,8 @@ First live end-to-end validation of the wired hook (Austin, 2026-09-18
   0.5 floor — the confidence gate working as designed.
 - Plane boundaries held: standing in-process + WebSocket stayed the primary
   interactive path (Jobs for scouts/batch, Substrate optional), and
-  `create-agent` stayed Wrapper/manager-only (classification only).
+  `create-agent` stayed Wrapper/manager-only (classification plus the
+  request-only hint — no peer creation).
 
 Serving-model note: the live decision reported `jev-1.13.0` via the
 `jev-latest` alias (`jev.DefaultModel`; the turn path passed no model
@@ -234,7 +297,12 @@ Remaining after this validation: confidence-floor tuning from labeled
 traffic (plus the higher destructive-action bar at the fulfillment site).
 Desktop shows a minimal read-only `jevIntent` caption on classified user
 messages (`EntityChatPage`: intent plus confidence/model when present —
-display only, no fulfillment action). The validated model pin
+display only). The `create_agent_request` fulfillment slice wires that
+classification to the existing peer-safe `requestPeer` STATUS_JSON shape
+plus the `jevNeedsManagerCreate` / `jev-needs-manager-create` request
+flag (see "`create_agent_request` fulfillment slice" above); remaining
+Desktop Wrapper work is to consume that flag with a manager-facing
+affordance. The validated model pin
 (`chat.jevModel: jev-1.13.0` in the Kind-local example,
 `ANVIL_AGENTS_JEV_MODEL` per-process) is landed with the gate still
 deny-by-default.

@@ -24,8 +24,12 @@ import (
 // never fails the turn. Jev never generates chat text; the harness chat
 // model behind the standing session still generates exactly as today.
 // create-agent stays Wrapper/manager-only: the create_agent_request hint
-// routes toward requesting a manager through the existing
-// manager-authorization path, never toward peer creation. See
+// names the concrete peer-safe request shape (requestPeer STATUS_JSON with
+// request=create-agent, mirroring skills/create-agent/SKILL.md and the
+// controller's injected skill content) and the turn carries a structured
+// request flag (user-message jevNeedsManagerCreate plus the
+// jev-needs-manager-create AgentRun annotation) for a Wrapper/manager to
+// fulfill later — never peer creation. See
 // docs/jev-intent-routing.md.
 
 // JevIntentEnvVar enables chat.jevIntentEnabled from the process
@@ -41,10 +45,17 @@ const JevModelEnvVar = "ANVIL_AGENTS_JEV_MODEL"
 // Annotation keys recording the routing decision on the turn's AgentRun for
 // kubectl-visible observability. The user message metadata carries the same
 // decision plus confidence detail; see chatAuthorMetadataWithIntent.
+// jevNeedsManagerCreateAnnotation marks the one actionable fulfillment case:
+// a classified, non-unclear create_agent_request. It is a request flag for a
+// Wrapper/manager to fulfill through the existing manager-authorization
+// path — never a grant for this peer to create. Desktop Wrapper may watch
+// it later; peers must still request via requestPeer STATUS_JSON.
 const (
-	jevIntentAnnotation     = "control.anvil.hazyforge.io/jev-intent"
-	jevConfidenceAnnotation = "control.anvil.hazyforge.io/jev-confidence"
-	jevModelAnnotation      = "control.anvil.hazyforge.io/jev-model"
+	jevIntentAnnotation             = "control.anvil.hazyforge.io/jev-intent"
+	jevConfidenceAnnotation         = "control.anvil.hazyforge.io/jev-confidence"
+	jevModelAnnotation              = "control.anvil.hazyforge.io/jev-model"
+	jevNeedsManagerCreateAnnotation = "control.anvil.hazyforge.io/jev-needs-manager-create"
+	jevCreateAgentStatusJSONExample = `ANVIL_AGENT_RUN_STATUS_JSON={"type":"decision","action":"requestPeer","request":"create-agent","name":"<dns-label>","description":"<why>","peerProfileName":"desktop-manager"}`
 )
 
 // jevClassifyTimeout bounds one routing decision. System One answers in
@@ -117,6 +128,17 @@ func (server *Server) classifyChatIntent(ctx context.Context, content string, me
 	return decision, true
 }
 
+// jevNeedsManagerCreate reports the one actionable fulfillment case: a
+// classified, non-unclear create_agent_request. Gated (unclear) turns,
+// unclassified fallbacks, and every other intent return false, so unclear
+// never produces a fulfillment signal. The flag is request-only — the
+// existing manager-authorization path (controller create-agent skill
+// injection/stripping plus Desktop isCreateAgentPrincipal) still owns the
+// decision, and peers never gain create authority from it.
+func jevNeedsManagerCreate(decision jev.Decision, classified bool) bool {
+	return classified && !decision.Unclear && decision.Intent == jev.IntentCreateAgentRequest
+}
+
 // jevIntentPromptHint renders the minimal per-intent routing hint. Empty
 // means unchanged behavior: chat_reply takes today's prompt path, and the
 // fallback (unclassified) path adds no hint either. Hints observe the
@@ -129,7 +151,7 @@ func jevIntentPromptHint(decision jev.Decision, classified bool) string {
 	provenance := fmt.Sprintf(" (Jev intent %s, confidence %.2f, model %s)", decision.Intent, decision.Confidence, decision.Model)
 	switch decision.Intent {
 	case jev.IntentCreateAgentRequest:
-		return "\nROUTING_HINT" + provenance + ": the author may be asking for a NEW agent. Do NOT create, spawn, provision, or claim to have created an agent from this peer path — create-agent stays Wrapper/manager-only. If the harness supports requesting a manager, route toward requesting one through the existing manager-authorization path; otherwise reply explaining that creating an agent requires a manager and ask what the new agent should do.\n"
+		return "\nROUTING_HINT" + provenance + ": the author may be asking for a NEW agent. Do NOT create, spawn, provision, or claim to have created an agent from this peer path — create-agent stays Wrapper/manager-only. Peer-safe fulfillment is request-only through the existing runner STATUS_JSON path so a Wrapper/manager can fulfill (the controller strips create-agent from peers; Desktop refuses peer creation): " + jevCreateAgentStatusJSONExample + " Fill name/description from the request; otherwise reply explaining that creating an agent requires a manager and ask what the new agent should do.\n"
 	case jev.IntentPeerHandoff:
 		return "\nROUTING_HINT" + provenance + ": the author may want handoff to another EXISTING agent or peer. This is a soft hint only: only coordinate through the existing coordination contract (the coordination JSON this thread's config allows, via requestPeer delivery) and never send outside existing paths. If coordination is not enabled on this thread, answer directly or explain the handoff needs an enabled coordination target.\n"
 	case jev.IntentToolRun:
@@ -162,7 +184,11 @@ func buildChatPromptWithIntent(thread chat.Thread, messages []chat.Message, cont
 // chatAuthorMetadataWithIntent merges the routing decision into the queued
 // user message metadata so intent + confidence + serving model persist
 // alongside the turn for threshold tuning. Unclassified turns return
-// today's metadata byte-identical.
+// today's metadata byte-identical. Classified, non-unclear
+// create_agent_request turns additionally carry jevNeedsManagerCreate=true:
+// the structured outbox hint a Wrapper/manager harness can act on later
+// (Desktop Wrapper fulfillment via executeCreateAgent). It grants no
+// authority — peers still request via requestPeer STATUS_JSON.
 func chatAuthorMetadataWithIntent(thread chat.Thread, deferred bool, decision jev.Decision, classified bool) json.RawMessage {
 	base := chatAuthorMetadata(thread, deferred)
 	if !classified {
@@ -177,6 +203,9 @@ func chatAuthorMetadataWithIntent(thread chat.Thread, deferred bool, decision je
 	metadata["jevConfidence"] = decision.Confidence
 	metadata["jevModel"] = decision.Model
 	metadata["jevUnclear"] = decision.Unclear
+	if jevNeedsManagerCreate(decision, classified) {
+		metadata["jevNeedsManagerCreate"] = true
+	}
 	raw, err := json.Marshal(metadata)
 	if err != nil {
 		return base
@@ -186,7 +215,10 @@ func chatAuthorMetadataWithIntent(thread chat.Thread, deferred bool, decision je
 
 // annotateChatRunWithIntent stamps the routing decision on the turn's
 // AgentRun for kubectl-visible observability. Unclassified turns leave the
-// run untouched.
+// run untouched. Classified, non-unclear create_agent_request turns
+// additionally carry the jev-needs-manager-create=true annotation so a
+// Wrapper/manager can find actionable turns with kubectl; it is a request
+// flag, never a create grant.
 func annotateChatRunWithIntent(annotations map[string]string, decision jev.Decision, classified bool) map[string]string {
 	if !classified {
 		return annotations
@@ -198,6 +230,9 @@ func annotateChatRunWithIntent(annotations map[string]string, decision jev.Decis
 	annotations[jevConfidenceAnnotation] = strconv.FormatFloat(decision.Confidence, 'f', 4, 64)
 	if model := strings.TrimSpace(decision.Model); model != "" {
 		annotations[jevModelAnnotation] = model
+	}
+	if jevNeedsManagerCreate(decision, classified) {
+		annotations[jevNeedsManagerCreateAnnotation] = "true"
 	}
 	return annotations
 }
