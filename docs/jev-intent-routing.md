@@ -96,6 +96,14 @@ same way).
   ConfigMap — no RBAC change, no Secret access).
 - Env: `ANVIL_AGENTS_JEV_INTENT=1` enables the config flag but never
   disables it (same pattern as `ANVIL_AGENTS_STANDING_LIVE`).
+- Model pin (optional, deny-by-default-safe): `chat.jevModel` (default
+  `""`; chart value `api.config.chat.jevModel`, rendered verbatim into
+  the API ConfigMap). Empty tracks the `jev-latest` alias
+  (`jev.DefaultModel`) — today's behavior unchanged. Set a versioned ID
+  to pin classification to that serving model; `jev-1.13.0` is the
+  validated serving model from the live Kind-local e2e below. Env
+  `ANVIL_AGENTS_JEV_MODEL` overrides the config-file value when
+  non-empty; empty leaves the config value untouched.
 - Backend: the API attaches the live System One client only when the gate
   is on AND `TYPESAFE_API_KEY` is set (`jev.ClientFromEnv` in
   `cmd/anvil-agents-api/main.go`, env only — the API gains no Secret
@@ -132,8 +140,21 @@ same way).
    drives fakes, so no live responses are pinned anywhere.
 2. Tune the confidence floor (default 0.5) — and the higher
    destructive-action bar at the fulfillment site — from labeled traffic;
-   pin a versioned model ID once thresholds are tuned instead of tracking
-   `jev-latest`.
+   then pin the validated serving model ID via `chat.jevModel` (chart
+   `api.config.chat.jevModel`, or `ANVIL_AGENTS_JEV_MODEL`) instead of
+   tracking `jev-latest`:
+
+```yaml
+chat:
+  enabled: true
+  jevIntentEnabled: true
+  jevModel: jev-1.13.0 # validated serving model (live Kind-local e2e, 2026-09-18)
+```
+
+```bash
+ANVIL_AGENTS_JEV_INTENT=1 ANVIL_AGENTS_JEV_MODEL=jev-1.13.0 \
+  go run ./cmd/anvil-agents-api --config <api-config-with-chat.enabled>
+```
 3. Confirm per-turn p70–p130 overhead stays inside the 70–500ms System One
    envelope on the append path (the 10s cap is a wedge guard, not a
    budget).
@@ -159,11 +180,12 @@ First live end-to-end validation of the wired hook (Austin, 2026-09-18
   `create-agent` stayed Wrapper/manager-only (classification only).
 
 Serving-model note: the live decision reported `jev-1.13.0` via the
-`jev-latest` alias (`jev.DefaultModel`; the turn path passes no model
-override and there is no `chat.jev*` model config field, so no pin is made
-here). Follow-up: pin a versioned model ID once thresholds are tuned
-instead of tracking `jev-latest` — that needs a new config/API field and is
-deliberately out of scope for this docs-only update.
+`jev-latest` alias (`jev.DefaultModel`; the turn path passed no model
+override at validation time). `jev-1.13.0` is the validated serving model
+from this run: pin it with `chat.jevModel: jev-1.13.0` (chart
+`api.config.chat.jevModel`, or `ANVIL_AGENTS_JEV_MODEL=jev-1.13.0`) once
+thresholds are tuned, instead of tracking `jev-latest`. Empty
+`chat.jevModel` (the default) keeps the alias behavior unchanged.
 
 Remaining after this validation: confidence-floor tuning from labeled
 traffic (plus the higher destructive-action bar at the fulfillment site),

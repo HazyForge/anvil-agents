@@ -50,6 +50,13 @@ func main() {
 	if enabled, err := strconv.ParseBool(strings.TrimSpace(os.Getenv(runapi.JevIntentEnvVar))); err == nil && enabled {
 		config.Chat.JevIntentEnabled = true
 	}
+	// Jev serving-model pin: a non-empty ANVIL_AGENTS_JEV_MODEL overrides
+	// config-file chat.jevModel. Empty (the default) tracks the jev-latest
+	// alias. Jev only classifies intent; it never generates chat text.
+	// See docs/jev-intent-routing.md.
+	if model := strings.TrimSpace(os.Getenv(runapi.JevModelEnvVar)); model != "" {
+		config.Chat.JevModel = model
+	}
 	restConfig, err := ctrl.GetConfig()
 	if err != nil {
 		log.Error(err, "load Kubernetes configuration")
@@ -122,7 +129,11 @@ func main() {
 	if config.Chat.JevIntentEnabled {
 		if client, ok := jev.ClientFromEnv(); ok {
 			server.SetJevBackend(client)
-			log.Info("jev intent classification enabled", "model", jev.DefaultModel)
+			model := strings.TrimSpace(config.Chat.JevModel)
+			if model == "" {
+				model = jev.DefaultModel
+			}
+			log.Info("jev intent classification enabled", "model", model)
 		} else {
 			log.Info("jev intent gate is on but TYPESAFE_API_KEY is not set; chat turns keep today's behavior")
 		}

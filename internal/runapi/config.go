@@ -75,6 +75,13 @@ type ChatConfig struct {
 	// or Jev errors. Jev only decides; it never generates chat text. See
 	// docs/jev-intent-routing.md.
 	JevIntentEnabled bool `json:"jevIntentEnabled"`
+	// JevModel pins the Jev serving model for chat-turn intent
+	// classification. Empty (the default) tracks the jev-latest alias via
+	// jev.DefaultModel; set a versioned ID (e.g. "jev-1.13.0") once
+	// thresholds are tuned against one version. Overridable from the
+	// ANVIL_AGENTS_JEV_MODEL environment variable when non-empty. Jev only
+	// decides; it never generates chat text. See docs/jev-intent-routing.md.
+	JevModel string `json:"jevModel"`
 }
 
 // StandingConfig controls live standing in-process turn execution. When
@@ -289,6 +296,7 @@ func (config *Config) normalize() {
 	config.CORS.AllowedOrigins = uniqueStrings(config.CORS.AllowedOrigins, false)
 	config.UI.OIDC.ClientID = strings.TrimSpace(config.UI.OIDC.ClientID)
 	config.UI.Desktop.OIDCClientID = strings.TrimSpace(config.UI.Desktop.OIDCClientID)
+	config.Chat.JevModel = strings.TrimSpace(config.Chat.JevModel)
 	for i := range config.Authorization.Bindings {
 		binding := &config.Authorization.Bindings[i]
 		binding.Name = strings.TrimSpace(binding.Name)

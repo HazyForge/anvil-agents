@@ -234,6 +234,14 @@ api:
       # api.extraEnv). Without a backend attached every turn falls back to
       # today's behavior. See docs/jev-intent-routing.md.
       jevIntentEnabled: false
+      # Optional Jev serving-model pin for chat-turn intent classification
+      # (Router.ClassifyIntent). Empty (the default) tracks the jev-latest
+      # alias via jev.DefaultModel. Set a versioned ID once thresholds are
+      # tuned against one version — jev-1.13.0 is the validated serving
+      # model from the live Kind-local e2e (see docs/jev-intent-routing.md).
+      # Overridable per-process with ANVIL_AGENTS_JEV_MODEL when non-empty.
+      # Jev only decides; it never generates chat text.
+      jevModel: ""
     # Standing in-process live turns (slice 5c). Disabled by default. When
     # true, the API drives API-owned standing turns: it stamps the
     # multi-replica claim (update/patch agentruns) and marks the streamed
