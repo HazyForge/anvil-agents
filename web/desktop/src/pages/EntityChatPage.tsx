@@ -45,6 +45,31 @@ function retainRecoveredReplies(next: RemoteThreadDetail, previous: RemoteThread
   })};
 }
 
+// Read-only Jev intent caption for a classified user message. The API turn
+// path records jevIntent/jevRawChoice/jevConfidence/jevModel/jevUnclear on
+// the queued user message metadata (see docs/jev-intent-routing.md).
+// Display only: no fulfillment action lives here — create_agent_request
+// still routes to requesting a Wrapper/manager through the existing
+// manager-authorization path. Returns undefined when unclassified.
+function jevIntentCaption(message: {metadata?: unknown}): string | undefined {
+  const meta = message.metadata as Record<string, unknown> | undefined;
+  const intent = typeof meta?.jevIntent === 'string' ? meta.jevIntent.trim() : '';
+  if (!intent) return undefined;
+  const parts = [`Intent: ${intent}`];
+  const raw = typeof meta?.jevRawChoice === 'string' ? (meta.jevRawChoice as string).trim() : '';
+  const unclear = meta?.jevUnclear === true;
+  if (unclear && raw && raw !== intent) parts.push(`(model said ${raw})`);
+  const confidence = typeof meta?.jevConfidence === 'number' ? (meta.jevConfidence as number) : undefined;
+  if (typeof confidence === 'number' && Number.isFinite(confidence)) {
+    parts.push(`${Math.round(confidence * 100)}%`);
+  } else if (unclear) {
+    parts.push('needs clarification');
+  }
+  const model = typeof meta?.jevModel === 'string' ? (meta.jevModel as string).trim() : '';
+  if (model) parts.push(model);
+  return parts.join(' · ');
+}
+
 export function EntityChatPage({token, config}: Props) {
   const [namespace, setNamespace] = useState(() => loadNamespace(config.defaultNamespaces[0] || 'agents'));
   const [profiles, setProfiles] = useState<CompositionDocument[]>([]);
@@ -396,9 +421,11 @@ export function EntityChatPage({token, config}: Props) {
               if (metadata?.kind !== 'legacy_output_unavailable' || !['hermesAgent', 'openClaw'].includes(metadata.backend || '')) return null;
               return <aside key={message.id} className="remote-chat-caption" aria-label="Earlier reply unavailable"><strong>Earlier reply unavailable</strong><p>{metadata.backend === 'openClaw' ? 'This older answer could not be recovered from its runner output yet. Your message is saved. The answer will be saved permanently when recovery succeeds.' : 'An older Hermes runner did not separate its final answer from internal output. The original message has been preserved. Reasoning and original output can be inspected in the runner output while its logs are retained.'}</p>{metadata.runName && /^[a-z0-9]([a-z0-9.-]{0,251}[a-z0-9])?$/.test(metadata.runName) && <button type="button" className="btn btn-ghost" onClick={() => {setHistoricalOutput({runName: metadata.runName!, backend: metadata.backend!}); setRawActivityOpen(true);}}>View original runner output</button>}</aside>;
             }
+            const jevCaption = jevIntentCaption(message);
             return <article key={message.id} className={`chat-bubble ${message.role === 'user' ? 'chat-bubble-user' : 'chat-bubble-run'}`}>
             <header className="chat-bubble-header"><span className="chat-bubble-role">{message.role === 'user' ? ((message.metadata as {authorProfile?: string} | undefined)?.authorProfile || 'You') : message.role === 'tool' ? 'Coordination' : detail.profileName || 'Agent'}</span></header>
             <pre className="chat-bubble-body">{message.content}</pre>
+            {jevCaption && <p className="remote-chat-caption">{jevCaption}</p>}
           </article>;
           })}
           {optimisticVisible && <article className="chat-bubble chat-bubble-user" aria-label="Your pending message">
