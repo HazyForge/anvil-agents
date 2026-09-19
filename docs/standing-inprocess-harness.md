@@ -475,6 +475,49 @@ verdict, the documented baseline defaults, the fail-closed backend
 selection, and the `harness-ok` ceiling for deterministic backends — all with
 no cluster and no subprocess.
 
+### Scoring the live signed-in JSONL against the same bars
+
+`cmd/standing-latency -chat-jsonl` (plus the thin
+`hack/standing-chat-latency-bars.sh` wrapper) scores the Desktop signed-in
+standing samples without touching the sixteen-scenario matrix: it filters
+`.runtime/chat-latency.jsonl` to `source: "desktop-chat-live-signed-in"` on
+`path: "standing"`, computes p50/p95 for `sendToFirstTokenMs` (falling back
+to `firstTokenMs` when the alias is absent) and `replyReadyMs`, compares to
+the same Job baseline flags (default 12000/44000), and emits a verdict +
+reason using the SAME `promote` / `reshape` / `retire` /
+`inconclusive-live` / `no-baseline` vocabulary above — no new bar names.
+Error lines are counted and excluded (a denied turn is not a latency
+sample); a missing file is an error and no samples are ever invented.
+
+```bash
+hack/standing-chat-latency-bars.sh --jsonl $PWD/.runtime/chat-latency.jsonl \
+  --out $PWD/.runtime/standing-chat-latency-bars.json
+# Equivalent direct binary run:
+# go run ./cmd/standing-latency -chat-jsonl .runtime/chat-latency.jsonl \
+#   -out .runtime/standing-chat-latency-bars.json
+```
+
+Closest honest mapping (the JSONL carries a single standing plane, not the
+direct+peer matrix the bars assume — pinned in code in
+`cmd/standing-latency/chat_bars.go`):
+
+| Slice 5a bar | Chat JSONL mapping |
+| --- | --- |
+| `promote` | `sendToFirstTokenMs` p95 ≤ min(5000ms, jobP95/10) AND `replyReadyMs` p95 ≤ jobP95/10 over at least `--min-samples` delivered samples (default 10). `replyReadyMs` plays the warm-turn role conservatively: the Job baseline covers Pod-ready only while replyReady includes harness/model time, so a pass here is strong. The peer plane is not in this JSONL — the reason still names the full `standing-latency` matrix as the peer check before promoting peers. |
+| `reshape` | Never emitted here (no peer dimension): a direct win with an unknown peer reports `inconclusive-live` pointing at the full matrix for the peer split. |
+| `retire` | `replyReadyMs` p50 within noise of the Job p50 (≥ jobP50/2). First-token alone never retires the plane. |
+| `inconclusive-live` | Zero matching samples, fewer than `--min-samples`, no `replyReadyMs` to evaluate the full-turn bar, or numbers between the bars: collect more iterations on the same cluster shape. |
+| `no-baseline` | Both baseline flags passed as `0`: raw numbers only, no comparison. |
+
+Tonight's reading: the `n=5` live signed-in samples above already sit well
+under the first-token bar (`sendToFirstTokenMs` p50 ~378ms vs the 5000ms /
+4400ms ceilings), but `n=5` is below the `--min-samples` gate, so the scorer
+reports `inconclusive-live` — more iterations are still needed before any
+promote call, plus the peer plane from the full matrix. Fixture scoring is
+pinned by `cmd/standing-latency/chat_bars_test.go` against the synthetic
+`cmd/standing-latency/testdata/chat-latency-synthetic.jsonl` (round
+placeholder values only — never live numbers).
+
 ## Slice 5c: process-exec cold-first + resumed-second measurement path (this slice)
 
 Slice 5c makes the `process-exec` live-number path as runnable and documented
@@ -951,7 +994,11 @@ spike](substrate-spike.md)).
    Next: collect more `process-exec` live samples against a local/Kind
    harness CLI (cold first turns AND resumed second turns) and grow the
    Desktop JSONL, then apply the
-   promote/reshape/retire bars above to the standing plane.
+   promote/reshape/retire bars above to the standing plane — score the JSONL
+   side with `hack/standing-chat-latency-bars.sh --jsonl
+   $PWD/.runtime/chat-latency.jsonl` (see "Scoring the live signed-in JSONL"
+   under Slice 5a; tonight's `n=5` reports `inconclusive-live` until more
+   iterations land).
 2. **Signed-in Desktop OIDC for chat-latency.jsonl (first samples landed).** Stub OIDC still denies
    signed-in Desktop chat, so live send→firstToken samples need real OIDC
    (Kind-local issuer or Zitadel) plus a standing-enabled manager thread
