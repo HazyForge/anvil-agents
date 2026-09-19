@@ -728,6 +728,32 @@ session against the real API 401s on the thread read and the POST alike),
 its existing fallback behavior; the probe is the scripted measurement hook,
 not a second login flow.
 
+### Live signed-in standing samples (collected 2026-09-18, Austin's WSL Kind-local run)
+
+First real signed-in Desktop standing-chat samples (~7:57 PM CT, `n=5`,
+`source: "desktop-chat-live-signed-in"`, `path: "standing"`, thread
+`3ea30630-d9a7-4a4e-8a6d-e8bd1f158b35`). The raw artifact lives at
+`.runtime/chat-latency.jsonl` on the WSL checkout (gitignored — do not
+commit the JSONL; docs only).
+
+| Metric | Samples (ms) | p50 (ms) |
+| --- | --- | --- |
+| `sendToFirstTokenMs` | 356, 377, 378, 383, 634 | ~378 |
+| `replyReadyMs` | ~6131–9587 range | ~7592 |
+
+Bring-up note: the Kind-local API used `127.0.0.1:18180`/`18181` because
+`18080` was occupied by local Zitadel, Kind CRDs were applied from
+`config/crd/bases` so `execution.runtime: InProcess` applied, and the
+harness was `codex` with the existing `~/.codex/auth.json`.
+
+Reading note: first-token p50 (~378ms) sits well under the documented Job
+Pod-ready baseline (~12s p50) that the slice-5a bars compare against; full
+turn time (harness/model time on top) is separate, and the
+promote/reshape/retire bars in "Slice 5a" above still need more iterations
+before any call. Standing in-process harness + WebSocket stays the primary
+interactive path; Substrate/ATE stays optional (see [Substrate
+spike](substrate-spike.md)).
+
 Tests: `hack/desktop-standing-chat-stream.mjs` fakes the WS stream and
 asserts first-token timing, the standing/job classification, the
 never-send-twice fallback, and the JSONL fields; `internal/desktop/
@@ -883,15 +909,17 @@ Standing in-process harness + WebSocket is the **primary** interactive path
 isolation/density and is not promoted (see [Substrate
 spike](substrate-spike.md)).
 
-0. **Kind-local signed-in samples (scaffolding landed, live run open).**
+0. **Kind-local signed-in samples (scaffolding landed, first samples landed 2026-09-18).**
    `cmd/kind-oidc-issuer`, `hack/desktop-standing-chat-live.mjs`
    (`source: "desktop-chat-live-signed-in"`),
    `examples/live-api/kind-local-api-config.yaml`, and
    `examples/live-api/kind-local-standing-manager.yaml` land the full loopback
-   runbook above with an honest skip/inconclusive contract — but no live
-   sample is captured or committed here (no Kind cluster, harness CLI, or
-   Postgres in the agent environment). Next: Austin runs steps 1–5 on WSL
-   Kind, then applies the promote/reshape/retire bars in "Slice 5a" above.
+   runbook above with an honest skip/inconclusive contract — first live
+   samples landed 2026-09-18 (Austin's WSL Kind-local run, `n=5`,
+   `path: "standing"`, `sendToFirstTokenMs` p50 ~378ms, `replyReadyMs` p50
+   ~7592ms; see "Live signed-in standing samples" above, JSONL stays
+   gitignored on the WSL checkout and is not committed here). Next: more
+   iterations on WSL Kind, then apply the promote/reshape/retire bars in "Slice 5a" above.
    Known blockers on that path, in order: (a) PostgreSQL for
    `chat.enabled` — scripted since #228 (`hack/kind-chat-postgres.sh`, see
    "Kind-local chat Postgres" above; export the printed
@@ -908,26 +936,32 @@ spike](substrate-spike.md)).
    auth" above; `./hack/kind-standing-harness.sh --check --require-bearer`
    must print `ready (harness=codex)` before the step-4 probe). Stub OIDC
    still denies by design; the probe reports `skip: stub-oidc-denied` there.
-1. **Live numbers (the remaining open measurement item).** Desktop e2e is
+1. **Live numbers (first Desktop samples landed, more iterations + bars still open).** Desktop e2e is
    done (see "Desktop chat e2e over the standing WebSocket" above), the
    slice-5a harness is green on deterministic backends, slice-5b resume is
    pinned against stub CLIs, and slice 5c wires the cold-first vs
-   resumed-second turn scenarios plus the resume-aware stub end to end — but
+   resumed-second turn scenarios plus the resume-aware stub end to end — and
+   the first signed-in Desktop `standing`-path samples landed 2026-09-18
+   (`n=5`, see "Live signed-in standing samples" above). Still open:
    `process-exec` live numbers on the same cluster shape as the Job baseline
-   are still open (gate the host first with
+   (gate the host first with
    `./hack/kind-standing-harness.sh --check`; none exists in the
-   agent environment, so no live numbers are captured or committed here).
+   agent environment, so no `process-exec` numbers are captured here), plus
+   more Desktop iterations before any promote/reshape/retire call.
    Next: collect more `process-exec` live samples against a local/Kind
-   harness CLI (cold first turns AND resumed second turns), then apply the
+   harness CLI (cold first turns AND resumed second turns) and grow the
+   Desktop JSONL, then apply the
    promote/reshape/retire bars above to the standing plane.
-2. **Signed-in Desktop OIDC for chat-latency.jsonl.** Stub OIDC still denies
+2. **Signed-in Desktop OIDC for chat-latency.jsonl (first samples landed).** Stub OIDC still denies
    signed-in Desktop chat, so live send→firstToken samples need real OIDC
    (Kind-local issuer or Zitadel) plus a standing-enabled manager thread
    (`standing.liveEnabled` / `ANVIL_AGENTS_STANDING_LIVE` on the API).
    Disposable Postgres for `chat.enabled` is scripted
    (`hack/kind-chat-postgres.sh`, see above) and no longer blocks bring-up.
-   Next: sign in against real OIDC, Send chat messages over the standing WS
-   path, and grow `.runtime/chat-latency.jsonl` with real `standing`-path
+   First samples via the Kind-local issuer landed 2026-09-18 (see "Live
+   signed-in standing samples" above).
+   Next: sign in against real OIDC, Send more chat messages over the standing WS
+   path, and grow `.runtime/chat-latency.jsonl` with more `standing`-path
    samples.
 3. **Retire the envelope wrapper** entirely once no Fake-only live path
    remains. Provider credentials stay outside the API's Secret surface
