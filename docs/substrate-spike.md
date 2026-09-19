@@ -353,11 +353,22 @@ do not commit the JSON; docs only). Job-baseline flags passed:
 | `peerCold` | 7.47 | 8.62 | count 10 |
 | `peerWarm` | 301.54 | 398.70 | warmOps 10 |
 
-`peerBusyWaitWarm` was not in this 2026-09-18 run. The harness now records
-it (FakeClient unit coverage; collect live Kind numbers with the same
-`--live` command — optional follow-up, not a promote).
+`peerBusyWaitWarm` was not in this first 2026-09-18 ~6:45 PM CT run. A later
+same-evening pulse on the same cluster (≈10:30–10:45 PM CT, `n=10`,
+`busyHoldMs=25`, probe `reachable:true`, artifact
+`.runtime/substrate-latency-live-pulse.json`) collected it:
 
-`comparisonMs` savings of warm resume vs the passed Job baseline:
+| Scenario | p50Ms | p95Ms | count/warmOps |
+| --- | --- | --- | --- |
+| `directWarm` (pulse) | ≈306.5 | ≈413.1 | warmOps 10 |
+| `peerWarm` (pulse) | ≈292.2 | ≈356.4 | warmOps 10 |
+| `peerBusyWaitWarm` (pulse) | ≈664.3 | ≈845.9 | warmOps 10 |
+
+`peerBusyWaitWarm` stays well under the Job baseline (saved ≈11336 ms vs
+Job p50 / ≈43154 ms vs Job p95 at the passed 12s/44s flags) while including
+the durable busy-hold. Substrate remains optional / not promoted.
+
+`comparisonMs` savings of warm resume vs the passed Job baseline (first run):
 
 | Comparison | Saved ms |
 | --- | --- |
@@ -373,9 +384,9 @@ baseline, not cold vs warm.
 
 Remaining opens, tracked as optional follow-ups (not promote blockers — the
 2026-09-18 decision keeps Substrate optional regardless): the busy-recipient
-durable-wait peer check has a live scenario harness (`peerBusyWaitWarm` in
-`cmd/substrate-latency`; collect Kind numbers with `--live` on
-`kind-substrate-spike`); suspend-on-idle multiplexing is stressed at the unit
+durable-wait peer check has FakeClient coverage plus live Kind numbers on
+`kind-substrate-spike` (`peerBusyWaitWarm` p50/p95 ≈664/846ms in the
+2026-09-18 ~10:45 PM CT pulse); suspend-on-idle multiplexing is stressed at the unit
 level (many actors, rapid Create→Suspend→Resume cycles, concurrent
 peer+direct resume warm without identity churn or drops — `TestSuspendIdleMultiplexManyActorsWarmResume`,
 `TestSuspendIdleRapidCreateSuspendResumeCycles`,
@@ -436,9 +447,9 @@ the same cluster shape:
   `TestPeerSubstrateBusyRecipientDurableWait`; suspend-then-warm-resume:
   `TestSuspendedActorResumesWarm`; actor-plane wait+resume:
   `TestBusyRecipientWaitThenWarmResumeSameActor`) and the latency harness
-  records `peerBusyWaitWarm` on FakeClient and under `--live` (collect Kind
-  numbers on `kind-substrate-spike` as an optional follow-up — Substrate
-  stays optional / not promoted); suspend-on-idle multiplexing is stressed
+  records `peerBusyWaitWarm` on FakeClient and under `--live` (live Kind
+  numbers collected 2026-09-18 ~10:45 PM CT on `kind-substrate-spike` —
+  Substrate stays optional / not promoted); suspend-on-idle multiplexing is stressed
   at the unit level (many-actor warm resume, rapid Create→Suspend→Resume
   cycles, concurrent peer+direct resume warm without identity churn or drops:
   `TestSuspendIdleMultiplexManyActorsWarmResume`,
@@ -476,8 +487,8 @@ the same cluster shape:
   398.70ms vs Job p95 44000ms — see the latency section) show warm resume far
   under the Job baseline, but the call is keep-optional regardless. Remaining
   opens are optional follow-ups, not promote blockers: busy-recipient
-  durable-wait peer check has a live scenario harness (`peerBusyWaitWarm`;
-  FakeClient unit coverage plus `--live` on kind-substrate-spike),
+  durable-wait peer check has FakeClient coverage plus live Kind numbers
+  (`peerBusyWaitWarm` ≈664/846ms p50/p95 on kind-substrate-spike),
   suspend-on-idle multiplexing is stressed at the unit
   level (many-actor warm resume, rapid Create→Suspend→Resume cycles,
   concurrent peer+direct resume warm without identity churn or drops),
