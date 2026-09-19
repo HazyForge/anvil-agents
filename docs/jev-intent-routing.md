@@ -76,6 +76,11 @@ turn path (`reconcileStandingTurn` in
   decision) — peers never create agents. Destructive fulfillment must apply
   a higher confidence bar in code at the fulfillment site, not in the
   router.
+- `peer_handoff` stays coordination-only. The hint names the existing-peer
+  `requestPeer` STATUS_JSON shape (plus the chat coordination JSON
+  equivalent) and the turn carries a structured `jevNeedsPeerHandoff`
+  request flag — never creation, never a new fanout path, never sends
+  outside existing paths.
 - No invented live API responses: fakes in CI, live only behind the env key.
 
 ## The live hook (wired)
@@ -123,7 +128,7 @@ same way).
 | --- | --- | --- |
 | `chat_reply` | unchanged prompt path | — |
 | `create_agent_request` | hint names the concrete peer-safe request shape (`requestPeer` STATUS_JSON with `request=create-agent`, mirroring `skills/create-agent/SKILL.md` and the controller's injected skill content) and the turn carries a structured `jevNeedsManagerCreate` request flag; still Wrapper/manager-only | Request-only — peers never create agents (controller strips `create-agent` from peers; Desktop `isCreateAgentPrincipal` refuses) |
-| `peer_handoff` | soft hint to coordinate only through the existing coordination contract (`requestPeer` delivery); no send outside existing paths; without enabled coordination, answer directly | No new fanout |
+| `peer_handoff` | hint names the concrete existing-peer `requestPeer` STATUS_JSON shape (`action=requestPeer` with `peerProfileName`/`summary`, mirroring `web/desktop/src/wrapper/requestPeer.ts` and the controller's `requestPeer` decision parsing) and the turn carries a structured `jevNeedsPeerHandoff` request flag; still coordination-only, never creation | Request-only — no new fanout; without enabled coordination, answer directly |
 | `tool_run` | tool-first hint: run the harness tool step before finalizing, else note the needed lookup | Prompt hint only |
 | `unclear` (choice, unknown output, or sub-threshold confidence) | clarification-first hint: ask a brief clarifying question; no destructive/delegating/creating acts | — |
 
@@ -172,7 +177,64 @@ both sides, and this slice wires the classified intent to it.
   manager-facing affordance (e.g. prefill the existing `CreateAgentPanel`
   or raise a `Requested create` receipt) when the signed-in principal is
   Wrapper/manager; keep the read-only `jevIntent` caption as-is for
-  peers. No peer create path.
+  peers. No peer create path. (Shipped next section; `create-agent` itself
+  is unchanged by the handoff slice below.)
+
+### `peer_handoff` fulfillment slice (this change)
+
+Same pattern as `create_agent_request`, one intent over: no new tool, API,
+or protocol was invented — the coordination surface already exists on both
+sides, and this slice wires the classified intent to it.
+
+- Existing surfaces found: in chat, the coordination JSON this thread's
+  config allows (`dispatchChatCoordination` in
+  `internal/runapi/chat_coordination.go`: `messages` to allowed profiles,
+  durable child-thread delivery); on the runner path, the base
+  `requestPeer` STATUS_JSON decision the controller already parses
+  (`action=requestPeer` plus `peerProfileName`, see
+  `internal/controller/agent_run_controller.go`) and Desktop already emits
+  and parses (`grokRequestPeerProofPrompt` /
+  `parseRequestPeerFromLogLine` in
+  `web/desktop/src/wrapper/requestPeer.ts`). No `request=create-agent`
+  extension, no new fields.
+- What a classified, non-`unclear` `peer_handoff` turn now carries: the
+  `ROUTING_HINT` names the exact existing-peer line the harness should
+  emit on the runner path (same shape the controller parser and the
+  Desktop parser accept):
+  `ANVIL_AGENT_RUN_STATUS_JSON={"type":"decision","action":"requestPeer","peerProfileName":"<existing-profile>","summary":"<why>"}`
+  (fill `peerProfileName` with the existing target profile and `summary`
+  from the request; in chat, use the coordination JSON equivalent to an
+  allowed profile). The queued user message carries
+  `jevNeedsPeerHandoff: true` and the turn's AgentRun carries
+  `control.anvil.hazyforge.io/jev-needs-peer-handoff=true` — the
+  structured outbox hint a harness can consume.
+- Peers vs managers: both fulfill through the same existing coordination
+  contract — a handoff never creates an agent and never sends outside
+  existing paths. The hint says `Never create, spawn, or provision an
+  agent for a handoff`; `create-agent` stays Wrapper/manager-only
+  (controller strips the skill from peers; Desktop
+  `isCreateAgentPrincipal` refuses). `unclear` (including a
+  sub-threshold `peer_handoff` choice) carries no request shape and no
+  flag — clarification only. Without enabled coordination, the harness
+  answers directly or explains the handoff needs an enabled coordination
+  target.
+- Unit cover (`internal/runapi/chat_jev_intent_test.go`, `FakeBackend`,
+  no network): `TestChatJevPeerHandoffFulfillmentSlice` (hint shape +
+  message flag + run annotation, and no create path), 
+  `TestChatJevUnclearHandoffCarriesNoFulfillment`,  `TestChatJevNonHandoffIntentsCarryNoHandoffFlag`, plus the updated
+  `TestChatJevNonCreateIntentsCarryNoManagerRequest` (pins the create
+  shape absent on every other intent, handoff included).
+- Desktop in this slice: docs-only. There is no existing peer-handoff UI
+  to extend (`EntityChatPage` has only the read-only `jevIntent` caption
+  plus the manager-create receipt; `WrapperPage`'s `RequestPeerMonitor`
+  watches runner signals, not Jev flags), so no Desktop code changes here
+  — the STATUS_JSON shape is pinned in the Go tests above. Remaining
+  Desktop work: if a handoff affordance is ever wanted, watch
+  `jevNeedsPeerHandoff` on thread detail / the `jev-needs-peer-handoff`
+  run annotation and surface existing coordination UI (e.g. deep-link the
+  named peer's chat thread or prefill a `requestPeer` line); peers and
+  managers see the same read-only `jevIntent` caption until then. Jev
+  never generates; Substrate untouched; standing primary.
 
 ### Desktop Wrapper affordance (shipped)
 
