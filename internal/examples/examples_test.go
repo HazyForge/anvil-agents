@@ -23,6 +23,12 @@ func TestExampleManifestsParseAndIdentifyObjects(t *testing.T) {
 			if entry.IsDir() || strings.HasSuffix(path, "-values.yaml") || (!strings.HasSuffix(path, ".yaml") && !strings.HasSuffix(path, ".yml")) {
 				return nil
 			}
+			// examples/live-api/kind-local-api-config.yaml is an anvil-agents-api
+			// process config, not a Kubernetes manifest; its load shape is
+			// pinned by TestKindLocalExampleConfigLoads in internal/runapi.
+			if strings.HasSuffix(path, "live-api/kind-local-api-config.yaml") {
+				return nil
+			}
 			contents, err := os.ReadFile(path)
 			if err != nil {
 				return err

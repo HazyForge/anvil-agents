@@ -674,7 +674,12 @@ or `--token-file` only: never argv, never query strings, never logs, never
 the JSONL file. `examples/live-api/kind-local-api-config.yaml` is the
 matching API config (loopback bind, Kind-local issuer, the
 `kind-local-desktop` binding with chat + runs:create, loopback CORS, chat and
-standing live on).
+standing live on). `examples/live-api/kind-local-standing-manager.yaml` is
+the matching standing-enabled manager composition: an `InProcess` codex
+harness profile (`kind-local-standing`, no `substrate` section — Substrate
+stays optional and untouched) bound to a manager AgentRunProfile
+(`kind-local-manager`). `create-agent` stays Wrapper/manager-only; the file
+creates no AgentRuns and grants no policy authority.
 
 ```bash
 # 0. Pure unit gates (no cluster, no OIDC).
@@ -690,12 +695,19 @@ go run ./cmd/kind-oidc-issuer --key-file /tmp/kind-oidc.key.json
 ANVIL_AGENTS_STANDING_LIVE=1 ANVIL_AGENTS_CHAT_DATABASE_URL=postgresql://... \
   go run ./cmd/anvil-agents-api --config examples/live-api/kind-local-api-config.yaml
 
-# 3. Mint a bearer (terminal 3) and create one standing-enabled manager
-#    thread (needs an InProcess harness profile on the thread's agent).
+# 3. Mint a bearer (terminal 3), apply the standing-enabled manager
+#    composition, and create one manager thread on it.
 go run ./cmd/kind-oidc-issuer mint --key-file /tmp/kind-oidc.key.json \
   --issuer http://127.0.0.1:18081 --audience anvil-agents \
   --subject kind-local-desktop --roles kind-local-desktop --namespaces agents
 export ANVIL_AGENTS_ACCESS_TOKEN=<minted-token>
+kubectl apply -f examples/live-api/kind-local-standing-manager.yaml
+curl -sS -X POST -H "Authorization: Bearer $ANVIL_AGENTS_ACCESS_TOKEN" \
+  -H 'Content-Type: application/json' \
+  http://127.0.0.1:18080/api/v1/namespaces/agents/chat/threads \
+  -d '{"profileName":"kind-local-manager","mode":"persona","title":"Kind-local standing manager"}'
+# Record the returned thread id for step 4. A standing-enabled thread
+# snapshot then carries `standing: {sessionName, harness, warm, resumes}`.
 
 # 4. Probe one signed-in standing turn; appends the JSONL sample on delivery.
 node --experimental-strip-types hack/desktop-standing-chat-live.mjs --live \
@@ -725,7 +737,10 @@ the production `OIDCAuthenticator` and authorizes chat write on `agents`
 `hack/desktop-standing-chat-live.test.mjs` pins the skip/inconclusive
 contract, the 202 append shape, and token redaction;
 `internal/runapi/kind_local_example_test.go` keeps the example config
-loadable with its gates and binding intact.
+loadable with its gates and binding intact, plus the standing-manager
+manifest loadable with `execution.runtime: InProcess` (no `substrate`
+section) on `kind-local-standing` and a `harnessProfileRef` from
+`kind-local-manager` to it.
 
 ## Kind-local chat Postgres for standing chat (blocker 1, scripted)
 
@@ -783,16 +798,19 @@ spike](substrate-spike.md)).
 
 0. **Kind-local signed-in samples (scaffolding landed, live run open).**
    `cmd/kind-oidc-issuer`, `hack/desktop-standing-chat-live.mjs`
-   (`source: "desktop-chat-live-signed-in"`), and
-   `examples/live-api/kind-local-api-config.yaml` land the full loopback
+   (`source: "desktop-chat-live-signed-in"`),
+   `examples/live-api/kind-local-api-config.yaml`, and
+   `examples/live-api/kind-local-standing-manager.yaml` land the full loopback
    runbook above with an honest skip/inconclusive contract — but no live
    sample is captured or committed here (no Kind cluster, harness CLI, or
    Postgres in the agent environment). Next: Austin runs steps 1–5 on WSL
    Kind, then applies the promote/reshape/retire bars in "Slice 5a" above.
    Known blockers on that path, in order: (a) PostgreSQL for
    `chat.enabled` (needs `ANVIL_AGENTS_CHAT_DATABASE_URL`); (b) a
-   standing-enabled manager thread (an `InProcess` harness profile bound to
-   the thread's agent plus `standing.liveEnabled` on the API); (c) a
+   standing-enabled manager thread — now concrete: apply
+   `examples/live-api/kind-local-standing-manager.yaml` (an `InProcess`
+   harness profile bound to the thread's agent) with `standing.liveEnabled`
+   on the API, then create the thread per step 3 above; (c) a
    harness CLI with local auth on the API host for `ProcessBackend` turns
    (otherwise turns hold as `InProcessNotWired` and the probe reports a
    delivered-turn failure, never a sample). Stub OIDC still denies by

@@ -1,0 +1,80 @@
+# Kind-local standing-enabled manager composition (TEST ONLY).
+#
+# Smallest shippable option B toward a real signed-in Desktop standing chat
+# latency sample: one InProcess harness profile bound to one manager
+# AgentRunProfile. Together with examples/live-api/kind-local-api-config.yaml
+# (standing.liveEnabled: true) this makes a Kind-local API eligible to run a
+# standing-enabled manager thread for measurement.
+#
+# Standing in-process + WebSocket is PRIMARY; Substrate/ATE stays optional and
+# is untouched here (no substrate section anywhere in this file).
+# create-agent stays Wrapper/manager-only: this file creates no AgentRuns and
+# grants no manager policy authority. It only names the reusable runtime the
+# thread's agent selects.
+#
+# Apply against Kind from the repo root (KUBECONFIG must point at Kind; the
+# `agents` namespace must exist):
+#
+#   kubectl apply -f examples/live-api/kind-local-standing-manager.yaml
+#   kubectl get agentharnessprofile kind-local-standing -n agents -o yaml
+#   kubectl get agentrunprofile kind-local-manager -n agents -o yaml
+#
+# Then create one manager thread bound to the profile (authenticated; see
+# docs/standing-inprocess-harness.md Kind-local runbook):
+#
+#   curl -sS -X POST \
+#     -H "Authorization: Bearer $ANVIL_AGENTS_ACCESS_TOKEN" \
+#     -H 'Content-Type: application/json' \
+#     http://127.0.0.1:18080/api/v1/namespaces/agents/chat/threads \
+#     -d '{"profileName":"kind-local-manager","mode":"persona","title":"Kind-local standing manager"}'
+#
+# A standing-enabled thread snapshot then carries
+# `standing: {sessionName, harness, warm, resumes}` and the live probe
+# (hack/desktop-standing-chat-live.mjs) can measure it. Without this
+# manifest — or with standing.liveEnabled off — the same probe honestly
+# reports `inconclusive: job-plane` and writes no sample.
+#
+# Live-turn requirement (next slice, NOT wired here): the API host needs one
+# harness CLI with that CLI's own local auth (for kind codex: `codex` on PATH
+# plus ~/.codex/auth.json). Provider credentials stay in the CLI's own auth
+# home and outside the API Secret surface. Until then turns hold as
+# InProcessNotWired and no latency sample is produced or invented.
+apiVersion: control.anvil.hazyforge.io/v1alpha1
+kind: AgentHarnessProfile
+metadata:
+  name: kind-local-standing
+  namespace: agents
+spec:
+  description: Kind-local TEST ONLY standing runtime for signed-in Desktop latency samples. InProcess plane, codex CLI on the API host.
+  backend:
+    kind: codex
+    codex:
+      sandbox: read-only
+  execution:
+    serviceAccountName: agent-runner
+    runtime: InProcess
+    timeoutSeconds: 1800
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: "2"
+        memory: 2Gi
+---
+apiVersion: control.anvil.hazyforge.io/v1alpha1
+kind: AgentRunProfile
+metadata:
+  name: kind-local-manager
+  namespace: agents
+spec:
+  description: Kind-local TEST ONLY manager agent for standing chat latency samples. Binds the InProcess harness above; interactive use only.
+  scope:
+    summary: Kind-local interactive standing chat latency sample. No cluster-wide authority.
+    namespaces:
+      - agents
+  harnessProfileRef:
+    name: kind-local-standing
+  harness:
+    intent: observe
+    systemPrompt: Reply briefly for latency measurement. Make no mutations.
