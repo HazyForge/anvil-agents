@@ -161,13 +161,130 @@ func TestChatJevCreateAgentHintNeverAuthorizesPeerCreation(t *testing.T) {
 	server.SetJevBackend(cannedJevIntent(t, jev.IntentCreateAgentRequest, 0.92))
 	_, promptAndMeta := queueJevTurn(t, server, "spawn a new worker agent")
 	prompt := strings.SplitN(promptAndMeta, "\n---USERMETA---\n", 2)[0]
-	for _, banned := range []string{"you may create", "you are authorized to create", "go ahead and create"} {
+	for _, banned := range []string{"you may create", "you are authorized to create", "go ahead and create", "call create-agent", "post the profile", "post agentrunprofile"} {
 		if strings.Contains(strings.ToLower(prompt), banned) {
 			t.Fatalf("hint authorizes peer creation: %s", prompt)
 		}
 	}
 	if !strings.Contains(prompt, "Wrapper/manager-only") {
 		t.Fatalf("hint must name the manager-only boundary: %s", prompt)
+	}
+	if !strings.Contains(prompt, "Do NOT create") {
+		t.Fatalf("hint must refuse peer creation: %s", prompt)
+	}
+}
+
+// TestChatJevCreateAgentFulfillmentSlice pins the first concrete fulfillment
+// step after classification: a classified, non-unclear create_agent_request
+// carries the peer-safe request shape in the prompt plus a structured
+// request flag on the user message and the turn's AgentRun — without
+// granting peers create authority (enforced by the controller's
+// create-agent skill stripping and Desktop isCreateAgentPrincipal; the
+// hint only names the requestPeer STATUS_JSON path).
+func TestChatJevCreateAgentFulfillmentSlice(t *testing.T) {
+	server := chatTestServer(t, true)
+	server.config.Chat.JevIntentEnabled = true
+	server.SetJevBackend(cannedJevIntent(t, jev.IntentCreateAgentRequest, 0.92))
+	result, promptAndMeta := queueJevTurn(t, server, "please create a helper agent for triage")
+	parts := strings.SplitN(promptAndMeta, "\n---USERMETA---\n", 2)
+	prompt, userMeta := parts[0], parts[1]
+	for _, want := range []string{"ROUTING_HINT", "request-only", "requestPeer", "create-agent", "ANVIL_AGENT_RUN_STATUS_JSON=", `"request":"create-agent"`} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("create_agent_request prompt missing %q: %s", want, prompt)
+		}
+	}
+	var meta map[string]any
+	if err := json.Unmarshal([]byte(userMeta), &meta); err != nil {
+		t.Fatalf("user metadata is not JSON: %v", err)
+	}
+	if meta["jevIntent"] != jev.IntentCreateAgentRequest {
+		t.Fatalf("jevIntent = %v, want %q (meta %s)", meta["jevIntent"], jev.IntentCreateAgentRequest, userMeta)
+	}
+	if meta["jevNeedsManagerCreate"] != true {
+		t.Fatalf("jevNeedsManagerCreate missing/false on create_agent_request (meta %s)", userMeta)
+	}
+	stored := &agentsv1alpha1.AgentRun{}
+	if err := server.writes.Get(context.Background(), types.NamespacedName{Namespace: "agents", Name: result.Turn.RunName}, stored); err != nil {
+		t.Fatal(err)
+	}
+	if stored.Annotations[jevIntentAnnotation] != jev.IntentCreateAgentRequest {
+		t.Fatalf("run annotation %q = %q, want %q", jevIntentAnnotation, stored.Annotations[jevIntentAnnotation], jev.IntentCreateAgentRequest)
+	}
+	if stored.Annotations[jevNeedsManagerCreateAnnotation] != "true" {
+		t.Fatalf("run annotation %q = %q, want \"true\"", jevNeedsManagerCreateAnnotation, stored.Annotations[jevNeedsManagerCreateAnnotation])
+	}
+}
+
+// TestChatJevUnclearCreateCarriesNoFulfillment ensures the confidence gate
+// suppresses fulfillment: a create_agent_request choice under the floor
+// gates to unclear, asks for clarification, and carries no manager-request
+// flag on the message or the run.
+func TestChatJevUnclearCreateCarriesNoFulfillment(t *testing.T) {
+	server := chatTestServer(t, true)
+	server.config.Chat.JevIntentEnabled = true
+	server.SetJevBackend(cannedJevIntent(t, jev.IntentCreateAgentRequest, 0.2))
+	result, promptAndMeta := queueJevTurn(t, server, "create")
+	parts := strings.SplitN(promptAndMeta, "\n---USERMETA---\n", 2)
+	prompt, userMeta := parts[0], parts[1]
+	if !strings.Contains(strings.ToLower(prompt), "clarifying question") {
+		t.Fatalf("unclear turn must ask for clarification: %s", prompt)
+	}
+	if strings.Contains(prompt, "ANVIL_AGENT_RUN_STATUS_JSON=") {
+		t.Fatalf("unclear turn must not carry the create request shape: %s", prompt)
+	}
+	var meta map[string]any
+	if err := json.Unmarshal([]byte(userMeta), &meta); err != nil {
+		t.Fatalf("user metadata is not JSON: %v", err)
+	}
+	if meta["jevIntent"] != jev.IntentUnclear {
+		t.Fatalf("jevIntent = %v, want unclear (meta %s)", meta["jevIntent"], userMeta)
+	}
+	if _, ok := meta["jevNeedsManagerCreate"]; ok {
+		t.Fatalf("unclear turn must not carry jevNeedsManagerCreate (meta %s)", userMeta)
+	}
+	stored := &agentsv1alpha1.AgentRun{}
+	if err := server.writes.Get(context.Background(), types.NamespacedName{Namespace: "agents", Name: result.Turn.RunName}, stored); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := stored.Annotations[jevNeedsManagerCreateAnnotation]; ok {
+		t.Fatalf("unclear run must not carry %q", jevNeedsManagerCreateAnnotation)
+	}
+}
+
+// TestChatJevNonCreateIntentsCarryNoManagerRequest ensures only the
+// create_agent_request path arms the Wrapper/manager request flag.
+func TestChatJevNonCreateIntentsCarryNoManagerRequest(t *testing.T) {
+	for _, choice := range []string{jev.IntentChatReply, jev.IntentPeerHandoff, jev.IntentToolRun, jev.IntentUnclear} {
+		t.Run(choice, func(t *testing.T) {
+			server := chatTestServer(t, true)
+			server.config.Chat.JevIntentEnabled = true
+			server.SetJevBackend(cannedJevIntent(t, choice, 0.9))
+			result, promptAndMeta := queueJevTurn(t, server, "route me")
+			parts := strings.SplitN(promptAndMeta, "\n---USERMETA---\n", 2)
+			userMeta := parts[1]
+			if choice != jev.IntentChatReply {
+				if strings.Contains(parts[0], "ANVIL_AGENT_RUN_STATUS_JSON=") {
+					t.Fatalf("%s turn must not carry the create request shape: %s", choice, parts[0])
+				}
+			}
+			var meta map[string]any
+			if choice == jev.IntentChatReply {
+				return
+			}
+			if err := json.Unmarshal([]byte(userMeta), &meta); err != nil {
+				t.Fatalf("user metadata is not JSON: %v", err)
+			}
+			if _, ok := meta["jevNeedsManagerCreate"]; ok {
+				t.Fatalf("%s turn must not carry jevNeedsManagerCreate (meta %s)", choice, userMeta)
+			}
+			stored := &agentsv1alpha1.AgentRun{}
+			if err := server.writes.Get(context.Background(), types.NamespacedName{Namespace: "agents", Name: result.Turn.RunName}, stored); err != nil {
+				t.Fatal(err)
+			}
+			if _, ok := stored.Annotations[jevNeedsManagerCreateAnnotation]; ok {
+				t.Fatalf("%s run must not carry %q", choice, jevNeedsManagerCreateAnnotation)
+			}
+		})
 	}
 }
 
