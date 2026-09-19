@@ -144,6 +144,7 @@ func (server *Server) routes() http.Handler {
 	mux.Handle("GET /api/v1/namespaces/{namespace}/agent-runs/{name}", server.authenticate(http.HandlerFunc(server.handleGetRun)))
 	mux.Handle("GET /api/v1/namespaces/{namespace}/agent-runs/{name}/events", server.authenticate(http.HandlerFunc(server.handleRunEvents)))
 	server.registerCompositionRoutes(mux)
+	server.registerRunProfileHarnessRoute(mux)
 	server.registerControlRoutes(mux)
 	server.registerExternalTriggerRoutes(mux)
 	server.registerChatRoutes(mux)
@@ -389,7 +390,7 @@ func (server *Server) cors(next http.Handler) http.Handler {
 			}
 			writer.Header().Set("Access-Control-Allow-Origin", origin)
 			writer.Header().Set("Access-Control-Allow-Headers", "Authorization, Last-Event-ID, Content-Type")
-			writer.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+			writer.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
 			writer.Header().Set("Access-Control-Max-Age", "600")
 			writer.Header().Add("Vary", "Origin")
 		}

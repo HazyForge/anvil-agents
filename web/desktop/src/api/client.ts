@@ -18,7 +18,7 @@ export class APIError extends Error {
 
 /** Empty string = same-origin relative paths through the desktop host proxy. */
 export function apiBase(): string {
-  const configured = (import.meta.env.VITE_API_BASE ?? "").trim().replace(/\/+$/, "");
+  const configured = (import.meta.env?.VITE_API_BASE ?? "").trim().replace(/\/+$/, "");
   return configured;
 }
 
@@ -331,6 +331,74 @@ function backendKindValue(backend: unknown): string {
     return typeof kind === "string" ? kind.trim() : "";
   }
   return "";
+}
+
+function backendObjectFromComposition(profile?: CompositionDocument): Record<string, unknown> {
+  const spec = specRecord(profile?.spec);
+  const direct = spec.backend;
+  if (direct && typeof direct === "object") {
+    return direct as Record<string, unknown>;
+  }
+  const harness = spec.harness;
+  if (harness && typeof harness === "object") {
+    const nested = (harness as { backend?: unknown }).backend;
+    if (nested && typeof nested === "object") {
+      return nested as Record<string, unknown>;
+    }
+  }
+  return {};
+}
+
+// Backend-neutral model lookup across every known backend adapter envelope
+// (codex/openCode/hermesAgent/openClaw/grokBuild/piAgent/primeAgent/agy).
+// Empty when the harness uses its runner default.
+export function harnessModelFromComposition(profile?: CompositionDocument): string {
+  const backend = backendObjectFromComposition(profile);
+  for (const key of ["codex", "openCode", "hermesAgent", "openClaw", "grokBuild", "piAgent", "primeAgent", "agy"]) {
+    const section = backend[key];
+    if (section && typeof section === "object" && "model" in section) {
+      const model = (section as { model?: unknown }).model;
+      if (typeof model === "string" && model.trim()) {
+        return model.trim();
+      }
+    }
+  }
+  return "";
+}
+
+// Picker label for a cluster harness profile: "name (backend · model)".
+// Never assumes a Codex-only fleet.
+export function harnessOptionLabel(profile: CompositionDocument): string {
+  const name = profile.metadata.name;
+  const backend = backendKindFromComposition(profile) || "custom";
+  const model = harnessModelFromComposition(profile);
+  return model ? `${name} (${backend} · ${model})` : `${name} (${backend})`;
+}
+
+// Narrow harness switch: PATCHes only spec.harnessProfileRef on the
+// AgentRunProfile. Inline backend/execution, skills, tools, and scope are
+// preserved server-side. An empty harnessName clears the ref.
+export async function patchRunProfileHarness(
+  token: string,
+  namespace: string,
+  profileName: string,
+  harnessName: string,
+  signal?: AbortSignal,
+): Promise<CompositionDocument> {
+  const response = await apiFetch(
+    `/api/v1/namespaces/${encodeURIComponent(namespace)}/agent-run-profiles/${encodeURIComponent(profileName)}/harness`,
+    token,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ harnessProfileName: harnessName.trim() }),
+      signal,
+    },
+  );
+  if (!response.ok) {
+    throw await readAPIError(response);
+  }
+  return (await response.json()) as CompositionDocument;
 }
 
 export function applicationFromAgentRun(run: AgentRunView | undefined, namespace: string): string {
