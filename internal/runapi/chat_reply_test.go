@@ -37,3 +37,18 @@ func TestNativeChatRepliesExcludeToolAndRunnerOutput(t *testing.T) {
 		}
 	}
 }
+
+func TestGrokBuildReplyFallsBackPastToolFrames(t *testing.T) {
+	// Succeeded Job path that previously surfaced "harness completed without a
+	// persisted reply": structured tool noise plus a trailing plain answer.
+	raw := `{"type":"tool_result","response":"tool text"}` + "\n" + "Hello from Grok after tools\n"
+	got, err := extractChatReply(agents.AgentRunHarnessBackendGrokBuild, raw)
+	if err != nil || got != "Hello from Grok after tools" {
+		t.Fatalf("mixed grok: %q %v", got, err)
+	}
+	msg := `{"type":"message_end","message":{"role":"assistant","stopReason":"end_turn","content":[{"type":"text","text":"Message end reply"}]}}`
+	got, err = extractChatReply(agents.AgentRunHarnessBackendGrokBuild, msg)
+	if err != nil || got != "Message end reply" {
+		t.Fatalf("message_end grok: %q %v", got, err)
+	}
+}
