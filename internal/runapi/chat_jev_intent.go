@@ -36,7 +36,12 @@ import (
 // requestPeer decision parsing) and the turn carries its own structured
 // request flag (user-message jevNeedsPeerHandoff plus the
 // jev-needs-peer-handoff AgentRun annotation) — still coordination only,
-// never creation. See
+// never creation. The tool_run hint names the existing tool surface (the
+// turn's resolved AgentToolSet composition plus the harness tool step —
+// no new tool API) and the turn carries its own structured request flag
+// (user-message jevNeedsToolRun plus the jev-needs-tool-run AgentRun
+// annotation) — still tool-first prompting only, never invented results.
+// See
 // docs/jev-intent-routing.md.
 
 // JevIntentEnvVar enables chat.jevIntentEnabled from the process
@@ -62,12 +67,18 @@ const JevModelEnvVar = "ANVIL_AGENTS_JEV_MODEL"
 // harness to fulfill through the existing coordination contract
 // (coordination JSON in chat, requestPeer STATUS_JSON on the runner path)
 // — never a grant to create agents or to send outside existing paths.
+// jevNeedsToolRunAnnotation marks the actionable tool case: a classified,
+// non-unclear tool_run. It is a prompting flag for the harness to run the
+// matching configured tool (the turn's resolved AgentToolSet composition)
+// before finalizing the reply — never a grant to invent tool results or
+// to call tools outside the configured sets.
 const (
 	jevIntentAnnotation             = "control.anvil.hazyforge.io/jev-intent"
 	jevConfidenceAnnotation         = "control.anvil.hazyforge.io/jev-confidence"
 	jevModelAnnotation              = "control.anvil.hazyforge.io/jev-model"
 	jevNeedsManagerCreateAnnotation = "control.anvil.hazyforge.io/jev-needs-manager-create"
 	jevNeedsPeerHandoffAnnotation   = "control.anvil.hazyforge.io/jev-needs-peer-handoff"
+	jevNeedsToolRunAnnotation       = "control.anvil.hazyforge.io/jev-needs-tool-run"
 	jevCreateAgentStatusJSONExample = `ANVIL_AGENT_RUN_STATUS_JSON={"type":"decision","action":"requestPeer","request":"create-agent","name":"<dns-label>","description":"<why>","peerProfileName":"desktop-manager"}`
 	jevPeerHandoffStatusJSONExample = `ANVIL_AGENT_RUN_STATUS_JSON={"type":"decision","action":"requestPeer","peerProfileName":"<existing-profile>","summary":"<why>"}`
 )
@@ -164,6 +175,17 @@ func jevNeedsPeerHandoff(decision jev.Decision, classified bool) bool {
 	return classified && !decision.Unclear && decision.Intent == jev.IntentPeerHandoff
 }
 
+// jevNeedsToolRun reports the actionable tool case: a classified,
+// non-unclear tool_run. Gated (unclear) turns, unclassified fallbacks,
+// and every other intent return false, so unclear never produces a
+// fulfillment signal. The flag is prompting-only — fulfillment still runs
+// the matching configured tool from the turn's resolved AgentToolSet
+// composition through the harness tool step, and it never authorizes
+// invented results or tools outside the configured sets.
+func jevNeedsToolRun(decision jev.Decision, classified bool) bool {
+	return classified && !decision.Unclear && decision.Intent == jev.IntentToolRun
+}
+
 // jevIntentPromptHint renders the minimal per-intent routing hint. Empty
 // means unchanged behavior: chat_reply takes today's prompt path, and the
 // fallback (unclassified) path adds no hint either. Hints observe the
@@ -180,7 +202,7 @@ func jevIntentPromptHint(decision jev.Decision, classified bool) string {
 	case jev.IntentPeerHandoff:
 		return "\nROUTING_HINT" + provenance + ": the author may want handoff to another EXISTING agent or peer — never a new agent. Coordinate only through the existing coordination contract: in chat, the coordination JSON this thread's config allows (messages to an allowed profile); on the runner path, the existing requestPeer STATUS_JSON shape so delivery stays inside existing paths: " + jevPeerHandoffStatusJSONExample + " Fill peerProfileName with the existing target profile and summary from the request. Never create, spawn, or provision an agent for a handoff, and never send outside existing paths. If coordination is not enabled on this thread, answer directly or explain the handoff needs an enabled coordination target.\n"
 	case jev.IntentToolRun:
-		return "\nROUTING_HINT" + provenance + ": the reply may depend on a tool, command, lookup, query, build, or deploy result. Prefer tool-first behavior: if the harness offers a tool step, run it before finalizing the reply; otherwise note what lookup is needed instead of guessing the result.\n"
+		return "\nROUTING_HINT" + provenance + ": the reply depends on a tool, command, lookup, query, build, or deploy result. Be tool-first through the existing tool surface only: run the matching configured tool from this turn's resolved AgentToolSet composition (profile/run toolSets refs, visible as status.resolvedComposition.toolSetRefs) through the harness tool step before finalizing the reply. Never invent the tool result, never claim a lookup succeeded unless a real tool confirms it, and never reach for tools outside the configured sets. If no configured tool covers the request, say what lookup is needed instead of guessing the result.\n"
 	default:
 		return "\nROUTING_HINT" + provenance + ": the request is ambiguous or low-confidence (unclear). Ask a brief clarifying question before acting; do not take destructive, delegating, or agent-creating actions on this turn.\n"
 	}
@@ -215,9 +237,12 @@ func buildChatPromptWithIntent(thread chat.Thread, messages []chat.Message, cont
 // (Desktop Wrapper fulfillment via executeCreateAgent). Classified,
 // non-unclear peer_handoff turns additionally carry
 // jevNeedsPeerHandoff=true: the structured outbox hint a harness can act
-// on later through the existing coordination contract. Both grant no
-// authority — peers still request via requestPeer STATUS_JSON, and neither
-// flag authorizes creation.
+// on later through the existing coordination contract. Classified,
+// non-unclear tool_run turns additionally carry jevNeedsToolRun=true:
+// the structured prompting hint a harness can act on later by running the
+// matching configured tool before finalizing. All three grant no
+// authority — peers still request via requestPeer STATUS_JSON, no flag
+// authorizes creation, and no flag invents tool results.
 func chatAuthorMetadataWithIntent(thread chat.Thread, deferred bool, decision jev.Decision, classified bool) json.RawMessage {
 	base := chatAuthorMetadata(thread, deferred)
 	if !classified {
@@ -238,6 +263,9 @@ func chatAuthorMetadataWithIntent(thread chat.Thread, deferred bool, decision je
 	if jevNeedsPeerHandoff(decision, classified) {
 		metadata["jevNeedsPeerHandoff"] = true
 	}
+	if jevNeedsToolRun(decision, classified) {
+		metadata["jevNeedsToolRun"] = true
+	}
 	raw, err := json.Marshal(metadata)
 	if err != nil {
 		return base
@@ -253,7 +281,10 @@ func chatAuthorMetadataWithIntent(thread chat.Thread, deferred bool, decision je
 // flag, never a create grant. Classified, non-unclear peer_handoff turns
 // additionally carry the jev-needs-peer-handoff=true annotation; it is a
 // coordination-request flag, never a create grant and never a new fanout
-// path.
+// path. Classified, non-unclear tool_run turns additionally carry the
+// jev-needs-tool-run=true annotation; it is a tool-first prompting flag,
+// never a license to invent results or to call tools outside the
+// configured sets.
 func annotateChatRunWithIntent(annotations map[string]string, decision jev.Decision, classified bool) map[string]string {
 	if !classified {
 		return annotations
@@ -271,6 +302,9 @@ func annotateChatRunWithIntent(annotations map[string]string, decision jev.Decis
 	}
 	if jevNeedsPeerHandoff(decision, classified) {
 		annotations[jevNeedsPeerHandoffAnnotation] = "true"
+	}
+	if jevNeedsToolRun(decision, classified) {
+		annotations[jevNeedsToolRunAnnotation] = "true"
 	}
 	return annotations
 }

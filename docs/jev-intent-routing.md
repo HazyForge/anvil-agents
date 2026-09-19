@@ -81,6 +81,11 @@ turn path (`reconcileStandingTurn` in
   equivalent) and the turn carries a structured `jevNeedsPeerHandoff`
   request flag — never creation, never a new fanout path, never sends
   outside existing paths.
+- `tool_run` stays prompting-only. The hint names the existing tool
+  surface (the turn's resolved `AgentToolSet` composition plus the harness
+  tool step — no new tool API) and the turn carries a structured
+  `jevNeedsToolRun` prompting flag — never invented results, never tools
+  outside the configured sets.
 - No invented live API responses: fakes in CI, live only behind the env key.
 
 ## The live hook (wired)
@@ -129,7 +134,7 @@ same way).
 | `chat_reply` | unchanged prompt path | — |
 | `create_agent_request` | hint names the concrete peer-safe request shape (`requestPeer` STATUS_JSON with `request=create-agent`, mirroring `skills/create-agent/SKILL.md` and the controller's injected skill content) and the turn carries a structured `jevNeedsManagerCreate` request flag; still Wrapper/manager-only | Request-only — peers never create agents (controller strips `create-agent` from peers; Desktop `isCreateAgentPrincipal` refuses) |
 | `peer_handoff` | hint names the concrete existing-peer `requestPeer` STATUS_JSON shape (`action=requestPeer` with `peerProfileName`/`summary`, mirroring `web/desktop/src/wrapper/requestPeer.ts` and the controller's `requestPeer` decision parsing) and the turn carries a structured `jevNeedsPeerHandoff` request flag; still coordination-only, never creation | Request-only — no new fanout; without enabled coordination, answer directly |
-| `tool_run` | tool-first hint: run the harness tool step before finalizing, else note the needed lookup | Prompt hint only |
+| `tool_run` | tool-first hint naming the existing tool surface (the turn's resolved `AgentToolSet` composition — profile/run `toolSets` refs, `status.resolvedComposition.toolSetRefs` — run through the harness tool step before finalizing; never invent results, never tools outside the configured sets) and the turn carries a structured `jevNeedsToolRun` prompting flag | Prompting-only — no new tool API; without a covering configured tool, name the needed lookup instead of guessing |
 | `unclear` (choice, unknown output, or sub-threshold confidence) | clarification-first hint: ask a brief clarifying question; no destructive/delegating/creating acts | — |
 
 ### `create_agent_request` fulfillment slice (this change)
@@ -236,6 +241,54 @@ sides, and this slice wires the classified intent to it.
   managers see the same read-only `jevIntent` caption until then. Jev
   never generates; Substrate untouched; standing primary.
 
+### `tool_run` fulfillment slice (this change)
+
+Same pattern as `create_agent_request` and `peer_handoff`, one intent
+over: no new tool, API, or protocol was invented — the tool surface
+already exists on both sides, and this slice wires the classified intent
+to it.
+
+- Existing surfaces found: the `AgentToolSet` composition layer
+  (`api/v1alpha1/agent_tool_set_types.go`: stable tool entries such as
+  `kbctl`, selected via profile/run `toolSets` refs plus namespace-global
+  sets, materialized into compatible harnesses by the controller and
+  recorded per turn as `status.resolvedComposition.toolSetRefs`);
+  `runs.create` already accepts `toolSetNames`
+  (`internal/runapi/runs_create.go`); the standing chat prompt already
+  holds the no-invention boundary (`buildChatPrompt` in
+  `internal/runapi/chat_execution.go`: do not claim delivery "unless a
+  real tool confirms"). No new STATUS_JSON shape, no new tool-call
+  format.
+- What a classified, non-`unclear` `tool_run` turn now carries: the
+  `ROUTING_HINT` names that existing surface — run the matching
+  configured tool from this turn's resolved `AgentToolSet` composition
+  through the harness tool step before finalizing; never invent the
+  result, never claim a lookup succeeded unless a real tool confirms it,
+  never reach for tools outside the configured sets; with no covering
+  configured tool, name the needed lookup instead of guessing. The queued
+  user message carries `jevNeedsToolRun: true` and the turn's AgentRun
+  carries `control.anvil.hazyforge.io/jev-needs-tool-run=true` — the
+  structured prompting hint a harness can consume.
+- `unclear` (including a sub-threshold `tool_run` choice) carries no
+  tool-first hint and no flag — clarification only. The turn carries
+  neither the create nor the handoff request shape.
+- Unit cover (`internal/runapi/chat_jev_intent_test.go`, `FakeBackend`,
+  no network): `TestChatJevToolRunFulfillmentSlice` (hint shape +
+  message flag + run annotation, and no create/handoff shape),
+  `TestChatJevUnclearToolRunCarriesNoFulfillment`,
+  `TestChatJevNonToolRunIntentsCarryNoToolRunFlag`.
+- Desktop in this slice: docs-only. There is no existing tool-run UI to
+  extend (`EntityChatPage` has only the read-only `jevIntent` caption —
+  which already surfaces `tool_run` — plus the manager-create receipt;
+  `tool`-role messages already render under the `Coordination` header),
+  so no Desktop code changes here — the prompting shape is pinned in the
+  Go tests above. Remaining Desktop work: if a tool affordance is ever
+  wanted, watch `jevNeedsToolRun` on thread detail / the
+  `jev-needs-tool-run` run annotation and surface existing tool UI (e.g.
+  deep-link the covering configured tool set or its last output); every
+  principal sees the same read-only `jevIntent` caption until then. Jev
+  never generates; Substrate untouched; standing primary.
+
 ### Desktop Wrapper affordance (shipped)
 
 `EntityChatPage` consumes the request flag from thread detail:
@@ -269,13 +322,21 @@ sides, and this slice wires the classified intent to it.
   non-unclear `create_agent_request` turns additionally carry
   `jevNeedsManagerCreate: true`: the structured outbox hint a
   Wrapper/manager harness can act on later. It grants no authority.
+  Classified, non-unclear `peer_handoff` turns additionally carry
+  `jevNeedsPeerHandoff: true`, and classified, non-unclear `tool_run`
+  turns additionally carry `jevNeedsToolRun: true` — the same
+  request/prompting-only shape, one flag per intent.
 - Turn AgentRun annotations: `control.anvil.hazyforge.io/jev-intent`,
   `.../jev-confidence`, `.../jev-model` — `kubectl`-visible per turn.
   Classified, non-unclear `create_agent_request` turns additionally carry
   `control.anvil.hazyforge.io/jev-needs-manager-create=true` so a
   Wrapper/manager can find actionable turns with `kubectl`; it is a request
-  flag, never a create grant. `unclear` turns (including sub-threshold
-  `create_agent_request` choices) carry neither flag.
+  flag, never a create grant. Classified, non-unclear `peer_handoff`
+  turns additionally carry `.../jev-needs-peer-handoff=true`, and
+  classified, non-unclear `tool_run` turns additionally carry
+  `.../jev-needs-tool-run=true` — same flag-only shape.
+  `unclear` turns (including sub-threshold `create_agent_request`,
+  `peer_handoff`, and `tool_run` choices) carry none of the three flags.
 - The prompt hint itself carries `(Jev intent X, confidence N, model M)`.
 
 ### What still needs a live `TYPESAFE_API_KEY` probe
