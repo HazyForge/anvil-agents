@@ -691,7 +691,9 @@ node --experimental-strip-types --test hack/desktop-standing-chat-live.test.mjs
 go run ./cmd/kind-oidc-issuer --key-file /tmp/kind-oidc.key.json
 
 # 2. API against Kind from the same host (terminal 2; KUBECONFIG -> Kind,
-#    chat.enabled needs PostgreSQL, e.g. hack/test-archive-postgres.sh).
+#    chat.enabled needs PostgreSQL: eval "$(./hack/kind-chat-postgres.sh)"
+#    per "Kind-local chat Postgres" below; hack/test-archive-postgres.sh
+#    remains the migration + store-shape reference).
 ANVIL_AGENTS_STANDING_LIVE=1 ANVIL_AGENTS_CHAT_DATABASE_URL=postgresql://... \
   go run ./cmd/anvil-agents-api --config examples/live-api/kind-local-api-config.yaml
 
@@ -806,7 +808,9 @@ spike](substrate-spike.md)).
    Postgres in the agent environment). Next: Austin runs steps 1–5 on WSL
    Kind, then applies the promote/reshape/retire bars in "Slice 5a" above.
    Known blockers on that path, in order: (a) PostgreSQL for
-   `chat.enabled` (needs `ANVIL_AGENTS_CHAT_DATABASE_URL`); (b) a
+   `chat.enabled` — scripted since #228 (`hack/kind-chat-postgres.sh`, see
+   "Kind-local chat Postgres" above; export the printed
+   `ANVIL_AGENTS_CHAT_DATABASE_URL` before starting the API in step 2); (b) a
    standing-enabled manager thread — now concrete: apply
    `examples/live-api/kind-local-standing-manager.yaml` (an `InProcess`
    harness profile bound to the thread's agent) with `standing.liveEnabled`
