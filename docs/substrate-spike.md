@@ -1,8 +1,11 @@
 # Substrate standing-chat spike
 
 Status: architectural spike, slice 3 (live ATE gRPC dial behind an explicit
-opt-in gate; live Kind numbers collected 2026-09-18, decision open —
-Austin decides).
+opt-in gate; live Kind numbers collected 2026-09-18). Decision locked
+2026-09-18 (Austin): keep Substrate/ATE **optional** for isolation/density —
+NOT promoted, NOT default-on. Standing in-process harness + WebSocket remains
+the primary interactive path; Jobs stay for scouts/batch (see
+[Standing in-process harness](standing-inprocess-harness.md)).
 
 ## Why
 
@@ -344,12 +347,24 @@ expected if the cold path is create-only vs resume of a suspended actor — the
 promote/reshape/retire bars below compare warm resume to the Job cold-start
 baseline, not cold vs warm.
 
-Remaining open before any promote call: the busy-recipient durable-wait peer
-check still needs explicit confirmation; suspend-on-idle multiplex
-regressions are not yet stressed; upstream pin is currently `944abe3`. The
-promote/reshape/retire decision below stays open — Austin decides.
+Remaining opens, tracked as optional follow-ups (not promote blockers — the
+2026-09-18 decision keeps Substrate optional regardless): the busy-recipient
+durable-wait peer check still needs explicit confirmation; suspend-on-idle
+multiplex regressions are not yet stressed; upstream pin is currently
+`944abe3`.
 
-## Decision: promote, reshape, or retire
+## Decision: keep optional (locked 2026-09-18)
+
+Austin skipped the Substrate promote widget: Substrate/ATE stays **optional**
+for isolation/density. It is NOT promoted and NOT default-on. The standing
+in-process harness + WebSocket is the primary interactive path; Jobs stay for
+scouts/batch.
+
+The live Kind numbers above (`n=10`, `kind-substrate-spike`: directWarm p95
+1233.01ms, peerWarm p95 398.70ms vs the passed Job p95 baseline of 44000ms)
+show warm resume far under the Job cold-start baseline, but the architectural
+call is still keep-optional, not promote. The bars below are kept for the
+record of how the spike was evaluated.
 
 Run the live compare above on Kind, then apply these bars. All comparisons
 are warm actor resume (direct AND peer) against the Job cold-start baseline on
@@ -381,9 +396,10 @@ the same cluster shape:
 - [x] Kind-local Substrate install note from the spike path above.
 - [x] Live `Client` binding onto real ATE lifecycle behind an explicit opt-in
   gate, including peer resume per the mapping above. Tested via fakes (warm
-  reuse + `ErrActorNotFound`) plus in-process gRPC round-trips; the warm-actor
+  reuse + `ErrActorNotFound`) plus in-process gRPC round-trips. Live Kind
+  numbers landed 2026-09-18 (see the latency section below); the warm-actor
   latency check for peer turns specifically (busy-recipient durable wait must
-  hold) is still open, so live Kind numbers are too.
+  hold) stays open as an optional follow-up.
 - [x] Live gRPC dialer (`internal/substrate/ate_grpc.go` over hand-written
   `ateapipb` stubs) with TLS/token parity to upstream `ateclient`, plus a
   Kind-only insecure-dev loopback dial. Gate-on dispatch and live Kind
@@ -407,10 +423,11 @@ the same cluster shape:
   SUSPENDED) while staying distinct on the seam; the five bound RPC
   signatures and all lifecycle field numbers are unchanged, and the spike
   binds no Revert/Delete RPCs.
-- [ ] Decision: promote, reshape, or retire the `SubstrateActor` surface.
-  Live p95 warm resume sits far under the passed Job baseline (directWarm
-  p95 1233.01ms and peerWarm p95 398.70ms vs Job p95 44000ms), which leans
-  promote on the latency bar alone — but Austin decides, and these stay open
-  first: busy-recipient durable-wait peer check needs explicit confirmation,
-  suspend-on-idle multiplex regressions are not yet stressed, upstream pin is
-  `944abe3`.
+- [x] Decision (locked 2026-09-18, Austin): keep the `SubstrateActor`
+  surface **optional** for isolation/density — not promoted, not default-on.
+  Live Kind numbers (`n=10`, directWarm p95 1233.01ms and peerWarm p95
+  398.70ms vs Job p95 44000ms — see the latency section) show warm resume far
+  under the Job baseline, but the call is keep-optional regardless. Remaining
+  opens are optional follow-ups, not promote blockers: busy-recipient
+  durable-wait peer check needs explicit confirmation, suspend-on-idle
+  multiplex regressions are not yet stressed, upstream pin is `944abe3`.

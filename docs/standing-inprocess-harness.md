@@ -10,7 +10,11 @@ exactly one API replica drives a standing turn through an annotation claim
 the controller respects, while open standing streams multiplex live token
 frames during the turn and the durable turn record stays the source of truth.
 Architectural
-direction locked by Austin 2026-09-18.
+direction locked by Austin 2026-09-18 and reaffirmed the same day: standing
+in-process harness + WebSocket is the **primary** interactive path.
+Substrate/ATE stays **optional** for isolation/density (see [Substrate
+spike](substrate-spike.md)) — not promoted, not default-on. Jobs stay for
+scouts/batch.
 
 ## Direction
 
@@ -658,6 +662,11 @@ chat_latency_standing_test.go` pins the new sink fields server-side.
 
 ## NEXT (after slice 5c)
 
+Standing in-process harness + WebSocket is the **primary** interactive path
+(reaffirmed 2026-09-18); Substrate/ATE stays **optional** for
+isolation/density and is not promoted (see [Substrate
+spike](substrate-spike.md)).
+
 1. **Live numbers (the remaining open measurement item).** Desktop e2e is
    done (see "Desktop chat e2e over the standing WebSocket" above), the
    slice-5a harness is green on deterministic backends, slice-5b resume is
@@ -666,9 +675,16 @@ chat_latency_standing_test.go` pins the new sink fields server-side.
    `process-exec` live numbers on the same cluster shape as the Job baseline
    are still open (needs a harness CLI with local auth; none exists in the
    agent environment, so no live numbers are captured or committed here).
-   Next: run the checklist under "How to run" above against a local/Kind
-   harness CLI (cold first turns AND resumed second turns), re-measure
-   Desktop send→firstToken, then apply the promote/reshape/retire bars above.
-2. **Retire the envelope wrapper** entirely once no Fake-only live path
+   Next: collect more `process-exec` live samples against a local/Kind
+   harness CLI (cold first turns AND resumed second turns), then apply the
+   promote/reshape/retire bars above to the standing plane.
+2. **Signed-in Desktop OIDC for chat-latency.jsonl.** Stub OIDC still denies
+   signed-in Desktop chat, so live send→firstToken samples need real OIDC
+   (Kind-local issuer or Zitadel) plus a standing-enabled manager thread
+   (`standing.liveEnabled` / `ANVIL_AGENTS_STANDING_LIVE` on the API).
+   Next: sign in against real OIDC, Send chat messages over the standing WS
+   path, and grow `.runtime/chat-latency.jsonl` with real `standing`-path
+   samples.
+3. **Retire the envelope wrapper** entirely once no Fake-only live path
    remains. Provider credentials stay outside the API's Secret surface
    throughout.
