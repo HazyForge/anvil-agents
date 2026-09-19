@@ -182,8 +182,13 @@ backend-kind overlay, which stays orthogonal to the runtime plane).
 - No Kind e2e against a real Substrate cluster in CI and no chat-log replay
   onto actors. Peer resume against live actors is mapped and wire-tested
   (thread-actor naming plus Resume-then-Suspend over real gRPC); live cluster
-  numbers landed 2026-09-18 (see the latency section) but the busy-recipient
-  durable-wait peer check still needs explicit confirmation.
+  numbers landed 2026-09-18 (see the latency section); the busy-recipient
+  durable-wait peer check is confirmed at the unit level
+  (`TestPeerSubstrateBusyRecipientDurableWait`, FakeClient, no cluster) with
+  only its live Kind numbers still open, and suspend-on-idle multiplexing is
+  stressed at the unit level (many-actor warm resume, rapid
+  Create→Suspend→Resume cycles, concurrent peer+direct resume — see the
+  latency section).
 - If upstream churns the lifecycle surface, update the hand-written
   `internal/substrate/ateapipb` binding per its refresh procedure (field
   numbers are what matter on the wire) — AgentRun types, merge rules, chat
@@ -353,8 +358,15 @@ baseline, not cold vs warm.
 
 Remaining opens, tracked as optional follow-ups (not promote blockers — the
 2026-09-18 decision keeps Substrate optional regardless): the busy-recipient
-durable-wait peer check still needs explicit confirmation; suspend-on-idle
-multiplex regressions are not yet stressed; upstream pin is currently
+durable-wait peer check is confirmed at the unit level with only its live
+Kind numbers still open; suspend-on-idle multiplexing is stressed at the unit
+level (many actors, rapid Create→Suspend→Resume cycles, concurrent
+peer+direct resume warm without identity churn or drops — `TestSuspendIdleMultiplexManyActorsWarmResume`,
+`TestSuspendIdleRapidCreateSuspendResumeCycles`,
+`TestSuspendIdleConcurrentPeerDirectResumeWarm`,
+`TestATEClientSuspendIdleMultiplexStress` in `internal/substrate` plus
+`TestSubstrateLiveSuspendIdleMultiplexStress` in `internal/controller`, all
+FakeClient / in-memory ATEControl, no cluster); upstream pin is currently
 `944abe3`.
 
 ## Decision: keep optional (locked 2026-09-18)
@@ -406,7 +418,15 @@ the same cluster shape:
   unit level (peer delivery durable-queues as `waiting` while the recipient
   is busy, then runs and binds the same warm actor with no drop:
   `TestPeerSubstrateBusyRecipientDurableWait`; suspend-then-warm-resume:
-  `TestSuspendedActorResumesWarm`); the live Kind numbers for peer turns (warm-actor
+  `TestSuspendedActorResumesWarm`); suspend-on-idle multiplexing is stressed
+  at the unit level (many-actor warm resume, rapid Create→Suspend→Resume
+  cycles, concurrent peer+direct resume warm without identity churn or drops:
+  `TestSuspendIdleMultiplexManyActorsWarmResume`,
+  `TestSuspendIdleRapidCreateSuspendResumeCycles`,
+  `TestSuspendIdleConcurrentPeerDirectResumeWarm`,
+  `TestATEClientSuspendIdleMultiplexStress`, plus gate-on reconcile
+  multiplexing: `TestSubstrateLiveSuspendIdleMultiplexStress`); the live Kind
+  numbers for peer turns (warm-actor
   latency check with the durable wait holding) stay open as an optional follow-up.
 - [x] Live gRPC dialer (`internal/substrate/ate_grpc.go` over hand-written
   `ateapipb` stubs) with TLS/token parity to upstream `ateclient`, plus a
@@ -437,5 +457,8 @@ the same cluster shape:
   398.70ms vs Job p95 44000ms — see the latency section) show warm resume far
   under the Job baseline, but the call is keep-optional regardless. Remaining
   opens are optional follow-ups, not promote blockers: busy-recipient
-  durable-wait peer check needs explicit confirmation, suspend-on-idle
-  multiplex regressions are not yet stressed, upstream pin is `944abe3`.
+  durable-wait peer check is confirmed at the unit level (only its live Kind
+  numbers stay open), suspend-on-idle multiplexing is stressed at the unit
+  level (many-actor warm resume, rapid Create→Suspend→Resume cycles,
+  concurrent peer+direct resume warm without identity churn or drops),
+  upstream pin is `944abe3`.
