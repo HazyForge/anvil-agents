@@ -29,7 +29,14 @@ import (
 // controller's injected skill content) and the turn carries a structured
 // request flag (user-message jevNeedsManagerCreate plus the
 // jev-needs-manager-create AgentRun annotation) for a Wrapper/manager to
-// fulfill later — never peer creation. See
+// fulfill later — never peer creation. The peer_handoff hint mirrors the
+// same conventions with the existing-peer requestPeer STATUS_JSON shape
+// (action=requestPeer with peerProfileName/summary, mirroring
+// web/desktop/src/wrapper/requestPeer.ts and the controller's
+// requestPeer decision parsing) and the turn carries its own structured
+// request flag (user-message jevNeedsPeerHandoff plus the
+// jev-needs-peer-handoff AgentRun annotation) — still coordination only,
+// never creation. See
 // docs/jev-intent-routing.md.
 
 // JevIntentEnvVar enables chat.jevIntentEnabled from the process
@@ -50,12 +57,19 @@ const JevModelEnvVar = "ANVIL_AGENTS_JEV_MODEL"
 // Wrapper/manager to fulfill through the existing manager-authorization
 // path — never a grant for this peer to create. Desktop Wrapper may watch
 // it later; peers must still request via requestPeer STATUS_JSON.
+// jevNeedsPeerHandoffAnnotation marks the actionable handoff case: a
+// classified, non-unclear peer_handoff. It is a request flag for the
+// harness to fulfill through the existing coordination contract
+// (coordination JSON in chat, requestPeer STATUS_JSON on the runner path)
+// — never a grant to create agents or to send outside existing paths.
 const (
 	jevIntentAnnotation             = "control.anvil.hazyforge.io/jev-intent"
 	jevConfidenceAnnotation         = "control.anvil.hazyforge.io/jev-confidence"
 	jevModelAnnotation              = "control.anvil.hazyforge.io/jev-model"
 	jevNeedsManagerCreateAnnotation = "control.anvil.hazyforge.io/jev-needs-manager-create"
+	jevNeedsPeerHandoffAnnotation   = "control.anvil.hazyforge.io/jev-needs-peer-handoff"
 	jevCreateAgentStatusJSONExample = `ANVIL_AGENT_RUN_STATUS_JSON={"type":"decision","action":"requestPeer","request":"create-agent","name":"<dns-label>","description":"<why>","peerProfileName":"desktop-manager"}`
+	jevPeerHandoffStatusJSONExample = `ANVIL_AGENT_RUN_STATUS_JSON={"type":"decision","action":"requestPeer","peerProfileName":"<existing-profile>","summary":"<why>"}`
 )
 
 // jevClassifyTimeout bounds one routing decision. System One answers in
@@ -139,6 +153,17 @@ func jevNeedsManagerCreate(decision jev.Decision, classified bool) bool {
 	return classified && !decision.Unclear && decision.Intent == jev.IntentCreateAgentRequest
 }
 
+// jevNeedsPeerHandoff reports the actionable handoff case: a classified,
+// non-unclear peer_handoff. Gated (unclear) turns, unclassified fallbacks,
+// and every other intent return false, so unclear never produces a
+// fulfillment signal. The flag is request-only — fulfillment still goes
+// through the existing coordination contract (coordination JSON in chat,
+// requestPeer STATUS_JSON on the runner path), and it never authorizes
+// agent creation or sends outside existing paths.
+func jevNeedsPeerHandoff(decision jev.Decision, classified bool) bool {
+	return classified && !decision.Unclear && decision.Intent == jev.IntentPeerHandoff
+}
+
 // jevIntentPromptHint renders the minimal per-intent routing hint. Empty
 // means unchanged behavior: chat_reply takes today's prompt path, and the
 // fallback (unclassified) path adds no hint either. Hints observe the
@@ -153,7 +178,7 @@ func jevIntentPromptHint(decision jev.Decision, classified bool) string {
 	case jev.IntentCreateAgentRequest:
 		return "\nROUTING_HINT" + provenance + ": the author may be asking for a NEW agent. Do NOT create, spawn, provision, or claim to have created an agent from this peer path — create-agent stays Wrapper/manager-only. Peer-safe fulfillment is request-only through the existing runner STATUS_JSON path so a Wrapper/manager can fulfill (the controller strips create-agent from peers; Desktop refuses peer creation): " + jevCreateAgentStatusJSONExample + " Fill name/description from the request; otherwise reply explaining that creating an agent requires a manager and ask what the new agent should do.\n"
 	case jev.IntentPeerHandoff:
-		return "\nROUTING_HINT" + provenance + ": the author may want handoff to another EXISTING agent or peer. This is a soft hint only: only coordinate through the existing coordination contract (the coordination JSON this thread's config allows, via requestPeer delivery) and never send outside existing paths. If coordination is not enabled on this thread, answer directly or explain the handoff needs an enabled coordination target.\n"
+		return "\nROUTING_HINT" + provenance + ": the author may want handoff to another EXISTING agent or peer — never a new agent. Coordinate only through the existing coordination contract: in chat, the coordination JSON this thread's config allows (messages to an allowed profile); on the runner path, the existing requestPeer STATUS_JSON shape so delivery stays inside existing paths: " + jevPeerHandoffStatusJSONExample + " Fill peerProfileName with the existing target profile and summary from the request. Never create, spawn, or provision an agent for a handoff, and never send outside existing paths. If coordination is not enabled on this thread, answer directly or explain the handoff needs an enabled coordination target.\n"
 	case jev.IntentToolRun:
 		return "\nROUTING_HINT" + provenance + ": the reply may depend on a tool, command, lookup, query, build, or deploy result. Prefer tool-first behavior: if the harness offers a tool step, run it before finalizing the reply; otherwise note what lookup is needed instead of guessing the result.\n"
 	default:
@@ -187,8 +212,12 @@ func buildChatPromptWithIntent(thread chat.Thread, messages []chat.Message, cont
 // today's metadata byte-identical. Classified, non-unclear
 // create_agent_request turns additionally carry jevNeedsManagerCreate=true:
 // the structured outbox hint a Wrapper/manager harness can act on later
-// (Desktop Wrapper fulfillment via executeCreateAgent). It grants no
-// authority — peers still request via requestPeer STATUS_JSON.
+// (Desktop Wrapper fulfillment via executeCreateAgent). Classified,
+// non-unclear peer_handoff turns additionally carry
+// jevNeedsPeerHandoff=true: the structured outbox hint a harness can act
+// on later through the existing coordination contract. Both grant no
+// authority — peers still request via requestPeer STATUS_JSON, and neither
+// flag authorizes creation.
 func chatAuthorMetadataWithIntent(thread chat.Thread, deferred bool, decision jev.Decision, classified bool) json.RawMessage {
 	base := chatAuthorMetadata(thread, deferred)
 	if !classified {
@@ -206,6 +235,9 @@ func chatAuthorMetadataWithIntent(thread chat.Thread, deferred bool, decision je
 	if jevNeedsManagerCreate(decision, classified) {
 		metadata["jevNeedsManagerCreate"] = true
 	}
+	if jevNeedsPeerHandoff(decision, classified) {
+		metadata["jevNeedsPeerHandoff"] = true
+	}
 	raw, err := json.Marshal(metadata)
 	if err != nil {
 		return base
@@ -218,7 +250,10 @@ func chatAuthorMetadataWithIntent(thread chat.Thread, deferred bool, decision je
 // run untouched. Classified, non-unclear create_agent_request turns
 // additionally carry the jev-needs-manager-create=true annotation so a
 // Wrapper/manager can find actionable turns with kubectl; it is a request
-// flag, never a create grant.
+// flag, never a create grant. Classified, non-unclear peer_handoff turns
+// additionally carry the jev-needs-peer-handoff=true annotation; it is a
+// coordination-request flag, never a create grant and never a new fanout
+// path.
 func annotateChatRunWithIntent(annotations map[string]string, decision jev.Decision, classified bool) map[string]string {
 	if !classified {
 		return annotations
@@ -233,6 +268,9 @@ func annotateChatRunWithIntent(annotations map[string]string, decision jev.Decis
 	}
 	if jevNeedsManagerCreate(decision, classified) {
 		annotations[jevNeedsManagerCreateAnnotation] = "true"
+	}
+	if jevNeedsPeerHandoff(decision, classified) {
+		annotations[jevNeedsPeerHandoffAnnotation] = "true"
 	}
 	return annotations
 }

@@ -251,8 +251,138 @@ func TestChatJevUnclearCreateCarriesNoFulfillment(t *testing.T) {
 	}
 }
 
+// TestChatJevPeerHandoffFulfillmentSlice pins the handoff fulfillment step
+// after classification, mirroring the create-agent slice: a classified,
+// non-unclear peer_handoff carries the existing-peer requestPeer
+// STATUS_JSON shape in the prompt (the same conventions
+// web/desktop/src/wrapper/requestPeer.ts and the controller's requestPeer
+// decision parsing already accept — no new protocol) plus a structured
+// request flag on the user message and the turn's AgentRun. The flag is
+// coordination-only: it never authorizes creation and never sends outside
+// existing paths.
+func TestChatJevPeerHandoffFulfillmentSlice(t *testing.T) {
+	server := chatTestServer(t, true)
+	server.config.Chat.JevIntentEnabled = true
+	server.SetJevBackend(cannedJevIntent(t, jev.IntentPeerHandoff, 0.88))
+	result, promptAndMeta := queueJevTurn(t, server, "delegate this to the reviewer peer")
+	parts := strings.SplitN(promptAndMeta, "\n---USERMETA---\n", 2)
+	prompt, userMeta := parts[0], parts[1]
+	for _, want := range []string{"ROUTING_HINT", "requestPeer", "ANVIL_AGENT_RUN_STATUS_JSON=", `"action":"requestPeer"`, `"peerProfileName":"<existing-profile>"`, `"summary":"<why>"`} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("peer_handoff prompt missing %q: %s", want, prompt)
+		}
+	}
+	for _, banned := range []string{`"request":"create-agent"`, "create-agent", "go ahead and create", "you may create"} {
+		if strings.Contains(strings.ToLower(prompt), strings.ToLower(banned)) {
+			t.Fatalf("peer_handoff prompt must not carry the create path %q: %s", banned, prompt)
+		}
+	}
+	var meta map[string]any
+	if err := json.Unmarshal([]byte(userMeta), &meta); err != nil {
+		t.Fatalf("user metadata is not JSON: %v", err)
+	}
+	if meta["jevIntent"] != jev.IntentPeerHandoff {
+		t.Fatalf("jevIntent = %v, want %q (meta %s)", meta["jevIntent"], jev.IntentPeerHandoff, userMeta)
+	}
+	if meta["jevNeedsPeerHandoff"] != true {
+		t.Fatalf("jevNeedsPeerHandoff missing/false on peer_handoff (meta %s)", userMeta)
+	}
+	if _, ok := meta["jevNeedsManagerCreate"]; ok {
+		t.Fatalf("peer_handoff turn must not carry jevNeedsManagerCreate (meta %s)", userMeta)
+	}
+	stored := &agentsv1alpha1.AgentRun{}
+	if err := server.writes.Get(context.Background(), types.NamespacedName{Namespace: "agents", Name: result.Turn.RunName}, stored); err != nil {
+		t.Fatal(err)
+	}
+	if stored.Annotations[jevIntentAnnotation] != jev.IntentPeerHandoff {
+		t.Fatalf("run annotation %q = %q, want %q", jevIntentAnnotation, stored.Annotations[jevIntentAnnotation], jev.IntentPeerHandoff)
+	}
+	if stored.Annotations[jevNeedsPeerHandoffAnnotation] != "true" {
+		t.Fatalf("run annotation %q = %q, want \"true\"", jevNeedsPeerHandoffAnnotation, stored.Annotations[jevNeedsPeerHandoffAnnotation])
+	}
+	if _, ok := stored.Annotations[jevNeedsManagerCreateAnnotation]; ok {
+		t.Fatalf("peer_handoff run must not carry %q", jevNeedsManagerCreateAnnotation)
+	}
+}
+
+// TestChatJevUnclearHandoffCarriesNoFulfillment ensures the confidence gate
+// suppresses handoff fulfillment: a peer_handoff choice under the floor
+// gates to unclear, asks for clarification, and carries no handoff request
+// shape, message flag, or run annotation.
+func TestChatJevUnclearHandoffCarriesNoFulfillment(t *testing.T) {
+	server := chatTestServer(t, true)
+	server.config.Chat.JevIntentEnabled = true
+	server.SetJevBackend(cannedJevIntent(t, jev.IntentPeerHandoff, 0.2))
+	result, promptAndMeta := queueJevTurn(t, server, "hand off")
+	parts := strings.SplitN(promptAndMeta, "\n---USERMETA---\n", 2)
+	prompt, userMeta := parts[0], parts[1]
+	if !strings.Contains(strings.ToLower(prompt), "clarifying question") {
+		t.Fatalf("unclear turn must ask for clarification: %s", prompt)
+	}
+	if strings.Contains(prompt, "ANVIL_AGENT_RUN_STATUS_JSON=") {
+		t.Fatalf("unclear turn must not carry the handoff request shape: %s", prompt)
+	}
+	var meta map[string]any
+	if err := json.Unmarshal([]byte(userMeta), &meta); err != nil {
+		t.Fatalf("user metadata is not JSON: %v", err)
+	}
+	if meta["jevIntent"] != jev.IntentUnclear {
+		t.Fatalf("jevIntent = %v, want unclear (meta %s)", meta["jevIntent"], userMeta)
+	}
+	if _, ok := meta["jevNeedsPeerHandoff"]; ok {
+		t.Fatalf("unclear turn must not carry jevNeedsPeerHandoff (meta %s)", userMeta)
+	}
+	stored := &agentsv1alpha1.AgentRun{}
+	if err := server.writes.Get(context.Background(), types.NamespacedName{Namespace: "agents", Name: result.Turn.RunName}, stored); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := stored.Annotations[jevNeedsPeerHandoffAnnotation]; ok {
+		t.Fatalf("unclear run must not carry %q", jevNeedsPeerHandoffAnnotation)
+	}
+}
+
+// TestChatJevNonHandoffIntentsCarryNoHandoffFlag ensures only the
+// peer_handoff path arms the handoff request flag: every other intent
+// carries no jevNeedsPeerHandoff message flag and no run annotation.
+func TestChatJevNonHandoffIntentsCarryNoHandoffFlag(t *testing.T) {
+	for _, choice := range []string{jev.IntentChatReply, jev.IntentCreateAgentRequest, jev.IntentToolRun, jev.IntentUnclear} {
+		t.Run(choice, func(t *testing.T) {
+			server := chatTestServer(t, true)
+			server.config.Chat.JevIntentEnabled = true
+			server.SetJevBackend(cannedJevIntent(t, choice, 0.9))
+			result, promptAndMeta := queueJevTurn(t, server, "route me")
+			parts := strings.SplitN(promptAndMeta, "\n---USERMETA---\n", 2)
+			userMeta := parts[1]
+			if choice != jev.IntentChatReply {
+				if strings.Contains(parts[0], `"peerProfileName":"<existing-profile>"`) {
+					t.Fatalf("%s turn must not carry the handoff request shape: %s", choice, parts[0])
+				}
+			} else {
+				return
+			}
+			var meta map[string]any
+			if err := json.Unmarshal([]byte(userMeta), &meta); err != nil {
+				t.Fatalf("user metadata is not JSON: %v", err)
+			}
+			if _, ok := meta["jevNeedsPeerHandoff"]; ok {
+				t.Fatalf("%s turn must not carry jevNeedsPeerHandoff (meta %s)", choice, userMeta)
+			}
+			stored := &agentsv1alpha1.AgentRun{}
+			if err := server.writes.Get(context.Background(), types.NamespacedName{Namespace: "agents", Name: result.Turn.RunName}, stored); err != nil {
+				t.Fatal(err)
+			}
+			if _, ok := stored.Annotations[jevNeedsPeerHandoffAnnotation]; ok {
+				t.Fatalf("%s run must not carry %q", choice, jevNeedsPeerHandoffAnnotation)
+			}
+		})
+	}
+}
+
 // TestChatJevNonCreateIntentsCarryNoManagerRequest ensures only the
-// create_agent_request path arms the Wrapper/manager request flag.
+// create_agent_request path arms the Wrapper/manager request flag. The
+// peer_handoff path now carries its own handoff request shape (not the
+// create shape), so this pins the absence of the create-agent request line
+// plus the manager flag/annotation on every other intent.
 func TestChatJevNonCreateIntentsCarryNoManagerRequest(t *testing.T) {
 	for _, choice := range []string{jev.IntentChatReply, jev.IntentPeerHandoff, jev.IntentToolRun, jev.IntentUnclear} {
 		t.Run(choice, func(t *testing.T) {
@@ -263,7 +393,7 @@ func TestChatJevNonCreateIntentsCarryNoManagerRequest(t *testing.T) {
 			parts := strings.SplitN(promptAndMeta, "\n---USERMETA---\n", 2)
 			userMeta := parts[1]
 			if choice != jev.IntentChatReply {
-				if strings.Contains(parts[0], "ANVIL_AGENT_RUN_STATUS_JSON=") {
+				if strings.Contains(parts[0], `"request":"create-agent"`) {
 					t.Fatalf("%s turn must not carry the create request shape: %s", choice, parts[0])
 				}
 			}
@@ -277,12 +407,22 @@ func TestChatJevNonCreateIntentsCarryNoManagerRequest(t *testing.T) {
 			if _, ok := meta["jevNeedsManagerCreate"]; ok {
 				t.Fatalf("%s turn must not carry jevNeedsManagerCreate (meta %s)", choice, userMeta)
 			}
+			if choice != jev.IntentPeerHandoff {
+				if _, ok := meta["jevNeedsPeerHandoff"]; ok {
+					t.Fatalf("%s turn must not carry jevNeedsPeerHandoff (meta %s)", choice, userMeta)
+				}
+			}
 			stored := &agentsv1alpha1.AgentRun{}
 			if err := server.writes.Get(context.Background(), types.NamespacedName{Namespace: "agents", Name: result.Turn.RunName}, stored); err != nil {
 				t.Fatal(err)
 			}
 			if _, ok := stored.Annotations[jevNeedsManagerCreateAnnotation]; ok {
 				t.Fatalf("%s run must not carry %q", choice, jevNeedsManagerCreateAnnotation)
+			}
+			if choice != jev.IntentPeerHandoff {
+				if _, ok := stored.Annotations[jevNeedsPeerHandoffAnnotation]; ok {
+					t.Fatalf("%s run must not carry %q", choice, jevNeedsPeerHandoffAnnotation)
+				}
 			}
 		})
 	}
