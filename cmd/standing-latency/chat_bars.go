@@ -9,32 +9,45 @@
 // uses (see docs/standing-inprocess-harness.md, "Slice 5a").
 //
 // Closest honest mapping (documented here because the docs bars assume the
-// sixteen-scenario standing-latency matrix, which the JSONL does not have):
+// sixteen-scenario standing-latency matrix, which the JSONL does not have).
+// Recalibrated: per prior clarification the Job ~12s figure is Pod-ready /
+// startup only, NOT a full turn — so the promote/retire/inconclusive gates
+// key off sendToFirstTokenMs vs that baseline, and replyReadyMs never drives
+// a verdict.
 //
 //   - `sendToFirstTokenMs` (falling back to `firstTokenMs` when the alias is
-//     absent) plays the first-token role: the bar is p95 in the low single
-//     seconds (<= 5000ms) and at least an order of magnitude under the Job
-//     p95 (<= jobP95/10).
-//   - `replyReadyMs` plays the full warm-turn role: the bar is p95 an order
-//     of magnitude under the Job p95 (<= jobP95/10). This is conservative —
-//     the Job baseline covers create-to-Pod-ready only while replyReady
-//     includes harness/model time on top — so a pass here is strong.
+//     absent) is the promote/retire metric: time to first visible token,
+//     which is exactly what the Job Pod-ready baseline (~12s p50 / ~44s p95
+//     via `-job-baseline-p50-ms` / `-job-baseline-p95-ms`) delays. The bar
+//     is p95 in the low single seconds (<= 5000ms) and at least an order of
+//     magnitude under the Job p95 (<= jobP95/10).
+//   - `replyReadyMs` is computed and reported in the JSON artifact as
+//     model-inclusive context only — it must NOT drive retire/promote. A
+//     slow full turn next to a fast first token reports promote (or
+//     inconclusive, see below), never retire: the Job baseline covers
+//     create-to-Pod-ready only while replyReady includes harness/model time
+//     on top, so scoring replyReady against it miscalibrates the bars
+//     (tonight's live n=10 retired on replyReady p50 7190ms vs Job 12s;
+//     under this mapping the same first-token numbers lean promote).
 //   - The JSONL carries a single standing plane (no direct-vs-peer split),
 //     so `reshape` (direct wins, peer does not) is never emitted by this
-//     scorer. A direct-win/peer-unknown outcome reports `inconclusive-live`
-//     with a reason pointing at the full `standing-latency` matrix for the
-//     peer dimension.
-//   - `promote` additionally requires at least `-min-samples` delivered
-//     standing samples (default 10): tonight's n=5 already sits well under
-//     the first-token bar, but five turns cannot carry a p95 promote call.
-//   - `retire` fires when full-turn p50 sits within noise of the Job p50
-//     (under a 2x win, i.e. replyReady p50 >= jobP50/2). First-token alone
-//     never retires the plane.
-//   - Zero matching samples, too few samples, replyReady absent, or numbers
-//     between the bars all report `inconclusive-live` — never a new bar
-//     name. No baseline flags reports `no-baseline`. This scorer never
-//     reports `harness-ok`: its input is live signed-in samples, not
-//     deterministic backends.
+//     scorer. A direct-win/peer-unknown outcome reports `promote` with a
+//     reason naming the full `standing-latency` matrix as the peer check
+//     that must also pass before promoting peers, or `inconclusive-live`
+//     when the peer plane (or sample count) is the only open item.
+//   - `promote`/`retire` additionally require at least `-min-samples`
+//     delivered standing samples (default 10): tonight's n=5 already sits
+//     well under the first-token bar, but five turns cannot carry a p95
+//     promote call.
+//   - `retire` fires when first-token p50 sits within noise of the Job
+//     Pod-ready p50 (under a 2x win, i.e. first-token p50 >= jobP50/2). A
+//     slow replyReadyMs alone never retires the plane.
+//   - Zero matching samples, too few samples, or first-token numbers between
+//     the bars all report `inconclusive-live` — never a new bar name. A
+//     missing replyReadyMs no longer blocks a verdict (it is context only).
+//     No baseline flags reports `no-baseline`. This scorer never reports
+//     `harness-ok`: its input is live signed-in samples, not deterministic
+//     backends.
 //
 // Lines carrying a non-empty `error` are counted (`errorSamples`) and
 // excluded from the latency stats: a denied or failed turn is not a latency
@@ -106,6 +119,10 @@ func summarizeChatSamples(samples []float64) chatBarsStats {
 }
 
 // chatBarsInput carries the parsed scoreable inputs for judgeChatBars.
+// ReplyReady/HasReply are model-inclusive context only: they are reported in
+// the JSON artifact and may be named in verdict reasons, but they never gate
+// a verdict — the promote/retire/inconclusive gates key off FirstToken vs
+// the Job Pod-ready baseline alone.
 type chatBarsInput struct {
 	Matched      int
 	FirstToken   chatBarsStats
@@ -125,6 +142,13 @@ type chatBarsInput struct {
 // are promote, retire, inconclusive-live, and no-baseline. reshape is
 // documented as not emitted (peer dimension lives in the full
 // standing-latency matrix, not in this single-plane JSONL).
+//
+// Recalibrated mapping: the Job baseline is Pod-ready/startup only (NOT a
+// full turn), so the gates key off sendToFirstTokenMs (fallback
+// firstTokenMs) vs that baseline. replyReadyMs is context only and never
+// drives retire/promote — a slow replyReady next to a fast first token
+// reports promote (or inconclusive on sample count / between-bars
+// first-token numbers), never retire.
 func judgeChatBars(in chatBarsInput) (string, string) {
 	if in.JobP50 <= 0 && in.JobP95 <= 0 {
 		return chatBarsNoBaseline, "no Job baseline flags were passed, so no comparison or bars verdict applies"
@@ -137,28 +161,37 @@ func judgeChatBars(in chatBarsInput) (string, string) {
 		return chatBarsInconclusive, fmt.Sprintf("only %d delivered standing samples (need >= %d for a bars call): first-token p50 %.1fms already sits well under the Job baseline, but more iterations are needed before any promote/retire decision",
 			in.Matched, in.MinSamples, in.FirstToken.P50Ms)
 	}
-	if !in.HasReply {
-		return chatBarsInconclusive, fmt.Sprintf("%d delivered standing samples carry sendToFirstTokenMs but none carry replyReadyMs: the full-turn bar cannot be evaluated, collect turns with both fields before applying the bars", in.Matched)
+	// Retire: first-token p50 within noise of the Job Pod-ready p50 (under
+	// a 2x win). replyReadyMs alone never retires the plane.
+	if in.JobP50 > 0 && in.FirstToken.P50Ms >= in.JobP50/2 {
+		return chatBarsRetire, fmt.Sprintf("standing sendToFirstToken p50 %.1fms is within noise of job Pod-ready p50 %.0fms (under a 2x win); the standing plane does not pay for itself%s",
+			in.FirstToken.P50Ms, in.JobP50, replyReadyContextSuffix(in))
 	}
-	// Retire: full-turn p50 within noise of the Job p50 (under a 2x win).
-	if in.JobP50 > 0 && in.ReplyReady.P50Ms >= in.JobP50/2 {
-		return chatBarsRetire, fmt.Sprintf("standing replyReady p50 %.1fms is within noise of job p50 %.0fms (under a 2x win); the standing plane does not pay for itself",
-			in.ReplyReady.P50Ms, in.JobP50)
-	}
-	// Promote: full-turn p95 an order of magnitude under the Job p95 with
-	// first-token p95 in the low single seconds. The peer dimension is not
-	// in this JSONL, so the reason names the standing-latency matrix as the
-	// peer check that must also pass before promoting peers.
+	// Promote: first-token p95 an order of magnitude under the Job Pod-ready
+	// p95 with first-token p95 in the low single seconds. The peer dimension
+	// is not in this JSONL, so the reason names the standing-latency matrix
+	// as the peer check that must also pass before promoting peers.
 	firstTokenCeiling := firstTokenBarMs
 	if in.JobP95 > 0 && in.JobP95/10 < float64(firstTokenCeiling) {
 		firstTokenCeiling = int(in.JobP95 / 10)
 	}
-	if in.JobP95 > 0 && in.ReplyReady.P95Ms <= in.JobP95/10 && in.FirstToken.P95Ms <= float64(firstTokenCeiling) {
-		return chatBarsPromote, fmt.Sprintf("standing replyReady p95 %.1fms <= job p95 %.0fms/10 with sendToFirstToken p95 %.1fms <= %dms over %d samples; peer plane still needs the full standing-latency matrix (reshape bar) before promoting peers",
-			in.ReplyReady.P95Ms, in.JobP95, in.FirstToken.P95Ms, firstTokenCeiling, in.Matched)
+	if in.JobP95 > 0 && in.FirstToken.P95Ms <= float64(firstTokenCeiling) {
+		return chatBarsPromote, fmt.Sprintf("standing sendToFirstToken p95 %.1fms <= min(5000ms, job Pod-ready p95 %.0fms/10) = %dms over %d samples (p50 %.1fms)%s; peer plane still needs the full standing-latency matrix (reshape bar) before promoting peers",
+			in.FirstToken.P95Ms, in.JobP95, firstTokenCeiling, in.Matched, in.FirstToken.P50Ms, replyReadyContextSuffix(in))
 	}
-	return chatBarsInconclusive, fmt.Sprintf("live standing numbers land between the bars (sendToFirstToken p50 %.1fms / p95 %.1fms, replyReady p50 %.1fms / p95 %.1fms over %d samples vs job p50 %.0fms / p95 %.0fms): collect more iterations on the same cluster shape before deciding",
-		in.FirstToken.P50Ms, in.FirstToken.P95Ms, in.ReplyReady.P50Ms, in.ReplyReady.P95Ms, in.Matched, in.JobP50, in.JobP95)
+	return chatBarsInconclusive, fmt.Sprintf("live standing first-token lands between the bars (sendToFirstToken p50 %.1fms / p95 %.1fms over %d samples vs job Pod-ready p50 %.0fms / p95 %.0fms%s): collect more iterations on the same cluster shape before deciding",
+		in.FirstToken.P50Ms, in.FirstToken.P95Ms, in.Matched, in.JobP50, in.JobP95, replyReadyContextSuffix(in))
+}
+
+// replyReadyContextSuffix renders the model-inclusive replyReady context for
+// verdict reasons. It never gates a verdict: present numbers are reported as
+// context, an absent replyReady is reported as absent context.
+func replyReadyContextSuffix(in chatBarsInput) string {
+	if !in.HasReply {
+		return "; no replyReadyMs in these samples (context absent, verdict keys off first-token only)"
+	}
+	return fmt.Sprintf("; replyReady p50 %.1fms / p95 %.1fms is model-inclusive context only, not a gate",
+		in.ReplyReady.P50Ms, in.ReplyReady.P95Ms)
 }
 
 // chatBarsReport is the JSON report for `-chat-jsonl` scoring mode. Verdict
@@ -293,7 +326,7 @@ func scoreChatJSONL(path, source, wantPath string, jobP50, jobP95 float64, minSa
 		SendToFirstToken: firstStats,
 		Verdict:          verdict,
 		VerdictReason:    reason,
-		Note:             "single-plane JSONL: reshape needs the full standing-latency direct+peer matrix and is never emitted here; promote additionally requires the peer plane from that matrix before promoting peers",
+		Note:             "verdict keys off sendToFirstTokenMs vs the Job Pod-ready baseline (replyReadyMs is model-inclusive context only); single-plane JSONL: reshape needs the full standing-latency direct+peer matrix and is never emitted here; promote additionally requires the peer plane from that matrix before promoting peers",
 	}
 	if hasReply {
 		replyStats := summarizeChatSamples(replyReadies)

@@ -726,7 +726,7 @@ func main() {
 	jobP95 := flag.Float64("job-baseline-p95-ms", 44000, "Documented Job create-to-Pod-ready p95 in ms for comparison (0 omits the baseline).")
 	outPath := flag.String("out", "", "Optional JSON report path (written with 0600 permissions).")
 	onlyRaw := flag.String("only", "", "Optional comma-separated scenario subset (e.g. directTurnCold,directTurnResumed) for cheap live probes; empty measures all sixteen scenarios.")
-	chatJSONL := flag.String("chat-jsonl", "", "Score Desktop signed-in standing JSONL (e.g. .runtime/chat-latency.jsonl) against the Slice 5a bars instead of running the backend matrix. Filters to -chat-source on -chat-path and compares sendToFirstTokenMs/replyReadyMs to the Job baseline flags.")
+	chatJSONL := flag.String("chat-jsonl", "", "Score Desktop signed-in standing JSONL (e.g. .runtime/chat-latency.jsonl) against the Slice 5a bars instead of running the backend matrix. Filters to -chat-source on -chat-path and keys the verdict off sendToFirstTokenMs vs the Job Pod-ready baseline flags (replyReadyMs is reported as model-inclusive context only).")
 	chatSource := flag.String("chat-source", "desktop-chat-live-signed-in", "JSONL source label to score in chat-bars mode.")
 	chatPath := flag.String("chat-path", "standing", "JSONL path tag to score in chat-bars mode (empty scores every path).")
 	minSamples := flag.Int("min-samples", defaultChatMinSamples, "Minimum delivered standing samples for a promote/retire call in chat-bars mode; fewer reports inconclusive-live.")

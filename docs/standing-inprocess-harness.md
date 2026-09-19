@@ -482,12 +482,15 @@ no cluster and no subprocess.
 standing samples without touching the sixteen-scenario matrix: it filters
 `.runtime/chat-latency.jsonl` to `source: "desktop-chat-live-signed-in"` on
 `path: "standing"`, computes p50/p95 for `sendToFirstTokenMs` (falling back
-to `firstTokenMs` when the alias is absent) and `replyReadyMs`, compares to
-the same Job baseline flags (default 12000/44000), and emits a verdict +
-reason using the SAME `promote` / `reshape` / `retire` /
-`inconclusive-live` / `no-baseline` vocabulary above — no new bar names.
-Error lines are counted and excluded (a denied turn is not a latency
-sample); a missing file is an error and no samples are ever invented.
+to `firstTokenMs` when the alias is absent) and `replyReadyMs`, keys the
+verdict off first-token vs the same Job Pod-ready baseline flags (default
+12000/44000), and emits a verdict + reason using the SAME `promote` /
+`reshape` / `retire` / `inconclusive-live` / `no-baseline` vocabulary above
+— no new bar names. `replyReadyMs` is still computed and reported in the
+JSON artifact, but only as model-inclusive context: it never drives
+retire/promote. Error lines are counted and excluded (a denied turn is not
+a latency sample); a missing file is an error and no samples are ever
+invented.
 
 ```bash
 hack/standing-chat-latency-bars.sh --jsonl $PWD/.runtime/chat-latency.jsonl \
@@ -499,22 +502,35 @@ hack/standing-chat-latency-bars.sh --jsonl $PWD/.runtime/chat-latency.jsonl \
 
 Closest honest mapping (the JSONL carries a single standing plane, not the
 direct+peer matrix the bars assume — pinned in code in
-`cmd/standing-latency/chat_bars.go`):
+`cmd/standing-latency/chat_bars.go`). Recalibrated: per prior clarification
+the Job ~12s figure is Pod-ready/startup only, NOT a full turn, so the gates
+below key off first-token vs that baseline and `replyReadyMs` is context
+only — scoring the model-inclusive full turn against a Pod-ready baseline
+miscalibrates the bars.
 
 | Slice 5a bar | Chat JSONL mapping |
 | --- | --- |
-| `promote` | `sendToFirstTokenMs` p95 ≤ min(5000ms, jobP95/10) AND `replyReadyMs` p95 ≤ jobP95/10 over at least `--min-samples` delivered samples (default 10). `replyReadyMs` plays the warm-turn role conservatively: the Job baseline covers Pod-ready only while replyReady includes harness/model time, so a pass here is strong. The peer plane is not in this JSONL — the reason still names the full `standing-latency` matrix as the peer check before promoting peers. |
-| `reshape` | Never emitted here (no peer dimension): a direct win with an unknown peer reports `inconclusive-live` pointing at the full matrix for the peer split. |
-| `retire` | `replyReadyMs` p50 within noise of the Job p50 (≥ jobP50/2). First-token alone never retires the plane. |
-| `inconclusive-live` | Zero matching samples, fewer than `--min-samples`, no `replyReadyMs` to evaluate the full-turn bar, or numbers between the bars: collect more iterations on the same cluster shape. |
+| `promote` | `sendToFirstTokenMs` (fallback `firstTokenMs`) p95 ≤ min(5000ms, jobP95/10) over at least `--min-samples` delivered samples (default 10). First-token is the like-for-like metric against the Pod-ready baseline; `replyReadyMs` is reported as model-inclusive context only and never gates promote. The peer plane is not in this JSONL — the reason still names the full `standing-latency` matrix as the peer check before promoting peers. |
+| `reshape` | Never emitted here (no peer dimension): reshape still needs the full `standing-latency` direct+peer matrix (unchanged) — a direct win with an unknown peer reports `promote` with the matrix named as the peer check, or `inconclusive-live` when count or numbers are the only open items. |
+| `retire` | `sendToFirstTokenMs` p50 within noise of the Job Pod-ready p50 (≥ jobP50/2). A slow `replyReadyMs` alone never retires the plane. |
+| `inconclusive-live` | Zero matching samples, fewer than `--min-samples`, or first-token numbers between the bars: collect more iterations on the same cluster shape. A missing `replyReadyMs` no longer blocks a verdict — it is context only. |
 | `no-baseline` | Both baseline flags passed as `0`: raw numbers only, no comparison. |
 
 Tonight's reading: the `n=5` live signed-in samples above already sit well
 under the first-token bar (`sendToFirstTokenMs` p50 ~378ms vs the 5000ms /
 4400ms ceilings), but `n=5` is below the `--min-samples` gate, so the scorer
 reports `inconclusive-live` — more iterations are still needed before any
-promote call, plus the peer plane from the full matrix. Fixture scoring is
-pinned by `cmd/standing-latency/chat_bars_test.go` against the synthetic
+promote call, plus the peer plane from the full matrix. Re-score note: the
+live `n=10` reading (`sendToFirstTokenMs` p50 ~370ms / p95 ~634ms,
+`replyReadyMs` p50 ~7190ms) reported `retire` under the old logic because
+replyReady p50 7190ms was not a 2× win over Job 12s — that was the
+miscalibration (Job 12s is Pod-ready only, replyReady includes model time).
+Under the recalibrated mapping the same numbers lean `promote`: first-token
+p95 634ms ≤ min(5000ms, 4400ms), p50 370ms far under the 6000ms retire line,
+and `n=10` meets the `--min-samples` gate (replyReady stays context only;
+the peer plane from the full matrix is still needed before promoting
+peers). Fixture scoring is pinned by
+`cmd/standing-latency/chat_bars_test.go` against the synthetic
 `cmd/standing-latency/testdata/chat-latency-synthetic.jsonl` (round
 placeholder values only — never live numbers).
 

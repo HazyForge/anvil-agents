@@ -4,19 +4,21 @@
 #
 # Reads .runtime/chat-latency.jsonl (or --jsonl), filters to
 # source desktop-chat-live-signed-in on path standing, computes p50/p95 for
-# sendToFirstTokenMs and replyReadyMs, compares to the Job Pod-ready baseline
-# flags (default ~12s p50 / ~44s p95), and emits a verdict + reason using the
-# SAME vocabulary as Slice 5a in docs/standing-inprocess-harness.md
+# sendToFirstTokenMs and replyReadyMs, keys the verdict off sendToFirstTokenMs
+# against the Job Pod-ready baseline flags (default ~12s p50 / ~44s p95;
+# replyReadyMs is reported as model-inclusive context only), and emits a
+# verdict + reason using the SAME vocabulary as Slice 5a in
+# docs/standing-inprocess-harness.md
 # (promote / reshape / retire / inconclusive-live / no-baseline — no new bar
 # names).
 #
 # Honest single-plane mapping (see cmd/standing-latency/chat_bars.go):
-# sendToFirstTokenMs plays the first-token role (p95 <= 5000ms and <=
-# jobP95/10), replyReadyMs plays the full warm-turn role (p95 <= jobP95/10,
-# retire when p50 >= jobP50/2). The JSONL has no direct-vs-peer split, so
-# reshape is never emitted here — a direct win with an unknown peer reports
-# inconclusive-live and points at the full standing-latency matrix for the
-# peer dimension. Promote additionally needs --min-samples delivered samples
+# sendToFirstTokenMs is the promote/retire metric vs the Job Pod-ready
+# baseline (p95 <= min(5000ms, jobP95/10) to promote, p50 >= jobP50/2 to
+# retire); replyReadyMs is reported as model-inclusive context only and never
+# drives a verdict. The JSONL has no direct-vs-peer split, so reshape is
+# never emitted here — reshape still needs the full standing-latency
+# direct+peer matrix. Promote additionally needs --min-samples delivered samples
 # (default 10): tonight's n=5 already sits well under the first-token bar but
 # cannot carry a p95 promote call.
 #
