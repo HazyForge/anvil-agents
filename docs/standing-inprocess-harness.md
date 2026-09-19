@@ -516,20 +516,27 @@ miscalibrates the bars.
 | `inconclusive-live` | Zero matching samples, fewer than `--min-samples`, or first-token numbers between the bars: collect more iterations on the same cluster shape. A missing `replyReadyMs` no longer blocks a verdict — it is context only. |
 | `no-baseline` | Both baseline flags passed as `0`: raw numbers only, no comparison. |
 
-Tonight's reading: the `n=5` live signed-in samples above already sit well
+Tonight's reading: the `n=5` live signed-in samples above already sat well
 under the first-token bar (`sendToFirstTokenMs` p50 ~378ms vs the 5000ms /
-4400ms ceilings), but `n=5` is below the `--min-samples` gate, so the scorer
-reports `inconclusive-live` — more iterations are still needed before any
-promote call, plus the peer plane from the full matrix. Re-score note: the
-live `n=10` reading (`sendToFirstTokenMs` p50 ~370ms / p95 ~634ms,
-`replyReadyMs` p50 ~7190ms) reported `retire` under the old logic because
-replyReady p50 7190ms was not a 2× win over Job 12s — that was the
-miscalibration (Job 12s is Pod-ready only, replyReady includes model time).
-Under the recalibrated mapping the same numbers lean `promote`: first-token
-p95 634ms ≤ min(5000ms, 4400ms), p50 370ms far under the 6000ms retire line,
-and `n=10` meets the `--min-samples` gate (replyReady stays context only;
-the peer plane from the full matrix is still needed before promoting
-peers). Fixture scoring is pinned by
+4400ms ceilings), but `n=5` was below the `--min-samples` gate, so the scorer
+reported `inconclusive-live` at that time — plus the peer plane from the
+full matrix was still open. Re-score (2026-09-18 ~8:16 PM CT, Austin WSL
+Kind-local): after #234, the grown `.runtime/chat-latency.jsonl` (`n=10`
+`source: "desktop-chat-live-signed-in"`, `path: "standing"`) re-scores as
+`promote` against the Job Pod-ready baseline (12000/44000):
+`sendToFirstTokenMs` p50 370ms / p95 634ms (p95 ≤ min(5000ms, 4400ms)),
+`replyReadyMs` p50 7190ms / p95 9823ms reported as model-inclusive context
+only, never a gate. (The same `n=10` reading had reported `retire` under the
+old logic because replyReady p50 7190ms was not a 2× win over Job 12s — that
+was the miscalibration #234 fixed: Job 12s is Pod-ready only, replyReady
+includes model time.) Scope: this `promote` is for the interactive standing
+Desktop chat first-token path only — Jobs remain the default for
+scouts/batch, and Substrate/ATE stays optional (see [Substrate
+spike](substrate-spike.md)). Caveat (already in the scorer reason): the peer
+plane / reshape still needs the full `standing-latency` live direct+peer
+matrix before promoting peers. Artifacts stay gitignored local JSON
+(`.runtime/chat-latency.jsonl` + `.runtime/standing-chat-latency-bars.json`;
+no live numbers committed). Fixture scoring is pinned by
 `cmd/standing-latency/chat_bars_test.go` against the synthetic
 `cmd/standing-latency/testdata/chat-latency-synthetic.jsonl` (round
 placeholder values only — never live numbers).
@@ -807,11 +814,18 @@ harness was `codex` with the existing `~/.codex/auth.json`.
 
 Reading note: first-token p50 (~378ms) sits well under the documented Job
 Pod-ready baseline (~12s p50) that the slice-5a bars compare against; full
-turn time (harness/model time on top) is separate, and the
-promote/reshape/retire bars in "Slice 5a" above still need more iterations
-before any call. Standing in-process harness + WebSocket stays the primary
-interactive path; Substrate/ATE stays optional (see [Substrate
-spike](substrate-spike.md)).
+turn time (harness/model time on top) is separate. Re-score (2026-09-18
+~8:16 PM CT, Austin WSL Kind-local): the grown `.runtime/chat-latency.jsonl`
+(`n=10` `source: "desktop-chat-live-signed-in"`, `path: "standing"`)
+re-scores as `promote` after the #234 recalibration —
+`sendToFirstTokenMs` p50 370ms / p95 634ms vs the Job Pod-ready baseline
+(12000/44000), `replyReadyMs` p50 7190ms / p95 9823ms as model-inclusive
+context only (not a gate); see "Scoring the live signed-in JSONL" under
+Slice 5a for the verdict, scope (interactive standing Desktop chat
+first-token path; Jobs stay default for scouts/batch), and the still-open
+full direct+peer matrix for reshape/peer bars. Standing in-process harness
++ WebSocket stays the primary interactive path; Substrate/ATE stays optional
+(see [Substrate spike](substrate-spike.md)).
 
 Tests: `hack/desktop-standing-chat-stream.mjs` fakes the WS stream and
 asserts first-token timing, the standing/job classification, the
@@ -977,8 +991,14 @@ spike](substrate-spike.md)).
    samples landed 2026-09-18 (Austin's WSL Kind-local run, `n=5`,
    `path: "standing"`, `sendToFirstTokenMs` p50 ~378ms, `replyReadyMs` p50
    ~7592ms; see "Live signed-in standing samples" above, JSONL stays
-   gitignored on the WSL checkout and is not committed here). Next: more
-   iterations on WSL Kind, then apply the promote/reshape/retire bars in "Slice 5a" above.
+   gitignored on the WSL checkout and is not committed here). Re-score
+   (2026-09-18 ~8:16 PM CT): the grown JSONL (`n=10`
+   `desktop-chat-live-signed-in` standing samples) scores `promote` after
+   the #234 recalibration (`sendToFirstTokenMs` p50 370ms / p95 634ms vs
+   the Job Pod-ready baseline 12000/44000; `replyReadyMs` p50 7190ms / p95
+   9823ms context only) — see "Scoring the live signed-in JSONL" under
+   Slice 5a. Next: the full `standing-latency` live direct+peer matrix is
+   still open for reshape/peer bars before promoting peers.
    Known blockers on that path, in order: (a) PostgreSQL for
    `chat.enabled` — scripted since #228 (`hack/kind-chat-postgres.sh`, see
    "Kind-local chat Postgres" above; export the printed
@@ -995,26 +1015,31 @@ spike](substrate-spike.md)).
    auth" above; `./hack/kind-standing-harness.sh --check --require-bearer`
    must print `ready (harness=codex)` before the step-4 probe). Stub OIDC
    still denies by design; the probe reports `skip: stub-oidc-denied` there.
-1. **Live numbers (first Desktop samples landed, more iterations + bars still open).** Desktop e2e is
+1. **Live numbers (Desktop chat-bars re-score: promote for the interactive first-token path; direct+peer matrix still open).** Desktop e2e is
    done (see "Desktop chat e2e over the standing WebSocket" above), the
    slice-5a harness is green on deterministic backends, slice-5b resume is
    pinned against stub CLIs, and slice 5c wires the cold-first vs
    resumed-second turn scenarios plus the resume-aware stub end to end — and
    the first signed-in Desktop `standing`-path samples landed 2026-09-18
-   (`n=5`, see "Live signed-in standing samples" above). Still open:
+   (`n=5`, see "Live signed-in standing samples" above) and re-scored
+   `promote` at `n=10` after the #234 recalibration
+   (`sendToFirstTokenMs` p50 370ms / p95 634ms vs the Job Pod-ready
+   baseline 12000/44000; `replyReadyMs` p50 7190ms / p95 9823ms context
+   only — interactive standing Desktop chat first-token path; Jobs stay
+   default for scouts/batch, Substrate stays optional). Still open:
    `process-exec` live numbers on the same cluster shape as the Job baseline
    (gate the host first with
    `./hack/kind-standing-harness.sh --check`; none exists in the
    agent environment, so no `process-exec` numbers are captured here), plus
-   more Desktop iterations before any promote/reshape/retire call.
+   the full `standing-latency` live direct+peer matrix for reshape/peer bars
+   before promoting peers.
    Next: collect more `process-exec` live samples against a local/Kind
-   harness CLI (cold first turns AND resumed second turns) and grow the
-   Desktop JSONL, then apply the
+   harness CLI (cold first turns AND resumed second turns) and run the full
+   direct+peer matrix, then apply the
    promote/reshape/retire bars above to the standing plane — score the JSONL
    side with `hack/standing-chat-latency-bars.sh --jsonl
    $PWD/.runtime/chat-latency.jsonl` (see "Scoring the live signed-in JSONL"
-   under Slice 5a; tonight's `n=5` reports `inconclusive-live` until more
-   iterations land).
+   under Slice 5a for the recorded `n=10` `promote`).
 2. **Signed-in Desktop OIDC for chat-latency.jsonl (first samples landed).** Stub OIDC still denies
    signed-in Desktop chat, so live send→firstToken samples need real OIDC
    (Kind-local issuer or Zitadel) plus a standing-enabled manager thread
