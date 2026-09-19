@@ -38,6 +38,13 @@
 //	go run ./cmd/standing-latency -backend process-stub -n 20 -out .runtime/standing-latency-stub.json
 //	go run ./cmd/standing-latency -backend process-exec -harness codex -n 10 -out .runtime/standing-latency-live.json
 //	go run ./cmd/standing-latency -backend process-exec -harness codex -n 5 -only directTurnCold,directTurnResumed -out .runtime/standing-latency-live-cold-resume.json
+//
+// Chat-bars mode scores Desktop signed-in standing JSONL against the same
+// Slice 5a promote/reshape/retire vocabulary (see chat_bars.go for the
+// honest single-plane mapping — reshape is never emitted there):
+//
+//	go run ./cmd/standing-latency -chat-jsonl .runtime/chat-latency.jsonl -out .runtime/standing-chat-latency-bars.json
+//	hack/standing-chat-latency-bars.sh --jsonl .runtime/chat-latency.jsonl
 package main
 
 import (
@@ -719,7 +726,40 @@ func main() {
 	jobP95 := flag.Float64("job-baseline-p95-ms", 44000, "Documented Job create-to-Pod-ready p95 in ms for comparison (0 omits the baseline).")
 	outPath := flag.String("out", "", "Optional JSON report path (written with 0600 permissions).")
 	onlyRaw := flag.String("only", "", "Optional comma-separated scenario subset (e.g. directTurnCold,directTurnResumed) for cheap live probes; empty measures all sixteen scenarios.")
+	chatJSONL := flag.String("chat-jsonl", "", "Score Desktop signed-in standing JSONL (e.g. .runtime/chat-latency.jsonl) against the Slice 5a bars instead of running the backend matrix. Filters to -chat-source on -chat-path and compares sendToFirstTokenMs/replyReadyMs to the Job baseline flags.")
+	chatSource := flag.String("chat-source", "desktop-chat-live-signed-in", "JSONL source label to score in chat-bars mode.")
+	chatPath := flag.String("chat-path", "standing", "JSONL path tag to score in chat-bars mode (empty scores every path).")
+	minSamples := flag.Int("min-samples", defaultChatMinSamples, "Minimum delivered standing samples for a promote/retire call in chat-bars mode; fewer reports inconclusive-live.")
 	flag.Parse()
+
+	if strings.TrimSpace(*chatJSONL) != "" {
+		if *minSamples < 0 {
+			fmt.Fprintf(os.Stderr, "error: -min-samples must be at least 0\n")
+			os.Exit(1)
+		}
+		chatReport, err := scoreChatJSONL(*chatJSONL, strings.TrimSpace(*chatSource), strings.TrimSpace(*chatPath), *jobP50, *jobP95, *minSamples)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			os.Exit(1)
+		}
+		encoded, err := json.MarshalIndent(chatReport, "", "  ")
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error: encode report: %v\n", err)
+			os.Exit(1)
+		}
+		encoded = append(encoded, '\n')
+		if trimmed := strings.TrimSpace(*outPath); trimmed != "" {
+			if err := os.WriteFile(trimmed, encoded, 0o600); err != nil {
+				fmt.Fprintf(os.Stderr, "error: write report: %v\n", err)
+				os.Exit(1)
+			}
+		}
+		if _, err := os.Stdout.Write(encoded); err != nil {
+			fmt.Fprintf(os.Stderr, "error: write stdout: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	}
 
 	only, err := parseOnly(*onlyRaw)
 	if err != nil {

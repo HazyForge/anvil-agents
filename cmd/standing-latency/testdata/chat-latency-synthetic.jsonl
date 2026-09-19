@@ -1,0 +1,9 @@
+{"ts":"2026-01-01T00:00:01Z","source":"desktop-chat-live-signed-in","threadId":"synthetic-thread-1","sessionId":"standing-synthetic-1","path":"standing","sendToFirstTokenMs":310,"firstTokenMs":310,"replyReadyMs":6100}
+{"ts":"2026-01-01T00:00:02Z","source":"desktop-chat-live-signed-in","threadId":"synthetic-thread-2","sessionId":"standing-synthetic-2","path":"standing","sendToFirstTokenMs":340,"firstTokenMs":340,"replyReadyMs":6800}
+{"ts":"2026-01-01T00:00:03Z","source":"desktop-chat-live-signed-in","threadId":"synthetic-thread-3","sessionId":"standing-synthetic-3","path":"standing","sendToFirstTokenMs":365,"firstTokenMs":365,"replyReadyMs":7200}
+{"ts":"2026-01-01T00:00:04Z","source":"desktop-chat-live-signed-in","threadId":"synthetic-thread-4","sessionId":"standing-synthetic-4","path":"standing","sendToFirstTokenMs":390,"firstTokenMs":390,"replyReadyMs":7900}
+{"ts":"2026-01-01T00:00:05Z","source":"desktop-chat-live-signed-in","threadId":"synthetic-thread-5","sessionId":"standing-synthetic-5","path":"standing","sendToFirstTokenMs":420,"firstTokenMs":420,"replyReadyMs":8300}
+{"ts":"2026-01-01T00:00:06Z","source":"desktop-chat-live-signed-in","threadId":"synthetic-thread-6","sessionId":"standing-synthetic-6","path":"standing","sendToFirstTokenMs":510,"firstTokenMs":510,"replyReadyMs":9100}
+{"ts":"2026-01-01T00:00:07Z","source":"desktop-chat","threadId":"synthetic-thread-7","sessionId":"standing-synthetic-7","path":"standing","sendToFirstTokenMs":999,"firstTokenMs":999,"replyReadyMs":99999}
+{"ts":"2026-01-01T00:00:08Z","source":"desktop-chat-live-signed-in","threadId":"synthetic-thread-8","sessionId":"standing-synthetic-8","path":"job","sendToFirstTokenMs":888,"firstTokenMs":888,"replyReadyMs":88888}
+{"ts":"2026-01-01T00:00:09Z","source":"desktop-chat-live-signed-in","threadId":"synthetic-thread-9","path":"standing","error":"open stream failed: unauthorized"}
