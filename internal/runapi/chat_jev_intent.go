@@ -33,6 +33,11 @@ import (
 // mirroring ANVIL_AGENTS_STANDING_LIVE.
 const JevIntentEnvVar = "ANVIL_AGENTS_JEV_INTENT"
 
+// JevModelEnvVar overrides chat.jevModel from the process environment when
+// non-empty (after trimming). Empty leaves the config-file value untouched,
+// so the default stays the jev-latest alias.
+const JevModelEnvVar = "ANVIL_AGENTS_JEV_MODEL"
+
 // Annotation keys recording the routing decision on the turn's AgentRun for
 // kubectl-visible observability. The user message metadata carries the same
 // decision plus confidence detail; see chatAuthorMetadataWithIntent.
@@ -66,6 +71,17 @@ func (server *Server) jevIntentEnabled() bool {
 	return server != nil && server.config.Chat.JevIntentEnabled && server.jev != nil
 }
 
+// jevModel returns the configured Jev serving model for the chat turn
+// path. Empty (the default) means the Router falls back to the jev-latest
+// alias (jev.DefaultModel); a versioned ID (e.g. "jev-1.13.0") pins
+// classification to that serving model.
+func (server *Server) jevModel() string {
+	if server == nil {
+		return ""
+	}
+	return strings.TrimSpace(server.config.Chat.JevModel)
+}
+
 // classifyChatIntent routes one incoming message through the Jev intent
 // router. It returns classified=false on every fallback path (gate off, no
 // backend, Jev error) with a chat_reply decision carrying no confidence, so
@@ -92,7 +108,7 @@ func (server *Server) classifyChatIntent(ctx context.Context, content string, me
 	}
 	classifyCtx, cancel := context.WithTimeout(ctx, jevClassifyTimeout)
 	defer cancel()
-	router := &jev.Router{Backend: server.jev}
+	router := &jev.Router{Backend: server.jev, Model: server.jevModel()}
 	decision, err := router.ClassifyIntent(classifyCtx, jev.MessageContext{Message: content, Recent: recent})
 	if err != nil {
 		server.log.Info("jev intent classification failed; keeping today's chat behavior", "error", err.Error())

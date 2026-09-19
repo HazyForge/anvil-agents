@@ -186,6 +186,70 @@ func TestChatJevErrorFallsBackWithoutFailing(t *testing.T) {
 	}
 }
 
+// capturingJevBackend records the request model the turn path sends and
+// answers the intent question with one fixed choice/confidence (no network).
+func capturingJevBackend(t *testing.T, gotModel *string, servingModel, choice string, confidence float64) jev.Backend {
+	t.Helper()
+	probs := map[string]float64{
+		jev.IntentChatReply:          0.01,
+		jev.IntentCreateAgentRequest: 0.01,
+		jev.IntentPeerHandoff:        0.01,
+		jev.IntentToolRun:            0.01,
+		jev.IntentUnclear:            0.01,
+	}
+	probs[choice] = 0.96
+	return jev.FuncBackend(func(ctx context.Context, req jev.Request) (jev.Response, error) {
+		*gotModel = req.Model
+		return jev.Response{
+			Model: servingModel,
+			Answers: map[string]json.RawMessage{
+				jev.IntentQuestionID: jev.MustAnswer(t, jev.ChoiceAnswer{
+					Type:          jev.TypeChoice,
+					Choice:        choice,
+					Probabilities: probs,
+					Confidence:    confidence,
+				}),
+			},
+		}, nil
+	})
+}
+
+func TestChatJevConfiguredModelIsRequested(t *testing.T) {
+	server := chatTestServer(t, true)
+	server.config.Chat.JevIntentEnabled = true
+	server.config.Chat.JevModel = "jev-1.13.0"
+	var gotModel string
+	server.SetJevBackend(capturingJevBackend(t, &gotModel, "jev-1.13.0", jev.IntentCreateAgentRequest, 0.92))
+	_, promptAndMeta := queueJevTurn(t, server, "please create a helper agent for triage")
+	if gotModel != "jev-1.13.0" {
+		t.Fatalf("requested model = %q, want pinned %q", gotModel, "jev-1.13.0")
+	}
+	userMeta := strings.SplitN(promptAndMeta, "\n---USERMETA---\n", 2)[1]
+	var meta map[string]any
+	if err := json.Unmarshal([]byte(userMeta), &meta); err != nil {
+		t.Fatalf("user metadata is not JSON: %v", err)
+	}
+	if meta["jevModel"] != "jev-1.13.0" {
+		t.Fatalf("jevModel = %v, want serving model jev-1.13.0 (meta %s)", meta["jevModel"], userMeta)
+	}
+}
+
+func TestChatJevDefaultModelTracksLatestAlias(t *testing.T) {
+	server := chatTestServer(t, true)
+	server.config.Chat.JevIntentEnabled = true
+	// JevModel left empty (the default): the turn path must request the
+	// jev-latest alias, keeping today's behavior unchanged.
+	var gotModel string
+	server.SetJevBackend(capturingJevBackend(t, &gotModel, "jev-1.13.0", jev.IntentChatReply, 0.9))
+	queueJevTurn(t, server, "hello")
+	if gotModel != jev.DefaultModel {
+		t.Fatalf("requested model = %q, want default alias %q", gotModel, jev.DefaultModel)
+	}
+	if server.jevModel() != "" {
+		t.Fatalf("jevModel() = %q, want empty default", server.jevModel())
+	}
+}
+
 func TestChatJevPromptByteIdenticalWhenUnclassified(t *testing.T) {
 	server := chatTestServer(t, true)
 	thread, err := server.chatStore.CreateThread(context.Background(), chat.Thread{Namespace: "agents", ProfileName: "grok45", Mode: "persona", CreatedBy: "user"})
