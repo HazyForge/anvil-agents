@@ -827,6 +827,15 @@ full direct+peer matrix for reshape/peer bars. Standing in-process harness
 + WebSocket stays the primary interactive path; Substrate/ATE stays optional
 (see [Substrate spike](substrate-spike.md)).
 
+Keep-going re-score (2026-09-18 ~11:36 PM CT, Austin WSL): the grown
+`.runtime/chat-latency.jsonl` (`n=12` `source: "desktop-chat-live-signed-in"`)
+still scores `promote` via `hack/standing-chat-latency-bars.sh` —
+`sendToFirstTokenMs` p50 377ms / p95 765ms vs the Job Pod-ready baseline
+(12000/44000); `replyReadyMs` p50 7302ms / p95 27403ms remains model-inclusive
+context only (not a gate). Peer plane still needs the full standing-latency
+direct+peer matrix before promoting peers. Standing in-process harness +
+WebSocket stays primary; Substrate/ATE stays optional / not promoted.
+
 Tests: `hack/desktop-standing-chat-stream.mjs` fakes the WS stream and
 asserts first-token timing, the standing/job classification, the
 never-send-twice fallback, and the JSONL fields; `internal/desktop/
