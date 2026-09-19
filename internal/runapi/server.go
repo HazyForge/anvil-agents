@@ -21,6 +21,7 @@ import (
 
 	agentsv1alpha1 "github.com/hazyforge/anvil-agents/api/v1alpha1"
 	"github.com/hazyforge/anvil-agents/internal/chat"
+	"github.com/hazyforge/anvil-agents/internal/jev"
 	"github.com/hazyforge/anvil-agents/internal/standing"
 )
 
@@ -48,6 +49,12 @@ type Server struct {
 	// the chat stream endpoint stays transport-only and every thread
 	// terminates with job_plane.
 	standing standing.Backend
+	// jev is the optional Jev System One backend behind the opt-in
+	// chat.jevIntentEnabled gate. When nil (the default, e.g. missing
+	// TYPESAFE_API_KEY) the chat-append path keeps today's behavior even
+	// with the gate on. Jev only classifies intent; it never generates
+	// chat text. See docs/jev-intent-routing.md.
+	jev jev.Backend
 	// standingGuard serializes live standing execution per turn so a queue,
 	// a read refresh, and background recovery racing on the same turn cannot
 	// stream it twice in this process. It is a pointer so Server stays

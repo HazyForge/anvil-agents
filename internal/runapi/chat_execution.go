@@ -84,7 +84,13 @@ func (server *Server) queueChatTurnAttempt(ctx context.Context, ns, id string, b
 	if err != nil {
 		return ChatAppendResponse{}, err
 	}
-	prompt, err := buildChatPrompt(thread, messages, body.Content)
+	// Jev intent hook (opt-in, deny by default): classify the incoming
+	// message plus a small thread tail before buildChatPrompt freezes the
+	// execution intent. Gate off, missing TYPESAFE_API_KEY, or any Jev
+	// error falls back to today's behavior — never a hard fail, never a
+	// route on a guess. See docs/jev-intent-routing.md.
+	intent, classified := server.classifyChatIntent(ctx, body.Content, messages)
+	prompt, err := buildChatPromptWithIntent(thread, messages, body.Content, intent, classified)
 	if err != nil {
 		return ChatAppendResponse{}, err
 	}
@@ -98,6 +104,13 @@ func (server *Server) queueChatTurnAttempt(ctx context.Context, ns, id string, b
 	run, err := buildChatRun(ns, runName, prompt, thread)
 	if err != nil {
 		return ChatAppendResponse{}, err
+	}
+	// The routing decision rides on the run as annotations for
+	// kubectl-visible observability; the user message metadata carries
+	// the same decision plus confidence detail. Unclassified turns leave
+	// the run untouched.
+	if classified {
+		run.Annotations = annotateChatRunWithIntent(run.Annotations, intent, classified)
 	}
 	// Freeze the validated opaque application key alongside the accepted intent.
 	if application != "" {
@@ -118,7 +131,7 @@ func (server *Server) queueChatTurnAttempt(ctx context.Context, ns, id string, b
 	if len(messages) > 0 {
 		expectedSequence = messages[len(messages)-1].Sequence
 	}
-	turn, user, thread, err := server.chatStore.QueueTurn(ctx, chat.Turn{ID: turnID, ExpectedSequence: &expectedSequence, LockKeys: lockKeys, Deferred: deferred, ProfileName: chatExecutionKey(thread), Namespace: ns, ThreadID: id, RequestID: body.RequestID, RunName: runName, RunJSON: raw}, chat.Message{Content: body.Content, Metadata: chatAuthorMetadata(thread, deferred)})
+	turn, user, thread, err := server.chatStore.QueueTurn(ctx, chat.Turn{ID: turnID, ExpectedSequence: &expectedSequence, LockKeys: lockKeys, Deferred: deferred, ProfileName: chatExecutionKey(thread), Namespace: ns, ThreadID: id, RequestID: body.RequestID, RunName: runName, RunJSON: raw}, chat.Message{Content: body.Content, Metadata: chatAuthorMetadataWithIntent(thread, deferred, intent, classified)})
 	if errors.Is(err, chat.ErrConversationChanged) && attempt < 3 {
 		return server.queueChatTurnAttempt(ctx, ns, id, body, deferred, attempt+1)
 	}

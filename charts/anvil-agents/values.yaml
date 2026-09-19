@@ -225,6 +225,15 @@ api:
     # ANVIL_AGENTS_CHAT_DATABASE_URL from a Secret (archive Secret by default).
     chat:
       enabled: false
+      # Jev intent routing on the chat-append path. Disabled by default. When
+      # true the API classifies each incoming message (Router.ClassifyIntent)
+      # before freezing the turn prompt and folds a per-intent routing hint
+      # into the prompt plus intent metadata. Jev only decides; it never
+      # generates chat text, needs no RBAC change and no Secret access (the
+      # live backend reads TYPESAFE_API_KEY from process env, e.g. via
+      # api.extraEnv). Without a backend attached every turn falls back to
+      # today's behavior. See docs/jev-intent-routing.md.
+      jevIntentEnabled: false
     # Standing in-process live turns (slice 5c). Disabled by default. When
     # true, the API drives API-owned standing turns: it stamps the
     # multi-replica claim (update/patch agentruns) and marks the streamed

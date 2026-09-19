@@ -68,6 +68,13 @@ type ExternalTriggersConfig struct {
 // into the process environment, never read through the Kubernetes API.
 type ChatConfig struct {
 	Enabled bool `json:"enabled"`
+	// JevIntentEnabled wires the Jev intent router (internal/jev) into the
+	// chat-append path. Off by default; gate off keeps today's prompt and
+	// metadata byte-identical. Gate on still falls back to today's behavior
+	// per turn when no Jev backend is attached (missing TYPESAFE_API_KEY)
+	// or Jev errors. Jev only decides; it never generates chat text. See
+	// docs/jev-intent-routing.md.
+	JevIntentEnabled bool `json:"jevIntentEnabled"`
 }
 
 // StandingConfig controls live standing in-process turn execution. When
