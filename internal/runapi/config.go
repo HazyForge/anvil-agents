@@ -93,6 +93,12 @@ type StandingConfig struct {
 	// threads whose harness selects execution.runtime InProcess. Enable via
 	// config file or the ANVIL_AGENTS_STANDING_LIVE environment variable.
 	LiveEnabled bool `json:"liveEnabled"`
+	// GenerateActorClasses lists Substrate actorClass values completed by
+	// the controller via atenet (generate-on-actor). The API must not claim
+	// those turns with ProcessBackend. Empty (default) keeps Desktop
+	// standing-chat on ProcessBackend. Helm copies substrate.generateActorClasses
+	// here only when substrate.generateOnActor is true.
+	GenerateActorClasses []string `json:"generateActorClasses,omitempty"`
 }
 
 // RunsConfig controls AgentRun mutation endpoints. Creates remain append-only.
@@ -297,6 +303,7 @@ func (config *Config) normalize() {
 	config.UI.OIDC.ClientID = strings.TrimSpace(config.UI.OIDC.ClientID)
 	config.UI.Desktop.OIDCClientID = strings.TrimSpace(config.UI.Desktop.OIDCClientID)
 	config.Chat.JevModel = strings.TrimSpace(config.Chat.JevModel)
+	config.Standing.GenerateActorClasses = uniqueStrings(config.Standing.GenerateActorClasses, false)
 	for i := range config.Authorization.Bindings {
 		binding := &config.Authorization.Bindings[i]
 		binding.Name = strings.TrimSpace(binding.Name)

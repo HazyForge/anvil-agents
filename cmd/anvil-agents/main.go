@@ -53,6 +53,10 @@ func main() {
 	flag.StringVar(&options.SubstrateCAConfigMapNamespace, "substrate-ca-configmap-namespace", options.SubstrateCAConfigMapNamespace, "Namespace of the ateapi jwt CA ConfigMap (default ate-system).")
 	flag.StringVar(&options.SubstrateCAConfigMapKey, "substrate-ca-configmap-key", options.SubstrateCAConfigMapKey, "ConfigMap data key for the ateapi jwt CA (default ca.crt).")
 	flag.StringVar(&options.SubstrateTLSServerName, "substrate-tls-server-name", options.SubstrateTLSServerName, "TLS ServerName for ateapi (default api.ate-system.svc).")
+	flag.BoolVar(&options.SubstrateGenerateOnActor, "substrate-generate-on-actor", options.SubstrateGenerateOnActor, "Stream frozen AgentRun prompts through atenet after Resume/bind (off by default; requires --substrate-generate-actor-classes).")
+	var substrateGenerateClasses string
+	flag.StringVar(&substrateGenerateClasses, "substrate-generate-actor-classes", strings.Join(options.SubstrateGenerateActorClasses, ","), "Comma-separated actorClass allowlist for generate-on-actor. Empty generates for nobody. Do not list standing-chat.")
+	flag.StringVar(&options.SubstrateAtenetEndpoint, "substrate-atenet-endpoint", options.SubstrateAtenetEndpoint, "atenet-router HTTP target (default atenet-router.ate-system.svc:80 when generate-on-actor is on).")
 	flag.BoolVar(&options.ExternalTriggerHTTPRoute.Enabled, "external-trigger-httproute-enabled", options.ExternalTriggerHTTPRoute.Enabled, "Create Gateway API HTTPRoutes for ready AgentExternalTrigger receivers.")
 	flag.StringVar(&externalTriggerHTTPRouteJSON, "external-trigger-httproute-json", "", "JSON object of parentRefs, hostnames, API Service backend, and routeNamespace for trigger HTTPRoutes.")
 	flag.StringVar(&options.ExternalTriggerHTTPRoute.RouteNamespace, "external-trigger-httproute-namespace", options.ExternalTriggerHTTPRoute.RouteNamespace, "Namespace for webhook HTTPRoutes; empty uses JSON routeNamespace or the controller pod namespace.")
@@ -78,6 +82,7 @@ func main() {
 		routeCfg.RouteNamespace = strings.TrimSpace(options.ExternalTriggerHTTPRoute.RouteNamespace)
 	}
 	options.ExternalTriggerHTTPRoute = routeCfg
+	options.SubstrateGenerateActorClasses = splitCSV(substrateGenerateClasses)
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&zapOptions)))
 	ctx := ctrl.SetupSignalHandler()
 	if err := controller.Run(ctx, options); err != nil {

@@ -93,6 +93,32 @@ func TestGateParsesJWTCATrustFields(t *testing.T) {
 	}
 }
 
+func TestGateGenerateOnActorDefaultsOff(t *testing.T) {
+	t.Setenv(GateGenerateOnActorEnvVar, "")
+	t.Setenv(GateGenerateActorClassesEnvVar, "")
+	t.Setenv(GateAtenetEndpointEnvVar, "")
+	gate := GateConfigFromEnv()
+	if gate.GenerateOnActor || len(gate.GenerateActorClasses) != 0 || gate.AtenetEndpoint != "" {
+		t.Fatalf("generate defaults = %+v", gate)
+	}
+	if gate.GenerateForClass(DefaultGenerateActorClass) {
+		t.Fatal("generate must stay off by default")
+	}
+}
+
+func TestGateParsesGenerateOnActorFields(t *testing.T) {
+	t.Setenv(GateGenerateOnActorEnvVar, "true")
+	t.Setenv(GateGenerateActorClassesEnvVar, "acp-spike,other")
+	t.Setenv(GateAtenetEndpointEnvVar, "atenet-router.ate-system.svc:80")
+	gate := GateConfigFromEnv()
+	if !gate.GenerateOnActor || gate.AtenetEndpoint != "atenet-router.ate-system.svc:80" {
+		t.Fatalf("generate gate = %+v", gate)
+	}
+	if !gate.GenerateForClass("acp-spike") || gate.GenerateForClass("standing-chat") {
+		t.Fatalf("class allowlist = %#v", gate.GenerateActorClasses)
+	}
+}
+
 func TestThreadIDForRunPrefersChatThread(t *testing.T) {
 	t.Parallel()
 

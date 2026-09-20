@@ -1,10 +1,10 @@
 # ActorTemplate name standing-chat matches desktop-standing-grok
 # execution.substrate.actorClass. Images must be digest-pinned (@).
 #
-# The grok-build image is Anvil's Job runner, NOT an ACP server. Resume +
-# atenet generate-on-actor is still blocked; do not flip Anvil
-# substrate.actorsEnabled on this template. See
-# docs/substrate-generate-on-actor.md.
+# The grok-build image is Anvil's Job runner, NOT an ACP server. Desktop
+# standing-chat stays on API ProcessBackend (actorClass standing-chat is
+# never generate-on-actor, even if listed). Generate uses ActorTemplate
+# acp-spike. See docs/substrate-generate-on-actor.md.
 apiVersion: ate.dev/v1alpha1
 kind: ActorTemplate
 metadata:

@@ -43,6 +43,9 @@ const (
 	substrateCAConfigMapNamespaceEnv = "ANVIL_AGENTS_SUBSTRATE_CA_CONFIGMAP_NAMESPACE"
 	substrateCAConfigMapKeyEnv       = "ANVIL_AGENTS_SUBSTRATE_CA_CONFIGMAP_KEY"
 	substrateTLSServerNameEnv        = "ANVIL_AGENTS_SUBSTRATE_TLS_SERVER_NAME"
+	substrateGenerateOnActorEnv      = "ANVIL_AGENTS_SUBSTRATE_GENERATE_ON_ACTOR"
+	substrateGenerateActorClassesEnv = "ANVIL_AGENTS_SUBSTRATE_GENERATE_ACTOR_CLASSES"
+	substrateAtenetEndpointEnv       = "ANVIL_AGENTS_SUBSTRATE_ATENET_ENDPOINT"
 )
 
 var defaultGitHubAPIAllowedHosts = []string{"api.github.com"}
@@ -118,6 +121,17 @@ type Options struct {
 	SubstrateCAConfigMapKey string
 	// SubstrateTLSServerName overrides ateapi TLS ServerName.
 	SubstrateTLSServerName string
+	// SubstrateGenerateOnActor streams the frozen AgentRun prompt through
+	// atenet after bind. Off by default. actorsEnabled without this flag
+	// keeps the SubstrateActorNotWired hold so Desktop standing-chat is
+	// unchanged.
+	SubstrateGenerateOnActor bool
+	// SubstrateGenerateActorClasses is the exact actorClass allowlist for
+	// generate-on-actor. Empty generates for nobody.
+	SubstrateGenerateActorClasses []string
+	// SubstrateAtenetEndpoint is the atenet-router HTTP target. Empty uses
+	// substrate.DefaultAtenetEndpoint when generate is on.
+	SubstrateAtenetEndpoint string
 }
 
 func DefaultOptions() *Options {
@@ -153,6 +167,9 @@ func DefaultOptions() *Options {
 		SubstrateCAConfigMapNamespace: strings.TrimSpace(os.Getenv(substrateCAConfigMapNamespaceEnv)),
 		SubstrateCAConfigMapKey:       strings.TrimSpace(os.Getenv(substrateCAConfigMapKeyEnv)),
 		SubstrateTLSServerName:        strings.TrimSpace(os.Getenv(substrateTLSServerNameEnv)),
+		SubstrateGenerateOnActor:      substrateBoolEnv(substrateGenerateOnActorEnv),
+		SubstrateGenerateActorClasses: uniqueCSV(os.Getenv(substrateGenerateActorClassesEnv)),
+		SubstrateAtenetEndpoint:       strings.TrimSpace(os.Getenv(substrateAtenetEndpointEnv)),
 	}
 }
 

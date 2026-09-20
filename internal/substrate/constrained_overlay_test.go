@@ -70,6 +70,20 @@ func TestConstrainedOverlayForbidsStockInstallAndDefaultRustFSKeys(t *testing.T)
 	if !strings.Contains(template, "@sha256:") {
 		t.Fatal("ActorTemplate images must be digest-pinned")
 	}
+	if !strings.Contains(template, "ProcessBackend") {
+		t.Fatal("standing-chat template must keep Desktop on ProcessBackend")
+	}
+
+	acp := read("fleet/base/actortemplate-acp-spike.yaml")
+	if !strings.Contains(acp, "name: acp-spike") {
+		t.Fatal("generate-on-actor ActorTemplate must be named acp-spike")
+	}
+	if !strings.Contains(acp, "@sha256:") {
+		t.Fatal("acp-spike images must be digest-pinned")
+	}
+	if !strings.Contains(acp, "session/prompt") {
+		t.Fatal("acp-spike must document ACP session/prompt")
+	}
 
 	pool := read("fleet/base/workerpool-warm.yaml")
 	if !strings.Contains(pool, "name: warm") || !strings.Contains(pool, "anvil.hazyforge.io/worker-pool: warm") {

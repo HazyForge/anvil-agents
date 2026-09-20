@@ -9,8 +9,9 @@
 # Release name MUST be "substrate" in namespace ate-system so the API
 # Service is api.ate-system.svc (TLS ServerName Anvil dials).
 #
-# Do not apply until generate-on-actor exists. Leave Anvil
-# substrate.actorsEnabled=false.
+# Apply only after generate-on-actor is in the live Anvil image. Leave Anvil
+# substrate.actorsEnabled=false and generateOnActor=false until an acp-spike
+# smoke succeeds.
 
 auth:
   mode: jwt

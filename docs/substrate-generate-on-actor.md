@@ -1,60 +1,83 @@
-# Generate-on-actor (follow-on)
+# Generate-on-actor
 
-Status: **not in this slice**. Keep Primaris `substrate.actorsEnabled=false`.
-Desktop standing grok stays on API `ProcessBackend`. Standing claim still
-wins first.
+Status: **in this slice**. Primaris `substrate.actorsEnabled` and
+`substrate.generateOnActor` stay **false** until ATE is applied one-node-safe
+and a non-Desktop `acp-spike` smoke bind+generate succeeds. Desktop
+`desktop-standing-assistant` stays on API `ProcessBackend`
+(`actorClass: standing-chat`).
 
-Anvil’s live ATE client is lifecycle-only (`Get` / `Create` / `Resume` /
-`Suspend` / `Pause` in `internal/substrate`). There is no ateapi `Execute`
-RPC. Upstream prompt delivery is HTTP/ACP through `atenet-router` **after**
-`ResumeActor`. Wiring that into AgentRun completion is a second stacked PR
-so JWT CA trust and the constrained overlay can land without flipping the
-gate.
+Anvil’s live ATE client is still lifecycle-only for Create/Resume/Suspend/Pause.
+Prompt delivery is HTTP/ACP through `atenet-router` **after** `ResumeActor`.
+This slice adds that path behind a second gate plus an exact `actorClass`
+allowlist so flipping `actorsEnabled` cannot hang Desktop chat.
 
-## Why this is not a small spike
+## What generate-on-actor does
 
-A real “Resume + stream prompt via atenet, mark AgentRun `Succeeded`” path
-needs all of:
+When all of these are true:
 
-1. An ACP-capable actor image. Overlay `ActorTemplate/standing-chat` currently
-   pins `anvil-agent-run-grok-build` (Job runner). That image does not serve
-   ACP on atenet. Using it as a standing actor would Resume a process that
-   cannot take a chat turn.
-2. An Anvil atenet client (HTTP to `atenet-router.ate-system.svc`, actor
-   identity from `status.substrateActor`, stream the turn prompt, fold
-   completion/failure onto AgentRun phase). This is new code beside the
-   gRPC Control dialer — not a flag.
-3. Auth to atenet that is not Secret-in-JSON. JWT mode uses projected SA
-   tokens for ateapi; atenet’s auth story must be verified against 0.0.8
-   before Primaris enablement.
-4. Reconcile rules that do **not** steal standing GET observe-only work
-   (PR #264) and do **not** run ahead of `ProcessBackend` while Desktop
-   still depends on it.
-5. Tests: fake atenet + fake Control that Resume then stream then
-   `Succeeded`, plus a failure path that does not leave
-   `Running/SubstrateActorBound` forever.
+1. Chart/flag `substrate.actorsEnabled=true` with an ateapi endpoint
+2. `substrate.generateOnActor=true`
+3. The run’s `execution.substrate.actorClass` is listed in
+   `substrate.generateActorClasses` (exact match; empty list generates for
+   nobody)
+4. No live standing claim owns the turn
 
-Execute-via-Control is not an option: Anvil must not grow an Execute RPC
-the upstream API does not have.
+the controller binds the thread actor (`EnsureTurnActor` / Resume), POSTs the
+frozen `spec.prompt` as ACP `session/prompt` to atenet, and marks the AgentRun
+`Succeeded` (`SubstrateActorGenerated`) or `Failed`
+(`SubstrateActorGenerateFailed`). No Kubernetes Job is created. Transient
+atenet errors (503/429/504) requeue as `Running/SubstrateActorBound`;
+permanent errors fail the run so it cannot sit Bound forever.
 
-## Unblock order
+The API copies `generateActorClasses` into `standing.generateActorClasses`
+only when generate is on, and **does not** ProcessBackend-claim those
+classes. `standing-chat` is never generated even if listed, so Desktop
+`desktop-standing-assistant` stays on ProcessBackend.
 
-1. Land JWT CA trust (`DialATEControl` + chart `substrate.ca` /
-   `substrate.token`, this slice).
-2. Land constrained overlay files (this slice). Operator applies **only**
-   after a one-node-safe render **and** step 3.
-3. Follow-on PR: ACP actor image (or a documented pause+sidecar spike),
-   atenet stream client, reconcile completion, tests. Then — and only then —
-   consider Primaris `substrate.actorsEnabled=true` with
-   `substrate.endpoint=api.ate-system.svc:443`,
-   `substrate.ca.configMapName=ateapi-ca`,
-   `substrate.ca.namespace=ate-system`,
-   `substrate.token.projected=true`.
-4. Do not restart the Primaris API solely to flip that gate. Do not move
-   `hazy-trade-agent-manager` off Job/RWO OAuth.
+## Atenet request
 
-## Kind-only until then
+- Target: `substrate.atenetEndpoint` (default
+  `atenet-router.ate-system.svc:80`)
+- `Host`: `<actorName>.<atespace>.actors.resources.substrate.ate.dev`
+- Body: JSON-RPC 2.0 `session/prompt` with `prompt: [{type: text, text: <frozen prompt>}]`
+- Replies accepted: ACP NDJSON `session/update` agent_message_chunk plus
+  result; JSON `{"text":...}`; plain text
+- Optional bearer from the same projected token file as ateapi. Token bytes
+  never appear in errors, logs, status, or console JSON.
 
-`hack/substrate-latency-compare.sh --live` may use loopback
-`--substrate-insecure` against a port-forward. That is skip-verify TLS,
-loopback-only, and does not complete AgentRun prompts on Primaris.
+## ActorTemplate
+
+Overlay `ActorTemplate/standing-chat` remains the Job grok-build placeholder
+and is **not** ACP. Generate uses `ActorTemplate/acp-spike`: a digest-pinned
+Python ACP echo on `:80` (atenet ExtProc forwards to `<pod_ip>:80`). Sample
+harness: `config/samples/control_v1alpha1_agentharnessprofile_acp_spike.yaml`.
+
+`cmd/anvil-actor-acp` is the same protocol compiled into the controller image
+for Kind/local (`anvil-actor-acp --listen :80`).
+
+## Primaris enablement (after this image is live)
+
+Do **not** set `actorsEnabled=true` until:
+
+1. Constrained overlay is applied one-node-safe (`hack/render-ate-constrained.sh`)
+2. A smoke AgentRun with `actorClass: acp-spike` bind+generates (or curl
+   through atenet to that actor)
+3. Overlay pin:
+
+```yaml
+substrate:
+  actorsEnabled: true
+  generateOnActor: true
+  generateActorClasses:
+    - acp-spike
+  endpoint: api.ate-system.svc:443
+  template: acp-spike
+  ca:
+    configMapName: ateapi-ca
+    namespace: ate-system
+  token:
+    projected: true
+```
+
+Leave `hazy-trade-agent-manager` on Job/RWO OAuth. Do not list
+`standing-chat` in `generateActorClasses`.
