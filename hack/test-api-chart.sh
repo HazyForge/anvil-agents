@@ -65,6 +65,58 @@ helm template "${release}" "${chart}" \
 grep -Fq -- '--substrate-actors-enabled=true' "${tmp_dir}/substrate-on.yaml" || fail "substrate live gate missing when enabled"
 grep -Fq -- '--substrate-endpoint=ate-api-server.ate-system.svc:443' "${tmp_dir}/substrate-on.yaml" || fail "substrate endpoint missing when set"
 grep -Fq -- '--substrate-template=standing-chat' "${tmp_dir}/substrate-on.yaml" || fail "substrate template missing when set"
+if grep -Fq -- '--substrate-ca-file=' "${tmp_dir}/disabled.yaml"; then
+  fail "substrate CA file flag rendered while substrate.ca is unset"
+fi
+if grep -Fq -- '--substrate-ca-configmap=' "${tmp_dir}/disabled.yaml"; then
+  fail "substrate CA ConfigMap flag rendered while substrate.ca is unset"
+fi
+if grep -Fq -- 'name: ateapi-ca' "${tmp_dir}/disabled.yaml"; then
+  fail "ateapi-ca volume rendered while substrate.ca is unset"
+fi
+if grep -Fq -- 'name: ate-client-token' "${tmp_dir}/disabled.yaml"; then
+  fail "projected ate-client token rendered while substrate.token.projected=false"
+fi
+helm template "${release}" "${chart}" \
+  --set substrate.ca.configMapName=ateapi-ca \
+  --show-only templates/deployment.yaml >"${tmp_dir}/substrate-ca-mount.yaml"
+grep -Fq -- '--substrate-ca-file=/etc/anvil-agents/ateapi-ca/ca.crt' "${tmp_dir}/substrate-ca-mount.yaml" || fail "same-namespace ateapi-ca must mount --substrate-ca-file"
+grep -Fq -- 'name: ateapi-ca' "${tmp_dir}/substrate-ca-mount.yaml" || fail "same-namespace ateapi-ca volume missing"
+if grep -Fq -- '--substrate-ca-configmap=' "${tmp_dir}/substrate-ca-mount.yaml"; then
+  fail "same-namespace ateapi-ca must not also set ConfigMap lookup flags"
+fi
+if grep -Fq -- '--substrate-actors-enabled=true' "${tmp_dir}/substrate-ca-mount.yaml"; then
+  fail "CA wiring must not enable substrate.actorsEnabled"
+fi
+helm template "${release}" "${chart}" --namespace anvil-agents-system \
+  --set substrate.ca.configMapName=ateapi-ca \
+  --set substrate.ca.namespace=ate-system \
+  --show-only templates/deployment.yaml >"${tmp_dir}/substrate-ca-lookup.yaml"
+grep -Fq -- '--substrate-ca-configmap=ateapi-ca' "${tmp_dir}/substrate-ca-lookup.yaml" || fail "cross-namespace ateapi-ca lookup flag missing"
+grep -Fq -- '--substrate-ca-configmap-namespace=ate-system' "${tmp_dir}/substrate-ca-lookup.yaml" || fail "cross-namespace ateapi-ca namespace flag missing"
+grep -Fq -- '--substrate-ca-configmap-key=ca.crt' "${tmp_dir}/substrate-ca-lookup.yaml" || fail "cross-namespace ateapi-ca key flag missing"
+if grep -Fq -- '--substrate-ca-file=' "${tmp_dir}/substrate-ca-lookup.yaml"; then
+  fail "cross-namespace ateapi-ca must not mount caFile"
+fi
+if grep -Fq -- 'name: ateapi-ca' "${tmp_dir}/substrate-ca-lookup.yaml"; then
+  fail "cross-namespace ateapi-ca must not mount the ConfigMap volume"
+fi
+helm template "${release}" "${chart}" \
+  --set substrate.token.projected=true \
+  --show-only templates/deployment.yaml >"${tmp_dir}/substrate-token.yaml"
+grep -Fq -- '--substrate-token-file=/var/run/secrets/tokens/ate-api/token' "${tmp_dir}/substrate-token.yaml" || fail "projected ate-client token file flag missing"
+grep -Fq -- 'audience: api.ate-system.svc' "${tmp_dir}/substrate-token.yaml" || fail "projected ate-client token audience missing"
+if grep -Fq -- '--substrate-actors-enabled=true' "${tmp_dir}/substrate-token.yaml"; then
+  fail "token projection must not enable substrate.actorsEnabled"
+fi
+expect_template_failure substrate-ca-cross-ns-with-file \
+  --namespace anvil-agents-system \
+  --set substrate.ca.configMapName=ateapi-ca \
+  --set substrate.ca.namespace=ate-system \
+  --set substrate.caFile=/etc/anvil-agents/ateapi-ca/ca.crt
+expect_template_failure substrate-token-file-mismatch \
+  --set substrate.token.projected=true \
+  --set substrate.tokenFile=/wrong/token
 if document_exists "${tmp_dir}/disabled.yaml" Deployment contract-anvil-agents-api; then
   fail "API resources rendered while api.enabled=false"
 fi

@@ -8,36 +8,41 @@ import (
 )
 
 const (
-	defaultMetricsBindAddress       = ":8080"
-	defaultHealthProbeBindAddress   = ":8081"
-	defaultLeaderElectionID         = "anvil-agents.control.anvil.hazyforge.io"
-	defaultPlatformRepository       = "HazyForge/anvil-agents"
-	defaultPlatformRepositoryURL    = "https://github.com/HazyForge/anvil-agents.git"
-	defaultApplicationConcurrency   = 1
-	archiveDatabaseURLEnv           = "ANVIL_AGENTS_ARCHIVE_DATABASE_URL"
-	terminalRetentionEnv            = "ANVIL_AGENTS_TERMINAL_RETENTION"
-	platformRepositoryEnv           = "ANVIL_AGENTS_PLATFORM_REPOSITORY"
-	platformRepositoryURLEnv        = "ANVIL_AGENTS_PLATFORM_REPOSITORY_URL"
-	platformDocsEnv                 = "ANVIL_AGENTS_PLATFORM_DOCS"
-	applicationMaxConcurrentRunsEnv = "ANVIL_AGENTS_APPLICATION_MAX_CONCURRENT_RUNS"
-	defaultStorageClassEnv          = "ANVIL_AGENTS_DEFAULT_STORAGE_CLASS"
-	githubAPIAllowedHostsEnv        = "ANVIL_AGENTS_GITHUB_API_ALLOWED_HOSTS"
-	allowInsecureGitHubAPIEnv       = "ANVIL_AGENTS_ALLOW_INSECURE_GITHUB_API"
-	codexRunnerImageEnv             = "ANVIL_AGENTS_RUNNER_IMAGE_CODEX"
-	openCodeRunnerImageEnv          = "ANVIL_AGENTS_RUNNER_IMAGE_OPENCODE"
-	hermesAgentRunnerImageEnv       = "ANVIL_AGENTS_RUNNER_IMAGE_HERMES_AGENT"
-	openClawRunnerImageEnv          = "ANVIL_AGENTS_RUNNER_IMAGE_OPENCLAW"
-	grokBuildRunnerImageEnv         = "ANVIL_AGENTS_RUNNER_IMAGE_GROK_BUILD"
-	piAgentRunnerImageEnv           = "ANVIL_AGENTS_RUNNER_IMAGE_PI_AGENT"
-	primeAgentRunnerImageEnv        = "ANVIL_AGENTS_RUNNER_IMAGE_PRIME_AGENT"
-	agyRunnerImageEnv               = "ANVIL_AGENTS_RUNNER_IMAGE_AGY"
-	substrateActorsEnabledEnv       = "ANVIL_AGENTS_SUBSTRATE_ACTORS_ENABLED"
-	substrateEndpointEnv            = "ANVIL_AGENTS_SUBSTRATE_ENDPOINT"
-	substrateTokenEnv               = "ANVIL_AGENTS_SUBSTRATE_TOKEN"
-	substrateTokenFileEnv           = "ANVIL_AGENTS_SUBSTRATE_TOKEN_FILE"
-	substrateAtespaceEnv            = "ANVIL_AGENTS_SUBSTRATE_ATESPACE"
-	substrateTemplateEnv            = "ANVIL_AGENTS_SUBSTRATE_TEMPLATE"
-	substrateInsecureEnv            = "ANVIL_AGENTS_SUBSTRATE_INSECURE"
+	defaultMetricsBindAddress        = ":8080"
+	defaultHealthProbeBindAddress    = ":8081"
+	defaultLeaderElectionID          = "anvil-agents.control.anvil.hazyforge.io"
+	defaultPlatformRepository        = "HazyForge/anvil-agents"
+	defaultPlatformRepositoryURL     = "https://github.com/HazyForge/anvil-agents.git"
+	defaultApplicationConcurrency    = 1
+	archiveDatabaseURLEnv            = "ANVIL_AGENTS_ARCHIVE_DATABASE_URL"
+	terminalRetentionEnv             = "ANVIL_AGENTS_TERMINAL_RETENTION"
+	platformRepositoryEnv            = "ANVIL_AGENTS_PLATFORM_REPOSITORY"
+	platformRepositoryURLEnv         = "ANVIL_AGENTS_PLATFORM_REPOSITORY_URL"
+	platformDocsEnv                  = "ANVIL_AGENTS_PLATFORM_DOCS"
+	applicationMaxConcurrentRunsEnv  = "ANVIL_AGENTS_APPLICATION_MAX_CONCURRENT_RUNS"
+	defaultStorageClassEnv           = "ANVIL_AGENTS_DEFAULT_STORAGE_CLASS"
+	githubAPIAllowedHostsEnv         = "ANVIL_AGENTS_GITHUB_API_ALLOWED_HOSTS"
+	allowInsecureGitHubAPIEnv        = "ANVIL_AGENTS_ALLOW_INSECURE_GITHUB_API"
+	codexRunnerImageEnv              = "ANVIL_AGENTS_RUNNER_IMAGE_CODEX"
+	openCodeRunnerImageEnv           = "ANVIL_AGENTS_RUNNER_IMAGE_OPENCODE"
+	hermesAgentRunnerImageEnv        = "ANVIL_AGENTS_RUNNER_IMAGE_HERMES_AGENT"
+	openClawRunnerImageEnv           = "ANVIL_AGENTS_RUNNER_IMAGE_OPENCLAW"
+	grokBuildRunnerImageEnv          = "ANVIL_AGENTS_RUNNER_IMAGE_GROK_BUILD"
+	piAgentRunnerImageEnv            = "ANVIL_AGENTS_RUNNER_IMAGE_PI_AGENT"
+	primeAgentRunnerImageEnv         = "ANVIL_AGENTS_RUNNER_IMAGE_PRIME_AGENT"
+	agyRunnerImageEnv                = "ANVIL_AGENTS_RUNNER_IMAGE_AGY"
+	substrateActorsEnabledEnv        = "ANVIL_AGENTS_SUBSTRATE_ACTORS_ENABLED"
+	substrateEndpointEnv             = "ANVIL_AGENTS_SUBSTRATE_ENDPOINT"
+	substrateTokenEnv                = "ANVIL_AGENTS_SUBSTRATE_TOKEN"
+	substrateTokenFileEnv            = "ANVIL_AGENTS_SUBSTRATE_TOKEN_FILE"
+	substrateAtespaceEnv             = "ANVIL_AGENTS_SUBSTRATE_ATESPACE"
+	substrateTemplateEnv             = "ANVIL_AGENTS_SUBSTRATE_TEMPLATE"
+	substrateInsecureEnv             = "ANVIL_AGENTS_SUBSTRATE_INSECURE"
+	substrateCAFileEnv               = "ANVIL_AGENTS_SUBSTRATE_CA_FILE"
+	substrateCAConfigMapEnv          = "ANVIL_AGENTS_SUBSTRATE_CA_CONFIGMAP"
+	substrateCAConfigMapNamespaceEnv = "ANVIL_AGENTS_SUBSTRATE_CA_CONFIGMAP_NAMESPACE"
+	substrateCAConfigMapKeyEnv       = "ANVIL_AGENTS_SUBSTRATE_CA_CONFIGMAP_KEY"
+	substrateTLSServerNameEnv        = "ANVIL_AGENTS_SUBSTRATE_TLS_SERVER_NAME"
 )
 
 var defaultGitHubAPIAllowedHosts = []string{"api.github.com"}
@@ -101,36 +106,53 @@ type Options struct {
 	// local Kind port-forward. Kind-only: the dialer refuses every non-loopback
 	// endpoint when set.
 	SubstrateInsecure bool
+	// SubstrateCAFile is the path to the ateapi jwt CA PEM (ateapi-ca).
+	// Never logged as bytes.
+	SubstrateCAFile string
+	// SubstrateCAConfigMapName names the jwt CA ConfigMap when it is not
+	// mounted (default lookup ateapi-ca in ate-system).
+	SubstrateCAConfigMapName string
+	// SubstrateCAConfigMapNamespace is that ConfigMap's namespace.
+	SubstrateCAConfigMapNamespace string
+	// SubstrateCAConfigMapKey is that ConfigMap's data key (default ca.crt).
+	SubstrateCAConfigMapKey string
+	// SubstrateTLSServerName overrides ateapi TLS ServerName.
+	SubstrateTLSServerName string
 }
 
 func DefaultOptions() *Options {
 	return &Options{
-		MetricsBindAddress:           defaultMetricsBindAddress,
-		HealthProbeBindAddress:       defaultHealthProbeBindAddress,
-		LeaderElectionID:             defaultLeaderElectionID,
-		AgentRunTerminalRetention:    durationEnv(terminalRetentionEnv),
-		PlatformRepository:           firstNonEmpty(strings.TrimSpace(os.Getenv(platformRepositoryEnv)), defaultPlatformRepository),
-		PlatformRepositoryURL:        firstNonEmpty(strings.TrimSpace(os.Getenv(platformRepositoryURLEnv)), defaultPlatformRepositoryURL),
-		PlatformDocs:                 csvOrDefault(os.Getenv(platformDocsEnv), defaultPlatformDocs),
-		ApplicationMaxConcurrentRuns: positiveIntEnv(applicationMaxConcurrentRunsEnv, defaultApplicationConcurrency),
-		DefaultStorageClass:          strings.TrimSpace(os.Getenv(defaultStorageClassEnv)),
-		GitHubAPIAllowedHosts:        csvOrDefault(os.Getenv(githubAPIAllowedHostsEnv), defaultGitHubAPIAllowedHosts),
-		AllowInsecureGitHubAPI:       boolEnv(allowInsecureGitHubAPIEnv),
-		CodexRunnerImage:             firstNonEmpty(strings.TrimSpace(os.Getenv(codexRunnerImageEnv)), agentRunDefaultCodexImage),
-		OpenCodeRunnerImage:          firstNonEmpty(strings.TrimSpace(os.Getenv(openCodeRunnerImageEnv)), agentRunDefaultOpenCodeImage),
-		HermesAgentRunnerImage:       firstNonEmpty(strings.TrimSpace(os.Getenv(hermesAgentRunnerImageEnv)), agentRunDefaultHermesAgentImage),
-		OpenClawRunnerImage:          firstNonEmpty(strings.TrimSpace(os.Getenv(openClawRunnerImageEnv)), agentRunDefaultOpenClawImage),
-		GrokBuildRunnerImage:         firstNonEmpty(strings.TrimSpace(os.Getenv(grokBuildRunnerImageEnv)), agentRunDefaultGrokBuildImage),
-		PiAgentRunnerImage:           firstNonEmpty(strings.TrimSpace(os.Getenv(piAgentRunnerImageEnv)), agentRunDefaultPiAgentImage),
-		PrimeAgentRunnerImage:        firstNonEmpty(strings.TrimSpace(os.Getenv(primeAgentRunnerImageEnv)), agentRunDefaultPrimeAgentImage),
-		AgyRunnerImage:               firstNonEmpty(strings.TrimSpace(os.Getenv(agyRunnerImageEnv)), agentRunDefaultAgyImage),
-		SubstrateActorsEnabled:       substrateBoolEnv(substrateActorsEnabledEnv),
-		SubstrateEndpoint:            strings.TrimSpace(os.Getenv(substrateEndpointEnv)),
-		SubstrateToken:               strings.TrimSpace(os.Getenv(substrateTokenEnv)),
-		SubstrateTokenFile:           strings.TrimSpace(os.Getenv(substrateTokenFileEnv)),
-		SubstrateAtespace:            strings.TrimSpace(os.Getenv(substrateAtespaceEnv)),
-		SubstrateTemplate:            strings.TrimSpace(os.Getenv(substrateTemplateEnv)),
-		SubstrateInsecure:            substrateBoolEnv(substrateInsecureEnv),
+		MetricsBindAddress:            defaultMetricsBindAddress,
+		HealthProbeBindAddress:        defaultHealthProbeBindAddress,
+		LeaderElectionID:              defaultLeaderElectionID,
+		AgentRunTerminalRetention:     durationEnv(terminalRetentionEnv),
+		PlatformRepository:            firstNonEmpty(strings.TrimSpace(os.Getenv(platformRepositoryEnv)), defaultPlatformRepository),
+		PlatformRepositoryURL:         firstNonEmpty(strings.TrimSpace(os.Getenv(platformRepositoryURLEnv)), defaultPlatformRepositoryURL),
+		PlatformDocs:                  csvOrDefault(os.Getenv(platformDocsEnv), defaultPlatformDocs),
+		ApplicationMaxConcurrentRuns:  positiveIntEnv(applicationMaxConcurrentRunsEnv, defaultApplicationConcurrency),
+		DefaultStorageClass:           strings.TrimSpace(os.Getenv(defaultStorageClassEnv)),
+		GitHubAPIAllowedHosts:         csvOrDefault(os.Getenv(githubAPIAllowedHostsEnv), defaultGitHubAPIAllowedHosts),
+		AllowInsecureGitHubAPI:        boolEnv(allowInsecureGitHubAPIEnv),
+		CodexRunnerImage:              firstNonEmpty(strings.TrimSpace(os.Getenv(codexRunnerImageEnv)), agentRunDefaultCodexImage),
+		OpenCodeRunnerImage:           firstNonEmpty(strings.TrimSpace(os.Getenv(openCodeRunnerImageEnv)), agentRunDefaultOpenCodeImage),
+		HermesAgentRunnerImage:        firstNonEmpty(strings.TrimSpace(os.Getenv(hermesAgentRunnerImageEnv)), agentRunDefaultHermesAgentImage),
+		OpenClawRunnerImage:           firstNonEmpty(strings.TrimSpace(os.Getenv(openClawRunnerImageEnv)), agentRunDefaultOpenClawImage),
+		GrokBuildRunnerImage:          firstNonEmpty(strings.TrimSpace(os.Getenv(grokBuildRunnerImageEnv)), agentRunDefaultGrokBuildImage),
+		PiAgentRunnerImage:            firstNonEmpty(strings.TrimSpace(os.Getenv(piAgentRunnerImageEnv)), agentRunDefaultPiAgentImage),
+		PrimeAgentRunnerImage:         firstNonEmpty(strings.TrimSpace(os.Getenv(primeAgentRunnerImageEnv)), agentRunDefaultPrimeAgentImage),
+		AgyRunnerImage:                firstNonEmpty(strings.TrimSpace(os.Getenv(agyRunnerImageEnv)), agentRunDefaultAgyImage),
+		SubstrateActorsEnabled:        substrateBoolEnv(substrateActorsEnabledEnv),
+		SubstrateEndpoint:             strings.TrimSpace(os.Getenv(substrateEndpointEnv)),
+		SubstrateToken:                strings.TrimSpace(os.Getenv(substrateTokenEnv)),
+		SubstrateTokenFile:            strings.TrimSpace(os.Getenv(substrateTokenFileEnv)),
+		SubstrateAtespace:             strings.TrimSpace(os.Getenv(substrateAtespaceEnv)),
+		SubstrateTemplate:             strings.TrimSpace(os.Getenv(substrateTemplateEnv)),
+		SubstrateInsecure:             substrateBoolEnv(substrateInsecureEnv),
+		SubstrateCAFile:               strings.TrimSpace(os.Getenv(substrateCAFileEnv)),
+		SubstrateCAConfigMapName:      strings.TrimSpace(os.Getenv(substrateCAConfigMapEnv)),
+		SubstrateCAConfigMapNamespace: strings.TrimSpace(os.Getenv(substrateCAConfigMapNamespaceEnv)),
+		SubstrateCAConfigMapKey:       strings.TrimSpace(os.Getenv(substrateCAConfigMapKeyEnv)),
+		SubstrateTLSServerName:        strings.TrimSpace(os.Getenv(substrateTLSServerNameEnv)),
 	}
 }
 

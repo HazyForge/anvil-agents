@@ -6,15 +6,18 @@
 // internal/substrate/ateapipb, a minimal generated subset of the upstream
 // ateapi.proto (see ateapipb/ateapi.proto for the refresh procedure).
 //
-// TLS/token parity with upstream internal/ateclient (builder.go):
+// TLS/token parity with upstream internal/ateclient (builder.go), plus JWT-mode
+// CA trust for ATE Helm 0.0.8 (auth.mode=jwt, ConfigMap ateapi-ca):
 //
-//   - TLS is verified BEFORE any bearer token is attached. The serving cert
-//     is verified against the live ClusterTrustBundle for signer
-//     servicedns.podcert.ate.dev/identity (label
-//     podcert.ate.dev/canarying=live), TLS 1.3 minimum, ServerName
-//     api.ate-system.svc. The bundle is fetched through the caller's
-//     kubeconfig (Kind/local) or in-cluster config (controller), the same
-//     sources kubectl-ate uses.
+//   - TLS is verified BEFORE any bearer token is attached. Trust sources, in
+//     order: ATEClientConfig.CAFile (PEM, ATE jwt chart ConfigMap key ca.crt);
+//     else Kubernetes ConfigMap CAConfigMapNamespace/CAConfigMapName
+//     (defaults ate-system/ateapi-ca, key ca.crt); else the live
+//     ClusterTrustBundle for signer servicedns.podcert.ate.dev/identity
+//     (label podcert.ate.dev/canarying=live, mTLS/podcert installs). TLS 1.3
+//     minimum, ServerName api.ate-system.svc (override with TLSServerName).
+//     CA PEM bytes never appear in errors, logs, or status — only file path
+//     or ConfigMap namespace/name/key.
 //   - The bearer token comes from ATEClientConfig.TokenFile (kubectl-ate
 //     --token-file parallel, "-" reads stdin) or the inline
 //     ATEClientConfig.Token, and is attached per-RPC as an authorization
@@ -23,7 +26,7 @@
 //   - With no explicit token the dialer mints a short-lived ServiceAccount
 //     token for ate-client in ate-system (audience api.ate-system.svc, 1h),
 //     exactly like kubectl-ate's default. In-cluster controllers typically
-//     lack that RBAC, so mount a token file there instead.
+//     lack that RBAC, so mount a projected token file there instead.
 //   - Round-robin balances across ateapi replicas behind the headless
 //     Service, matching upstream.
 //
@@ -33,11 +36,11 @@
 // ServerName api.ate-system.svc). ateapi always serves TLS, so this is still
 // a TLS channel — never plaintext/h2c. It refuses every non-loopback
 // endpoint, so it can only reach a local port-forward on the developer's own
-// machine. This exists for Kind spikes where the podcert trust bundle is not
-// yet wired into the local kubeconfig; production and shared clusters must
-// use verified TLS.
-// The flag, the loopback guard, and this comment are the explicit marker the
-// task requires — insecure dial is never silent.
+// machine. This exists for Kind spikes where the jwt CA or podcert trust
+// bundle is not yet wired into the local kubeconfig; production and shared
+// clusters must use verified TLS (CAFile or ateapi-ca ConfigMap for jwt
+// mode). The flag, the loopback guard, and this comment are the explicit
+// marker the task requires — insecure dial is never silent.
 package substrate
 
 import (
@@ -72,9 +75,14 @@ const (
 	ateTokenAudience = "api.ate-system.svc"
 	// ateTrustBundleSigner and ateTrustBundleSelector identify the live
 	// ClusterTrustBundle projected from the podcert signer, mirrored from
-	// upstream.
+	// upstream. Used only for auth.mode=mtls installs.
 	ateTrustBundleSigner   = "servicedns.podcert.ate.dev/identity"
 	ateTrustBundleSelector = "podcert.ate.dev/canarying=live"
+	// ateJWTCAConfigMap* are ATE Helm 0.0.8 jwt-mode defaults (values
+	// auth.jwt.caBundleConfigMap=ateapi-ca, key ca.crt in ate-system).
+	ateJWTCAConfigMapNamespace = "ate-system"
+	ateJWTCAConfigMapName      = "ateapi-ca"
+	ateJWTCAConfigMapKey       = "ca.crt"
 	// ateTokenServiceAccount is the "namespace/name" of the ServiceAccount
 	// kubectl-ate mints tokens for when --token-file is omitted.
 	ateTokenServiceAccountNamespace = "ate-system"
@@ -87,7 +95,7 @@ const roundRobinServiceConfig = `{"loadBalancingConfig": [{"round_robin":{}}]}`
 
 // ATEDialOptions carries out-of-band dial inputs that are not part of the
 // transport config: where to find Kubernetes credentials for ClusterTrustBundle
-// verification and ServiceAccount token minting.
+// or ateapi-ca ConfigMap verification and ServiceAccount token minting.
 type ATEDialOptions struct {
 	// KubeconfigPath overrides the standard kubeconfig lookup (KUBECONFIG /
 	// ~/.kube/config). Empty means default loading rules; in-cluster config
@@ -96,6 +104,9 @@ type ATEDialOptions struct {
 	// K8sContext selects the kubeconfig context. Empty means the current
 	// context.
 	K8sContext string
+	// Kubernetes overrides kubeconfig/in-cluster loading. Tests inject a
+	// fake clientset so JWT ConfigMap trust does not need a real cluster.
+	Kubernetes kubernetes.Interface
 }
 
 // normalizeATEEndpoint trims the configured ateapi target and tolerates an
@@ -217,8 +228,12 @@ func loadATEKubeConfig(kubeconfigPath, k8sContext string) (*rest.Config, error) 
 
 // ateKubernetesClientset builds a clientset from kubeconfig (Kind/local) or
 // in-cluster config (controller), suppressing the certificates.k8s.io/v1beta1
-// deprecation warnings the same way upstream does.
-func ateKubernetesClientset(opts ATEDialOptions) (*kubernetes.Clientset, error) {
+// deprecation warnings the same way upstream does. ATEDialOptions.Kubernetes
+// short-circuits loading for tests.
+func ateKubernetesClientset(opts ATEDialOptions) (kubernetes.Interface, error) {
+	if opts.Kubernetes != nil {
+		return opts.Kubernetes, nil
+	}
 	config, err := loadATEKubeConfig(opts.KubeconfigPath, opts.K8sContext)
 	if err != nil {
 		inCluster, inErr := rest.InClusterConfig()
@@ -235,12 +250,114 @@ func ateKubernetesClientset(opts ATEDialOptions) (*kubernetes.Clientset, error) 
 	return clientset, nil
 }
 
-// serverTLSConfig builds the verified TLS config from the live podcert
-// ClusterTrustBundle. Verification happens before any bearer token is
+func tlsServerName(cfg ATEClientConfig) string {
+	if name := strings.TrimSpace(cfg.TLSServerName); name != "" {
+		return name
+	}
+	return ateAPIServerName
+}
+
+func explicitBearerConfigured(cfg ATEClientConfig) bool {
+	return strings.TrimSpace(cfg.TokenFile) != "" || strings.TrimSpace(cfg.Token) != ""
+}
+
+func tlsConfigFromRootPEM(pemBytes []byte, serverName string) (*tls.Config, error) {
+	pool := x509.NewCertPool()
+	if !pool.AppendCertsFromPEM(pemBytes) {
+		return nil, fmt.Errorf("ATE CA PEM contains no valid certificates")
+	}
+	return &tls.Config{
+		MinVersion: tls.VersionTLS13,
+		RootCAs:    pool,
+		ServerName: serverName,
+	}, nil
+}
+
+func tlsConfigFromCAFile(path, serverName string) (*tls.Config, error) {
+	path = strings.TrimSpace(path)
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read ATE CA file %q: %w", path, err)
+	}
+	if strings.TrimSpace(string(raw)) == "" {
+		return nil, fmt.Errorf("ATE CA file %q is empty", path)
+	}
+	cfg, err := tlsConfigFromRootPEM(raw, serverName)
+	if err != nil {
+		return nil, fmt.Errorf("ATE CA file %q: %w", path, err)
+	}
+	return cfg, nil
+}
+
+func caConfigMapRef(cfg ATEClientConfig) (namespace, name, key string) {
+	name = strings.TrimSpace(cfg.CAConfigMapName)
+	namespace = strings.TrimSpace(cfg.CAConfigMapNamespace)
+	if namespace == "" {
+		namespace = ateJWTCAConfigMapNamespace
+	}
+	key = strings.TrimSpace(cfg.CAConfigMapKey)
+	if key == "" {
+		key = ateJWTCAConfigMapKey
+	}
+	return namespace, name, key
+}
+
+func tlsConfigFromCAConfigMap(ctx context.Context, clientset kubernetes.Interface, cfg ATEClientConfig, serverName string) (*tls.Config, error) {
+	if clientset == nil {
+		return nil, fmt.Errorf("Kubernetes client is required to load the ATE CA ConfigMap")
+	}
+	namespace, name, key := caConfigMapRef(cfg)
+	if name == "" {
+		return nil, fmt.Errorf("ATE CA ConfigMap name is required (see %s)", GateCAConfigMapEnvVar)
+	}
+	cm, err := clientset.CoreV1().ConfigMaps(namespace).Get(ctx, name, metav1.GetOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("get ATE CA ConfigMap %s/%s: %w", namespace, name, err)
+	}
+	pem, ok := cm.Data[key]
+	if !ok || strings.TrimSpace(pem) == "" {
+		return nil, fmt.Errorf("ATE CA ConfigMap %s/%s is missing key %q or the key is empty", namespace, name, key)
+	}
+	tlsCfg, err := tlsConfigFromRootPEM([]byte(pem), serverName)
+	if err != nil {
+		return nil, fmt.Errorf("ATE CA ConfigMap %s/%s key %q: %w", namespace, name, key, err)
+	}
+	return tlsCfg, nil
+}
+
+// resolveServerTLSConfig picks jwt CA file, jwt ConfigMap ateapi-ca, then
+// podcert ClusterTrustBundle. Verification happens before any bearer token is
 // attached, so the token never travels over an unauthenticated channel.
-func serverTLSConfig(ctx context.Context, clientset kubernetes.Interface) (*tls.Config, error) {
+func resolveServerTLSConfig(ctx context.Context, cfg ATEClientConfig, clientset kubernetes.Interface) (*tls.Config, error) {
+	serverName := tlsServerName(cfg)
+	if strings.TrimSpace(cfg.CAFile) != "" {
+		return tlsConfigFromCAFile(cfg.CAFile, serverName)
+	}
+	if strings.TrimSpace(cfg.CAConfigMapName) != "" {
+		return tlsConfigFromCAConfigMap(ctx, clientset, cfg, serverName)
+	}
+	if clientset != nil {
+		jwtCfg := ATEClientConfig{
+			CAConfigMapName:      ateJWTCAConfigMapName,
+			CAConfigMapNamespace: ateJWTCAConfigMapNamespace,
+			CAConfigMapKey:       ateJWTCAConfigMapKey,
+		}
+		if tlsCfg, err := tlsConfigFromCAConfigMap(ctx, clientset, jwtCfg, serverName); err == nil {
+			return tlsCfg, nil
+		}
+	}
+	return serverTLSConfig(ctx, clientset, serverName)
+}
+
+// serverTLSConfig builds the verified TLS config from the live podcert
+// ClusterTrustBundle (ATE auth.mode=mtls). JWT-mode ATE 0.0.8 does not
+// publish this bundle; use CAFile or CAConfigMapName instead.
+func serverTLSConfig(ctx context.Context, clientset kubernetes.Interface, serverName string) (*tls.Config, error) {
 	if clientset == nil {
 		return nil, fmt.Errorf("Kubernetes client is required to verify ateapi TLS")
+	}
+	if strings.TrimSpace(serverName) == "" {
+		serverName = ateAPIServerName
 	}
 	bundles, err := clientset.CertificatesV1beta1().ClusterTrustBundles().List(ctx, metav1.ListOptions{
 		LabelSelector: ateTrustBundleSelector,
@@ -260,12 +377,12 @@ func serverTLSConfig(ctx context.Context, clientset kubernetes.Interface) (*tls.
 		found = true
 	}
 	if !found {
-		return nil, fmt.Errorf("no live ClusterTrustBundle found for signer %q (is Substrate ATE installed? for a Kind port-forward see docs/substrate-spike.md, or set %s for insecure-dev loopback only)", ateTrustBundleSigner, GateInsecureEnvVar)
+		return nil, fmt.Errorf("no ATE CA found: mount jwt ConfigMap %s (key %s) via %s, set %s=%s/%s, or install podcert ClusterTrustBundle signer %q; Kind port-forward may set %s for insecure-dev loopback only", ateJWTCAConfigMapName, ateJWTCAConfigMapKey, GateCAFileEnvVar, GateCAConfigMapEnvVar, ateJWTCAConfigMapNamespace, ateJWTCAConfigMapName, ateTrustBundleSigner, GateInsecureEnvVar)
 	}
 	return &tls.Config{
 		MinVersion: tls.VersionTLS13,
 		RootCAs:    pool,
-		ServerName: ateAPIServerName,
+		ServerName: serverName,
 	}, nil
 }
 
@@ -460,12 +577,13 @@ func (g *grpcATEControl) PauseActor(ctx context.Context, ref ATEObjectRef) (ATEA
 // DialATEControl dials ateapi at cfg.Address and returns the ATEControl seam
 // plus a close func. The caller owns the connection lifetime.
 //
-// Secure path (default): verified TLS via the live ClusterTrustBundle, then
-// the bearer token (file > inline > minted ServiceAccount token), mirroring
-// upstream ateclient.NewClient. Insecure path (cfg.Insecure, Kind-only):
-// TLS with certificate verification skipped, restricted to loopback
-// endpoints; bearer token attached like the secure path when available
-// (file > inline > minted ServiceAccount token).
+// Secure path (default): verified TLS via CAFile (ATE jwt ateapi-ca), else
+// CAConfigMapName, else the live ClusterTrustBundle, then the bearer token
+// (file > inline > minted ServiceAccount token), mirroring upstream
+// ateclient.NewClient plus jwt-mode CA trust. Insecure path (cfg.Insecure,
+// Kind-only): TLS with certificate verification skipped, restricted to
+// loopback endpoints; bearer token attached like the secure path when
+// available (file > inline > minted ServiceAccount token).
 func DialATEControl(ctx context.Context, cfg ATEClientConfig, opts ATEDialOptions) (ATEControl, func(), error) {
 	if err := cfg.Validate(); err != nil {
 		return nil, nil, err
@@ -478,15 +596,11 @@ func DialATEControl(ctx context.Context, cfg ATEClientConfig, opts ATEDialOption
 		if !isLoopbackEndpoint(endpoint) {
 			return nil, nil, fmt.Errorf("substrate insecure-dev dial refuses non-loopback endpoint %q (set %s only for a local Kind port-forward)", endpoint, GateInsecureEnvVar)
 		}
-		// Kind-only skip-verify TLS: ateapi always serves TLS, so the
-		// insecure escape hatch skips certificate verification on a TLS
-		// channel instead of dialing plaintext. The loopback guard above is
-		// what keeps this from ever reaching a shared cluster.
 		dialOpts := []grpc.DialOption{
 			grpc.WithTransportCredentials(credentials.NewTLS(&tls.Config{
 				InsecureSkipVerify: true, // #nosec G402 -- Kind-only loopback spike path; non-loopback endpoints are refused by the guard above.
 				MinVersion:         tls.VersionTLS13,
-				ServerName:         ateAPIServerName,
+				ServerName:         tlsServerName(cfg),
 			})),
 			grpc.WithDefaultServiceConfig(roundRobinServiceConfig),
 		}
@@ -498,9 +612,6 @@ func DialATEControl(ctx context.Context, cfg ATEClientConfig, opts ATEDialOption
 		} else if strings.TrimSpace(cfg.Token) != "" {
 			dialOpts = append(dialOpts, grpc.WithPerRPCCredentials(staticBearerCreds{token: strings.TrimSpace(cfg.Token), requireTLS: true}))
 		} else if clientset, err := ateKubernetesClientset(opts); err == nil {
-			// Best-effort mint like the secure path; without a kubeconfig or
-			// in-cluster RBAC there is nothing to mint, so dial without a
-			// token rather than failing the loopback spike.
 			if tokenOpt, err := resolveBearerCredentials(ctx, cfg, clientset, true); err == nil {
 				dialOpts = append(dialOpts, tokenOpt)
 			}
@@ -511,17 +622,27 @@ func DialATEControl(ctx context.Context, cfg ATEClientConfig, opts ATEDialOption
 		}
 		return &grpcATEControl{client: ateapipb.NewControlClient(conn)}, func() { _ = conn.Close() }, nil
 	}
-	clientset, err := ateKubernetesClientset(opts)
-	if err != nil {
-		return nil, nil, fmt.Errorf("dial ateapi at %s: %w (or set %s for insecure-dev loopback only)", endpoint, err, GateInsecureEnvVar)
+	needsKube := strings.TrimSpace(cfg.CAFile) == "" || !explicitBearerConfigured(cfg)
+	var clientset kubernetes.Interface
+	if needsKube {
+		clientset, err = ateKubernetesClientset(opts)
+		if err != nil && strings.TrimSpace(cfg.CAFile) == "" {
+			return nil, nil, fmt.Errorf("dial ateapi at %s: %w (or set %s to the jwt ateapi-ca PEM, %s for ConfigMap lookup, or %s for insecure-dev loopback only)", endpoint, err, GateCAFileEnvVar, GateCAConfigMapEnvVar, GateInsecureEnvVar)
+		}
 	}
-	tlsCfg, err := serverTLSConfig(ctx, clientset)
+	tlsCfg, err := resolveServerTLSConfig(ctx, cfg, clientset)
 	if err != nil {
 		return nil, nil, fmt.Errorf("dial ateapi at %s: %w", endpoint, err)
 	}
 	dialOpts := []grpc.DialOption{
 		grpc.WithTransportCredentials(credentials.NewTLS(tlsCfg)),
 		grpc.WithDefaultServiceConfig(roundRobinServiceConfig),
+	}
+	if !explicitBearerConfigured(cfg) && clientset == nil {
+		clientset, err = ateKubernetesClientset(opts)
+		if err != nil {
+			return nil, nil, fmt.Errorf("dial ateapi at %s: %w", endpoint, err)
+		}
 	}
 	tokenOpt, err := resolveBearerCredentials(ctx, cfg, clientset, true)
 	if err != nil {

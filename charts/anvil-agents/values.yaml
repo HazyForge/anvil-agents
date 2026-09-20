@@ -339,8 +339,10 @@ affinity: {}
 # this gate and is the Primaris speed path. Enabling the gate without a
 # reachable ateapi, or enabling bind-only ATE without a completion path,
 # leaves unclaimed SubstrateActor runs Running/SubstrateActorBound.
-# Do not put bearer tokens here; prefer a mounted token file or the
-# controller's short-lived ate-client ServiceAccount token.
+# Do not put bearer tokens or CA PEM bytes here; prefer a mounted token file
+# or the controller's short-lived ate-client ServiceAccount token, and a
+# mounted or looked-up ateapi-ca ConfigMap (ATE Helm 0.0.8 jwt mode).
+# --substrate-insecure stays loopback-only even if set.
 substrate:
   actorsEnabled: false
   endpoint: ""
@@ -348,6 +350,26 @@ substrate:
   atespace: ""
   tokenFile: ""
   insecure: false
+  # In-pod path to the jwt CA PEM. Set automatically when ca.configMapName
+  # is in the release namespace. Cross-namespace lookup uses ca.* instead.
+  caFile: ""
+  # TLS ServerName override (empty = api.ate-system.svc).
+  tlsServerName: ""
+  ca:
+    # ATE jwt ConfigMap name (chart default ateapi-ca). Empty disables CA
+    # wiring. Same-namespace ConfigMaps are mounted; other namespaces are
+    # read through the Kubernetes API (controller ConfigMap get). Never
+    # put CA bytes in status, logs, or console/API JSON.
+    configMapName: ""
+    namespace: ""
+    key: ca.crt
+  token:
+    # Project a ServiceAccount token with the ateapi JWT audience. Off by
+    # default. Token bytes never land in status, logs, or console JSON.
+    projected: false
+    audience: api.ate-system.svc
+    expirationSeconds: 3600
+    mountPath: /var/run/secrets/tokens/ate-api
 
 # Additional explicit Kubernetes objects installed and owned by this Helm
 # release. Set metadata.namespace on every namespaced object. Values are not

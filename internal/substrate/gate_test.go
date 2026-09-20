@@ -71,6 +71,28 @@ func TestGateParsesATEPlaneFields(t *testing.T) {
 	}
 }
 
+func TestGateParsesJWTCATrustFields(t *testing.T) {
+	t.Setenv(GateEnabledEnvVar, "true")
+	t.Setenv(GateEndpointEnvVar, "api.ate-system.svc:443")
+	t.Setenv(GateTemplateEnvVar, "standing-chat")
+	t.Setenv(GateCAFileEnvVar, "/etc/anvil-agents/ateapi-ca/ca.crt")
+	t.Setenv(GateCAConfigMapEnvVar, "ateapi-ca")
+	t.Setenv(GateCAConfigMapNamespaceEnvVar, "ate-system")
+	t.Setenv(GateCAConfigMapKeyEnvVar, "ca.crt")
+	t.Setenv(GateTLSServerNameEnvVar, "api.ate-system.svc")
+
+	gate := GateConfigFromEnv()
+	if gate.CAFile != "/etc/anvil-agents/ateapi-ca/ca.crt" || gate.CAConfigMapName != "ateapi-ca" ||
+		gate.CAConfigMapNamespace != "ate-system" || gate.CAConfigMapKey != "ca.crt" ||
+		gate.TLSServerName != "api.ate-system.svc" {
+		t.Fatalf("gate CA fields = %+v", gate)
+	}
+	cfg := ATEClientConfigFromGate(gate)
+	if cfg.CAFile != gate.CAFile || cfg.CAConfigMapName != gate.CAConfigMapName || cfg.Insecure {
+		t.Fatalf("client config from gate = %+v, want jwt CA file without insecure", cfg)
+	}
+}
+
 func TestThreadIDForRunPrefersChatThread(t *testing.T) {
 	t.Parallel()
 

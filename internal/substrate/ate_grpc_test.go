@@ -20,6 +20,7 @@ import (
 	"time"
 
 	certificatesv1beta1 "k8s.io/api/certificates/v1beta1"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	kubefake "k8s.io/client-go/kubernetes/fake"
 
@@ -79,8 +80,8 @@ func (s *bufconnATEControlServer) CreateActor(_ context.Context, req *ateapipb.C
 			Name:     want.GetMetadata().GetName(),
 			Uid:      "ate-uid-wire-1",
 		},
-		ActorTemplate:  want.GetActorTemplate(),
-		Status:         &ateapipb.ActorStatus{State: ateapipb.ActorState_ACTOR_STATE_RUNNING},
+		ActorTemplate: want.GetActorTemplate(),
+		Status:        &ateapipb.ActorStatus{State: ateapipb.ActorState_ACTOR_STATE_RUNNING},
 	}
 	if want.GetWorkerSelector() != nil {
 		actor.WorkerSelector = &ateapipb.Selector{MatchLabels: want.GetWorkerSelector().GetMatchLabels()}
@@ -479,16 +480,16 @@ func TestServerTLSConfigRequiresLiveBundle(t *testing.T) {
 
 	ctx := context.Background()
 	clientset := kubefake.NewSimpleClientset()
-	if _, err := serverTLSConfig(ctx, clientset); err == nil || !strings.Contains(err.Error(), "ClusterTrustBundle") {
-		t.Fatalf("TLS without bundles err = %v, want a ClusterTrustBundle error", err)
+	if _, err := serverTLSConfig(ctx, clientset, ateAPIServerName); err == nil || !strings.Contains(err.Error(), "no ATE CA found") {
+		t.Fatalf("TLS without bundles err = %v, want a missing ATE CA error", err)
 	}
 	wrongSigner := &certificatesv1beta1.ClusterTrustBundle{
 		ObjectMeta: metav1.ObjectMeta{Name: "wrong", Labels: map[string]string{"podcert.ate.dev/canarying": "live"}},
 		Spec:       certificatesv1beta1.ClusterTrustBundleSpec{SignerName: "other.example/signer", TrustBundle: "junk"},
 	}
 	clientset = kubefake.NewSimpleClientset(wrongSigner)
-	if _, err := serverTLSConfig(ctx, clientset); err == nil || !strings.Contains(err.Error(), "ClusterTrustBundle") {
-		t.Fatalf("TLS with wrong signer err = %v, want a ClusterTrustBundle error", err)
+	if _, err := serverTLSConfig(ctx, clientset, ateAPIServerName); err == nil || !strings.Contains(err.Error(), "no ATE CA found") {
+		t.Fatalf("TLS with wrong signer err = %v, want a missing ATE CA error", err)
 	}
 }
 
@@ -502,7 +503,7 @@ func TestServerTLSConfigAcceptsLiveBundle(t *testing.T) {
 		Spec:       certificatesv1beta1.ClusterTrustBundleSpec{SignerName: "servicedns.podcert.ate.dev/identity", TrustBundle: string(caPEM)},
 	}
 	clientset := kubefake.NewSimpleClientset(bundle)
-	tlsCfg, err := serverTLSConfig(ctx, clientset)
+	tlsCfg, err := serverTLSConfig(ctx, clientset, ateAPIServerName)
 	if err != nil {
 		t.Fatalf("TLS with live bundle: %v", err)
 	}
@@ -577,4 +578,278 @@ func TestStaticBearerCredentials(t *testing.T) {
 	if got := (fileBearerCreds{path: "some/path", requireTLS: true}).RequireTransportSecurity(); !got {
 		t.Fatal("file bearer credentials must require transport security over skip-verify TLS")
 	}
+}
+
+func TestTLSConfigFromCAFile(t *testing.T) {
+	t.Parallel()
+
+	caPEM := selfSignedCAPEM(t)
+	path := filepath.Join(t.TempDir(), "ca.crt")
+	if err := os.WriteFile(path, caPEM, 0o600); err != nil {
+		t.Fatalf("write CA: %v", err)
+	}
+	tlsCfg, err := tlsConfigFromCAFile(path, ateAPIServerName)
+	if err != nil {
+		t.Fatalf("CA file: %v", err)
+	}
+	if tlsCfg.ServerName != ateAPIServerName || tlsCfg.MinVersion != tls.VersionTLS13 {
+		t.Fatalf("TLS config = %+v, want ServerName %q TLS 1.3", tlsCfg, ateAPIServerName)
+	}
+	if _, err := tlsConfigFromCAFile(filepath.Join(t.TempDir(), "missing"), ateAPIServerName); err == nil {
+		t.Fatal("missing CA file must fail")
+	}
+	empty := filepath.Join(t.TempDir(), "empty.crt")
+	if err := os.WriteFile(empty, []byte("\n"), 0o600); err != nil {
+		t.Fatalf("write empty CA: %v", err)
+	}
+	if _, err := tlsConfigFromCAFile(empty, ateAPIServerName); err == nil || !strings.Contains(err.Error(), "empty") {
+		t.Fatalf("empty CA file err = %v, want empty", err)
+	}
+}
+
+func TestResolveServerTLSConfigPrefersCAFileOverBundle(t *testing.T) {
+	t.Parallel()
+
+	caPEM := selfSignedCAPEM(t)
+	path := filepath.Join(t.TempDir(), "ca.crt")
+	if err := os.WriteFile(path, caPEM, 0o600); err != nil {
+		t.Fatalf("write CA: %v", err)
+	}
+	tlsCfg, err := resolveServerTLSConfig(context.Background(), ATEClientConfig{CAFile: path}, nil)
+	if err != nil {
+		t.Fatalf("CA file without kube client: %v", err)
+	}
+	if tlsCfg.ServerName != ateAPIServerName {
+		t.Fatalf("ServerName = %q, want %q", tlsCfg.ServerName, ateAPIServerName)
+	}
+}
+
+func TestTLSConfigFromCAConfigMap(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	caPEM := selfSignedCAPEM(t)
+	cm := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{Name: ateJWTCAConfigMapName, Namespace: ateJWTCAConfigMapNamespace},
+		Data:       map[string]string{ateJWTCAConfigMapKey: string(caPEM)},
+	}
+	clientset := kubefake.NewSimpleClientset(cm)
+	tlsCfg, err := resolveServerTLSConfig(ctx, ATEClientConfig{CAConfigMapName: ateJWTCAConfigMapName}, clientset)
+	if err != nil {
+		t.Fatalf("ConfigMap CA: %v", err)
+	}
+	if tlsCfg.ServerName != ateAPIServerName || tlsCfg.MinVersion != tls.VersionTLS13 {
+		t.Fatalf("TLS config = %+v, want jwt ServerName TLS 1.3", tlsCfg)
+	}
+
+	missingKey := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{Name: "ateapi-ca", Namespace: "ate-system"},
+		Data:       map[string]string{"other": "nope"},
+	}
+	_, err = tlsConfigFromCAConfigMap(ctx, kubefake.NewSimpleClientset(missingKey), ATEClientConfig{CAConfigMapName: "ateapi-ca"}, ateAPIServerName)
+	if err == nil || !strings.Contains(err.Error(), "missing key") {
+		t.Fatalf("missing CA key err = %v, want missing key", err)
+	}
+	if strings.Contains(err.Error(), "BEGIN CERTIFICATE") || strings.Contains(err.Error(), string(caPEM)) {
+		t.Fatalf("CA ConfigMap error leaked PEM: %v", err)
+	}
+}
+
+func TestResolveServerTLSConfigDefaultJWTConfigMap(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	caPEM := selfSignedCAPEM(t)
+	cm := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{Name: ateJWTCAConfigMapName, Namespace: ateJWTCAConfigMapNamespace},
+		Data:       map[string]string{ateJWTCAConfigMapKey: string(caPEM)},
+	}
+	tlsCfg, err := resolveServerTLSConfig(ctx, ATEClientConfig{}, kubefake.NewSimpleClientset(cm))
+	if err != nil {
+		t.Fatalf("default ateapi-ca lookup: %v", err)
+	}
+	if tlsCfg.ServerName != ateAPIServerName || tlsCfg.MinVersion != tls.VersionTLS13 {
+		t.Fatalf("TLS config = %+v, want jwt ServerName TLS 1.3", tlsCfg)
+	}
+}
+
+func TestDialATEControlJWTCAFileRoundTrip(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	_, caPEM, serverCert := jwtModeServerCert(t)
+	lis, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	srv := grpc.NewServer(grpc.Creds(credentials.NewServerTLSFromCert(&serverCert)))
+	ateapipb.RegisterControlServer(srv, newBufconnATEControlServer())
+	go func() { _ = srv.Serve(lis) }()
+	t.Cleanup(srv.Stop)
+
+	caPath := filepath.Join(t.TempDir(), "ca.crt")
+	if err := os.WriteFile(caPath, caPEM, 0o600); err != nil {
+		t.Fatalf("write CA: %v", err)
+	}
+	tokenPath := filepath.Join(t.TempDir(), "token")
+	if err := os.WriteFile(tokenPath, []byte("jwt-test-token"), 0o600); err != nil {
+		t.Fatalf("write token: %v", err)
+	}
+	cfg := ATEClientConfig{
+		Address:   lis.Addr().String(),
+		Template:  "standing-chat",
+		CAFile:    caPath,
+		TokenFile: tokenPath,
+	}
+	control, closeConn, err := DialATEControl(ctx, cfg, ATEDialOptions{})
+	if err != nil {
+		t.Fatalf("DialATEControl jwt CA file: %v", err)
+	}
+	defer closeConn()
+	client, err := NewATEClient(cfg, control)
+	if err != nil {
+		t.Fatalf("NewATEClient: %v", err)
+	}
+	created, err := client.CreateActor(ctx, ActorSpec{Namespace: "agents", Name: "chat-jwt-1", ActorClass: "standing-chat"})
+	if err != nil {
+		t.Fatalf("create via jwt CA dial: %v", err)
+	}
+	if created.ID == "" {
+		t.Fatalf("created handle = %+v, want a server UID", created)
+	}
+}
+
+func TestDialATEControlJWTConfigMapRoundTrip(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	_, caPEM, serverCert := jwtModeServerCert(t)
+	lis, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	srv := grpc.NewServer(grpc.Creds(credentials.NewServerTLSFromCert(&serverCert)))
+	ateapipb.RegisterControlServer(srv, newBufconnATEControlServer())
+	go func() { _ = srv.Serve(lis) }()
+	t.Cleanup(srv.Stop)
+
+	cm := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{Name: ateJWTCAConfigMapName, Namespace: ateJWTCAConfigMapNamespace},
+		Data:       map[string]string{ateJWTCAConfigMapKey: string(caPEM)},
+	}
+	tokenPath := filepath.Join(t.TempDir(), "token")
+	if err := os.WriteFile(tokenPath, []byte("jwt-cm-token"), 0o600); err != nil {
+		t.Fatalf("write token: %v", err)
+	}
+	cfg := ATEClientConfig{
+		Address:         lis.Addr().String(),
+		Template:        "standing-chat",
+		CAConfigMapName: ateJWTCAConfigMapName,
+		TokenFile:       tokenPath,
+	}
+	control, closeConn, err := DialATEControl(ctx, cfg, ATEDialOptions{Kubernetes: kubefake.NewSimpleClientset(cm)})
+	if err != nil {
+		t.Fatalf("DialATEControl jwt ConfigMap: %v", err)
+	}
+	defer closeConn()
+	client, err := NewATEClient(cfg, control)
+	if err != nil {
+		t.Fatalf("NewATEClient: %v", err)
+	}
+	if _, err := client.CreateActor(ctx, ActorSpec{Namespace: "agents", Name: "chat-jwt-cm-1", ActorClass: "standing-chat"}); err != nil {
+		t.Fatalf("create via jwt ConfigMap dial: %v", err)
+	}
+}
+
+func TestDialATEControlJWTCAFileRejectsWrongCA(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	_, _, serverCert := jwtModeServerCert(t)
+	lis, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	srv := grpc.NewServer(grpc.Creds(credentials.NewServerTLSFromCert(&serverCert)))
+	ateapipb.RegisterControlServer(srv, newBufconnATEControlServer())
+	go func() { _ = srv.Serve(lis) }()
+	t.Cleanup(srv.Stop)
+
+	wrongCA := selfSignedCAPEM(t)
+	caPath := filepath.Join(t.TempDir(), "wrong-ca.crt")
+	if err := os.WriteFile(caPath, wrongCA, 0o600); err != nil {
+		t.Fatalf("write CA: %v", err)
+	}
+	tokenPath := filepath.Join(t.TempDir(), "token")
+	if err := os.WriteFile(tokenPath, []byte("jwt-wrong-ca"), 0o600); err != nil {
+		t.Fatalf("write token: %v", err)
+	}
+	cfg := ATEClientConfig{Address: lis.Addr().String(), Template: "standing-chat", CAFile: caPath, TokenFile: tokenPath}
+	control, closeConn, err := DialATEControl(ctx, cfg, ATEDialOptions{})
+	if err != nil {
+		t.Fatalf("dial constructs before RPC: %v", err)
+	}
+	defer closeConn()
+	client, err := NewATEClient(cfg, control)
+	if err != nil {
+		t.Fatalf("NewATEClient: %v", err)
+	}
+	rpcCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	if _, err := client.CreateActor(rpcCtx, ActorSpec{Namespace: "agents", Name: "chat-jwt-wrong", ActorClass: "standing-chat"}); err == nil {
+		t.Fatal("RPC with the wrong CA must fail certificate verification")
+	}
+}
+
+func jwtModeServerCert(t *testing.T) (ca *x509.Certificate, caPEM []byte, server tls.Certificate) {
+	t.Helper()
+	caKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("generate CA key: %v", err)
+	}
+	caTemplate := &x509.Certificate{
+		SerialNumber:          big.NewInt(1),
+		Subject:               pkix.Name{CommonName: "ateapi-ca-test"},
+		NotBefore:             time.Now().Add(-time.Hour),
+		NotAfter:              time.Now().Add(time.Hour),
+		IsCA:                  true,
+		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageDigitalSignature,
+		BasicConstraintsValid: true,
+	}
+	caDER, err := x509.CreateCertificate(rand.Reader, caTemplate, caTemplate, caKey.Public(), caKey)
+	if err != nil {
+		t.Fatalf("create CA: %v", err)
+	}
+	ca, err = x509.ParseCertificate(caDER)
+	if err != nil {
+		t.Fatalf("parse CA: %v", err)
+	}
+	caPEM = pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: caDER})
+
+	serverKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("generate server key: %v", err)
+	}
+	serverTemplate := &x509.Certificate{
+		SerialNumber: big.NewInt(2),
+		Subject:      pkix.Name{CommonName: ateAPIServerName},
+		NotBefore:    time.Now().Add(-time.Hour),
+		NotAfter:     time.Now().Add(time.Hour),
+		KeyUsage:     x509.KeyUsageDigitalSignature,
+		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		DNSNames:     []string{ateAPIServerName, "localhost"},
+		IPAddresses:  []net.IP{net.ParseIP("127.0.0.1"), net.ParseIP("::1")},
+	}
+	serverDER, err := x509.CreateCertificate(rand.Reader, serverTemplate, ca, serverKey.Public(), caKey)
+	if err != nil {
+		t.Fatalf("create server cert: %v", err)
+	}
+	server, err = tls.X509KeyPair(
+		pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: serverDER}),
+		mustMarshalECKey(t, serverKey),
+	)
+	if err != nil {
+		t.Fatalf("marshal server key pair: %v", err)
+	}
+	return ca, caPEM, server
 }
