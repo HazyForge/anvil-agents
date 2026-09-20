@@ -1,0 +1,28 @@
+# Bind kube's default OIDC discovery role to unauthenticated users so ATE
+# ateapi (jwt mode) can GET well-known + JWKS without a bearer. ateapi 0.0.8
+# has no JWKS override and does not send its ServiceAccount token on the
+# discovery HTTP client (only --client-jwt-ca-cert).
+#
+# Requires kube-apiserver --anonymous-auth=true (Talos control-plane patch
+# talos/12-control-plane-sa-oidc-issuer.yaml). Without that flag these
+# requests fail authentication with 401 before RBAC.
+#
+# Does not grant list/get on API resources. Does not expose Talos API.
+# Apply after (or just before) the Talos issuer patch; harmless no-op until
+# anonymous-auth is on.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: oidc-discovery-unauthenticated
+  labels:
+    app.kubernetes.io/name: anvil-agents
+    app.kubernetes.io/component: ate-jwt-oidc
+    control.anvil.hazyforge.io/managed-by: anvil-agents-ate-overlay
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: system:service-account-issuer-discovery
+subjects:
+  - apiGroup: rbac.authorization.k8s.io
+    kind: Group
+    name: system:unauthenticated

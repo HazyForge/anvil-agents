@@ -5,9 +5,10 @@ Status: **code is in this slice and live on Primaris** (Helm 39,
 `substrate.actorsEnabled` and `substrate.generateOnActor` stay **false** —
 ATE is applied one-node-safe on `anvil-primaris-worker-hel1-1`, but a real
 `acp-spike` smoke bind+generate has **not** succeeded end to end: it is
-blocked by ateapi's own JWT/OIDC issuer discovery, not by this code (see
-`config/ate-constrained-primaris/README.md#blocker-talos-jwt-issuer-oidc-discovery-is-not-reachable-from-workload-pods`).
-Desktop `desktop-standing-assistant` stays on API `ProcessBackend`
+blocked until Austin applies the Talos CP SA-issuer patch and ateapi can
+anonymously fetch in-cluster OIDC (see
+`config/ate-constrained-primaris/README.md`). Desktop
+`desktop-standing-assistant` stays on API `ProcessBackend`
 (`actorClass: standing-chat`).
 
 Verified 2026-09-20 with a temporary, reverted smoke enable
@@ -17,9 +18,14 @@ controller correctly held/released the run, dialed `ateapi` over mTLS,
 completed the TLS handshake against the (freshly restarted) `ateapi-tls`
 cert trusted via the `ateapi-ca` ConfigMap, and reached ateapi's own bearer
 validation — which then failed because `ateapi` cannot complete OIDC
-discovery against the configured Talos issuer from a workload pod. No actor
-reply was produced. Flags were reverted to `false` and the cluster
-redeployed from the committed overlay before ending the session.
+discovery against Omni's SideroLink kube-apiserver VIP from a workload pod.
+Re-probe the same day: that VIP **is** kube-apiserver (`CN=kube-apiserver`),
+pods get `network is unreachable` (Cilium IPv6 off), hostNetwork GET is
+**401** (anonymous-auth off). GitOps fix is the Talos CP patch
+`talos/12-control-plane-sa-oidc-issuer.yaml` plus
+`oidc-discovery-unauthenticated.yaml` and ATE issuer
+`https://kubernetes.default.svc.cluster.local`. No actor reply yet. Do not
+flip the generate gates until a token validates.
 
 Anvil’s live ATE client is still lifecycle-only for Create/Resume/Suspend/Pause.
 Prompt delivery is HTTP/ACP through `atenet-router` **after** `ResumeActor`.

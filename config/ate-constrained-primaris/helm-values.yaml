@@ -22,8 +22,13 @@ createNamespace: true
 auth:
   mode: jwt
   jwt:
-    # Talos ServiceAccount issuer on Anvil Primaris (verified 2026-09-20).
-    issuer: "https://[fdae:41e4:649b:9303::1]:10000"
+    # Must equal the ServiceAccount iss claim after the Talos CP patch
+    # talos/12-control-plane-sa-oidc-issuer.yaml. ATE 0.0.8 has no JWKS
+    # override; ateapi anonymously GETs {issuer}/.well-known/openid-configuration.
+    # Do not point this at Omni's SideroLink kube-apiserver VIP
+    # https://[fdae:41e4:649b:9303::1]:10000: Cilium IPv6 is off (pods:
+    # network unreachable) and anonymous OIDC is 401 until that patch.
+    issuer: https://kubernetes.default.svc.cluster.local
     audience: api.ate-system.svc
 
 # Chart default replicas is 6. The valkey-cluster-init Job hardcodes pods

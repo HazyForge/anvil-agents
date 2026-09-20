@@ -39,17 +39,48 @@ func TestConstrainedOverlayForbidsStockInstallAndDefaultRustFSKeys(t *testing.T)
 	if !strings.Contains(readme, "anvil-primaris-worker-hel1-1") {
 		t.Fatal("README must name the pinned worker")
 	}
+	if !strings.Contains(readme, "12-control-plane-sa-oidc-issuer.yaml") {
+		t.Fatal("README must name the Talos CP SA OIDC patch")
+	}
+	if !strings.Contains(readme, "substrate.actorsEnabled") {
+		t.Fatal("README must keep actorsEnabled off")
+	}
 	if strings.Contains(readme, ".hazyforge/clusters/anvil-primaris/namespace/") &&
 		!strings.Contains(readme, "not under") {
 		t.Fatal("README must keep the overlay out of Primaris namespace GitOps")
 	}
 
 	values := read("helm-values.yaml")
-	if !strings.Contains(values, "https://[fdae:41e4:649b:9303::1]:10000") {
-		t.Fatal("helm-values.yaml missing Talos jwt issuer")
+	if !strings.Contains(values, "issuer: https://kubernetes.default.svc.cluster.local") {
+		t.Fatal("helm-values.yaml missing in-cluster kube jwt issuer")
+	}
+	if strings.Contains(values, "issuer: \"https://[fdae:") || strings.Contains(values, "issuer: https://[fdae:") {
+		t.Fatal("helm-values.yaml must not use the SideroLink VIP as jwt issuer")
 	}
 	if !strings.Contains(values, "audience: api.ate-system.svc") {
 		t.Fatal("helm-values.yaml missing jwt audience")
+	}
+
+	talos := read("talos/12-control-plane-sa-oidc-issuer.yaml")
+	if !strings.Contains(talos, "service-account-issuer: https://kubernetes.default.svc.cluster.local") {
+		t.Fatal("Talos CP patch missing in-cluster service-account-issuer")
+	}
+	if !strings.Contains(talos, `anonymous-auth: "true"`) {
+		t.Fatal("Talos CP patch missing anonymous-auth")
+	}
+	if strings.Contains(talos, "50000") && !strings.Contains(talos, "Do not expose the Talos API") {
+		t.Fatal("Talos CP patch must warn against exposing Talos API")
+	}
+
+	rbac := read("oidc-discovery-unauthenticated.yaml")
+	if !strings.Contains(rbac, "name: oidc-discovery-unauthenticated") {
+		t.Fatal("OIDC unauthenticated binding missing")
+	}
+	if !strings.Contains(rbac, "name: system:service-account-issuer-discovery") {
+		t.Fatal("OIDC binding must use kube default discovery role")
+	}
+	if !strings.Contains(rbac, "name: system:unauthenticated") {
+		t.Fatal("OIDC binding must include system:unauthenticated")
 	}
 	if strings.Contains(values, "accessKey: rustfsadmin") || strings.Contains(values, "secretKey: rustfsadmin") {
 		t.Fatal("helm-values.yaml must not commit chart default rustfsadmin as a value")

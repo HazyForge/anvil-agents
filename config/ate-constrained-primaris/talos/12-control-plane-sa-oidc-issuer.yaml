@@ -1,0 +1,46 @@
+# OMNI TARGET: Control Plane Config Patches
+# Paste onto anvil-primaris control plane machines (not workers).
+#
+# Lets in-cluster JWT validators (ATE ateapi) fetch ServiceAccount OIDC
+# discovery. Do not expose the Talos API (port 50000) to the internet.
+# Do not enable Cilium IPv6 for this; that is a larger cluster change.
+#
+# Canonical copy also lives in anvil-primaris:
+# tools/talos-omni/patches/12-control-plane-sa-oidc-issuer.yaml
+# Keep these files identical.
+#
+# Live evidence 2026-09-20 (ate-system on hel1-1):
+# - kubectl get --raw /.well-known/openid-configuration issuer is
+#   https://[fdae:41e4:649b:9303::1]:10000 (Omni SideroLink kube-apiserver,
+#   cert CN=kube-apiserver, SAN includes that ULA and kubernetes.default.svc).
+# - Workload pods: connect to that VIP:10000 fails with network unreachable
+#   (Cilium enable-ipv6=false).
+# - hostNetwork on hel1-1: TLS works, HTTP GET returns 401 (anonymous-auth
+#   is off). Not HTTP/2 GOAWAY on this re-probe; still unusable for ateapi.
+# - kubernetes.default.svc /.well-known and /openid/v1/jwks return 200 with
+#   an SA bearer, 401 without.
+# - ATE 0.0.8 ateapi has no JWKS override; it anonymously GETs
+#   {--client-jwt-issuer}/.well-known/openid-configuration using the cluster CA.
+#
+# This patch:
+# 1. Mints new SA tokens with iss=https://kubernetes.default.svc.cluster.local
+#    (ATE chart default; IPv4 ClusterIP, cert SAN match).
+# 2. Publishes jwks_uri at that same in-cluster URL.
+# 3. Sets anonymous-auth=true so unauthenticated GET can reach RBAC.
+#    Bind system:unauthenticated to system:service-account-issuer-discovery
+#    (oidc-discovery-unauthenticated.yaml in this overlay) so only JWKS +
+#    discovery are anonymously readable, not the rest of the API.
+#
+# Side effect: kube's default system:public-info-viewer binding also grants
+# unauthenticated GET on /healthz /livez /readyz /version. Those become
+# reachable on the existing public kube API. That is not the Talos API.
+#
+# Talos extraArgs is a map, so only one service-account-issuer can be set.
+# Existing projected tokens refresh after kube-apiserver restarts (brief 401
+# window). Apply ATE --client-jwt-issuer to the same URL after this lands.
+cluster:
+  apiServer:
+    extraArgs:
+      service-account-issuer: https://kubernetes.default.svc.cluster.local
+      service-account-jwks-uri: https://kubernetes.default.svc.cluster.local/openid/v1/jwks
+      anonymous-auth: "true"
