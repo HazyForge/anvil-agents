@@ -278,3 +278,28 @@ true
   {{- end -}}
 {{- end -}}
 {{- end }}
+
+{{- define "anvil-agents.validateSubstrate" -}}
+{{- $ca := .Values.substrate.ca | default dict -}}
+{{- $name := default "" $ca.configMapName -}}
+{{- $ns := default "" $ca.namespace -}}
+{{- $key := default "ca.crt" $ca.key -}}
+{{- $sameNS := or (eq $ns "") (eq $ns .Release.Namespace) -}}
+{{- if and $name (not $key) -}}
+{{- fail "substrate.ca.key is required when substrate.ca.configMapName is set" -}}
+{{- end -}}
+{{- $mountPath := "/etc/anvil-agents/ateapi-ca/ca.crt" -}}
+{{- if and $name $sameNS .Values.substrate.caFile (ne .Values.substrate.caFile $mountPath) -}}
+{{- fail (printf "substrate.caFile must be %s when mounting substrate.ca.configMapName in the release namespace" $mountPath) -}}
+{{- end -}}
+{{- if and $name (not $sameNS) .Values.substrate.caFile -}}
+{{- fail "substrate.caFile cannot be combined with a cross-namespace substrate.ca.configMapName lookup; omit caFile so the controller reads ateapi-ca via the Kubernetes API" -}}
+{{- end -}}
+{{- $token := .Values.substrate.token | default dict -}}
+{{- if and $token.projected .Values.substrate.tokenFile -}}
+{{- $want := printf "%s/token" (default "/var/run/secrets/tokens/ate-api" $token.mountPath) -}}
+{{- if ne .Values.substrate.tokenFile $want -}}
+{{- fail (printf "substrate.tokenFile must be %s when substrate.token.projected=true" $want) -}}
+{{- end -}}
+{{- end -}}
+{{- end }}

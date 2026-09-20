@@ -223,17 +223,34 @@ type ATEClientConfig struct {
 	// non-loopback endpoint when set.
 	// Production and shared clusters must use verified TLS (default).
 	Insecure bool
+	// CAFile is the path to the ateapi server CA PEM (ATE 0.0.8 jwt
+	// ConfigMap ateapi-ca, key ca.crt). Path never includes PEM bytes.
+	CAFile string
+	// CAConfigMapName names a ConfigMap holding that CA when CAFile is
+	// empty (default lookup name ateapi-ca when set).
+	CAConfigMapName string
+	// CAConfigMapNamespace is the ConfigMap namespace (default ate-system).
+	CAConfigMapNamespace string
+	// CAConfigMapKey is the ConfigMap data key (default ca.crt).
+	CAConfigMapKey string
+	// TLSServerName overrides TLS ServerName (default api.ate-system.svc).
+	TLSServerName string
 }
 
 // ATEClientConfigFromGate bridges the opt-in gate to the transport config.
 func ATEClientConfigFromGate(gate GateConfig) ATEClientConfig {
 	return ATEClientConfig{
-		Address:   strings.TrimSpace(gate.Endpoint),
-		Atespace:  strings.TrimSpace(gate.Atespace),
-		Template:  strings.TrimSpace(gate.Template),
-		TokenFile: strings.TrimSpace(gate.TokenFile),
-		Token:     strings.TrimSpace(gate.Token),
-		Insecure:  gate.Insecure,
+		Address:              strings.TrimSpace(gate.Endpoint),
+		Atespace:             strings.TrimSpace(gate.Atespace),
+		Template:             strings.TrimSpace(gate.Template),
+		TokenFile:            strings.TrimSpace(gate.TokenFile),
+		Token:                strings.TrimSpace(gate.Token),
+		Insecure:             gate.Insecure,
+		CAFile:               strings.TrimSpace(gate.CAFile),
+		CAConfigMapName:      strings.TrimSpace(gate.CAConfigMapName),
+		CAConfigMapNamespace: strings.TrimSpace(gate.CAConfigMapNamespace),
+		CAConfigMapKey:       strings.TrimSpace(gate.CAConfigMapKey),
+		TLSServerName:        strings.TrimSpace(gate.TLSServerName),
 	}
 }
 

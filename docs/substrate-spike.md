@@ -146,17 +146,22 @@ backend-kind overlay, which stays orthogonal to the runtime plane).
   alone never enables dispatch, and token material never lands in status,
   logs, or API JSON.
 - Live gRPC dialer (`internal/substrate/ate_grpc.go` over the hand-written
-  `internal/substrate/ateapipb` stubs): verified TLS via the live podcert
-  `ClusterTrustBundle` before any bearer token is attached (TLS 1.3,
-  `ServerName api.ate-system.svc`), per-RPC bearer auth with file-token
-  rotation, round-robin across ateapi replicas, and `NotFound`/`AlreadyExists`
-  mapped onto the warm-reuse contract — parity with upstream
-  `internal/ateclient`. Kind-only escape hatch:
+  `internal/substrate/ateapipb` stubs): verified TLS **before** any bearer
+  token is attached (TLS 1.3, `ServerName api.ate-system.svc`). Trust order
+  for ATE Helm 0.0.8 `auth.mode=jwt`: `--substrate-ca-file` / mounted
+  `ateapi-ca` PEM; else ConfigMap lookup (`ate-system/ateapi-ca` key
+  `ca.crt`, including a default lookup when the name is unset); else the
+  live podcert `ClusterTrustBundle` signer
+  `servicedns.podcert.ate.dev/identity` (mTLS installs). Per-RPC bearer
+  auth with file-token rotation, round-robin across ateapi replicas, and
+  `NotFound`/`AlreadyExists` mapped onto the warm-reuse contract — parity
+  with upstream `internal/ateclient` plus jwt CA. Kind-only escape hatch:
   `ANVIL_AGENTS_SUBSTRATE_INSECURE=true` (flag `--substrate-insecure`) dials
   TLS with certificate verification skipped but refuses every non-loopback
   endpoint, so it can only reach a local port-forward. ateapi always serves
   TLS, so this is still a TLS channel — never plaintext. Prefer verified TLS;
-  use insecure-dev only while the local trust bundle is not yet wired.
+  never use skip-verify against Primaris. CA PEM and token bytes never land
+  in status, logs, or console/API JSON.
 - Controller dispatch (`internal/controller/agent_run_substrate_live.go`): with
   the gate on, a well-formed SubstrateActor run binds its thread actor through
   `EnsureTurnActor`, records `status.substrateActor` (turn-to-actor binding),
@@ -281,15 +286,19 @@ export ANVIL_AGENTS_SUBSTRATE_ACTORS_ENABLED=true
 export ANVIL_AGENTS_SUBSTRATE_ENDPOINT=127.0.0.1:8443
 export ANVIL_AGENTS_SUBSTRATE_ATESPACE=ate-demo-counter
 export ANVIL_AGENTS_SUBSTRATE_TEMPLATE=counter
-# Verified TLS (default, preferred): uses your kubeconfig's
-# ClusterTrustBundle plus a token file, an inline token, or a minted
-# ate-client token, in that order.
-# export ANVIL_AGENTS_SUBSTRATE_TOKEN_FILE="$HOME/.config/ate/token"
-# Kind-only fallback while the local trust bundle is not yet wired: ateapi is
-# always TLS, so ANVIL_AGENTS_SUBSTRATE_INSECURE=true is skip-verify TLS
-# (never plaintext), loopback-only (refuses non-local endpoints). Leave it
-# unset for verified TLS.
+# Verified TLS (default, preferred). JWT-mode ATE 0.0.8 publishes ConfigMap
+# ateapi-ca (key ca.crt), not a podcert ClusterTrustBundle:
+#   kubectl -n ate-system get configmap ateapi-ca -o jsonpath='{.data.ca\.crt}' \
+#     > /tmp/ateapi-ca.crt
+#   export ANVIL_AGENTS_SUBSTRATE_CA_FILE=/tmp/ateapi-ca.crt
+#   export ANVIL_AGENTS_SUBSTRATE_TOKEN_FILE="$HOME/.config/ate/token"
+# In-cluster: chart substrate.ca.configMapName=ateapi-ca (mount same-ns, or
+# substrate.ca.namespace=ate-system for API lookup) plus
+# substrate.token.projected=true (audience api.ate-system.svc).
+# Kind-only fallback: ANVIL_AGENTS_SUBSTRATE_INSECURE=true is skip-verify TLS
+# (never plaintext), loopback-only. Leave it unset for verified TLS.
 # export ANVIL_AGENTS_SUBSTRATE_INSECURE=true
+# In-cluster endpoint for helm release name substrate is api.ate-system.svc:443.
 
 hack/substrate-latency-compare.sh --live -n 10 \
   --namespace ate-demo-counter --actor-class counter --pool '' \
@@ -474,9 +483,17 @@ the same cluster shape:
   `TestATEClientSuspendIdleMultiplexStress`, plus gate-on reconcile
   multiplexing: `TestSubstrateLiveSuspendIdleMultiplexStress`).
 - [x] Live gRPC dialer (`internal/substrate/ate_grpc.go` over hand-written
-  `ateapipb` stubs) with TLS/token parity to upstream `ateclient`, plus a
-  Kind-only insecure-dev loopback dial. Gate-on dispatch and live Kind
-  numbers are unblocked.
+  `ateapipb` stubs) with TLS/token parity to upstream `ateclient`, plus jwt
+  `ateapi-ca` trust (CA file, ConfigMap lookup, default `ate-system/ateapi-ca`)
+  and a Kind-only insecure-dev loopback dial. Enabling `actorsEnabled` against
+  JWT ATE no longer fails controller startup for missing ClusterTrustBundle.
+- [x] Constrained Primaris overlay **files** at
+  `config/ate-constrained-primaris/` (jwt issuer/audience, one-node pin,
+  `ActorTemplate/standing-chat`, `WorkerPool/warm`). Do not stock-install.
+  Do not apply until generate-on-actor exists.
+- [ ] Generate-on-actor (Resume + atenet/ACP stream, mark AgentRun
+  Succeeded). Plan: [substrate-generate-on-actor.md](substrate-generate-on-actor.md).
+  Keep `substrate.actorsEnabled=false` on Primaris until that lands.
 - [x] Actor identity in `status.substrateActor` and turn-to-actor binding.
 - [x] Latency harness (Job cold start vs warm actor resume) covering direct
   turns, peer deliveries, and the busy-recipient durable-wait peer path

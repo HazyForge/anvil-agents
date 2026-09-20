@@ -1,6 +1,7 @@
 {{- include "anvil-agents.validateArchive" . }}
 {{- include "anvil-agents.validateExternalTriggerHTTPRoute" . }}
 {{- include "anvil-agents.validateChat" . }}
+{{- include "anvil-agents.validateSubstrate" . }}
 {{- $archiveMode := include "anvil-agents.archiveMode" . -}}
 apiVersion: apps/v1
 kind: Deployment
@@ -77,11 +78,39 @@ spec:
             {{- with .Values.substrate.atespace }}
             - --substrate-atespace={{ . }}
             {{- end }}
-            {{- with .Values.substrate.tokenFile }}
+            {{- $tokenFile := .Values.substrate.tokenFile }}
+            {{- if and .Values.substrate.token .Values.substrate.token.projected }}
+            {{- $tokenFile = default (printf "%s/token" (default "/var/run/secrets/tokens/ate-api" .Values.substrate.token.mountPath)) $tokenFile }}
+            {{- end }}
+            {{- with $tokenFile }}
             - --substrate-token-file={{ . }}
             {{- end }}
             {{- if .Values.substrate.insecure }}
             - --substrate-insecure=true
+            {{- end }}
+            {{- $caName := "" }}
+            {{- $caNS := "" }}
+            {{- $caKey := "ca.crt" }}
+            {{- if .Values.substrate.ca }}
+            {{- $caName = default "" .Values.substrate.ca.configMapName }}
+            {{- $caNS = default "" .Values.substrate.ca.namespace }}
+            {{- $caKey = default "ca.crt" .Values.substrate.ca.key }}
+            {{- end }}
+            {{- $caSameNS := or (eq $caNS "") (eq $caNS .Release.Namespace) }}
+            {{- $caFile := .Values.substrate.caFile }}
+            {{- if and $caName $caSameNS }}
+            {{- $caFile = default "/etc/anvil-agents/ateapi-ca/ca.crt" $caFile }}
+            {{- end }}
+            {{- with $caFile }}
+            - --substrate-ca-file={{ . }}
+            {{- end }}
+            {{- if and $caName (not $caSameNS) }}
+            - --substrate-ca-configmap={{ $caName }}
+            - --substrate-ca-configmap-namespace={{ $caNS }}
+            - --substrate-ca-configmap-key={{ $caKey }}
+            {{- end }}
+            {{- with .Values.substrate.tlsServerName }}
+            - --substrate-tls-server-name={{ . }}
             {{- end }}
           ports:
             - name: metrics
@@ -119,13 +148,52 @@ spec:
           {{- end }}
           resources:
 {{ toYaml .Values.resources | indent 12 }}
-          {{- with .Values.extraVolumeMounts }}
-          volumeMounts:
-{{ toYaml . | indent 12 }}
+          {{- $caName := "" }}
+          {{- $caNS := "" }}
+          {{- $caKey := "ca.crt" }}
+          {{- if .Values.substrate.ca }}
+          {{- $caName = default "" .Values.substrate.ca.configMapName }}
+          {{- $caNS = default "" .Values.substrate.ca.namespace }}
+          {{- $caKey = default "ca.crt" .Values.substrate.ca.key }}
           {{- end }}
-      {{- with .Values.extraVolumes }}
+          {{- $caSameNS := and $caName (or (eq $caNS "") (eq $caNS .Release.Namespace)) }}
+          {{- $tokenProjected := false }}
+          {{- if .Values.substrate.token }}
+          {{- $tokenProjected = .Values.substrate.token.projected }}
+          {{- end }}
+          {{- $tokenMount := "/var/run/secrets/tokens/ate-api" }}
+          {{- if and .Values.substrate.token .Values.substrate.token.mountPath }}
+          {{- $tokenMount = .Values.substrate.token.mountPath }}
+          {{- end }}
+          {{- $mounts := concat (list) (.Values.extraVolumeMounts | default list) }}
+          {{- if $caSameNS }}
+          {{- $mounts = append $mounts (dict "name" "ateapi-ca" "mountPath" "/etc/anvil-agents/ateapi-ca" "readOnly" true) }}
+          {{- end }}
+          {{- if $tokenProjected }}
+          {{- $mounts = append $mounts (dict "name" "ate-client-token" "mountPath" $tokenMount "readOnly" true) }}
+          {{- end }}
+          {{- if $mounts }}
+          volumeMounts:
+{{ toYaml $mounts | indent 12 }}
+          {{- end }}
+      {{- $volumes := concat (list) (.Values.extraVolumes | default list) }}
+      {{- if $caSameNS }}
+      {{- $volumes = append $volumes (dict "name" "ateapi-ca" "configMap" (dict "name" $caName "items" (list (dict "key" $caKey "path" "ca.crt")))) }}
+      {{- end }}
+      {{- if $tokenProjected }}
+      {{- $tokenAudience := "api.ate-system.svc" }}
+      {{- $tokenTTL := 3600 }}
+      {{- if .Values.substrate.token }}
+      {{- $tokenAudience = default $tokenAudience .Values.substrate.token.audience }}
+      {{- if .Values.substrate.token.expirationSeconds }}
+      {{- $tokenTTL = int .Values.substrate.token.expirationSeconds }}
+      {{- end }}
+      {{- end }}
+      {{- $volumes = append $volumes (dict "name" "ate-client-token" "projected" (dict "sources" (list (dict "serviceAccountToken" (dict "audience" $tokenAudience "expirationSeconds" $tokenTTL "path" "token"))))) }}
+      {{- end }}
+      {{- if $volumes }}
       volumes:
-{{ toYaml . | indent 8 }}
+{{ toYaml $volumes | indent 8 }}
       {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector:

@@ -9,7 +9,8 @@ import (
 // Feature-gate environment variables for the optional live Substrate actor
 // plane. The plane is off by default: the controller holds well-formed
 // SubstrateActor runs without creating a Job until the gate is explicitly
-// enabled. No chart values or Primaris Argo sync changes are involved.
+// enabled. Chart substrate.* and Primaris deploy.yaml stay off; do not
+// set substrate.actorsEnabled=true until generate-on-actor exists.
 //
 // The transport is Substrate ATE's real surface (ateapi Control gRPC,
 // kubectl-ate lifecycle); see live.go. The endpoint is therefore the ateapi
@@ -42,12 +43,28 @@ const (
 	// dispatch because CreateActor always derives from a template.
 	GateTemplateEnvVar = "ANVIL_AGENTS_SUBSTRATE_TEMPLATE"
 	// GateInsecureEnvVar opts into TLS with certificate verification skipped
-	// for a local Kind port-forward when the podcert trust bundle is not yet
-	// wired locally. ateapi always serves TLS, so this is still a TLS
-	// channel — never plaintext. Kind-only: the dialer refuses every
+	// for a local Kind port-forward when the jwt CA or podcert trust bundle
+	// is not yet wired locally. ateapi always serves TLS, so this is still a
+	// TLS channel — never plaintext. Kind-only: the dialer refuses every
 	// non-loopback endpoint when this is set. Production and shared clusters
-	// must use verified TLS (default).
+	// must use verified TLS (default): CAFile or ateapi-ca ConfigMap for
+	// ATE 0.0.8 jwt mode.
 	GateInsecureEnvVar = "ANVIL_AGENTS_SUBSTRATE_INSECURE"
+	// GateCAFileEnvVar points at a PEM file holding the ateapi server CA
+	// (ATE Helm jwt ConfigMap ateapi-ca key ca.crt). Preferred in-cluster
+	// via a mounted ConfigMap. Path (never PEM bytes) may appear in errors.
+	GateCAFileEnvVar = "ANVIL_AGENTS_SUBSTRATE_CA_FILE"
+	// GateCAConfigMapEnvVar names the ConfigMap holding that CA when it is
+	// not mounted (cross-namespace lookup, default ateapi-ca).
+	GateCAConfigMapEnvVar = "ANVIL_AGENTS_SUBSTRATE_CA_CONFIGMAP"
+	// GateCAConfigMapNamespaceEnvVar is the namespace of that ConfigMap
+	// (default ate-system).
+	GateCAConfigMapNamespaceEnvVar = "ANVIL_AGENTS_SUBSTRATE_CA_CONFIGMAP_NAMESPACE"
+	// GateCAConfigMapKeyEnvVar is the ConfigMap data key (default ca.crt).
+	GateCAConfigMapKeyEnvVar = "ANVIL_AGENTS_SUBSTRATE_CA_CONFIGMAP_KEY"
+	// GateTLSServerNameEnvVar overrides TLS ServerName (default
+	// api.ate-system.svc, matching ATE jwt bootstrap DNS SAN).
+	GateTLSServerNameEnvVar = "ANVIL_AGENTS_SUBSTRATE_TLS_SERVER_NAME"
 )
 
 // GateConfig is the explicit opt-in configuration for live Substrate actor
@@ -68,19 +85,36 @@ type GateConfig struct {
 	// channel — never plaintext. Kind-only: the dialer refuses every
 	// non-loopback endpoint when set.
 	Insecure bool
+	// CAFile is the path to the ateapi server CA PEM (jwt ConfigMap
+	// ateapi-ca key ca.crt). Preferred over ConfigMap lookup when mounted.
+	CAFile string
+	// CAConfigMapName names a ConfigMap holding that CA when CAFile is empty.
+	CAConfigMapName string
+	// CAConfigMapNamespace is the ConfigMap namespace (default ate-system).
+	CAConfigMapNamespace string
+	// CAConfigMapKey is the ConfigMap data key (default ca.crt).
+	CAConfigMapKey string
+	// TLSServerName overrides the ateapi TLS ServerName (default
+	// api.ate-system.svc).
+	TLSServerName string
 }
 
 // GateConfigFromEnv reads the live-plane gate from the process environment.
 // The gate defaults to off; an endpoint alone never enables dispatch.
 func GateConfigFromEnv() GateConfig {
 	return GateConfig{
-		Enabled:   gateBoolEnv(GateEnabledEnvVar),
-		Endpoint:  strings.TrimSpace(os.Getenv(GateEndpointEnvVar)),
-		Token:     strings.TrimSpace(os.Getenv(GateTokenEnvVar)),
-		TokenFile: strings.TrimSpace(os.Getenv(GateTokenFileEnvVar)),
-		Atespace:  strings.TrimSpace(os.Getenv(GateAtespaceEnvVar)),
-		Template:  strings.TrimSpace(os.Getenv(GateTemplateEnvVar)),
-		Insecure:  gateBoolEnv(GateInsecureEnvVar),
+		Enabled:              gateBoolEnv(GateEnabledEnvVar),
+		Endpoint:             strings.TrimSpace(os.Getenv(GateEndpointEnvVar)),
+		Token:                strings.TrimSpace(os.Getenv(GateTokenEnvVar)),
+		TokenFile:            strings.TrimSpace(os.Getenv(GateTokenFileEnvVar)),
+		Atespace:             strings.TrimSpace(os.Getenv(GateAtespaceEnvVar)),
+		Template:             strings.TrimSpace(os.Getenv(GateTemplateEnvVar)),
+		Insecure:             gateBoolEnv(GateInsecureEnvVar),
+		CAFile:               strings.TrimSpace(os.Getenv(GateCAFileEnvVar)),
+		CAConfigMapName:      strings.TrimSpace(os.Getenv(GateCAConfigMapEnvVar)),
+		CAConfigMapNamespace: strings.TrimSpace(os.Getenv(GateCAConfigMapNamespaceEnvVar)),
+		CAConfigMapKey:       strings.TrimSpace(os.Getenv(GateCAConfigMapKeyEnvVar)),
+		TLSServerName:        strings.TrimSpace(os.Getenv(GateTLSServerNameEnvVar)),
 	}
 }
 

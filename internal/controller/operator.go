@@ -94,19 +94,25 @@ func Run(ctx context.Context, options *Options) error {
 	}
 	// Optional live Substrate plane (standing-chat spike, ATE binding). The
 	// gate is off by default; with the gate on plus an ateapi endpoint the
-	// operator dials ateapi over gRPC (verified TLS before any bearer token,
-	// token from the token file or inline env, ServiceAccount mint fallback;
+	// operator dials ateapi over gRPC (verified TLS before any bearer token:
+	// jwt CAFile/ateapi-ca ConfigMap, else podcert ClusterTrustBundle; token
+	// from the token file or inline env, ServiceAccount mint fallback;
 	// Kind-only skip-verify TLS behind --substrate-insecure for loopback). No token
 	// material is ever logged.
 	var substrateClient substrate.Client
 	if options.SubstrateActorsEnabled && strings.TrimSpace(options.SubstrateEndpoint) != "" {
 		ateCfg := substrate.ATEClientConfig{
-			Address:   strings.TrimSpace(options.SubstrateEndpoint),
-			Atespace:  strings.TrimSpace(options.SubstrateAtespace),
-			Template:  strings.TrimSpace(options.SubstrateTemplate),
-			TokenFile: strings.TrimSpace(options.SubstrateTokenFile),
-			Token:     strings.TrimSpace(options.SubstrateToken),
-			Insecure:  options.SubstrateInsecure,
+			Address:              strings.TrimSpace(options.SubstrateEndpoint),
+			Atespace:             strings.TrimSpace(options.SubstrateAtespace),
+			Template:             strings.TrimSpace(options.SubstrateTemplate),
+			TokenFile:            strings.TrimSpace(options.SubstrateTokenFile),
+			Token:                strings.TrimSpace(options.SubstrateToken),
+			Insecure:             options.SubstrateInsecure,
+			CAFile:               strings.TrimSpace(options.SubstrateCAFile),
+			CAConfigMapName:      strings.TrimSpace(options.SubstrateCAConfigMapName),
+			CAConfigMapNamespace: strings.TrimSpace(options.SubstrateCAConfigMapNamespace),
+			CAConfigMapKey:       strings.TrimSpace(options.SubstrateCAConfigMapKey),
+			TLSServerName:        strings.TrimSpace(options.SubstrateTLSServerName),
 		}
 		live, closeConn, err := substrate.DialATEClient(ctx, ateCfg, substrate.ATEDialOptions{})
 		if err != nil {
