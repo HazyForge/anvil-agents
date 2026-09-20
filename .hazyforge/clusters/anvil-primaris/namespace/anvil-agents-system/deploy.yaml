@@ -55,7 +55,7 @@ extraRBACRules:
     resources: [applicationreleases, artifactbuilds, iosbuilds, anviltasks, testruns]
     verbs: [get, list, watch]
 archive:
-  restartToken: jev-live-20260920
+  restartToken: rollout-20260920
   databaseURLSecret:
     name: anvilhub-inventory-database
     key: database-url
