@@ -6,7 +6,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -521,5 +523,129 @@ func TestStandingTurnResultsVisibleOnStreamPath(t *testing.T) {
 	}
 	if terminal.Code != "standing_ready" {
 		t.Fatalf("terminal = %+v, want standing_ready", terminal)
+	}
+}
+
+type countingStandingBackend struct {
+	inner   *standing.FakeBackend
+	streams atomic.Int32
+}
+
+func (backend *countingStandingBackend) CreateSession(ctx context.Context, spec standing.SessionSpec) (standing.SessionHandle, error) {
+	return backend.inner.CreateSession(ctx, spec)
+}
+
+func (backend *countingStandingBackend) ResumeSession(ctx context.Context, namespace, name string) (standing.SessionHandle, error) {
+	return backend.inner.ResumeSession(ctx, namespace, name)
+}
+
+func (backend *countingStandingBackend) DescribeSession(ctx context.Context, namespace, name string) (standing.SessionHandle, error) {
+	return backend.inner.DescribeSession(ctx, namespace, name)
+}
+
+func (backend *countingStandingBackend) SuspendSession(ctx context.Context, namespace, name string) (standing.SessionHandle, error) {
+	return backend.inner.SuspendSession(ctx, namespace, name)
+}
+
+func (backend *countingStandingBackend) StreamTurn(ctx context.Context, handle standing.SessionHandle, turnID, prompt string, sink standing.Sink) (string, error) {
+	backend.streams.Add(1)
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	return backend.inner.StreamTurn(ctx, handle, turnID, prompt, sink)
+}
+
+func TestStandingCanDriveStreamRejectsShortDeadline(t *testing.T) {
+	if !standingCanDriveStream(context.Background()) {
+		t.Fatal("no deadline must drive")
+	}
+	short, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	if standingCanDriveStream(short) {
+		t.Fatal("3s GET budget must not drive StreamTurn")
+	}
+	long, longCancel := context.WithTimeout(context.Background(), standingDriveTimeout)
+	defer longCancel()
+	if !standingCanDriveStream(long) {
+		t.Fatal("recovery budget must drive")
+	}
+	done, doneCancel := context.WithCancel(context.Background())
+	doneCancel()
+	if standingCanDriveStream(done) {
+		t.Fatal("canceled context must not drive")
+	}
+}
+
+func TestStandingThreadGETDoesNotStreamTurn(t *testing.T) {
+	ctx := context.Background()
+	server := chatTestServer(t, true)
+	standingHarnessRuntime(t, server, "desktop-standing-grok", agentsv1alpha1.AgentRunHarnessBackendGrokBuild, agentsv1alpha1.AgentRunExecutionRuntimeSubstrateActor)
+	thread := standingThread(t, server, "desktop-standing-grok")
+	accepted, err := server.queueChatTurn(ctx, "agents", thread.ID, AppendChatMessageRequest{Content: "how are you doing ?"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	counter := &countingStandingBackend{inner: standing.NewFakeBackend()}
+	enableStandingLive(t, server, counter)
+
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/namespaces/agents/chat/threads/"+thread.ID, nil)
+	request.Header.Set("Authorization", "Bearer valid")
+	response := httptest.NewRecorder()
+	started := time.Now()
+	server.routes().ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("GET thread: %d %s", response.Code, response.Body.String())
+	}
+	if time.Since(started) > time.Second {
+		t.Fatalf("GET thread blocked %s, want observe-only return", time.Since(started))
+	}
+	if got := counter.streams.Load(); got != 0 {
+		t.Fatalf("GET StreamTurn calls = %d, want 0", got)
+	}
+	var detail ChatThreadDetailResponse
+	if err := json.Unmarshal(response.Body.Bytes(), &detail); err != nil {
+		t.Fatal(err)
+	}
+	if detail.ActiveTurn == nil || detail.ActiveTurn.ID != accepted.Turn.ID {
+		t.Fatalf("GET detail = %#v, want the active turn preserved", detail.ActiveTurn)
+	}
+
+	if _, err := server.reconcileChatThread(ctx, "agents", thread.ID); err != nil {
+		t.Fatal(err)
+	}
+	if got := counter.streams.Load(); got != 1 {
+		t.Fatalf("drive StreamTurn calls = %d, want 1", got)
+	}
+	turns, err := server.chatStore.ListTurns(ctx, "agents", thread.ID)
+	if err != nil || len(turns) != 1 || turns[0].Status != "succeeded" {
+		t.Fatalf("driven turn = %#v %v, want succeeded", turns, err)
+	}
+}
+
+func TestStandingShortDeadlineDoesNotStreamTurn(t *testing.T) {
+	ctx := context.Background()
+	server := chatTestServer(t, true)
+	standingHarnessRuntime(t, server, "desktop-standing-grok", agentsv1alpha1.AgentRunHarnessBackendGrokBuild, agentsv1alpha1.AgentRunExecutionRuntimeSubstrateActor)
+	thread := standingThread(t, server, "desktop-standing-grok")
+	if _, err := server.queueChatTurn(ctx, "agents", thread.ID, AppendChatMessageRequest{Content: "how are you doing ?"}); err != nil {
+		t.Fatal(err)
+	}
+	counter := &countingStandingBackend{inner: standing.NewFakeBackend()}
+	enableStandingLive(t, server, counter)
+
+	short, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	if _, err := server.reconcileChatThread(short, "agents", thread.ID); err != nil {
+		t.Fatal(err)
+	}
+	if got := counter.streams.Load(); got != 0 {
+		t.Fatalf("short-deadline StreamTurn calls = %d, want 0", got)
+	}
+
+	if _, err := server.reconcileChatThread(ctx, "agents", thread.ID); err != nil {
+		t.Fatal(err)
+	}
+	if got := counter.streams.Load(); got != 1 {
+		t.Fatalf("full-budget StreamTurn calls = %d, want 1", got)
 	}
 }

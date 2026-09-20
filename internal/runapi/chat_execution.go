@@ -179,13 +179,17 @@ func buildChatPrompt(thread chat.Thread, messages []chat.Message, content string
 }
 
 func (server *Server) reconcileChatThread(ctx context.Context, ns, id string) ([]chat.Turn, error) {
+	return server.reconcileChatThreadMode(ctx, ns, id, true)
+}
+
+func (server *Server) reconcileChatThreadMode(ctx context.Context, ns, id string, driveStanding bool) ([]chat.Turn, error) {
 	turns, err := server.chatStore.ListTurns(ctx, ns, id)
 	if err != nil {
 		return nil, err
 	}
 	for i := range turns {
 		if chat.Active(turns[i]) {
-			if err = server.reconcileChatTurn(ctx, &turns[i]); err != nil {
+			if err = server.reconcileChatTurnMode(ctx, &turns[i], driveStanding); err != nil {
 				return nil, err
 			}
 		}
@@ -208,6 +212,10 @@ func (server *Server) reconcileChatThread(ctx context.Context, ns, id string) ([
 	return turns, nil
 }
 func (server *Server) reconcileChatTurn(ctx context.Context, turn *chat.Turn) error {
+	return server.reconcileChatTurnMode(ctx, turn, true)
+}
+
+func (server *Server) reconcileChatTurnMode(ctx context.Context, turn *chat.Turn, driveStanding bool) error {
 	if !chat.Active(*turn) {
 		return nil
 	}
@@ -273,7 +281,7 @@ func (server *Server) reconcileChatTurn(ctx context.Context, turn *chat.Turn) er
 	// lands Succeeded, so the switch below completes it through the existing
 	// path. Gate off, unresolvable harness, or any backend error leaves the
 	// run untouched for today's Job / NeedsHuman hold behavior.
-	if _, err := server.reconcileStandingTurn(ctx, turn, run); err != nil {
+	if _, err := server.reconcileStandingTurn(ctx, turn, run, driveStanding); err != nil {
 		return err
 	}
 	if (turn.RunUID != "" && turn.RunUID != string(run.UID)) || run.Labels[chatTurnLabel] != turn.ID || run.Labels[chatThreadLabel] != turn.ThreadID || run.Spec.SourceRef.Kind != "ChatThread" || run.Spec.SourceRef.Name != turn.ThreadID {
@@ -367,18 +375,20 @@ func (server *Server) runChatRecovery(ctx context.Context) {
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
 	for {
-		workCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
-		turns, err := server.chatStore.PendingTurns(workCtx, 200)
+		listCtx, listCancel := context.WithTimeout(ctx, chatRecoveryListTimeout)
+		turns, err := server.chatStore.PendingTurns(listCtx, 200)
+		listCancel()
 		if err == nil {
 			for i := range turns {
-				if err := server.reconcileChatTurn(workCtx, &turns[i]); err != nil {
+				turnCtx, turnCancel := context.WithTimeout(ctx, standingDriveTimeout)
+				if err := server.reconcileChatTurn(turnCtx, &turns[i]); err != nil {
 					server.log.Error(err, "reconcile persisted chat turn", "namespace", turns[i].Namespace, "turn", turns[i].ID)
 				}
+				turnCancel()
 			}
 		} else {
 			server.log.Error(err, "read pending chat turns")
 		}
-		cancel()
 		select {
 		case <-ctx.Done():
 			return

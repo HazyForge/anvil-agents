@@ -53,7 +53,7 @@ func runnerStateForPod(pod *corev1.Pod) *RunnerStateView {
 }
 
 func (server *Server) readRunnerState(ctx context.Context, run *agentsv1alpha1.AgentRun) (*RunnerStateView, bool) {
-	if run == nil || agentRunTerminal(run.Status.Phase) || run.Status.RunnerPodRef == nil {
+	if run == nil || agentRunStreamComplete(run) || run.Status.RunnerPodRef == nil {
 		return nil, true
 	}
 	source, ok := server.logs.(agentRunStateSource)

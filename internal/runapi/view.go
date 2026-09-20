@@ -57,7 +57,7 @@ func NewAgentRunView(run *agentsv1alpha1.AgentRun, includeOutput bool) AgentRunV
 		UID:             string(run.UID),
 		ResourceVersion: run.ResourceVersion,
 		CreatedAt:       run.CreationTimestamp.Time,
-		Phase:           run.Status.Phase,
+		Phase:           standingViewPhase(run),
 		Backend:         run.Status.Backend,
 		Model:           firstNonEmpty(run.Status.Model, agentRunSpecModel(run)),
 		Intent:          run.Status.Intent,

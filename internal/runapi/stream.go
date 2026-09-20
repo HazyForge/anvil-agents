@@ -146,7 +146,7 @@ func (server *Server) handleRunEvents(writer http.ResponseWriter, request *http.
 	startLogs(run)
 
 	for {
-		if agentRunTerminal(run.Status.Phase) && !logActive && len(logLines) == 0 {
+		if agentRunStreamComplete(run) && !logActive && len(logLines) == 0 {
 			terminalView := NewAgentRunView(run, true)
 			_ = sse.write("terminal", "status:"+run.ResourceVersion, streamEvent{Type: "terminal", Run: &terminalView})
 			return
