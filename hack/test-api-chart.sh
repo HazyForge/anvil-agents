@@ -54,6 +54,17 @@ helm template "${release}" "${chart}" --set crds.install=false >"${tmp_dir}/with
 if grep -Fq -- '--adverse-sources-json=' "${tmp_dir}/disabled.yaml"; then
   fail "structured adverse source flag rendered with empty adverseSources"
 fi
+if grep -Fq -- '--substrate-actors-enabled=true' "${tmp_dir}/disabled.yaml"; then
+  fail "substrate live gate rendered while substrate.actorsEnabled=false"
+fi
+helm template "${release}" "${chart}" \
+  --set substrate.actorsEnabled=true \
+  --set substrate.endpoint=ate-api-server.ate-system.svc:443 \
+  --set substrate.template=standing-chat \
+  --show-only templates/deployment.yaml >"${tmp_dir}/substrate-on.yaml"
+grep -Fq -- '--substrate-actors-enabled=true' "${tmp_dir}/substrate-on.yaml" || fail "substrate live gate missing when enabled"
+grep -Fq -- '--substrate-endpoint=ate-api-server.ate-system.svc:443' "${tmp_dir}/substrate-on.yaml" || fail "substrate endpoint missing when set"
+grep -Fq -- '--substrate-template=standing-chat' "${tmp_dir}/substrate-on.yaml" || fail "substrate template missing when set"
 if document_exists "${tmp_dir}/disabled.yaml" Deployment contract-anvil-agents-api; then
   fail "API resources rendered while api.enabled=false"
 fi

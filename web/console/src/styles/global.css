@@ -2261,6 +2261,29 @@ table.data-table tr.click-row:hover td {
   color: var(--text);
 }
 
+.chat-reasoning {
+  margin: 0 0 0.7rem;
+  padding: 0.55rem 0.7rem;
+  border-radius: 10px;
+  background: oklch(1 0 0 / 0.03);
+  box-shadow: 0 0 0 1px oklch(1 0 0 / 0.08);
+}
+
+.chat-reasoning > summary {
+  cursor: pointer;
+  color: var(--text-mute);
+  font-size: 0.72rem;
+  font-weight: 600;
+}
+
+.chat-reasoning-body {
+  margin-top: 0.45rem;
+  color: var(--text-dim);
+  font-size: 0.78rem;
+  line-height: 1.5;
+  opacity: 0.88;
+}
+
 .chat-composer {
   border-top: 1px solid var(--border);
   padding: 0.75rem;

@@ -199,15 +199,22 @@ func jevNeedsToolRun(decision jev.Decision, classified bool) bool {
 }
 
 // jevIntentPromptHint renders the minimal per-intent routing hint. Empty
-// means unchanged behavior: chat_reply takes today's prompt path, and the
-// fallback (unclassified) path adds no hint either. Hints observe the
-// existing contracts — coordination JSON, manager authorization, harness
-// tools — and never grant new authority.
+// means unchanged behavior: the unclassified fallback adds no hint.
+// Classified chat_reply gets a short ceremony-reduction hint so Job
+// managers do not narrate prompt-reading or emit progress status JSON for
+// a greeting. Hints observe the existing contracts — coordination JSON,
+// manager authorization, harness tools — and never grant new authority.
 func jevIntentPromptHint(decision jev.Decision, classified bool) string {
-	if !classified || decision.Intent == jev.IntentChatReply {
+	if !classified {
 		return ""
 	}
 	provenance := fmt.Sprintf(" (Jev intent %s, confidence %.2f, model %s)", decision.Intent, decision.Confidence, decision.Model)
+	if decision.Intent == jev.IntentChatReply {
+		if decision.Unclear {
+			return ""
+		}
+		return "\nROUTING_HINT" + provenance + ": this is ordinary conversation. Put only the user-visible answer in the final reply. Do not narrate reading the mounted prompt, tool warmup, or closing the turn. Do not emit progress status JSON unless work is actually in progress.\n"
+	}
 	switch decision.Intent {
 	case jev.IntentCreateAgentRequest:
 		if !jevNeedsManagerCreate(decision, classified) {
@@ -227,8 +234,8 @@ func jevIntentPromptHint(decision jev.Decision, classified bool) string {
 }
 
 // buildChatPromptWithIntent freezes the execution intent with the Jev
-// routing hint folded in. Unclassified turns and chat_reply are today's
-// prompt byte-identical: the hint is empty and this delegates to
+// routing hint folded in. Unclassified turns stay today's prompt
+// byte-identical: the hint is empty and this delegates to
 // buildChatPrompt untouched.
 func buildChatPromptWithIntent(thread chat.Thread, messages []chat.Message, content string, decision jev.Decision, classified bool) (string, error) {
 	prompt, err := buildChatPrompt(thread, messages, content)

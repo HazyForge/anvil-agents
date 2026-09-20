@@ -225,7 +225,10 @@ api:
     standing:
       liveEnabled: true
     authorization:
-      roleClaims: []
+      # Zitadel device/native tokens expose roles on the standard claim;
+      # project-scoped object claims remain the Desktop PKCE path.
+      roleClaims:
+        - roles
       roleObjectClaims:
         - urn:zitadel:iam:org:project:376124473528572432:roles
       bindings:

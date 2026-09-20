@@ -102,7 +102,7 @@ func TestChatJevDrivesEachIntent(t *testing.T) {
 		wantHint   string
 		wantPlain  bool
 	}{
-		{name: "chat reply unchanged", choice: jev.IntentChatReply, confidence: 0.9, wantPlain: true},
+		{name: "chat reply skips harness ceremony", choice: jev.IntentChatReply, confidence: 0.9, wantHint: "ordinary conversation"},
 		{name: "create agent routes toward manager", choice: jev.IntentCreateAgentRequest, confidence: 0.92, wantHint: "manager"},
 		{name: "peer handoff stays on existing paths", choice: jev.IntentPeerHandoff, confidence: 0.88, wantHint: "requestPeer"},
 		{name: "tool run prefers tools first", choice: jev.IntentToolRun, confidence: 0.85, wantHint: "tool-first"},

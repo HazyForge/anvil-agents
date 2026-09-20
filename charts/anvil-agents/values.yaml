@@ -334,6 +334,21 @@ nodeSelector: {}
 tolerations: []
 affinity: {}
 
+# Optional live ATE actor plane (agent-substrate/substrate). Off by default.
+# Standing ProcessBackend already completes SubstrateActor chat turns without
+# this gate and is the Primaris speed path. Enabling the gate without a
+# reachable ateapi, or enabling bind-only ATE without a completion path,
+# leaves unclaimed SubstrateActor runs Running/SubstrateActorBound.
+# Do not put bearer tokens here; prefer a mounted token file or the
+# controller's short-lived ate-client ServiceAccount token.
+substrate:
+  actorsEnabled: false
+  endpoint: ""
+  template: ""
+  atespace: ""
+  tokenFile: ""
+  insecure: false
+
 # Additional explicit Kubernetes objects installed and owned by this Helm
 # release. Set metadata.namespace on every namespaced object. Values are not
 # evaluated as Go templates. Keep credentials in external Secret references.

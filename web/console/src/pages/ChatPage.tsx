@@ -11,6 +11,7 @@ import { listComposition } from "../api/composition";
 import type { ChatMessage, ChatThread, ChatTurn } from "../api/types.chat";
 import { formatTime } from "../utils/format";
 import { MarkdownBody } from "../components/MarkdownBody";
+import { ChatAssistantBody } from "../components/ChatAssistantBody";
 
 interface Props {
   token: string;
@@ -480,7 +481,11 @@ export function ChatPage({ token, namespace: activeNamespace, onViewNamespace }:
                           </span>
                         ) : null}
                       </header>
-                      <div className="chat-bubble-body"><MarkdownBody content={message.content} /></div>
+                      {message.role === "assistant" ? (
+                        <ChatAssistantBody content={message.content} />
+                      ) : (
+                        <div className="chat-bubble-body"><MarkdownBody content={message.content} /></div>
+                      )}
                     </article>
                   );
                 })}

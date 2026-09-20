@@ -64,9 +64,10 @@ Boundaries that do not move in this spike:
   Malformed selections (substrate section on a Job runtime, missing section on
   an actor runtime) fail closed as `InvalidSubstrateSpec`.
 - The OIDC API, RBAC posture, Secret handling, and Primaris Argo sync policy
-  are unchanged. No chart values were added; the live plane is configured only
-  through the controller gate (`ANVIL_AGENTS_SUBSTRATE_ACTORS_ENABLED` +
-  `ANVIL_AGENTS_SUBSTRATE_ENDPOINT`).
+  are unchanged. The live plane is configured through the controller gate
+  (`ANVIL_AGENTS_SUBSTRATE_ACTORS_ENABLED` +
+  `ANVIL_AGENTS_SUBSTRATE_ENDPOINT`) or the equivalent chart `substrate.*`
+  values (off by default).
 
 ## What was in slice 1 (API-first)
 
@@ -219,8 +220,23 @@ do not change Primaris Argo sync policy. The spike needs only:
 3. A harness profile selecting the actor plane (sample:
    `config/samples/control_v1alpha1_agentharnessprofile_substrate.yaml`).
 
-Enable the gate on the controller only (no chart values were added, no
-Primaris sync changes):
+## Primaris speed path (2026-09-20)
+
+Anvil Primaris does **not** run `ate-system`. Upstream ATE 0.0.8 installs a
+privileged `atelet` DaemonSet with hostPorts 8085/9090 and a
+`/var/lib/ateom-gvisor` hostPath on every node. The Anvil live client is
+lifecycle-only (Create/Resume/Suspend/Pause/GetActor) — it does not execute
+a chat turn on the actor. Standing ProcessBackend already completes
+`SubstrateActor` Desktop turns in ~10s (no Job). Enabling the ATE gate
+without a completion path hangs unclaimed runs at
+`Running/SubstrateActorBound`. Keep the chart `substrate.actorsEnabled`
+false on Primaris until ATE is constrained (nodeSelector, no cluster-wide
+hostPorts) and a generate-on-actor path exists. Hazy Trade manager stays
+Job/RWO OAuth.
+
+Enable the gate on the controller only when ateapi is actually reachable
+(chart `substrate.*` or the env/flags below). No Primaris Argo sync
+changes are required to keep the gate off:
 
 ```bash
 export ANVIL_AGENTS_SUBSTRATE_ACTORS_ENABLED=true
