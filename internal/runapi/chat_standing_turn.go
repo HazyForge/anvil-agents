@@ -53,9 +53,9 @@ import (
 // (StandingClaimed, never InProcessNotWired racing a live stream).
 
 // standingTurnGuard serializes live standing execution per turn ID within one
-// API process. Queue, read-refresh, and background recovery can reconcile the
-// same turn concurrently; the loser skips streaming and observes the winner's
-// Succeeded mark on a later pass.
+// API process. Queue and background recovery can reconcile the same turn
+// concurrently; GET thread refresh is observe-only. The loser skips streaming
+// and observes the winner's Succeeded mark on a later pass.
 type standingTurnGuard struct {
 	mu       sync.Mutex
 	inflight map[string]struct{}
@@ -94,12 +94,37 @@ func (server *Server) standingTurnEnabled() bool {
 	return server != nil && server.standing != nil && server.config.Standing.LiveEnabled
 }
 
+// standingDriveMinBudget is the shortest remaining context deadline that
+// may start StreamTurn. GET thread refresh uses 3s; grok standing turns
+// need tens of seconds. Recovery uses standingDriveTimeout per turn.
+const standingDriveMinBudget = 45 * time.Second
+
+// standingDriveTimeout bounds one recovery-driven standing stream. It
+// matches the process-backend default so a warm grok turn can finish
+// after a short GET refresh skipped streaming.
+const standingDriveTimeout = 2 * time.Minute
+
+// chatRecoveryListTimeout bounds the pending-turn LIST, not StreamTurn.
+const chatRecoveryListTimeout = 20 * time.Second
+
+func standingCanDriveStream(ctx context.Context) bool {
+	if ctx == nil || ctx.Err() != nil {
+		return false
+	}
+	deadline, ok := ctx.Deadline()
+	if !ok {
+		return true
+	}
+	return time.Until(deadline) >= standingDriveMinBudget
+}
+
 // reconcileStandingTurn streams one standing turn when the gate is on and the
-// thread's harness selects InProcess or SubstrateActor. It returns true when
+// thread's harness selects InProcess or SubstrateActor. driveStanding is true
+// for POST/recovery and false for GET thread refresh. It returns true when
 // the in-memory run now carries the streamed Succeeded result and the caller
 // should continue through the normal status switch; false means untouched
 // (today's behavior owns the turn from here).
-func (server *Server) reconcileStandingTurn(ctx context.Context, turn *chat.Turn, run *agentsv1alpha1.AgentRun) (bool, error) {
+func (server *Server) reconcileStandingTurn(ctx context.Context, turn *chat.Turn, run *agentsv1alpha1.AgentRun, driveStanding bool) (bool, error) {
 	if turn == nil || run == nil {
 		return false, nil
 	}
@@ -115,6 +140,13 @@ func (server *Server) reconcileStandingTurn(ctx context.Context, turn *chat.Turn
 		return false, nil
 	}
 	if turn.ID == "" {
+		return false, nil
+	}
+	if !driveStanding {
+		return false, nil
+	}
+	if !standingCanDriveStream(ctx) {
+		server.log.Info("standing turn stream skipped; remaining deadline too short", "namespace", turn.Namespace, "turn", turn.ID)
 		return false, nil
 	}
 	if !server.standingGuard.claim(turn.ID) {
@@ -146,7 +178,11 @@ func (server *Server) reconcileStandingTurn(ctx context.Context, turn *chat.Turn
 		server.log.Info("standing turn has no frozen prompt; keeping hold behavior", "namespace", turn.Namespace, "turn", turn.ID)
 		return false, nil
 	}
-	sink := &standingRunSink{runName: turn.RunName, downstream: server.standingTokenPublisher(turn.Namespace)}
+	// Hold Done until this turn has a real answer. StreamTurn emits Done on
+	// process exit; the live WebSocket closes on that frame. A preamble like
+	// "I'll check" must not finish the stream before continuation runs.
+	hubSink := &holdDoneSink{inner: server.standingTokenPublisher(turn.Namespace)}
+	sink := &standingRunSink{runName: turn.RunName, downstream: hubSink}
 	reply, err := server.standing.StreamTurn(ctx, handle, turn.ID, prompt, sink)
 	if err != nil {
 		server.log.Error(err, "standing turn stream failed; keeping hold behavior", "namespace", turn.Namespace, "turn", turn.ID)
@@ -157,6 +193,10 @@ func (server *Server) reconcileStandingTurn(ctx context.Context, turn *chat.Turn
 		return false, nil
 	}
 	harnessKind := agentsv1alpha1.AgentRunHarnessBackendKind(handle.HarnessKind)
+	reply = server.completeStandingDeferredWork(ctx, handle, turn, harnessKind, prompt, reply, sink)
+	if err := hubSink.flush(ctx); err != nil {
+		server.log.Error(err, "standing turn could not flush the stream done marker", "namespace", turn.Namespace, "turn", turn.ID)
+	}
 	run.Status.Phase = agentsv1alpha1.AgentRunPhaseSucceeded
 	run.Status.Backend = string(harnessKind)
 	if spec.Runtime != "" {

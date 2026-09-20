@@ -18,6 +18,46 @@ export function runnerFailureLabel(run?: {job?: unknown; runnerPod?: unknown; co
   return 'Agent could not finish this turn';
 }
 
+const STANDING_HOLD_REASONS = new Set([
+  'StandingClaimed',
+  'InProcessNotWired',
+  'SubstrateActorNotWired',
+]);
+
+/** Controller yield while the API standing path streams. Not a failed turn. */
+export function isStandingAPIHold(run?: {
+  phase?: string;
+  conditions?: {type?: string; status?: string; reason?: string}[];
+}): boolean {
+  if (!run) {
+    return false;
+  }
+  if (run.phase && run.phase !== 'NeedsHuman') {
+    return false;
+  }
+  return (run.conditions ?? []).some(
+    (condition) => condition.type === 'Ready' && condition.status === 'False' && STANDING_HOLD_REASONS.has(condition.reason ?? ''),
+  );
+}
+
+/** Activity widget: a standing yield is still in progress, not a terminal error. */
+export function activityTreatAsFailed(
+  status?: string,
+  terminalPhase?: string,
+  run?: {phase?: string; conditions?: {type?: string; status?: string; reason?: string}[]},
+): boolean {
+  if (status === 'succeeded') {
+    return false;
+  }
+  if (status === 'failed' || terminalPhase === 'Failed') {
+    return true;
+  }
+  if (terminalPhase === 'NeedsHuman' || run?.phase === 'NeedsHuman') {
+    return !isStandingAPIHold(run) && !isStandingAPIHold({phase: terminalPhase, conditions: run?.conditions});
+  }
+  return false;
+}
+
 /** Recognize only API-canned diagnostics; never display native error text. */
 export function chatFailureLabel(error?: string): string | undefined {
   if (error === 'OpenClaw cannot refresh its xAI authentication. Re-authenticate xAI for the selected remote OpenClaw harness, then start a new turn.') return 'OpenClaw authentication required for xAI';

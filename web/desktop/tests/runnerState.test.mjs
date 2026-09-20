@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { chatFailureLabel, runnerFailureLabel, runnerStateLabel } from '../src/api/runnerState.ts';
+import { activityTreatAsFailed, chatFailureLabel, isStandingAPIHold, runnerFailureLabel, runnerStateLabel } from '../src/api/runnerState.ts';
 
 test('startup blockers have recoverable labels without trusting server messages', () => {
   for (const code of ['configuration_unavailable', 'image_unavailable', 'capacity_wait']) {
@@ -30,4 +30,19 @@ test('authentication heading recognizes only API canned failure', () => {
 test('Hermes credential readiness failure does not overclaim expired authentication', () => {
   assert.equal(chatFailureLabel('Hermes provider authentication or configuration is unavailable. Check the selected remote harness provider setup, then start a new turn.'), 'Hermes provider setup required');
   assert.equal(chatFailureLabel('Hermes provider authentication or configuration is unavailable. raw private error'), undefined);
+});
+
+test('standing controller yield is not a failed Desktop turn', () => {
+  const standing = {
+    phase: 'NeedsHuman',
+    conditions: [{type: 'Ready', status: 'False', reason: 'StandingClaimed', message: 'API replica owns this turn'}],
+  };
+  assert.equal(isStandingAPIHold(standing), true);
+  assert.equal(isStandingAPIHold({phase: 'NeedsHuman', conditions: [{type: 'Ready', status: 'False', reason: 'SubstrateActorNotWired'}]}), true);
+  assert.equal(isStandingAPIHold({phase: 'NeedsHuman', conditions: [{type: 'Ready', status: 'False', reason: 'ConflictingToolName'}]}), false);
+  assert.equal(activityTreatAsFailed('running', 'NeedsHuman', standing), false);
+  assert.equal(activityTreatAsFailed('succeeded', 'NeedsHuman', standing), false);
+  assert.equal(activityTreatAsFailed('failed', 'NeedsHuman'), true);
+  assert.equal(activityTreatAsFailed('running', 'Failed'), true);
+  assert.equal(activityTreatAsFailed('running', 'NeedsHuman', {phase: 'NeedsHuman', conditions: [{type: 'Ready', status: 'False', reason: 'AuthRequired'}]}), true);
 });

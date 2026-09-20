@@ -204,8 +204,13 @@ func (server *Server) handleGetChatThread(writer http.ResponseWriter, request *h
 		server.writeChatStoreError(writer, err, principal, namespace)
 		return
 	}
+	// Observe-only refresh: complete already-Succeeded runs and report a
+	// live standing claim as running, but never StreamTurn. Desktop polls
+	// this GET every few seconds with a 3s budget; driving grok here is
+	// what logged `harness "grokBuild" timed out: context deadline exceeded`
+	// and killed the in-flight standing process.
 	recoveryCtx, cancel := context.WithTimeout(request.Context(), 3*time.Second)
-	turns, err := server.reconcileChatThread(recoveryCtx, namespace, threadID)
+	turns, err := server.reconcileChatThreadMode(recoveryCtx, namespace, threadID, false)
 	cancel()
 	recoveryPending := err != nil
 	if err != nil {

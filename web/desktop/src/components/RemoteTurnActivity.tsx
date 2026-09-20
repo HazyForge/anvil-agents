@@ -4,7 +4,7 @@ import { openAgentRunStream } from '../api/stream';
 import { activityFromLog, type RunActivity } from '../api/runActivity';
 import type { RemoteTurn } from '../api/remoteChat';
 import { ensureAccessToken } from '../auth/oidc';
-import { chatFailureLabel, runnerFailureLabel, runnerStateLabel } from '../api/runnerState';
+import { chatFailureLabel, runnerFailureLabel, runnerStateLabel, isStandingAPIHold, activityTreatAsFailed } from '../api/runnerState';
 
 interface Props {
   token: string;
@@ -73,7 +73,7 @@ export function RemoteTurnActivity({token, namespace, turn, agentLabel, recovery
               setTerminalPhase(phase);
               append({key: 'runner-complete', label: 'Harness finished', kind: 'reply'});
             }
-            if (phase === 'Failed' || phase === 'NeedsHuman') {
+            if (phase === 'Failed' || (phase === 'NeedsHuman' && !isStandingAPIHold(payload.run))) {
               stopped = true;
               setTerminalPhase(phase);
               setTerminalLabel(runnerFailureLabel(payload.run));
@@ -152,8 +152,9 @@ export function RemoteTurnActivity({token, namespace, turn, agentLabel, recovery
   const elapsed = Math.max(0, Math.floor((now - (Number.isFinite(acceptedAt) ? acceptedAt! : mountedAt.current)) / 1000));
   const latest = rows.at(-1);
   const cannotCheck = recoveryPending && !done(status) && !terminalPhase;
-  const wait = cannotCheck ? {tone: 'delayed', label: 'Cannot check agent progress right now. Your message is saved.', note: 'Waiting for the server to reconnect to the runner. Keep your draft; sending will become available when the server confirms this turn has finished.'} : turnWaitFeedback(terminalPhase === 'Succeeded' ? 'succeeded' : terminalPhase === 'Failed' || terminalPhase === 'NeedsHuman' ? 'failed' : status, elapsed, Math.max(0, (now - lastUpdate) / 1000), workObserved);
-  const label = retrying && status === 'queued' ? `Retrying startup${retrySeconds ? ` in ${retrySeconds}s` : ''} · attempt ${(turn?.retryCount ?? 0) + 1} of 3` : status === 'failed' || terminalPhase === 'Failed' || terminalPhase === 'NeedsHuman' ? (chatFailureLabel(turn.error) || terminalLabel)
+  const wait = cannotCheck ? {tone: 'delayed', label: 'Cannot check agent progress right now. Your message is saved.', note: 'Waiting for the server to reconnect to the runner. Keep your draft; sending will become available when the server confirms this turn has finished.'} : turnWaitFeedback(terminalPhase === 'Succeeded' ? 'succeeded' : activityTreatAsFailed(status, terminalPhase) ? 'failed' : status, elapsed, Math.max(0, (now - lastUpdate) / 1000), workObserved);
+  const failed = activityTreatAsFailed(status, terminalPhase);
+  const label = retrying && status === 'queued' ? `Retrying startup${retrySeconds ? ` in ${retrySeconds}s` : ''} · attempt ${(turn?.retryCount ?? 0) + 1} of 3` : failed ? (chatFailureLabel(turn.error) || terminalLabel)
     : status === 'succeeded' ? 'Reply received'
     : terminalPhase === 'Succeeded' ? 'Harness finished; saving the reply'
     : cannotCheck ? 'Cannot check agent progress right now. Your message is saved.'
@@ -164,7 +165,7 @@ export function RemoteTurnActivity({token, namespace, turn, agentLabel, recovery
   const quiet = !done(status) && now - lastUpdate > 15000;
   return <section className={`turn-activity${done(status) ? ' turn-activity-finished' : ''}${retrying ? ' turn-activity-delayed' : wait ? ` turn-activity-${wait.tone}` : ''}`} aria-label="Agent activity">
     <div className="turn-activity-heading">
-      <span className={`turn-activity-indicator${status === 'failed' || terminalPhase === 'Failed' || terminalPhase === 'NeedsHuman' ? ' is-error' : ''}`} aria-hidden="true"/>
+      <span className={`turn-activity-indicator${failed ? ' is-error' : ''}`} aria-hidden="true"/>
       <div><span className="turn-activity-agent">{agentLabel || 'Remote agent'}</span><p role="status">{label}</p></div>
       {!done(status) && <span className="turn-activity-elapsed" aria-hidden="true">{elapsed < 60 ? `${elapsed}s` : `${Math.floor(elapsed / 60)}m ${elapsed % 60}s`}</span>}
     </div>

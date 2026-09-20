@@ -213,7 +213,7 @@ func jevIntentPromptHint(decision jev.Decision, classified bool) string {
 		if decision.Unclear {
 			return ""
 		}
-		return "\nROUTING_HINT" + provenance + ": this is ordinary conversation. Put only the user-visible answer in the final reply. Do not narrate reading the mounted prompt, tool warmup, or closing the turn. Do not emit progress status JSON unless work is actually in progress.\n"
+		return "\nROUTING_HINT" + provenance + ": this is ordinary conversation. Put only the user-visible answer in the final reply. Do not narrate reading the mounted prompt, tool warmup, or closing the turn. If the answer depends on inspecting this session, do that now and include the result in this same reply; do not promise to check later. Do not emit progress status JSON unless work is actually in progress.\n"
 	}
 	switch decision.Intent {
 	case jev.IntentCreateAgentRequest:
@@ -242,15 +242,18 @@ func buildChatPromptWithIntent(thread chat.Thread, messages []chat.Message, cont
 	if err != nil {
 		return "", err
 	}
-	hint := jevIntentPromptHint(decision, classified)
-	if hint == "" {
-		return prompt, nil
+	return insertBeforeConversationJSON(prompt, jevIntentPromptHint(decision, classified)), nil
+}
+
+func insertBeforeConversationJSON(prompt, extra string) string {
+	if strings.TrimSpace(extra) == "" {
+		return prompt
 	}
 	const marker = "CONVERSATION_JSON:\n"
 	if before, after, ok := strings.Cut(prompt, marker); ok {
-		return before + hint + marker + after, nil
+		return before + extra + marker + after
 	}
-	return prompt + hint, nil
+	return prompt + extra
 }
 
 // chatAuthorMetadataWithIntent merges the routing decision into the queued
