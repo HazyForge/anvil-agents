@@ -12,7 +12,7 @@ serviceAccount:
   name: anvil-agents
 image:
   # Controller/API image embeds Anvil Agents Console SPA (served at /).
-  reference: ghcr.io/hazyforge/anvil-agents@sha256:7232ce880bd9f9e44f82a8f2e70e238faecdc25a346f8cc31cf136b1f921c103
+  reference: ghcr.io/hazyforge/anvil-agents@sha256:22682ef26f9d4f6f619779783cc61cd77dd28ab7fecab856e696799a3bdbb974
   pullPolicy: IfNotPresent
 imagePullSecrets:
   - name: ghcr-creds
@@ -89,7 +89,7 @@ api:
       value: /tmp
   # API-only chat fixes can roll independently of the healthy controller.
   image:
-    reference: ghcr.io/hazyforge/anvil-agents@sha256:7232ce880bd9f9e44f82a8f2e70e238faecdc25a346f8cc31cf136b1f921c103
+    reference: ghcr.io/hazyforge/anvil-agents@sha256:22682ef26f9d4f6f619779783cc61cd77dd28ab7fecab856e696799a3bdbb974
   enabled: true
   extraVolumes:
     - name: chat-database-ca
