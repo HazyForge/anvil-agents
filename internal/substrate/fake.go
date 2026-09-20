@@ -3,6 +3,7 @@ package substrate
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 )
 
@@ -145,4 +146,30 @@ func (f *FakeClient) Created() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return len(f.actors)
+}
+
+// FakeGenerator is an in-memory TurnGenerator for controller tests.
+type FakeGenerator struct {
+	mu    sync.Mutex
+	Reply string
+	Err   error
+	Calls []GenerateRequest
+}
+
+// Generate records the request and returns Reply or Err.
+func (f *FakeGenerator) Generate(ctx context.Context, req GenerateRequest) (GenerateResult, error) {
+	if err := ctx.Err(); err != nil {
+		return GenerateResult{}, err
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.Calls = append(f.Calls, req)
+	if f.Err != nil {
+		return GenerateResult{}, f.Err
+	}
+	text := strings.TrimSpace(f.Reply)
+	if text == "" {
+		text = strings.TrimSpace(req.Prompt)
+	}
+	return GenerateResult{Text: text, StopReason: "end_turn"}, nil
 }

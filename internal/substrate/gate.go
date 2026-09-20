@@ -10,7 +10,8 @@ import (
 // plane. The plane is off by default: the controller holds well-formed
 // SubstrateActor runs without creating a Job until the gate is explicitly
 // enabled. Chart substrate.* and Primaris deploy.yaml stay off; do not
-// set substrate.actorsEnabled=true until generate-on-actor exists.
+// set substrate.actorsEnabled=true until generate-on-actor is in the
+// live image and an opted-in actorClass (not standing-chat) can complete.
 //
 // The transport is Substrate ATE's real surface (ateapi Control gRPC,
 // kubectl-ate lifecycle); see live.go. The endpoint is therefore the ateapi
@@ -65,6 +66,19 @@ const (
 	// GateTLSServerNameEnvVar overrides TLS ServerName (default
 	// api.ate-system.svc, matching ATE jwt bootstrap DNS SAN).
 	GateTLSServerNameEnvVar = "ANVIL_AGENTS_SUBSTRATE_TLS_SERVER_NAME"
+	// GateGenerateOnActorEnvVar opts the controller into atenet generate
+	// after Resume/bind. Off by default. actorsEnabled alone never
+	// generates and never binds; Desktop standing-chat stays on
+	// ProcessBackend until a matching generateActorClass is listed.
+	GateGenerateOnActorEnvVar = "ANVIL_AGENTS_SUBSTRATE_GENERATE_ON_ACTOR"
+	// GateGenerateActorClassesEnvVar is the comma-separated actorClass
+	// allowlist for generate-on-actor (exact match). Empty generates for
+	// nobody. Do not list standing-chat on Primaris.
+	GateGenerateActorClassesEnvVar = "ANVIL_AGENTS_SUBSTRATE_GENERATE_ACTOR_CLASSES"
+	// GateAtenetEndpointEnvVar is the atenet-router HTTP target
+	// (host:port or URL). Empty uses DefaultAtenetEndpoint when generate
+	// is on.
+	GateAtenetEndpointEnvVar = "ANVIL_AGENTS_SUBSTRATE_ATENET_ENDPOINT"
 )
 
 // GateConfig is the explicit opt-in configuration for live Substrate actor
@@ -97,6 +111,14 @@ type GateConfig struct {
 	// TLSServerName overrides the ateapi TLS ServerName (default
 	// api.ate-system.svc).
 	TLSServerName string
+	// GenerateOnActor streams the frozen AgentRun prompt through atenet
+	// after bind and marks the run Succeeded/Failed. Off by default.
+	GenerateOnActor bool
+	// GenerateActorClasses is the exact actorClass allowlist. Empty means
+	// generate for nobody, even when GenerateOnActor is true.
+	GenerateActorClasses []string
+	// AtenetEndpoint is the atenet-router HTTP target.
+	AtenetEndpoint string
 }
 
 // GateConfigFromEnv reads the live-plane gate from the process environment.
@@ -115,6 +137,9 @@ func GateConfigFromEnv() GateConfig {
 		CAConfigMapNamespace: strings.TrimSpace(os.Getenv(GateCAConfigMapNamespaceEnvVar)),
 		CAConfigMapKey:       strings.TrimSpace(os.Getenv(GateCAConfigMapKeyEnvVar)),
 		TLSServerName:        strings.TrimSpace(os.Getenv(GateTLSServerNameEnvVar)),
+		GenerateOnActor:      gateBoolEnv(GateGenerateOnActorEnvVar),
+		GenerateActorClasses: ParseActorClassList(os.Getenv(GateGenerateActorClassesEnvVar)),
+		AtenetEndpoint:       strings.TrimSpace(os.Getenv(GateAtenetEndpointEnvVar)),
 	}
 }
 
@@ -123,6 +148,13 @@ func GateConfigFromEnv() GateConfig {
 // without a reachable backend keeps the safe hold.
 func (g GateConfig) LiveEnabled() bool {
 	return g.Enabled && strings.TrimSpace(g.Endpoint) != ""
+}
+
+// GenerateForClass reports whether live generate-on-actor may complete a
+// run with this actorClass. Requires the generate gate plus an allowlist
+// hit; it does not by itself enable ateapi bind.
+func (g GateConfig) GenerateForClass(actorClass string) bool {
+	return GenerateEnabled(g.GenerateOnActor, g.GenerateActorClasses, actorClass)
 }
 
 func gateBoolEnv(name string) bool {

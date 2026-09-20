@@ -2,11 +2,13 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"strings"
 
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	controlv1alpha1 "github.com/hazyforge/anvil-agents/api/v1alpha1"
 	"github.com/hazyforge/anvil-agents/internal/substrate"
@@ -27,6 +29,26 @@ func (r *AgentRunReconciler) substrateLiveClient() substrate.Client {
 		return nil
 	}
 	return r.SubstrateClient
+}
+
+func (r *AgentRunReconciler) substrateActorClass(obj *controlv1alpha1.AgentRun) string {
+	if obj == nil || obj.Spec.Harness.Execution.Substrate == nil {
+		return ""
+	}
+	return strings.TrimSpace(obj.Spec.Harness.Execution.Substrate.ActorClass)
+}
+
+// shouldGenerateOnActor reports whether this run is opted into atenet
+// generate. Desktop standing-chat (actorClass standing-chat) stays off the
+// allowlist so ProcessBackend keeps owning those turns.
+func (r *AgentRunReconciler) shouldGenerateOnActor(obj *controlv1alpha1.AgentRun) bool {
+	if obj == nil || !obj.Spec.Harness.Execution.UsesSubstrateActors() {
+		return false
+	}
+	if r.substrateLiveClient() == nil || r.SubstrateGenerate == nil || r.Options == nil {
+		return false
+	}
+	return substrate.GenerateEnabled(r.Options.SubstrateGenerateOnActor, r.Options.SubstrateGenerateActorClasses, r.substrateActorClass(obj))
 }
 
 // substrateThreadID resolves the stable chat thread backing one effective run.
@@ -66,21 +88,28 @@ func substrateActorSpecForRun(effective *controlv1alpha1.AgentRun, actorName str
 	)
 }
 
-// reconcileSubstrateActorRun binds one SubstrateActor run to its warm actor
-// and records the binding in status. It never creates a Kubernetes Job: the
-// Job-launch receipt fields (PlannedJobRef, JobCreateAttemptedAt, JobRef) stay
-// empty so the single-execution guards keep treating the run as unlaunched on
-// the Job plane. Backend failures return an error so controller-runtime backs
-// off and retries; the run stays Running, never Failed, on transient gateway
-// errors.
+func substrateGenerateAtespace(r *AgentRunReconciler, handle substrate.ActorHandle) string {
+	if r != nil && r.Options != nil {
+		if forced := strings.TrimSpace(r.Options.SubstrateAtespace); forced != "" {
+			return forced
+		}
+	}
+	return strings.TrimSpace(handle.Namespace)
+}
+
+// reconcileSubstrateActorRun binds one opted-in SubstrateActor run to its
+// warm actor, streams the frozen prompt through atenet, and marks the run
+// Succeeded or Failed from the actor reply. It never creates a Kubernetes
+// Job. Transient atenet failures requeue while Running; permanent failures
+// fail the run so it cannot sit at SubstrateActorBound forever.
 func (r *AgentRunReconciler) reconcileSubstrateActorRun(ctx context.Context, original, obj *controlv1alpha1.AgentRun, status *controlv1alpha1.AgentRunStatus, effective *controlv1alpha1.AgentRun, now metav1.Time) (ctrl.Result, error) {
 	if agentRunPhaseTerminal(obj.Status.Phase) || agentRunPhaseTerminal(status.Phase) {
 		return ctrl.Result{}, nil
 	}
-	live := r.substrateLiveClient()
-	if live == nil {
+	if !r.shouldGenerateOnActor(effective) {
 		return ctrl.Result{}, nil
 	}
+	live := r.substrateLiveClient()
 	threadID := substrateThreadID(effective)
 	actorName := substrate.ActorNameForThread(threadID)
 	handle, warm, err := substrate.EnsureTurnActor(ctx, live, substrateActorSpecForRun(effective, actorName))
@@ -96,24 +125,92 @@ func (r *AgentRunReconciler) reconcileSubstrateActorRun(ctx context.Context, ori
 	if status.StartedAt == nil {
 		status.StartedAt = &now
 	}
-	status.CompletedAt = nil
-	status.Phase = controlv1alpha1.AgentRunPhaseRunning
-	status.Error = ""
-	binding := "created a cold Substrate actor"
-	if warm {
-		binding = "resumed a warm Substrate actor"
+	status.Backend = string(agentRunBackendKind(effective))
+	prompt := strings.TrimSpace(effective.Spec.Prompt)
+	if prompt == "" {
+		return r.failSubstrateGenerate(ctx, original, obj, status, now, "AgentRun spec.prompt is empty; generate-on-actor cannot complete this turn.")
 	}
-	message := "Standing-chat turn " + binding + " " + handle.Name + " for thread " + threadID + "; no Kubernetes Job was created."
+	result, err := r.SubstrateGenerate.Generate(ctx, substrate.GenerateRequest{
+		ActorName: handle.Name,
+		Atespace:  substrateGenerateAtespace(r, handle),
+		SessionID: threadID,
+		Prompt:    prompt,
+	})
+	if err != nil {
+		if errors.Is(err, substrate.ErrGenerateTransient) {
+			status.CompletedAt = nil
+			status.Phase = controlv1alpha1.AgentRunPhaseRunning
+			status.Error = ""
+			binding := "created a cold Substrate actor"
+			if warm {
+				binding = "resumed a warm Substrate actor"
+			}
+			apimeta.SetStatusCondition(&status.Conditions, metav1.Condition{
+				Type:               agentRunReady,
+				Status:             metav1.ConditionFalse,
+				ObservedGeneration: obj.Generation,
+				LastTransitionTime: now,
+				Reason:             "SubstrateActorBound",
+				Message:            "Generate-on-actor " + binding + " " + handle.Name + "; retrying atenet stream. No Kubernetes Job was created.",
+			})
+			obj.Status = *status
+			if patchErr := r.Status().Patch(ctx, obj, client.MergeFrom(original)); patchErr != nil {
+				return r.patchAgentRunStatus(ctx, original, obj, true)
+			}
+			return ctrl.Result{}, err
+		}
+		return r.failSubstrateGenerate(ctx, original, obj, status, now, "generate-on-actor failed; no Kubernetes Job was created.")
+	}
+	output := agentRunTrimOutput(result.Text)
+	if strings.TrimSpace(output) == "" {
+		return r.failSubstrateGenerate(ctx, original, obj, status, now, "generate-on-actor returned an empty reply; no Kubernetes Job was created.")
+	}
+	status.Output = output
+	status.PromptHash = shortHash(prompt)
+	status.CompletedAt = &now
+	status.Error = ""
+	status.Decision = &controlv1alpha1.AgentRunDecisionStatus{
+		Classification: "completed",
+		Action:         firstNonEmpty(strings.TrimSpace(status.Intent), string(agentRunIntent(effective))),
+		Summary:        agentRunOutputSummary(status.Output),
+	}
+	status.Result = agentRunRawResult(status.Output, status.PullRequestURL, status.Decision, status.Reports)
+	status.Phase = controlv1alpha1.AgentRunPhaseSucceeded
+	apimeta.SetStatusCondition(&status.Conditions, metav1.Condition{
+		Type:               agentRunReady,
+		Status:             metav1.ConditionTrue,
+		ObservedGeneration: obj.Generation,
+		LastTransitionTime: now,
+		Reason:             "SubstrateActorGenerated",
+		Message:            "Generate-on-actor streamed the frozen prompt through atenet; no Kubernetes Job was created.",
+	})
+	obj.Status = *status
+	patched, patchErr := r.patchAgentRunStatus(ctx, original, obj, false)
+	if patchErr == nil {
+		r.suspendSubstrateActorOnTerminal(ctx, obj)
+	}
+	return patched, patchErr
+}
+
+func (r *AgentRunReconciler) failSubstrateGenerate(ctx context.Context, original, obj *controlv1alpha1.AgentRun, status *controlv1alpha1.AgentRunStatus, now metav1.Time, message string) (ctrl.Result, error) {
+	status.Phase = controlv1alpha1.AgentRunPhaseFailed
+	status.CompletedAt = &now
+	status.Error = message
+	status.Result = agentRunRawResult(status.Output, status.PullRequestURL, status.Decision, status.Reports)
 	apimeta.SetStatusCondition(&status.Conditions, metav1.Condition{
 		Type:               agentRunReady,
 		Status:             metav1.ConditionFalse,
 		ObservedGeneration: obj.Generation,
 		LastTransitionTime: now,
-		Reason:             "SubstrateActorBound",
+		Reason:             "SubstrateActorGenerateFailed",
 		Message:            message,
 	})
 	obj.Status = *status
-	return r.patchAgentRunStatus(ctx, original, obj, true)
+	patched, err := r.patchAgentRunStatus(ctx, original, obj, false)
+	if err == nil {
+		r.suspendSubstrateActorOnTerminal(ctx, obj)
+	}
+	return patched, err
 }
 
 // suspendSubstrateActorOnTerminal releases the actor worker once the run goes

@@ -74,6 +74,9 @@
 {{- fail "api.config.cors.allowedOrigins must contain exact origins, never wildcards" }}
 {{- end }}
 {{- end }}
+{{- if and .Values.substrate.generateOnActor .Values.substrate.generateActorClasses .Values.api.config.standing }}
+{{- $_ := set .Values.api.config.standing "generateActorClasses" .Values.substrate.generateActorClasses }}
+{{- end }}
 apiVersion: v1
 kind: ConfigMap
 metadata:

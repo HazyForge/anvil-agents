@@ -55,12 +55,13 @@ Boundaries that do not move in this spike:
   binding (`internal/substrate/ateapipb`, wire-pinned by golden tests), so
   transport changes stay inside the dialer without touching AgentRun types,
   merge rules, or chat selection.
-- The controller never creates a Job for a SubstrateActor run. With the live
-  gate off it holds the run as `NeedsHuman/SubstrateActorNotWired` with
-  guidance instead, and records `status.executionRuntime`. With the gate on
-  (plus an ateapi endpoint) it dials ateapi, binds the warm actor
-  (`Create`/`Resume` via `ActorNameForThread`), records
-  `status.substrateActor`, suspends on idle, and still never creates a Job.
+- The controller never creates a Job for a SubstrateActor run. With both live
+gates off it holds the run as `NeedsHuman/SubstrateActorNotWired`. With
+`actorsEnabled` on but generate-on-actor off (or the actorClass not
+allowlisted) it keeps that hold so Desktop `standing-chat` stays on
+ProcessBackend. With generate-on-actor on for a matching class it dials
+ateapi, binds the warm actor, streams the frozen prompt through atenet, and
+marks Succeeded/Failed — still never creating a Job.
   Malformed selections (substrate section on a Job runtime, missing section on
   an actor runtime) fail closed as `InvalidSubstrateSpec`.
 - The OIDC API, RBAC posture, Secret handling, and Primaris Argo sync policy
@@ -162,17 +163,19 @@ backend-kind overlay, which stays orthogonal to the runtime plane).
   TLS, so this is still a TLS channel — never plaintext. Prefer verified TLS;
   never use skip-verify against Primaris. CA PEM and token bytes never land
   in status, logs, or console/API JSON.
-- Controller dispatch (`internal/controller/agent_run_substrate_live.go`): with
-  the gate on, a well-formed SubstrateActor run binds its thread actor through
-  `EnsureTurnActor`, records `status.substrateActor` (turn-to-actor binding),
-  and reports `Running/SubstrateActorBound` with warm-vs-cold guidance. The
-  branch runs before any Job-launch receipt is written, so no Job is ever
-  created for the run; terminal runs suspend on idle (best-effort). Peer child
-  runs take the identical path via their recipient child-thread source, so
-  peer resume is `ResumeActor` with no new peer protocol. Covered by
-  fake-backend reconcile tests asserting Running + binding + zero Jobs for
-  direct turns, warm reuse across append-only turns, peer-child binding, and
-  suspend-on-idle.
+- Controller dispatch (`internal/controller/agent_run_substrate_live.go`):
+  `actorsEnabled` without generate-on-actor keeps `SubstrateActorNotWired`
+  (Desktop `standing-chat` unchanged). With generate-on-actor on for an
+  allowlisted class, the run binds its thread actor through
+  `EnsureTurnActor`, POSTs the frozen prompt through atenet, records
+  `status.substrateActor`, and marks `Succeeded/SubstrateActorGenerated` or
+  `Failed/SubstrateActorGenerateFailed`. Transient atenet errors requeue as
+  `Running/SubstrateActorBound`. The branch runs before any Job-launch
+  receipt is written, so no Job is ever created for the run; terminal runs
+  suspend on idle (best-effort). Peer child runs take the identical path via
+  their recipient child-thread source. Covered by fake-backend reconcile
+  tests asserting Succeeded + binding + zero Jobs for direct turns, warm
+  reuse, peer-child binding, standing-chat hold, and suspend-on-idle.
 - Peer contract (`TestPeerResumeContract` plus a runapi source-mapping test):
   deterministic child-thread and delivery request IDs converge retries onto
   one warm recipient actor; the durable wait for busy recipients still owns
@@ -230,13 +233,14 @@ do not change Primaris Argo sync policy. The spike needs only:
 Anvil Primaris does **not** run `ate-system`. Upstream ATE 0.0.8 installs a
 privileged `atelet` DaemonSet with hostPorts 8085/9090 and a
 `/var/lib/ateom-gvisor` hostPath on every node. The Anvil live client is
-lifecycle-only (Create/Resume/Suspend/Pause/GetActor) — it does not execute
-a chat turn on the actor. Standing ProcessBackend already completes
-`SubstrateActor` Desktop turns in ~10s (no Job). Enabling the ATE gate
-without a completion path hangs unclaimed runs at
-`Running/SubstrateActorBound`. Keep the chart `substrate.actorsEnabled`
-false on Primaris until ATE is constrained (nodeSelector, no cluster-wide
-hostPorts) and a generate-on-actor path exists. Hazy Trade manager stays
+lifecycle-only (Create/Resume/Suspend/Pause/GetActor) until generate-on-actor
+is opted in per `actorClass`. Standing ProcessBackend already completes
+`standing-chat` Desktop turns in ~10s (no Job). Enabling `actorsEnabled`
+without `generateOnActor` plus an allowlist keeps those runs on the
+`SubstrateActorNotWired` hold so Desktop is unchanged. Generate uses
+`ActorTemplate/acp-spike`, not `standing-chat`. Keep both chart gates false
+on Primaris until ATE is constrained (nodeSelector, no cluster-wide
+hostPorts) and an `acp-spike` smoke bind+generate succeeds. Hazy Trade manager stays
 Job/RWO OAuth.
 
 Enable the gate on the controller only when ateapi is actually reachable
@@ -489,11 +493,14 @@ the same cluster shape:
   JWT ATE no longer fails controller startup for missing ClusterTrustBundle.
 - [x] Constrained Primaris overlay **files** at
   `config/ate-constrained-primaris/` (jwt issuer/audience, one-node pin,
-  `ActorTemplate/standing-chat`, `WorkerPool/warm`). Do not stock-install.
-  Do not apply until generate-on-actor exists.
-- [ ] Generate-on-actor (Resume + atenet/ACP stream, mark AgentRun
+  `ActorTemplate/standing-chat`, `ActorTemplate/acp-spike`, `WorkerPool/warm`).
+  Do not stock-install. Apply only with a one-node-safe render after this
+  generate-on-actor image is live.
+- [x] Generate-on-actor (Resume + atenet/ACP stream, mark AgentRun
   Succeeded). Plan: [substrate-generate-on-actor.md](substrate-generate-on-actor.md).
-  Keep `substrate.actorsEnabled=false` on Primaris until that lands.
+  Keep `substrate.actorsEnabled=false` and `substrate.generateOnActor=false`
+  on Primaris until a one-node ATE apply and an `acp-spike` smoke succeed.
+  Desktop `standing-chat` stays on ProcessBackend.
 - [x] Actor identity in `status.substrateActor` and turn-to-actor binding.
 - [x] Latency harness (Job cold start vs warm actor resume) covering direct
   turns, peer deliveries, and the busy-recipient durable-wait peer path

@@ -24,14 +24,16 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     go install "github.com/google/go-licenses/v2@${GO_LICENSES_VERSION}" && \
     CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
-    /go/bin/go-licenses save ./cmd/anvil-agents ./cmd/anvil-agents-api \
+    /go/bin/go-licenses save ./cmd/anvil-agents ./cmd/anvil-agents-api ./cmd/anvil-actor-acp \
     --save_path /out/licenses
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
     go build -trimpath -ldflags="-s -w" -o /out/anvil-agents ./cmd/anvil-agents && \
     CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
-    go build -trimpath -ldflags="-s -w" -o /out/anvil-agents-api ./cmd/anvil-agents-api
+    go build -trimpath -ldflags="-s -w" -o /out/anvil-agents-api ./cmd/anvil-agents-api && \
+    CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
+    go build -trimpath -ldflags="-s -w" -o /out/anvil-actor-acp ./cmd/anvil-actor-acp
 
 # base (not static): standing ProcessBackend may exec PATH harness CLIs
 # (e.g. grok) that are dynamically linked against glibc.
@@ -39,6 +41,7 @@ FROM gcr.io/distroless/base-debian12:nonroot
 LABEL org.opencontainers.image.source=https://github.com/HazyForge/anvil-agents
 COPY --from=build /out/anvil-agents /usr/local/bin/anvil-agents
 COPY --from=build /out/anvil-agents-api /usr/local/bin/anvil-agents-api
+COPY --from=build /out/anvil-actor-acp /usr/local/bin/anvil-actor-acp
 COPY --from=build /out/licenses /usr/share/licenses/anvil-agents
 EXPOSE 8080 8081 8082
 ENTRYPOINT ["/usr/local/bin/anvil-agents"]

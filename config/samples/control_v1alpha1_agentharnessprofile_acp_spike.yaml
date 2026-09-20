@@ -1,0 +1,25 @@
+apiVersion: control.anvil.hazyforge.io/v1alpha1
+kind: AgentHarnessProfile
+metadata:
+  name: substrate-acp-spike
+  namespace: agents
+spec:
+  description: Spike generate-on-actor harness. Opt-in actorClass acp-spike streams the frozen AgentRun prompt through atenet. Desktop standing-chat must keep actorClass standing-chat.
+  backend:
+    kind: custom
+    image: python:3.12-alpine@sha256:9b8dad7f66b5c7751df6cb7a64a07812e86bed85d0116efe82b3a11209f1440d
+  execution:
+    serviceAccountName: agent-runner
+    runtime: SubstrateActor
+    substrate:
+      actorClass: acp-spike
+      pool: warm
+      suspendOnIdle: true
+    timeoutSeconds: 180
+    resources:
+      requests:
+        cpu: 50m
+        memory: 64Mi
+      limits:
+        cpu: 500m
+        memory: 256Mi

@@ -12,13 +12,14 @@ ApplicationSet applies). It is files only until an operator:
 1. Renders with rotated RustFS keys.
 2. Confirms every DaemonSet/Deployment/StatefulSet/Job is pinned to **one**
    worker (`anvil-primaris-worker-hel1-1`).
-3. Confirms generate-on-actor exists (see
+3. Confirms generate-on-actor is in the live Anvil image (see
    [`docs/substrate-generate-on-actor.md`](../../docs/substrate-generate-on-actor.md)).
 
-Do **not** apply this overlay yet. Do **not** set Primaris
-`substrate.actorsEnabled=true`. Desktop standing grok stays on API
-`ProcessBackend`. Standing claim still wins first; bind-only ATE hangs
-unclaimed `SubstrateActor` runs at `Running/SubstrateActorBound`.
+Apply this overlay only after that image is live. Do **not** set Primaris
+`substrate.actorsEnabled=true` or `substrate.generateOnActor=true` until an
+`acp-spike` smoke bind+generate succeeds. Desktop standing grok stays on API
+`ProcessBackend` (`actorClass: standing-chat` is not in the generate
+allowlist).
 
 ## What this pins
 
@@ -29,8 +30,8 @@ unclaimed `SubstrateActor` runs at `Running/SubstrateActorBound`.
 | Release / namespace | `substrate` / `ate-system` (TLS ServerName `api.ate-system.svc`) |
 | Auth | `jwt` (ATE default). Issuer: Talos SA `https://[fdae:41e4:649b:9303::1]:10000`. Audience: `api.ate-system.svc` |
 | Node | `kubernetes.io/hostname=anvil-primaris-worker-hel1-1` on every workload **and** WorkerPool pods |
-| Fleet | `ActorTemplate/standing-chat` + `WorkerPool/warm` in `anvilhub` and `hazy-trade` |
-| Anvil client | Get/Create/Resume/Suspend/Pause only — no Execute |
+| Fleet | `ActorTemplate/standing-chat` + `ActorTemplate/acp-spike` + `WorkerPool/warm` in `anvilhub` and `hazy-trade` |
+| Anvil client | Get/Create/Resume/Suspend/Pause; generate-on-actor is ACP/HTTP through atenet after Resume, opted in per actorClass |
 
 Valkey stays at **6 replicas** because the 0.0.8 init Job hardcodes pods
 `0..5`. There is no anti-affinity, so all six plus RustFS, ateapi,
@@ -58,8 +59,9 @@ cp config/ate-constrained-primaris/values.secrets.yaml.example \
 Apply, if ever, is CRDs then the render — not stock helm install:
 
 ```bash
-# Still do not run these until generate-on-actor lands and the render is
-# one-node-safe. Shown only so the procedure is not tribal knowledge.
+# Apply after generate-on-actor is in the live Anvil image and the render is
+# one-node-safe. Leave Anvil actorsEnabled/generateOnActor off until acp-spike
+# smoke succeeds.
 # helm template substrate-crds oci://ghcr.io/kagent-dev/substrate/helm/substrate-crds --version 0.0.8 | kubectl apply --context hazyforge-anvil-primaris -f -
 # kubectl --context hazyforge-anvil-primaris apply -f /tmp/ate-constrained-primaris.yaml
 ```
@@ -68,7 +70,10 @@ After ATE exists, Anvil JWT CA trust is chart `substrate.ca.configMapName=ateapi
 with `substrate.ca.namespace=ate-system` (cross-namespace lookup; the
 controller already has ConfigMap get). Projected token:
 `substrate.token.projected=true` audience `api.ate-system.svc`. Leave
-`substrate.actorsEnabled=false`.
+`substrate.actorsEnabled=false` and `substrate.generateOnActor=false` until
+an `acp-spike` smoke bind+generate succeeds. Fleet includes
+`ActorTemplate/acp-spike` (ACP echo) and `standing-chat` (Desktop stays on
+ProcessBackend).
 
 ## RustFS keys
 

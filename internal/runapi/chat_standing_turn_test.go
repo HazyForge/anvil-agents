@@ -204,6 +204,46 @@ func TestStandingTurnStreamsSubstrateActor(t *testing.T) {
 	}
 }
 
+func TestStandingTurnDoesNotStealGenerateOnActorClass(t *testing.T) {
+	ctx := context.Background()
+	server := chatTestServer(t, true)
+	harness := &agentsv1alpha1.AgentHarnessProfile{
+		ObjectMeta: metav1.ObjectMeta{Name: "acp-spike", Namespace: "agents"},
+		Spec: agentsv1alpha1.AgentHarnessProfileSpec{
+			Backend: agentsv1alpha1.AgentRunHarnessBackendSpec{Kind: agentsv1alpha1.AgentRunHarnessBackendCustom, Image: "registry.invalid/acp-spike:test"},
+			Execution: agentsv1alpha1.AgentRunHarnessExecutionSpec{
+				Runtime:   agentsv1alpha1.AgentRunExecutionRuntimeSubstrateActor,
+				Substrate: &agentsv1alpha1.AgentRunSubstrateActorSpec{ActorClass: "acp-spike", Pool: "warm"},
+			},
+		},
+	}
+	if err := server.writes.Create(ctx, harness); err != nil {
+		t.Fatal(err)
+	}
+	fake := standing.NewFakeBackend()
+	enableStandingLive(t, server, fake)
+	server.config.Standing.GenerateActorClasses = []string{"acp-spike"}
+	thread := standingThread(t, server, "acp-spike")
+
+	accepted, err := server.queueChatTurn(ctx, "agents", thread.ID, AppendChatMessageRequest{Content: "generate on actor"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if accepted.Turn.Status == "succeeded" {
+		t.Fatal("ProcessBackend must not complete generate-on-actor classes")
+	}
+	run := &agentsv1alpha1.AgentRun{}
+	if err := server.writes.Get(ctx, types.NamespacedName{Namespace: "agents", Name: accepted.Turn.RunName}, run); err != nil {
+		t.Fatal(err)
+	}
+	if run.Status.Phase == agentsv1alpha1.AgentRunPhaseSucceeded {
+		t.Fatal("generate-on-actor run must wait for the controller, not standing ProcessBackend")
+	}
+	if fake.Turns() != 0 {
+		t.Fatalf("ProcessBackend stole %d turns, want 0", fake.Turns())
+	}
+}
+
 func TestStandingTurnPeerChildTakesIdenticalBranch(t *testing.T) {
 	ctx := context.Background()
 	server := chatTestServer(t, true)

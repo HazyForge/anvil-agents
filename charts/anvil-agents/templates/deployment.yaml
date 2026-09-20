@@ -112,6 +112,12 @@ spec:
             {{- with .Values.substrate.tlsServerName }}
             - --substrate-tls-server-name={{ . }}
             {{- end }}
+            {{- if .Values.substrate.generateOnActor }}
+            - --substrate-generate-on-actor=true
+            {{- $classes := .Values.substrate.generateActorClasses | default list }}
+            - --substrate-generate-actor-classes={{ join "," $classes }}
+            - --substrate-atenet-endpoint={{ default "atenet-router.ate-system.svc:80" .Values.substrate.atenetEndpoint }}
+            {{- end }}
           ports:
             - name: metrics
               containerPort: 8080

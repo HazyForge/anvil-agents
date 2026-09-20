@@ -2,9 +2,13 @@ package controller
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"strings"
 	"testing"
 
 	batchv1 "k8s.io/api/batch/v1"
+	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -15,9 +19,6 @@ import (
 	"github.com/hazyforge/anvil-agents/internal/substrate"
 )
 
-// liveSubstrateReconciler returns a reconciler with the explicit opt-in gate on
-// and an in-memory actor backend, so live-wiring tests never need a Substrate
-// cluster.
 func liveSubstrateReconciler(t *testing.T, run *agents.AgentRun, backend *substrate.FakeClient) *AgentRunReconciler {
 	t.Helper()
 	scheme := newAgentControlTestScheme(t)
@@ -39,12 +40,31 @@ func liveSubstrateReconciler(t *testing.T, run *agents.AgentRun, backend *substr
 	}
 }
 
+func liveGenerateReconciler(t *testing.T, run *agents.AgentRun, backend *substrate.FakeClient, gen *substrate.FakeGenerator) *AgentRunReconciler {
+	t.Helper()
+	r := liveSubstrateReconciler(t, run, backend)
+	r.Options.SubstrateGenerateOnActor = true
+	r.Options.SubstrateGenerateActorClasses = []string{substrate.DefaultGenerateActorClass}
+	if gen == nil {
+		gen = &substrate.FakeGenerator{}
+	}
+	r.SubstrateGenerate = gen
+	return r
+}
+
 func liveSubstrateRun(threadID string) *agents.AgentRun {
 	run := substrateSpikeRun()
 	run.Name = "standing-chat-live"
 	run.Spec.SourceRef = agents.AgentRunSourceRef{Kind: "ChatThread", Name: threadID}
 	run.Spec.Harness.Execution.Runtime = agents.AgentRunExecutionRuntimeSubstrateActor
 	run.Spec.Harness.Execution.Substrate = &agents.AgentRunSubstrateActorSpec{ActorClass: "standing-chat", Pool: "warm"}
+	return run
+}
+
+func liveGenerateRun(threadID string) *agents.AgentRun {
+	run := liveSubstrateRun(threadID)
+	run.Spec.Prompt = "frozen actor prompt"
+	run.Spec.Harness.Execution.Substrate = &agents.AgentRunSubstrateActorSpec{ActorClass: substrate.DefaultGenerateActorClass, Pool: "warm"}
 	return run
 }
 
@@ -75,7 +95,6 @@ func TestSubstrateLiveClientRequiresGateAndEndpoint(t *testing.T) {
 			if r.substrateLiveClient() != nil {
 				t.Fatal("live client must stay nil without the full opt-in")
 			}
-			// Without the live backend the API-first hold still applies.
 			if phase, reason, _ := r.agentRunBlockingValidation(run); phase != agents.AgentRunPhaseNeedsHuman || reason != "SubstrateActorNotWired" {
 				t.Fatalf("hold = %q/%q, want NeedsHuman/SubstrateActorNotWired", phase, reason)
 			}
@@ -83,7 +102,7 @@ func TestSubstrateLiveClientRequiresGateAndEndpoint(t *testing.T) {
 	}
 }
 
-func TestSubstrateGateOnLiftsHoldWithoutJob(t *testing.T) {
+func TestSubstrateGateOnWithoutGenerateKeepsHold(t *testing.T) {
 	t.Parallel()
 
 	run := liveSubstrateRun("thread-1")
@@ -91,26 +110,114 @@ func TestSubstrateGateOnLiftsHoldWithoutJob(t *testing.T) {
 		SubstrateClient:         substrate.NewFakeClient(),
 		CommonReconcilerOptions: CommonReconcilerOptions{Options: &Options{SubstrateActorsEnabled: true, SubstrateEndpoint: "ate-api-server.ate-system.svc:443"}},
 	}
-	if phase, reason, message := r.agentRunBlockingValidation(run); phase != "" || reason != "" || message != "" {
-		t.Fatalf("live validation = %q/%q/%q, want no blocking phase", phase, reason, message)
+	if phase, reason, _ := r.agentRunBlockingValidation(run); phase != agents.AgentRunPhaseNeedsHuman || reason != "SubstrateActorNotWired" {
+		t.Fatalf("actorsEnabled without generate = %q/%q, want SubstrateActorNotWired so Desktop standing-chat is unchanged", phase, reason)
 	}
 }
 
-func TestSubstrateLiveReconcileBindsActorWithoutJob(t *testing.T) {
+func TestSubstrateGenerateLiftsHoldForAllowedClassOnly(t *testing.T) {
+	t.Parallel()
+
+	gen := &substrate.FakeGenerator{}
+	allowed := liveGenerateRun("thread-1")
+	r := liveGenerateReconciler(t, allowed, substrate.NewFakeClient(), gen)
+	if phase, reason, message := r.agentRunBlockingValidation(allowed); phase != "" || reason != "" || message != "" {
+		t.Fatalf("acp-spike validation = %q/%q/%q, want no blocking phase", phase, reason, message)
+	}
+	denied := liveSubstrateRun("thread-desktop")
+	if phase, reason, _ := r.agentRunBlockingValidation(denied); phase != agents.AgentRunPhaseNeedsHuman || reason != "SubstrateActorNotWired" {
+		t.Fatalf("standing-chat hold = %q/%q, want NotWired", phase, reason)
+	}
+}
+
+func TestSubstrateGenerateCompletesWithoutJob(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
 	backend := substrate.NewFakeClient()
-	run := liveSubstrateRun("thread-direct-1")
-	r := liveSubstrateReconciler(t, run, backend)
+	gen := &substrate.FakeGenerator{Reply: "actor reply"}
+	run := liveGenerateRun("thread-direct-1")
+	r := liveGenerateReconciler(t, run, backend, gen)
 	req := ctrl.Request{NamespacedName: client.ObjectKeyFromObject(run)}
 
 	result, err := r.Reconcile(ctx, req)
 	if err != nil {
 		t.Fatalf("reconcile: %v", err)
 	}
-	if !result.Requeue && result.RequeueAfter == 0 {
-		t.Fatal("live actor reconcile must requeue for warm-resume polling")
+	if result.Requeue || result.RequeueAfter != 0 {
+		t.Fatalf("generate success must not requeue: %+v", result)
+	}
+	updated := &agents.AgentRun{}
+	if err := r.Get(ctx, types.NamespacedName{Namespace: run.Namespace, Name: run.Name}, updated); err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	if updated.Status.Phase != agents.AgentRunPhaseSucceeded {
+		t.Fatalf("phase = %q, want Succeeded", updated.Status.Phase)
+	}
+	cond := apimeta.FindStatusCondition(updated.Status.Conditions, agentRunReady)
+	if cond == nil || cond.Reason != "SubstrateActorGenerated" {
+		t.Fatalf("ready = %+v, want SubstrateActorGenerated", cond)
+	}
+	if strings.TrimSpace(updated.Status.Output) != "actor reply" {
+		t.Fatalf("output = %q, want actor reply", updated.Status.Output)
+	}
+	wantActor := substrate.ActorNameForThread("thread-direct-1")
+	if updated.Status.SubstrateActor == nil || updated.Status.SubstrateActor.ActorName != wantActor {
+		t.Fatalf("substrate actor = %+v, want actor %q", updated.Status.SubstrateActor, wantActor)
+	}
+	if updated.Status.JobRef != nil || updated.Status.PlannedJobRef != nil || updated.Status.JobCreateAttemptedAt != nil {
+		t.Fatalf("generate-on-actor must not carry Job-launch receipts: %+v", updated.Status)
+	}
+	jobs := &batchv1.JobList{}
+	if err := r.List(ctx, jobs); err != nil {
+		t.Fatalf("list jobs: %v", err)
+	}
+	if len(jobs.Items) != 0 {
+		t.Fatalf("generate created %d Jobs, want none", len(jobs.Items))
+	}
+	if len(gen.Calls) != 1 || gen.Calls[0].Prompt != "frozen actor prompt" || gen.Calls[0].ActorName != wantActor {
+		t.Fatalf("generate calls = %+v", gen.Calls)
+	}
+}
+
+func TestSubstrateGenerateFailureDoesNotStayBound(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	backend := substrate.NewFakeClient()
+	gen := &substrate.FakeGenerator{Err: errors.New("actor refused the prompt")}
+	run := liveGenerateRun("thread-fail-1")
+	r := liveGenerateReconciler(t, run, backend, gen)
+	if _, err := r.Reconcile(ctx, ctrl.Request{NamespacedName: client.ObjectKeyFromObject(run)}); err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+	updated := &agents.AgentRun{}
+	if err := r.Get(ctx, types.NamespacedName{Namespace: run.Namespace, Name: run.Name}, updated); err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	if updated.Status.Phase != agents.AgentRunPhaseFailed {
+		t.Fatalf("phase = %q, want Failed", updated.Status.Phase)
+	}
+	cond := apimeta.FindStatusCondition(updated.Status.Conditions, agentRunReady)
+	if cond == nil || cond.Reason != "SubstrateActorGenerateFailed" {
+		t.Fatalf("ready = %+v, want SubstrateActorGenerateFailed", cond)
+	}
+	if strings.Contains(updated.Status.Error, "actor refused") {
+		t.Fatal("status must not copy generate error text that might include secrets")
+	}
+}
+
+func TestSubstrateGenerateTransientRequeuesWithoutFailing(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	backend := substrate.NewFakeClient()
+	gen := &substrate.FakeGenerator{Err: fmt.Errorf("%w: HTTP 503", substrate.ErrGenerateTransient)}
+	run := liveGenerateRun("thread-park-1")
+	r := liveGenerateReconciler(t, run, backend, gen)
+	_, err := r.Reconcile(ctx, ctrl.Request{NamespacedName: client.ObjectKeyFromObject(run)})
+	if !errors.Is(err, substrate.ErrGenerateTransient) {
+		t.Fatalf("reconcile err = %v, want ErrGenerateTransient", err)
 	}
 	updated := &agents.AgentRun{}
 	if err := r.Get(ctx, types.NamespacedName{Namespace: run.Namespace, Name: run.Name}, updated); err != nil {
@@ -119,28 +226,36 @@ func TestSubstrateLiveReconcileBindsActorWithoutJob(t *testing.T) {
 	if updated.Status.Phase != agents.AgentRunPhaseRunning {
 		t.Fatalf("phase = %q, want Running", updated.Status.Phase)
 	}
-	if updated.Status.ExecutionRuntime != string(agents.AgentRunExecutionRuntimeSubstrateActor) {
-		t.Fatalf("execution runtime = %q, want SubstrateActor", updated.Status.ExecutionRuntime)
+	cond := apimeta.FindStatusCondition(updated.Status.Conditions, agentRunReady)
+	if cond == nil || cond.Reason != "SubstrateActorBound" {
+		t.Fatalf("ready = %+v, want SubstrateActorBound while retrying", cond)
 	}
-	wantActor := substrate.ActorNameForThread("thread-direct-1")
-	if updated.Status.SubstrateActor == nil || updated.Status.SubstrateActor.ActorName != wantActor {
-		t.Fatalf("substrate actor = %+v, want actor %q", updated.Status.SubstrateActor, wantActor)
+}
+
+func TestSubstrateStandingChatDoesNotGenerate(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	backend := substrate.NewFakeClient()
+	gen := &substrate.FakeGenerator{Reply: "stolen"}
+	run := liveSubstrateRun("thread-desktop-1")
+	run.Spec.Prompt = "hey"
+	r := liveGenerateReconciler(t, run, backend, gen)
+	if _, err := r.Reconcile(ctx, ctrl.Request{NamespacedName: client.ObjectKeyFromObject(run)}); err != nil {
+		t.Fatalf("reconcile: %v", err)
 	}
-	if updated.Status.SubstrateActor.ActorID == "" || updated.Status.SubstrateActor.State != string(substrate.ActorStateActive) {
-		t.Fatalf("substrate actor binding = %+v, want active with an ID", updated.Status.SubstrateActor)
+	updated := &agents.AgentRun{}
+	if err := r.Get(ctx, types.NamespacedName{Namespace: run.Namespace, Name: run.Name}, updated); err != nil {
+		t.Fatalf("get run: %v", err)
 	}
-	if updated.Status.JobRef != nil || updated.Status.PlannedJobRef != nil || updated.Status.JobCreateAttemptedAt != nil {
-		t.Fatalf("live actor run must not carry Job-launch receipts: %+v", updated.Status)
+	if updated.Status.Phase != agents.AgentRunPhaseNeedsHuman {
+		t.Fatalf("phase = %q, want NeedsHuman hold for standing-chat", updated.Status.Phase)
 	}
-	jobs := &batchv1.JobList{}
-	if err := r.List(ctx, jobs); err != nil {
-		t.Fatalf("list jobs: %v", err)
+	if len(gen.Calls) != 0 {
+		t.Fatalf("ProcessBackend class must not hit atenet: %+v", gen.Calls)
 	}
-	if len(jobs.Items) != 0 {
-		t.Fatalf("live actor reconcile created %d Jobs, want none", len(jobs.Items))
-	}
-	if updated.Status.CompletedAt != nil {
-		t.Fatal("running actor binding must not set CompletedAt")
+	if backend.Created() != 0 {
+		t.Fatal("standing-chat must not bind an ATE actor")
 	}
 }
 
@@ -149,8 +264,9 @@ func TestSubstrateLiveReconcileWarmsOnSecondTurn(t *testing.T) {
 
 	ctx := context.Background()
 	backend := substrate.NewFakeClient()
-	run := liveSubstrateRun("thread-direct-2")
-	r := liveSubstrateReconciler(t, run, backend)
+	gen := &substrate.FakeGenerator{}
+	run := liveGenerateRun("thread-direct-2")
+	r := liveGenerateReconciler(t, run, backend, gen)
 	req := ctrl.Request{NamespacedName: client.ObjectKeyFromObject(run)}
 
 	if _, err := r.Reconcile(ctx, req); err != nil {
@@ -159,12 +275,9 @@ func TestSubstrateLiveReconcileWarmsOnSecondTurn(t *testing.T) {
 	if got := backend.Created(); got != 1 {
 		t.Fatalf("distinct actors after first turn = %d, want 1", got)
 	}
-	// A second turn on the same thread (new append-only AgentRun) resumes the
-	// warm actor instead of paying another cold create.
-	second := liveSubstrateRun("thread-direct-2")
+	second := liveGenerateRun("thread-direct-2")
 	second.Name = "standing-chat-live-2"
-	r2 := liveSubstrateReconciler(t, second, backend)
-	// Share the backend across both reconcilers like the live gateway would.
+	r2 := liveGenerateReconciler(t, second, backend, gen)
 	r2.SubstrateClient = backend
 	req2 := ctrl.Request{NamespacedName: client.ObjectKeyFromObject(second)}
 	if _, err := r2.Reconcile(ctx, req2); err != nil {
@@ -180,6 +293,9 @@ func TestSubstrateLiveReconcileWarmsOnSecondTurn(t *testing.T) {
 	if updated.Status.SubstrateActor == nil || updated.Status.SubstrateActor.ActorName != substrate.ActorNameForThread("thread-direct-2") {
 		t.Fatalf("second turn actor = %+v, want the shared thread actor", updated.Status.SubstrateActor)
 	}
+	if updated.Status.Phase != agents.AgentRunPhaseSucceeded {
+		t.Fatalf("second phase = %q, want Succeeded", updated.Status.Phase)
+	}
 }
 
 func TestSubstrateLivePeerChildResumesRecipientActor(t *testing.T) {
@@ -187,12 +303,9 @@ func TestSubstrateLivePeerChildResumesRecipientActor(t *testing.T) {
 
 	ctx := context.Background()
 	backend := substrate.NewFakeClient()
-	// Peer coordination creates one durable child thread per recipient; the
-	// child run carries the child thread as its ChatThread source, so the live
-	// path resumes the recipient actor with no new peer protocol.
-	child := liveSubstrateRun("child-recipient-thread")
+	child := liveGenerateRun("child-recipient-thread")
 	child.Name = "peer-delivery-live"
-	r := liveSubstrateReconciler(t, child, backend)
+	r := liveGenerateReconciler(t, child, backend, nil)
 	req := ctrl.Request{NamespacedName: client.ObjectKeyFromObject(child)}
 
 	if _, err := r.Reconcile(ctx, req); err != nil {
@@ -206,8 +319,8 @@ func TestSubstrateLivePeerChildResumesRecipientActor(t *testing.T) {
 	if updated.Status.SubstrateActor == nil || updated.Status.SubstrateActor.ActorName != wantActor {
 		t.Fatalf("peer actor = %+v, want recipient actor %q", updated.Status.SubstrateActor, wantActor)
 	}
-	if updated.Status.Phase != agents.AgentRunPhaseRunning {
-		t.Fatalf("peer phase = %q, want Running", updated.Status.Phase)
+	if updated.Status.Phase != agents.AgentRunPhaseSucceeded {
+		t.Fatalf("peer phase = %q, want Succeeded", updated.Status.Phase)
 	}
 	peerJobs := &batchv1.JobList{}
 	if err := r.List(ctx, peerJobs); err != nil {
@@ -221,8 +334,6 @@ func TestSubstrateLivePeerChildResumesRecipientActor(t *testing.T) {
 func TestSubstrateLiveDefaultJobPathUntouched(t *testing.T) {
 	t.Parallel()
 
-	// With the gate on, a default-runtime run must not consult the actor plane
-	// at all: no hold, no actor binding, no live client requirement.
 	run := substrateSpikeRun()
 	r := &AgentRunReconciler{
 		SubstrateClient:         substrate.NewFakeClient(),
@@ -241,31 +352,22 @@ func TestSubstrateTerminalRunSuspendsActor(t *testing.T) {
 
 	ctx := context.Background()
 	backend := substrate.NewFakeClient()
-	run := liveSubstrateRun("thread-terminal-1")
-	r := liveSubstrateReconciler(t, run, backend)
+	run := liveGenerateRun("thread-terminal-1")
+	r := liveGenerateReconciler(t, run, backend, nil)
 	req := ctrl.Request{NamespacedName: client.ObjectKeyFromObject(run)}
 
 	if _, err := r.Reconcile(ctx, req); err != nil {
 		t.Fatalf("reconcile: %v", err)
 	}
-	described, err := backend.DescribeActor(ctx, run.Namespace, substrate.ActorNameForThread("thread-terminal-1"))
-	if err != nil {
-		t.Fatalf("describe: %v", err)
-	}
-	if described.State != substrate.ActorStateActive {
-		t.Fatalf("bound actor state = %q, want Active", described.State)
-	}
-	r.suspendSubstrateActorOnTerminal(ctx, run)
 	suspended, err := backend.DescribeActor(ctx, run.Namespace, substrate.ActorNameForThread("thread-terminal-1"))
 	if err != nil {
-		t.Fatalf("describe after suspend: %v", err)
+		t.Fatalf("describe after generate: %v", err)
 	}
 	if suspended.State != substrate.ActorStateSuspended {
-		t.Fatalf("idle actor state = %q, want Suspended", suspended.State)
+		t.Fatalf("idle actor state = %q, want Suspended after generate success", suspended.State)
 	}
-	// Suspend is best-effort: missing actors and Job runs never error.
 	r.suspendSubstrateActorOnTerminal(ctx, substrateSpikeRun())
-	missing := liveSubstrateRun("thread-never-bound")
+	missing := liveGenerateRun("thread-never-bound")
 	r.suspendSubstrateActorOnTerminal(ctx, missing)
 }
 

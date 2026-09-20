@@ -100,6 +100,7 @@ func Run(ctx context.Context, options *Options) error {
 	// Kind-only skip-verify TLS behind --substrate-insecure for loopback). No token
 	// material is ever logged.
 	var substrateClient substrate.Client
+	var substrateGenerate substrate.TurnGenerator
 	if options.SubstrateActorsEnabled && strings.TrimSpace(options.SubstrateEndpoint) != "" {
 		ateCfg := substrate.ATEClientConfig{
 			Address:              strings.TrimSpace(options.SubstrateEndpoint),
@@ -121,6 +122,21 @@ func Run(ctx context.Context, options *Options) error {
 		defer closeConn()
 		substrateClient = live
 	}
+	if options.SubstrateGenerateOnActor {
+		endpoint := strings.TrimSpace(options.SubstrateAtenetEndpoint)
+		if endpoint == "" {
+			endpoint = substrate.DefaultAtenetEndpoint
+		}
+		gen, err := substrate.NewAtenetClient(substrate.AtenetConfig{
+			Endpoint:  endpoint,
+			TokenFile: strings.TrimSpace(options.SubstrateTokenFile),
+			Token:     strings.TrimSpace(options.SubstrateToken),
+		})
+		if err != nil {
+			return fmt.Errorf("atenet generate-on-actor client: %w", err)
+		}
+		substrateGenerate = gen
+	}
 	registrations := []struct {
 		name  string
 		setup func(ctrl.Manager) error
@@ -130,7 +146,7 @@ func Run(ctx context.Context, options *Options) error {
 		{"AgentAuthSession", (&AgentAuthSessionReconciler{Client: mgr.GetClient(), Scheme: mgr.GetScheme(), CommonReconcilerOptions: common}).SetupWithManager},
 		{"AgentDataVolumeCopy", (&AgentDataVolumeCopyReconciler{Client: mgr.GetClient(), Scheme: mgr.GetScheme(), CommonReconcilerOptions: common}).SetupWithManager},
 		{"AgentRunControl", (&AgentRunControlReconciler{Client: mgr.GetClient(), Scheme: mgr.GetScheme()}).SetupWithManager},
-		{"AgentRun", (&AgentRunReconciler{Client: mgr.GetClient(), Scheme: mgr.GetScheme(), CommonReconcilerOptions: common, AgentRunArchive: archiveStore, SubstrateClient: substrateClient}).SetupWithManager},
+		{"AgentRun", (&AgentRunReconciler{Client: mgr.GetClient(), Scheme: mgr.GetScheme(), CommonReconcilerOptions: common, AgentRunArchive: archiveStore, SubstrateClient: substrateClient, SubstrateGenerate: substrateGenerate}).SetupWithManager},
 		{"AgentSchedule", (&AgentScheduleReconciler{Client: mgr.GetClient(), Scheme: mgr.GetScheme()}).SetupWithManager},
 		{"AgentExternalTrigger", (&AgentExternalTriggerReconciler{
 			Client:                  mgr.GetClient(),

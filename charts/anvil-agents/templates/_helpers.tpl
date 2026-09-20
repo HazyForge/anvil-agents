@@ -280,6 +280,9 @@ true
 {{- end }}
 
 {{- define "anvil-agents.validateSubstrate" -}}
+{{- if and .Values.substrate.generateOnActor (eq (len (.Values.substrate.generateActorClasses | default list)) 0) }}
+{{- fail "substrate.generateOnActor requires substrate.generateActorClasses (exact actorClass allowlist; do not list standing-chat)" -}}
+{{- end -}}
 {{- $ca := .Values.substrate.ca | default dict -}}
 {{- $name := default "" $ca.configMapName -}}
 {{- $ns := default "" $ca.namespace -}}

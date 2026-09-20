@@ -126,10 +126,14 @@ type AgentRunReconciler struct {
 	ReadPodLogs     func(ctx context.Context, namespace, pod string) (string, error)
 	AgentRunArchive archive.AgentRunArchiveStore
 	// SubstrateClient is the optional live actor backend (standing-chat spike
-	// slice 2). Nil keeps the API-first hold. It is only consulted when the
-	// SubstrateActorsEnabled gate and SubstrateEndpoint are both configured;
-	// the default Job path never touches it.
+	// slice 2). Nil keeps the API-first hold. It is only consulted when
+	// generate-on-actor is enabled for the run's actorClass (plus the
+	// SubstrateActorsEnabled gate and SubstrateEndpoint); the default Job
+	// path never touches it.
 	SubstrateClient substrate.Client
+	// SubstrateGenerate streams the frozen prompt through atenet after bind.
+	// Nil keeps generate-on-actor off.
+	SubstrateGenerate substrate.TurnGenerator
 }
 
 func (r *AgentRunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -476,7 +480,7 @@ func (r *AgentRunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		// written, so the Job plane keeps treating them as unlaunched and no
 		// Job is ever created for them. The default Job path falls through
 		// unchanged.
-		if r.substrateLiveClient() != nil && effective.Spec.Harness.Execution.UsesSubstrateActors() {
+		if r.shouldGenerateOnActor(effective) {
 			return r.reconcileSubstrateActorRun(ctx, original, obj, &status, effective, now)
 		}
 		prompt := buildAgentRunPrompt(effective)
@@ -3599,9 +3603,11 @@ func (r *AgentRunReconciler) agentRunBackendValidation(obj *controlv1alpha1.Agen
 // Kubernetes Job before live actor dispatch exists. It runs after backend
 // validation so adapter misconfiguration still surfaces first; scouts and
 // batch runs never reach it because they stay on the default Job runtime.
-// When the explicit live gate is on with a configured backend, the hold lifts
-// and reconcileSubstrateActorRun binds the warm actor instead (still with no
-// Job).
+// When generate-on-actor is opted in for the run's actorClass (plus the live
+// gate and a configured backend), the hold lifts and
+// reconcileSubstrateActorRun binds then streams through atenet (still with no
+// Job). actorsEnabled alone leaves the hold so Desktop standing-chat is
+// unchanged.
 func (r *AgentRunReconciler) agentRunSubstrateHold(obj *controlv1alpha1.AgentRun) (controlv1alpha1.AgentRunPhase, string, string) {
 	if obj == nil || !obj.Spec.Harness.Execution.UsesSubstrateActors() {
 		return "", "", ""
@@ -3610,7 +3616,7 @@ func (r *AgentRunReconciler) agentRunSubstrateHold(obj *controlv1alpha1.AgentRun
 		return controlv1alpha1.AgentRunPhaseNeedsHuman, "StandingClaimed",
 			fmt.Sprintf("execution.runtime SubstrateActor standing turn %q is owned by API replica %q; the controller yields and created no Kubernetes Job. See docs/standing-inprocess-harness.md (slice 4).", claim.TurnID, claim.Owner)
 	}
-	if r.substrateLiveClient() != nil {
+	if r.shouldGenerateOnActor(obj) {
 		return "", "", ""
 	}
 	return controlv1alpha1.AgentRunPhaseNeedsHuman, "SubstrateActorNotWired",

@@ -1,0 +1,83 @@
+# ActorTemplate name acp-spike is the generate-on-actor allowlist class.
+# This image speaks ACP-over-HTTP on :80 (initialize, session/new,
+# session/prompt echo). Desktop standing-chat stays on ActorTemplate
+# standing-chat (Job grok-build placeholder) and ProcessBackend.
+#
+# Images must be digest-pinned (@). python:3.12-alpine linux/amd64 from
+# 2026-09-17; runs as root so it can bind :80 (atenet ExtProc rewrites
+# :authority to <pod_ip>:80).
+apiVersion: ate.dev/v1alpha1
+kind: ActorTemplate
+metadata:
+  name: acp-spike
+spec:
+  sandboxClass: gvisor
+  pauseImage: registry.k8s.io/pause:3.10.2@sha256:f548e0e8e3dc1896ca956272154dde3314e8cc4fde0a57577ee9fa1c63f5baf4
+  snapshotsConfig:
+    location: s3://ate-snapshots/acp-spike
+    onPause: Full
+    onCommit: Full
+  workerSelector:
+    matchLabels:
+      anvil.hazyforge.io/worker-pool: warm
+  containers:
+    - name: agent
+      image: python:3.12-alpine@sha256:9b8dad7f66b5c7751df6cb7a64a07812e86bed85d0116efe82b3a11209f1440d
+      command:
+        - python3
+        - -c
+        - |
+          import json
+          from http.server import BaseHTTPRequestHandler, HTTPServer
+          class H(BaseHTTPRequestHandler):
+              def log_message(self, *args):
+                  return
+              def do_GET(self):
+                  self.send_response(200)
+                  self.end_headers()
+                  self.wfile.write(b"ok\n")
+              def do_POST(self):
+                  n = int(self.headers.get("Content-Length") or 0)
+                  raw = self.rfile.read(n)
+                  try:
+                      rpc = json.loads(raw)
+                  except Exception:
+                      self.send_response(200)
+                      self.send_header("Content-Type", "text/plain")
+                      self.end_headers()
+                      self.wfile.write(raw)
+                      return
+                  method = rpc.get("method")
+                  rid = rpc.get("id", 1)
+                  if method == "initialize":
+                      body = {"jsonrpc": "2.0", "id": rid, "result": {"protocolVersion": 1, "agentCapabilities": {"promptCapabilities": {}}}}
+                      self.send_response(200)
+                      self.send_header("Content-Type", "application/json")
+                      self.end_headers()
+                      self.wfile.write(json.dumps(body).encode())
+                      return
+                  if method == "session/new":
+                      body = {"jsonrpc": "2.0", "id": rid, "result": {"sessionId": "echo-1"}}
+                      self.send_response(200)
+                      self.send_header("Content-Type", "application/json")
+                      self.end_headers()
+                      self.wfile.write(json.dumps(body).encode())
+                      return
+                  if method == "session/prompt":
+                      params = rpc.get("params") or {}
+                      text = "".join(b.get("text", "") for b in params.get("prompt") or [] if b.get("type") == "text")
+                      sid = params.get("sessionId") or "echo-1"
+                      upd = {"jsonrpc": "2.0", "method": "session/update", "params": {"sessionId": sid, "update": {"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": text}}}}
+                      res = {"jsonrpc": "2.0", "id": rid, "result": {"stopReason": "end_turn"}}
+                      out = json.dumps(upd) + "\n" + json.dumps(res) + "\n"
+                      self.send_response(200)
+                      self.send_header("Content-Type", "application/x-ndjson")
+                      self.end_headers()
+                      self.wfile.write(out.encode())
+                      return
+                  err = {"jsonrpc": "2.0", "id": rid, "error": {"code": -32601, "message": "method not found"}}
+                  self.send_response(200)
+                  self.send_header("Content-Type", "application/json")
+                  self.end_headers()
+                  self.wfile.write(json.dumps(err).encode())
+          HTTPServer(("0.0.0.0", 80), H).serve_forever()

@@ -3,3 +3,4 @@ kind: Kustomization
 resources:
   - workerpool-warm.yaml
   - actortemplate-standing-chat.yaml
+  - actortemplate-acp-spike.yaml

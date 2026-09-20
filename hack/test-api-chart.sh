@@ -65,6 +65,28 @@ helm template "${release}" "${chart}" \
 grep -Fq -- '--substrate-actors-enabled=true' "${tmp_dir}/substrate-on.yaml" || fail "substrate live gate missing when enabled"
 grep -Fq -- '--substrate-endpoint=ate-api-server.ate-system.svc:443' "${tmp_dir}/substrate-on.yaml" || fail "substrate endpoint missing when set"
 grep -Fq -- '--substrate-template=standing-chat' "${tmp_dir}/substrate-on.yaml" || fail "substrate template missing when set"
+if grep -Fq -- '--substrate-generate-on-actor=true' "${tmp_dir}/disabled.yaml"; then
+  fail "generate-on-actor rendered while substrate.generateOnActor=false"
+fi
+if grep -Fq -- '--substrate-generate-on-actor=true' "${tmp_dir}/substrate-on.yaml"; then
+  fail "actorsEnabled must not enable generate-on-actor"
+fi
+expect_template_failure substrate-generate-without-classes \
+  --set substrate.generateOnActor=true
+helm template "${release}" "${chart}" "${api_args[@]}" \
+  --set substrate.generateOnActor=true \
+  --set 'substrate.generateActorClasses={acp-spike}' \
+  --set substrate.actorsEnabled=true \
+  --set substrate.endpoint=api.ate-system.svc:443 \
+  --set substrate.template=acp-spike \
+  >"${tmp_dir}/substrate-generate.yaml"
+grep -Fq -- '--substrate-generate-on-actor=true' "${tmp_dir}/substrate-generate.yaml" || fail "generate-on-actor flag missing when enabled"
+grep -Fq -- '--substrate-generate-actor-classes=acp-spike' "${tmp_dir}/substrate-generate.yaml" || fail "generate actor class allowlist missing"
+grep -Fq -- '--substrate-atenet-endpoint=atenet-router.ate-system.svc:80' "${tmp_dir}/substrate-generate.yaml" || fail "default atenet endpoint missing when generate is on"
+if grep -F -- '--substrate-generate-actor-classes=' "${tmp_dir}/substrate-generate.yaml" | grep -q standing-chat; then
+  fail "standing-chat must not be in the generate allowlist"
+fi
+grep -Fq -- 'generateActorClasses:' "${tmp_dir}/substrate-generate.yaml" || fail "API config must copy generateActorClasses when generateOnActor is true"
 if grep -Fq -- '--substrate-ca-file=' "${tmp_dir}/disabled.yaml"; then
   fail "substrate CA file flag rendered while substrate.ca is unset"
 fi

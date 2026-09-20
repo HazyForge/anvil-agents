@@ -14,6 +14,7 @@ import (
 	agentsv1alpha1 "github.com/hazyforge/anvil-agents/api/v1alpha1"
 	"github.com/hazyforge/anvil-agents/internal/chat"
 	"github.com/hazyforge/anvil-agents/internal/standing"
+	"github.com/hazyforge/anvil-agents/internal/substrate"
 )
 
 // Slice-1 standing chat stream contract, extended by slice 3 with a
@@ -218,6 +219,13 @@ func (server *Server) standingSessionSpec(ctx context.Context, thread chat.Threa
 		return standing.SessionSpec{}, false
 	}
 	if !harness.Spec.Execution.UsesStandingChat() {
+		return standing.SessionSpec{}, false
+	}
+	actorClass := ""
+	if harness.Spec.Execution.Substrate != nil {
+		actorClass = harness.Spec.Execution.Substrate.ActorClass
+	}
+	if server != nil && substrate.GenerateEnabled(true, server.config.Standing.GenerateActorClasses, actorClass) {
 		return standing.SessionSpec{}, false
 	}
 	return standing.SessionSpec{

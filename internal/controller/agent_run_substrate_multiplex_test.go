@@ -35,9 +35,9 @@ func TestSubstrateLiveSuspendIdleMultiplexStress(t *testing.T) {
 
 	firstIDs := make(map[string]string, len(threads))
 	for i, thread := range threads {
-		run := liveSubstrateRun(thread)
+		run := liveGenerateRun(thread)
 		run.Name = fmt.Sprintf("multiplex-turn-1-%d", i)
-		r := liveSubstrateReconciler(t, run, backend)
+		r := liveGenerateReconciler(t, run, backend, nil)
 		r.SubstrateClient = backend
 		if _, err := r.Reconcile(ctx, ctrl.Request{NamespacedName: client.ObjectKeyFromObject(run)}); err != nil {
 			t.Fatalf("thread %q first reconcile: %v (silent drop)", thread, err)
@@ -46,8 +46,8 @@ func TestSubstrateLiveSuspendIdleMultiplexStress(t *testing.T) {
 		if err := r.Get(ctx, types.NamespacedName{Namespace: run.Namespace, Name: run.Name}, updated); err != nil {
 			t.Fatalf("thread %q get run: %v", thread, err)
 		}
-		if updated.Status.Phase != agents.AgentRunPhaseRunning {
-			t.Fatalf("thread %q phase = %q, want Running", thread, updated.Status.Phase)
+		if updated.Status.Phase != agents.AgentRunPhaseSucceeded {
+			t.Fatalf("thread %q phase = %q, want Succeeded", thread, updated.Status.Phase)
 		}
 		wantActor := substrate.ActorNameForThread(thread)
 		if updated.Status.SubstrateActor == nil || updated.Status.SubstrateActor.ActorName != wantActor {
@@ -78,8 +78,8 @@ func TestSubstrateLiveSuspendIdleMultiplexStress(t *testing.T) {
 
 	// All runs go terminal-idle: every actor suspends without losing identity.
 	for _, thread := range threads {
-		run := liveSubstrateRun(thread)
-		r := liveSubstrateReconciler(t, run, backend)
+		run := liveGenerateRun(thread)
+		r := liveGenerateReconciler(t, run, backend, nil)
 		r.SubstrateClient = backend
 		r.suspendSubstrateActorOnTerminal(ctx, run)
 	}
@@ -98,9 +98,9 @@ func TestSubstrateLiveSuspendIdleMultiplexStress(t *testing.T) {
 
 	// Next append-only turn per thread resumes its own warm actor.
 	for i, thread := range threads {
-		run := liveSubstrateRun(thread)
+		run := liveGenerateRun(thread)
 		run.Name = fmt.Sprintf("multiplex-turn-2-%d", i)
-		r := liveSubstrateReconciler(t, run, backend)
+		r := liveGenerateReconciler(t, run, backend, nil)
 		r.SubstrateClient = backend
 		if _, err := r.Reconcile(ctx, ctrl.Request{NamespacedName: client.ObjectKeyFromObject(run)}); err != nil {
 			t.Fatalf("thread %q second reconcile: %v (silent drop)", thread, err)

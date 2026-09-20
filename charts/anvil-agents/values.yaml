@@ -336,9 +336,10 @@ affinity: {}
 
 # Optional live ATE actor plane (agent-substrate/substrate). Off by default.
 # Standing ProcessBackend already completes SubstrateActor chat turns without
-# this gate and is the Primaris speed path. Enabling the gate without a
-# reachable ateapi, or enabling bind-only ATE without a completion path,
-# leaves unclaimed SubstrateActor runs Running/SubstrateActorBound.
+# this gate and is the Primaris speed path. actorsEnabled without
+# generateOnActor keeps the SubstrateActorNotWired hold (Desktop
+# standing-chat unchanged). generateOnActor is a second gate plus an exact
+# actorClass allowlist; do not list standing-chat.
 # Do not put bearer tokens or CA PEM bytes here; prefer a mounted token file
 # or the controller's short-lived ate-client ServiceAccount token, and a
 # mounted or looked-up ateapi-ca ConfigMap (ATE Helm 0.0.8 jwt mode).
@@ -350,6 +351,13 @@ substrate:
   atespace: ""
   tokenFile: ""
   insecure: false
+  # Stream frozen AgentRun prompts through atenet after Resume/bind.
+  # Off by default. Requires generateActorClasses (exact match).
+  generateOnActor: false
+  generateActorClasses: []
+  # atenet-router HTTP target. Empty uses atenet-router.ate-system.svc:80
+  # when generateOnActor is true.
+  atenetEndpoint: ""
   # In-pod path to the jwt CA PEM. Set automatically when ca.configMapName
   # is in the release namespace. Cross-namespace lookup uses ca.* instead.
   caFile: ""
