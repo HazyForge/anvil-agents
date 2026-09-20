@@ -105,8 +105,14 @@ var processRecipes = map[string]processRecipe{
 		resume:   resumeSessionKey,
 	},
 	"grokBuild": {
-		// No documented resume flag: one-shot JSON output, always cold.
+		// No documented resume flag: always cold. --prompt-file is grok's
+		// headless single user-message path. Job runners pass
+		// --always-approve so grok can finish tool use without a TTY;
+		// standing ProcessBackend is the same CLI inside the API pod.
+		// Without that flag grok emits a promise ("I'll check") and
+		// exits instead of inspecting, and Desktop shows Harness finished.
 		binaries: []string{"grok"},
+		args:     []string{"--always-approve"},
 		mode:     processPromptFile,
 		fileFlag: "--prompt-file",
 	},

@@ -178,7 +178,11 @@ func (server *Server) reconcileStandingTurn(ctx context.Context, turn *chat.Turn
 		server.log.Info("standing turn has no frozen prompt; keeping hold behavior", "namespace", turn.Namespace, "turn", turn.ID)
 		return false, nil
 	}
-	sink := &standingRunSink{runName: turn.RunName, downstream: server.standingTokenPublisher(turn.Namespace)}
+	// Hold Done until this turn has a real answer. StreamTurn emits Done on
+	// process exit; the live WebSocket closes on that frame. A preamble like
+	// "I'll check" must not finish the stream before continuation runs.
+	hubSink := &holdDoneSink{inner: server.standingTokenPublisher(turn.Namespace)}
+	sink := &standingRunSink{runName: turn.RunName, downstream: hubSink}
 	reply, err := server.standing.StreamTurn(ctx, handle, turn.ID, prompt, sink)
 	if err != nil {
 		server.log.Error(err, "standing turn stream failed; keeping hold behavior", "namespace", turn.Namespace, "turn", turn.ID)
@@ -189,6 +193,10 @@ func (server *Server) reconcileStandingTurn(ctx context.Context, turn *chat.Turn
 		return false, nil
 	}
 	harnessKind := agentsv1alpha1.AgentRunHarnessBackendKind(handle.HarnessKind)
+	reply = server.completeStandingDeferredWork(ctx, handle, turn, harnessKind, prompt, reply, sink)
+	if err := hubSink.flush(ctx); err != nil {
+		server.log.Error(err, "standing turn could not flush the stream done marker", "namespace", turn.Namespace, "turn", turn.ID)
+	}
 	run.Status.Phase = agentsv1alpha1.AgentRunPhaseSucceeded
 	run.Status.Backend = string(harnessKind)
 	if spec.Runtime != "" {

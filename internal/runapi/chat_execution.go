@@ -94,6 +94,9 @@ func (server *Server) queueChatTurnAttempt(ctx context.Context, ns, id string, b
 	if err != nil {
 		return ChatAppendResponse{}, err
 	}
+	if spec, ok := server.standingSessionSpec(ctx, thread); ok && strings.TrimSpace(spec.HarnessKind) != "" {
+		prompt = insertBeforeConversationJSON(prompt, standingTurnContract)
+	}
 	prompt = inventory + prompt
 	digest := sha256.Sum256([]byte(ns + "/" + id + "/" + body.RequestID))
 	runName := fmt.Sprintf("chat-turn-%x", digest[:20])

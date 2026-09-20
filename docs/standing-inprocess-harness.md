@@ -307,7 +307,7 @@ Live vs Fake-only harness kinds, explicitly:
 | `codex` | live subprocess (`codex exec --skip-git-repo-check`, stdin) | native envelope parsed by the codex extractor |
 | `openCode` | live subprocess (`opencode run`, stdin) | |
 | `openClaw` | live subprocess (`openclaw agent --message-file`, 0600 file) | |
-| `grokBuild` | live subprocess (`grok --prompt-file`, 0600 file) | |
+| `grokBuild` | live subprocess (`grok --always-approve --prompt-file`, 0600 file) | `--always-approve` matches the Job runner so grok can finish inspection without a TTY |
 | `primeAgent` | live subprocess (`prime-agent --print --mode json --no-session`, stdin) | |
 | `agy` | live subprocess (stream-json user event on stdin) | |
 | `hermesAgent`, `piAgent` | Fake-only | inventory-only in the desktop catalog: no documented prompt-safe local invoke |

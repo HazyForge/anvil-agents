@@ -11,7 +11,8 @@
 //
 // Fixed intent set:
 //
-//   - chat_reply: ordinary conversation the current agent answers directly.
+//   - chat_reply: ordinary conversation the current agent answers directly
+//     without inspecting the environment.
 //   - create_agent_request: the user asks to create/spawn a new agent.
 //     Classification only: fulfillment must request a Wrapper/manager.
 //     Peers never create agents directly (create-agent stays
@@ -19,7 +20,8 @@
 //     existing manager-authorization path still owns the decision.
 //   - peer_handoff: hand off to (or coordinate with) another existing
 //     agent/peer via requestPeer — never agent creation.
-//   - tool_run: the reply needs a tool/command/lookup result first.
+//   - tool_run: the reply needs a tool/command/lookup or session-access
+//     inspection result first.
 //   - unclear: nothing fits, the message is ambiguous, or confidence is
 //     below the gate. Route to a human/clarification path.
 //
@@ -72,10 +74,10 @@ const DestructiveActionConfidenceBar = 0.8
 // message into a handler that does not fit.
 func IntentCriteria() map[string]*string {
 	return map[string]*string{
-		IntentChatReply:          Desc("Ordinary conversation the current agent can answer directly with its own reply: greetings, questions, explanations, status updates, follow-ups. No new agent, no peer delegation, no tool execution requested."),
+		IntentChatReply:          Desc("Ordinary conversation the current agent can answer directly from its own knowledge without inspecting the environment: greetings, explanations, status updates, follow-ups. No new agent, no peer delegation, no tool execution or session-access lookup."),
 		IntentCreateAgentRequest: Desc("The author asks to create, spawn, or provision a NEW agent (new teammate, helper, worker, bot). Classification only: fulfillment must request a Wrapper/manager, never create from a peer."),
 		IntentPeerHandoff:        Desc("The author asks to hand off, delegate, or coordinate with ANOTHER EXISTING agent or peer (a review, a named agent, a specific skill or owner). Routes via requestPeer coordination, never agent creation."),
-		IntentToolRun:            Desc("The author asks to run a tool, command, lookup, query, build, deploy, or other action whose result the reply depends on. The reply needs a tool result first."),
+		IntentToolRun:            Desc("The author asks to run a tool, command, lookup, query, build, deploy, or inspect this session's access or capabilities (GitHub, PATH, files), or other action whose result the reply depends on. The reply needs a tool or inspection result first."),
 		IntentUnclear:            nil,
 	}
 }

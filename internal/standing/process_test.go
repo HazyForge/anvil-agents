@@ -72,6 +72,25 @@ func TestProcessSupportedKindsLeaveInventoryOnlyFakeOnly(t *testing.T) {
 	}
 }
 
+func TestGrokBuildRecipeAlwaysApprovesTools(t *testing.T) {
+	t.Parallel()
+
+	recipe, ok := processRecipes["grokBuild"]
+	if !ok {
+		t.Fatal("grokBuild recipe missing")
+	}
+	found := false
+	for _, arg := range recipe.args {
+		if arg == "--always-approve" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("grokBuild args = %q, want --always-approve so standing grok can finish inspection without a TTY", recipe.args)
+	}
+}
+
 func TestProcessBackendWarmsAcrossTurns(t *testing.T) {
 	t.Parallel()
 
@@ -299,9 +318,16 @@ func TestExecRunnerStdinPromptReachesStubBinary(t *testing.T) {
 func TestExecRunnerFilePromptReachesStubBinary(t *testing.T) {
 	t.Parallel()
 
-	// grok recipe uses a 0600 prompt file; the stub reads the file path from
-	// the last argv word (--prompt-file <path>).
-	runner := writeStubBinary(t, "grok", "#!/bin/sh\ncat \"$2\"\n")
+	// grok recipe uses a 0600 prompt file plus --always-approve; the stub
+	// locates --prompt-file the same way the desktop catalog tests do.
+	runner := writeStubBinary(t, "grok", `#!/bin/sh
+file=""
+while [ "$#" -gt 0 ]; do
+  if [ "$1" = "--prompt-file" ]; then file="$2"; shift 2; continue; fi
+  shift
+done
+cat "$file"
+`)
 	backend := NewProcessBackend(runner)
 	handle := ensureProcessSession(t, backend, "thread-1", "grokBuild")
 	reply, err := backend.StreamTurn(context.Background(), handle, "turn-1", "file prompt bytes", nil)
