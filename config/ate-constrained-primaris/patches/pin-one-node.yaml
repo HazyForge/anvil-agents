@@ -1,0 +1,10 @@
+# JSON6902. hack/render-ate-constrained.sh applies this to every DaemonSet,
+# Deployment, StatefulSet, and Job from the ATE 0.0.8 helm template.
+#
+# DO NOT stock-install: stock atelet hostPorts 8085/9090 on every node.
+# After this patch, those hostPorts exist only on
+# anvil-primaris-worker-hel1-1 (the same worker Anvil controller/API use).
+- op: add
+  path: /spec/template/spec/nodeSelector
+  value:
+    kubernetes.io/hostname: anvil-primaris-worker-hel1-1

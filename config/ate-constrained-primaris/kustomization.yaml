@@ -1,0 +1,10 @@
+# Fleet only. The ATE helm render is produced by
+# hack/render-ate-constrained.sh (not committed) so CI does not pull
+# ghcr.io or apply cluster-wide ATE.
+#
+# Do not move this under .hazyforge/clusters/anvil-primaris/namespace/
+# (ApplicationSet). Do not stock-install ATE 0.0.8.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - fleet

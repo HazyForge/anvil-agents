@@ -3,6 +3,8 @@
 /coverage.out
 /.env
 /.runtime/
+/config/ate-constrained-primaris/values.secrets.yaml
+/config/ate-constrained-primaris/.render/
 /.idea/
 /.vscode/
 /web/console/node_modules/

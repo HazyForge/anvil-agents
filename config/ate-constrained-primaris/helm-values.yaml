@@ -1,0 +1,36 @@
+# Constrained Primaris values for ATE Helm 0.0.8.
+#
+# DO NOT helm upgrade --install stock 0.0.8. Stock atelet is privileged,
+# hostPort 8085/9090, hostPath /var/lib/ateom-gvisor, no nodeSelector.
+# Pinning is applied after helm template via
+# config/ate-constrained-primaris/patches/pin-one-node.yaml — Helm itself
+# has no atelet nodeSelector knob.
+#
+# Release name MUST be "substrate" in namespace ate-system so the API
+# Service is api.ate-system.svc (TLS ServerName Anvil dials).
+#
+# Do not apply until generate-on-actor exists. Leave Anvil
+# substrate.actorsEnabled=false.
+
+auth:
+  mode: jwt
+  jwt:
+    # Talos ServiceAccount issuer on Anvil Primaris (verified 2026-09-20).
+    issuer: "https://[fdae:41e4:649b:9303::1]:10000"
+    audience: api.ate-system.svc
+
+# Chart default replicas is 6. The valkey-cluster-init Job hardcodes pods
+# 0..5, so this overlay must not lower replicas. All six land on hel1-1.
+valkey:
+  enabled: true
+  replicas: 6
+
+# Chart default accessKey/secretKey is rustfsadmin. Override with
+# placeholders here; hack/render-ate-constrained.sh requires --secrets
+# (gitignored) with rotated keys. Never commit real keys or rustfsadmin
+# as values.
+rustfs:
+  enabled: true
+  bucket: ate-snapshots
+  accessKey: SET_AT_APPLY_DO_NOT_COMMIT
+  secretKey: SET_AT_APPLY_DO_NOT_COMMIT

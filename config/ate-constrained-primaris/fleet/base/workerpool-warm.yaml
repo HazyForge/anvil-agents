@@ -1,0 +1,19 @@
+# Warm pool matching desktop-standing-grok execution.substrate.pool=warm.
+# Worker pods are created by atecontroller from this spec; helm pin patches
+# do not apply here, so nodeSelector is inlined.
+#
+# ateomImage is the sandbox host, not the harness image. Tag pin matches
+# ATE 0.0.8 / kagent WorkerPool samples (digest optional on this CRD).
+apiVersion: ate.dev/v1alpha1
+kind: WorkerPool
+metadata:
+  name: warm
+  labels:
+    anvil.hazyforge.io/worker-pool: warm
+spec:
+  replicas: 2
+  sandboxClass: gvisor
+  ateomImage: ghcr.io/kagent-dev/substrate/ateom-gvisor:v0.0.8
+  template:
+    nodeSelector:
+      kubernetes.io/hostname: anvil-primaris-worker-hel1-1

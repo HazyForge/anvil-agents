@@ -146,6 +146,7 @@ image-checks:
 helm-lint:
 	./hack/test-api-chart.sh
 	./hack/test-archive-chart.sh
+	./hack/test-ate-constrained-overlay.sh
 
 archive-postgres-integration:
 	./hack/test-archive-postgres.sh
@@ -255,6 +256,8 @@ verify-runner-contract:
 	@bash -n hack/release-primaris.sh
 	@bash -n hack/release-primaris_test.sh
 	@bash -n hack/test-api-chart.sh
+	@bash -n hack/test-ate-constrained-overlay.sh
+	@bash -n hack/render-ate-constrained.sh
 	@bash -n hack/test-archive-chart.sh
 	@bash -n hack/test-archive-postgres.sh
 	@bash -n hack/kind-chat-postgres.sh
