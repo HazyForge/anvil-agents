@@ -39,6 +39,21 @@ extraEnv:
     value: "true"
 applicationMaxConcurrentRuns: 4
 defaultStorageClass: observability-local
+# ATE jwt client. actorsEnabled/generateOnActor stay false until an
+# acp-spike smoke bind+generate succeeds. standing-chat is never generated.
+substrate:
+  actorsEnabled: false
+  generateOnActor: false
+  generateActorClasses: []
+  endpoint: api.ate-system.svc:443
+  template: acp-spike
+  ca:
+    configMapName: ateapi-ca
+    namespace: ate-system
+    key: ca.crt
+  token:
+    projected: true
+    audience: api.ate-system.svc
 externalSecrets:
   enabled: true
 # Keep the legacy source list until this overlay pins a controller image that
