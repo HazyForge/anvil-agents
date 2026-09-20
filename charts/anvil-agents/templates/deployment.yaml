@@ -65,6 +65,24 @@ spec:
             {{- with .Values.archive.terminalRetention }}
             - --terminal-retention={{ . }}
             {{- end }}
+            {{- if .Values.substrate.actorsEnabled }}
+            - --substrate-actors-enabled=true
+            {{- end }}
+            {{- with .Values.substrate.endpoint }}
+            - --substrate-endpoint={{ . }}
+            {{- end }}
+            {{- with .Values.substrate.template }}
+            - --substrate-template={{ . }}
+            {{- end }}
+            {{- with .Values.substrate.atespace }}
+            - --substrate-atespace={{ . }}
+            {{- end }}
+            {{- with .Values.substrate.tokenFile }}
+            - --substrate-token-file={{ . }}
+            {{- end }}
+            {{- if .Values.substrate.insecure }}
+            - --substrate-insecure=true
+            {{- end }}
           ports:
             - name: metrics
               containerPort: 8080

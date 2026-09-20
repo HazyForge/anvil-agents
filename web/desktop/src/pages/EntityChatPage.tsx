@@ -7,6 +7,7 @@ import { readChatDraft, saveChatDraft, readSelectedChat, saveSelectedChat, readN
 import { RemoteTurnActivity } from '../components/RemoteTurnActivity';
 import { AgentAvatar } from '../components/AgentAvatar';
 import { MarkdownBody } from '../components/MarkdownBody';
+import { ChatAssistantBody } from '../components/ChatAssistantBody';
 import { ProjectSwitcher, remoteChatProjects, projectManagers } from '../components/ProjectSwitcher';
 import { preferredStandingChatProfile, shouldRestoreStandingThread } from '../wrapper/chatLanding';
 import { LiveStream } from '../components/LiveStream';
@@ -516,7 +517,7 @@ export function EntityChatPage({token, config}: Props) {
               : null;
             return <article key={message.id} className={`chat-bubble ${message.role === 'user' ? 'chat-bubble-user' : 'chat-bubble-run'}`}>
             <header className="chat-bubble-header"><span className="chat-bubble-role">{message.role === 'user' ? ((message.metadata as {authorProfile?: string} | undefined)?.authorProfile || 'You') : message.role === 'tool' ? 'Coordination' : detail.profileName || 'Agent'}</span></header>
-            <div className="chat-bubble-body"><MarkdownBody content={message.content}/></div>
+            {message.role === 'assistant' ? <ChatAssistantBody content={message.content}/> : <div className="chat-bubble-body"><MarkdownBody content={message.content}/></div>}
             {jevCaption && <p className="remote-chat-caption">{jevCaption}</p>}
             {showCreateAffordance && (
               <div className="remote-chat-caption" role="note" aria-label="Requested agent create">

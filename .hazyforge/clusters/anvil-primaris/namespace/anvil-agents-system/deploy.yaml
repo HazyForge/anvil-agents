@@ -12,7 +12,7 @@ serviceAccount:
   name: anvil-agents
 image:
   # Controller/API image embeds Anvil Agents Console SPA (served at /).
-  reference: ghcr.io/hazyforge/anvil-agents@sha256:6958334163c6162748bf73689bd97471e5a0d45308c38cce733bb1005897339e
+  reference: ghcr.io/hazyforge/anvil-agents@sha256:af68f90e2f09bd3de3477dff6fb6bc0a233afb54e5ab53b0a5a1d54506e691d8
   pullPolicy: IfNotPresent
 imagePullSecrets:
   - name: ghcr-creds
@@ -89,7 +89,7 @@ api:
       value: /tmp
   # API-only chat fixes can roll independently of the healthy controller.
   image:
-    reference: ghcr.io/hazyforge/anvil-agents@sha256:6958334163c6162748bf73689bd97471e5a0d45308c38cce733bb1005897339e
+    reference: ghcr.io/hazyforge/anvil-agents@sha256:af68f90e2f09bd3de3477dff6fb6bc0a233afb54e5ab53b0a5a1d54506e691d8
   enabled: true
   extraVolumes:
     - name: chat-database-ca
@@ -225,7 +225,10 @@ api:
     standing:
       liveEnabled: true
     authorization:
-      roleClaims: []
+      # Zitadel device/native tokens expose roles on the standard claim;
+      # project-scoped object claims remain the Desktop PKCE path.
+      roleClaims:
+        - roles
       roleObjectClaims:
         - urn:zitadel:iam:org:project:376124473528572432:roles
       bindings:

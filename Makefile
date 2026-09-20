@@ -103,6 +103,7 @@ desktop-chat-tests:
 	node --experimental-strip-types --test hack/desktop-jev-peer-handoff.mjs
 	node --experimental-strip-types --test hack/desktop-harness-switch.mjs
 	node --experimental-strip-types --test web/desktop/tests/chatLanding.test.mjs
+	node --experimental-strip-types --test web/desktop/tests/assistantPresentation.test.mjs
 
 # Copy built desktop assets into the go:embed tree used by anvil-desktop.
 # WARNING: replaces committed stub files under internal/desktop/uifs/dist.
