@@ -141,6 +141,53 @@ func TestAgentRunInProcessClaimWithoutTurnLabelKeepsNotWired(t *testing.T) {
 	}
 }
 
+func substrateClaimRun(annotations map[string]string) *agents.AgentRun {
+	run := substrateSpikeRun()
+	run.Spec.Harness.Execution.Runtime = agents.AgentRunExecutionRuntimeSubstrateActor
+	run.Spec.Harness.Execution.Substrate = &agents.AgentRunSubstrateActorSpec{ActorClass: "standing-chat", Pool: "warm"}
+	run.Labels = map[string]string{agents.AgentRunChatTurnLabel: "turn-1"}
+	run.Annotations = annotations
+	return run
+}
+
+func TestAgentRunSubstrateClaimYieldsStandingClaimed(t *testing.T) {
+	t.Parallel()
+
+	run := substrateClaimRun(map[string]string{
+		agents.AgentRunStandingClaimAnnotation: standingClaimValue(t, "turn-1", "api-a/123", time.Now()),
+	})
+	phase, reason, message := agentRunBlockingValidation(run)
+	if phase != agents.AgentRunPhaseNeedsHuman || reason != "StandingClaimed" {
+		t.Fatalf("claimed substrate hold = %q/%q, want NeedsHuman/StandingClaimed", phase, reason)
+	}
+	if !strings.Contains(message, "api-a/123") || !strings.Contains(message, "turn-1") {
+		t.Fatalf("yield message = %q, want owner and turn carried", message)
+	}
+}
+
+func TestAgentRunSubstrateClaimFallbacksKeepNotWired(t *testing.T) {
+	t.Parallel()
+
+	now := time.Now()
+	cases := map[string]map[string]string{
+		"no annotations": nil,
+		"malformed":      {agents.AgentRunStandingClaimAnnotation: "not-json"},
+		"other turn": {
+			agents.AgentRunStandingClaimAnnotation: standingClaimValue(t, "turn-2", "api-a/123", now),
+		},
+		"stale": {
+			agents.AgentRunStandingClaimAnnotation: standingClaimValue(t, "turn-1", "api-a/123", now.Add(-10*time.Minute)),
+		},
+	}
+	for name, annotations := range cases {
+		run := substrateClaimRun(annotations)
+		phase, reason, _ := agentRunBlockingValidation(run)
+		if phase != agents.AgentRunPhaseNeedsHuman || reason != "SubstrateActorNotWired" {
+			t.Fatalf("%s: hold = %q/%q, want NeedsHuman/SubstrateActorNotWired", name, phase, reason)
+		}
+	}
+}
+
 func TestAgentRunClaimIgnoredOffInProcess(t *testing.T) {
 	t.Parallel()
 

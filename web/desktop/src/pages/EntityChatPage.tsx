@@ -8,6 +8,7 @@ import { RemoteTurnActivity } from '../components/RemoteTurnActivity';
 import { AgentAvatar } from '../components/AgentAvatar';
 import { MarkdownBody } from '../components/MarkdownBody';
 import { ProjectSwitcher, remoteChatProjects, projectManagers } from '../components/ProjectSwitcher';
+import { preferredStandingChatProfile, shouldRestoreStandingThread } from '../wrapper/chatLanding';
 import { LiveStream } from '../components/LiveStream';
 import { CreateAgentPanel } from '../components/CreateAgentPanel';
 import { AgentHarnessSwitcher } from '../components/AgentHarnessSwitcher';
@@ -164,8 +165,14 @@ export function EntityChatPage({token, config}: Props) {
       if (restoredNamespace.current !== namespace) {
         restoredNamespace.current = namespace;
         const selected = readSelectedChat(namespace);
-        if (selected) {
-          const thread = ts.find(item => item.id === selected) ?? {
+        const standing = preferredStandingChatProfile(ps);
+        const selectedThread = selected ? ts.find(item => item.id === selected) : undefined;
+        if (selectedThread && shouldRestoreStandingThread(selectedThread, standing)) {
+          openThread(selectedThread);
+        } else if (standing) {
+          void openAgent(standing.metadata.name); return;
+        } else if (selected) {
+          const thread = selectedThread ?? {
             id: selected, namespace, title: 'Saved conversation', mode: 'persona',
             createdAt: '', updatedAt: '', createdBy: '',
           };

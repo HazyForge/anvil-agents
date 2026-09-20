@@ -22,11 +22,20 @@ import (
 
 func standingHarness(t *testing.T, server *Server, name string, backend agentsv1alpha1.AgentRunHarnessBackendKind) {
 	t.Helper()
+	standingHarnessRuntime(t, server, name, backend, agentsv1alpha1.AgentRunExecutionRuntimeInProcess)
+}
+
+func standingHarnessRuntime(t *testing.T, server *Server, name string, backend agentsv1alpha1.AgentRunHarnessBackendKind, runtime agentsv1alpha1.AgentRunExecutionRuntime) {
+	t.Helper()
+	execution := agentsv1alpha1.AgentRunHarnessExecutionSpec{Runtime: runtime}
+	if runtime == agentsv1alpha1.AgentRunExecutionRuntimeSubstrateActor {
+		execution.Substrate = &agentsv1alpha1.AgentRunSubstrateActorSpec{ActorClass: "standing-chat", Pool: "warm"}
+	}
 	harness := &agentsv1alpha1.AgentHarnessProfile{
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "agents"},
 		Spec: agentsv1alpha1.AgentHarnessProfileSpec{
 			Backend:   agentsv1alpha1.AgentRunHarnessBackendSpec{Kind: backend},
-			Execution: agentsv1alpha1.AgentRunHarnessExecutionSpec{Runtime: agentsv1alpha1.AgentRunExecutionRuntimeInProcess},
+			Execution: execution,
 		},
 	}
 	if err := server.writes.Create(context.Background(), harness); err != nil {
@@ -157,6 +166,39 @@ func TestStandingTurnStreamsDirectTurn(t *testing.T) {
 	}
 	if fake.Turns() != 2 {
 		t.Fatalf("streamed turns = %d, want 2", fake.Turns())
+	}
+}
+
+func TestStandingTurnStreamsSubstrateActor(t *testing.T) {
+	ctx := context.Background()
+	server := chatTestServer(t, true)
+	standingHarnessRuntime(t, server, "substrate-standing", agentsv1alpha1.AgentRunHarnessBackendGrokBuild, agentsv1alpha1.AgentRunExecutionRuntimeSubstrateActor)
+	fake := standing.NewFakeBackend()
+	enableStandingLive(t, server, fake)
+	thread := standingThread(t, server, "substrate-standing")
+
+	accepted, err := server.queueChatTurn(ctx, "agents", thread.ID, AppendChatMessageRequest{Content: "hey from desktop"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if accepted.Turn.Status != "succeeded" {
+		t.Fatalf("substrate standing turn status = %q, want succeeded", accepted.Turn.Status)
+	}
+	run := &agentsv1alpha1.AgentRun{}
+	if err := server.writes.Get(ctx, types.NamespacedName{Namespace: "agents", Name: accepted.Turn.RunName}, run); err != nil {
+		t.Fatal(err)
+	}
+	if run.Status.Phase != agentsv1alpha1.AgentRunPhaseSucceeded {
+		t.Fatalf("run phase = %q, want Succeeded", run.Status.Phase)
+	}
+	if run.Status.ExecutionRuntime != string(agentsv1alpha1.AgentRunExecutionRuntimeSubstrateActor) {
+		t.Fatalf("execution runtime = %q, want SubstrateActor", run.Status.ExecutionRuntime)
+	}
+	if run.Status.JobRef != nil || run.Status.PlannedJobRef != nil {
+		t.Fatalf("substrate standing turn must not create a Job: %+v", run.Status)
+	}
+	if fake.Turns() != 1 {
+		t.Fatalf("streamed turns = %d, want 1", fake.Turns())
 	}
 }
 

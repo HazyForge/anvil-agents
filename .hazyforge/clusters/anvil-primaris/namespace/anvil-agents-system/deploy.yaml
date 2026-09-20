@@ -12,7 +12,7 @@ serviceAccount:
   name: anvil-agents
 image:
   # Controller/API image embeds Anvil Agents Console SPA (served at /).
-  reference: ghcr.io/hazyforge/anvil-agents@sha256:1976430692656ee1f0296eb47c361029bc25369387e7e282f52146a83f889405
+  reference: ghcr.io/hazyforge/anvil-agents@sha256:6958334163c6162748bf73689bd97471e5a0d45308c38cce733bb1005897339e
   pullPolicy: IfNotPresent
 imagePullSecrets:
   - name: ghcr-creds
@@ -55,7 +55,7 @@ extraRBACRules:
     resources: [applicationreleases, artifactbuilds, iosbuilds, anviltasks, testruns]
     verbs: [get, list, watch]
 archive:
-  restartToken: standing-live-20260919
+  restartToken: jev-live-20260920
   databaseURLSecret:
     name: anvilhub-inventory-database
     key: database-url
@@ -68,6 +68,15 @@ api:
   extraEnv:
     - name: DISABLE_HTTP2
       value: "true"
+    - name: TYPESAFE_API_KEY
+      valueFrom:
+        secretKeyRef:
+          name: anvil-typesafe-jev
+          key: TYPESAFE_API_KEY
+    - name: ANVIL_AGENTS_JEV_INTENT
+      value: "true"
+    - name: ANVIL_AGENTS_JEV_MODEL
+      value: jev-1.13.0
     # Standing ProcessBackend: resolve grok from the init-copied CLI dir and
     # keep prompt-file CreateTemp + GROK_HOME writable under readOnlyRootFilesystem.
     - name: PATH
@@ -80,7 +89,7 @@ api:
       value: /tmp
   # API-only chat fixes can roll independently of the healthy controller.
   image:
-    reference: ghcr.io/hazyforge/anvil-agents@sha256:1976430692656ee1f0296eb47c361029bc25369387e7e282f52146a83f889405
+    reference: ghcr.io/hazyforge/anvil-agents@sha256:6958334163c6162748bf73689bd97471e5a0d45308c38cce733bb1005897339e
   enabled: true
   extraVolumes:
     - name: chat-database-ca
@@ -205,10 +214,14 @@ api:
       # The API receives ANVIL_AGENTS_CHAT_DATABASE_URL via secretKeyRef from
       # archive.databaseURLSecret above. No database URI belongs in this file.
       enabled: true
-    # Standing in-process + WebSocket is the primary interactive Desktop path
-    # (see docs/standing-inprocess-harness.md). Gate on grants claim/status
-    # RBAC so the API can own InProcess turns. Jobs remain default for
-    # scouts/batch; Substrate/ATE stays optional.
+      # Jev classifies every Desktop/console chat append (intent only; never
+      # generates). Key is injected via api.extraEnv secretKeyRef from
+      # Secret anvil-typesafe-jev (not in git). See docs/jev-intent-routing.md.
+      jevIntentEnabled: true
+      jevModel: "jev-1.13.0"
+    # Standing ProcessBackend + WebSocket is the primary interactive Desktop
+    # path. Gate on grants claim/status RBAC so the API can own InProcess and
+    # SubstrateActor turns. Jobs remain default for scouts/batch.
     standing:
       liveEnabled: true
     authorization:
@@ -613,7 +626,7 @@ extraObjects:
         control.anvil.hazyforge.io/ownership: helm
         control.anvil.hazyforge.io/standing: "true"
     spec:
-      description: Standing InProcess Grok Build for snappy Desktop chat (no Job cold start). Jobs stay default for scouts/batch.
+      description: Standing SubstrateActor Grok Build for snappy Desktop chat (no Job cold start). Jobs stay default for scouts/batch.
       backend:
         kind: grokBuild
         modelProvider: xai
@@ -622,9 +635,11 @@ extraObjects:
           model: grok-4.5
           reasoningEffort: low
       execution:
-        runtime: InProcess
+        runtime: SubstrateActor
+        substrate:
+          actorClass: standing-chat
+          pool: warm
         serviceAccountName: anvil-opencode-observe
-        # No substrate section — Substrate/ATE stays optional.
         timeoutSeconds: 120
         resources:
           requests:
@@ -644,11 +659,70 @@ extraObjects:
         control.anvil.hazyforge.io/ownership: helm
         control.anvil.hazyforge.io/standing: "true"
     spec:
-      description: Interactive Desktop assistant on the standing InProcess Grok path.
+      description: Interactive Desktop assistant on the standing SubstrateActor Grok path.
       scope:
         applicationRef:
           name: desktop-chat
-        summary: Answer user Desktop chat quickly via standing in-process harness. No cluster mutations.
+        summary: Answer user Desktop chat quickly via standing SubstrateActor harness. No cluster mutations.
+      harnessProfileRef:
+        name: desktop-standing-grok
+      harness:
+        intent: observe
+        systemPrompt: |
+          Answer the user's message clearly and concisely. Work in text only.
+          Do not mutate files, repositories, services, or cluster resources;
+          do not execute shell commands, contact third-party services, or spend money.
+          Coordinate only with peers explicitly permitted by this conversation.
+
+  - apiVersion: control.anvil.hazyforge.io/v1alpha1
+    kind: AgentHarnessProfile
+    metadata:
+      name: desktop-standing-grok
+      namespace: hazy-trade
+      labels:
+        app.kubernetes.io/part-of: desktop-chat
+        control.anvil.hazyforge.io/application: desktop-chat
+        control.anvil.hazyforge.io/ownership: helm
+        control.anvil.hazyforge.io/standing: "true"
+    spec:
+      description: Standing SubstrateActor Grok Build for snappy Desktop chat (no Job cold start). Jobs stay default for scouts/batch.
+      backend:
+        kind: grokBuild
+        modelProvider: xai
+        providerAuthMode: oauth
+        grokBuild:
+          model: grok-4.5
+          reasoningEffort: low
+      execution:
+        runtime: SubstrateActor
+        substrate:
+          actorClass: standing-chat
+          pool: warm
+        serviceAccountName: anvil-opencode-observe
+        timeoutSeconds: 120
+        resources:
+          requests:
+            cpu: 50m
+            memory: 128Mi
+          limits:
+            cpu: "1"
+            memory: 512Mi
+  - apiVersion: control.anvil.hazyforge.io/v1alpha1
+    kind: AgentRunProfile
+    metadata:
+      name: desktop-standing-assistant
+      namespace: hazy-trade
+      labels:
+        app.kubernetes.io/part-of: desktop-chat
+        control.anvil.hazyforge.io/application: desktop-chat
+        control.anvil.hazyforge.io/ownership: helm
+        control.anvil.hazyforge.io/standing: "true"
+    spec:
+      description: Interactive Desktop assistant on the standing SubstrateActor Grok path.
+      scope:
+        applicationRef:
+          name: desktop-chat
+        summary: Answer user Desktop chat quickly via standing SubstrateActor harness. No cluster mutations.
       harnessProfileRef:
         name: desktop-standing-grok
       harness:

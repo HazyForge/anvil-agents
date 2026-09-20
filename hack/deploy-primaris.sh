@@ -155,7 +155,7 @@ if [[ "${wait}" == "true" ]]; then
 	# AgentDataVolume with WaitForFirstConsumer stays Pending until a run uses it.
 	# Preserve Helm 3's workload readiness checks without that circular wait.
 	if [[ "$(helm version --template '{{.Version}}' 2>/dev/null || true)" == v4.* ]]; then
-		helm_args+=(--wait=legacy)
+		helm_args+=(--wait=legacy --take-ownership --force-conflicts)
 	else
 		helm_args+=(--wait)
 	fi

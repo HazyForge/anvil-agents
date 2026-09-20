@@ -38,9 +38,15 @@ func TestExecutionRuntimeDefaultsToJob(t *testing.T) {
 	if substrate.UsesInProcess() || inProcess.UsesSubstrateActors() {
 		t.Fatal("execution planes must not overlap: SubstrateActor and InProcess are distinct")
 	}
+	if !substrate.UsesStandingChat() || !inProcess.UsesStandingChat() {
+		t.Fatal("InProcess and SubstrateActor must both be standing-chat eligible")
+	}
 	job := &AgentRunHarnessExecutionSpec{}
 	if job.UsesInProcess() {
 		t.Fatal("empty execution must not select the in-process plane")
+	}
+	if job.UsesStandingChat() {
+		t.Fatal("empty execution must stay on the Job plane")
 	}
 }
 

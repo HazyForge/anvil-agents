@@ -3606,6 +3606,10 @@ func (r *AgentRunReconciler) agentRunSubstrateHold(obj *controlv1alpha1.AgentRun
 	if obj == nil || !obj.Spec.Harness.Execution.UsesSubstrateActors() {
 		return "", "", ""
 	}
+	if claim, ok := standing.ClaimForTurn(obj.Annotations, strings.TrimSpace(obj.Labels[agentRunChatTurnLabel]), time.Now(), standing.ClaimTTL); ok {
+		return controlv1alpha1.AgentRunPhaseNeedsHuman, "StandingClaimed",
+			fmt.Sprintf("execution.runtime SubstrateActor standing turn %q is owned by API replica %q; the controller yields and created no Kubernetes Job. See docs/standing-inprocess-harness.md (slice 4).", claim.TurnID, claim.Owner)
+	}
 	if r.substrateLiveClient() != nil {
 		return "", "", ""
 	}

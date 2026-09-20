@@ -28,7 +28,7 @@ import (
 //   - WebSocket: request Upgrade: websocket and the server answers 101, then
 //     sends the snapshot JSON text frame. Job-plane threads (and every
 //     gate-off read) follow with the terminal frame and close, byte-identical
-//     to slice 1. Standing (InProcess) threads keep the connection open past
+//     to slice 1. Standing (InProcess and SubstrateActor) threads keep the connection open past
 //     the snapshot and multiplex live `token` frames for the thread's turns,
 //     then send the same terminal frame and close.
 //
@@ -196,9 +196,9 @@ func (server *Server) resumeChatStreamSession(ctx context.Context, thread chat.T
 }
 
 // standingSessionSpec resolves the thread's harness selection to a standing
-// session. Only threads whose harness profile selects the InProcess runtime
-// are eligible; Job and SubstrateActor threads, profile-inline harnesses, and
-// unresolvable selections stay on their existing planes.
+// session. Threads whose harness profile selects InProcess or SubstrateActor
+// are eligible; Job threads, profile-inline harnesses, and unresolvable
+// selections stay on their existing planes.
 func (server *Server) standingSessionSpec(ctx context.Context, thread chat.Thread) (standing.SessionSpec, bool) {
 	harnessName := chatHarness(thread)
 	if harnessName == "" && thread.ProfileName != "" {
@@ -217,7 +217,7 @@ func (server *Server) standingSessionSpec(ctx context.Context, thread chat.Threa
 	if err := server.runs.Get(ctx, types.NamespacedName{Namespace: thread.Namespace, Name: strings.TrimSpace(harnessName)}, harness); err != nil {
 		return standing.SessionSpec{}, false
 	}
-	if !harness.Spec.Execution.UsesInProcess() {
+	if !harness.Spec.Execution.UsesStandingChat() {
 		return standing.SessionSpec{}, false
 	}
 	return standing.SessionSpec{
@@ -225,6 +225,7 @@ func (server *Server) standingSessionSpec(ctx context.Context, thread chat.Threa
 		ThreadID:    thread.ID,
 		SessionName: standing.SessionNameForThread(thread.ID),
 		HarnessKind: string(harness.Spec.Backend.Kind),
+		Runtime:     string(harness.Spec.Execution.EffectiveRuntime()),
 	}, true
 }
 

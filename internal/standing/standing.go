@@ -52,7 +52,11 @@ type SessionSpec struct {
 	ThreadID    string
 	SessionName string
 	HarnessKind string
-	Labels      map[string]string
+	// Runtime is the resolved execution plane (InProcess or SubstrateActor)
+	// so a standing turn can persist status.executionRuntime without a second
+	// harness lookup. The process backend does not branch on it.
+	Runtime string
+	Labels  map[string]string
 }
 
 // SessionHandle is the observed identity of a standing session.

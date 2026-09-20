@@ -74,6 +74,9 @@ func substrateActorSpecForRun(effective *controlv1alpha1.AgentRun, actorName str
 // off and retries; the run stays Running, never Failed, on transient gateway
 // errors.
 func (r *AgentRunReconciler) reconcileSubstrateActorRun(ctx context.Context, original, obj *controlv1alpha1.AgentRun, status *controlv1alpha1.AgentRunStatus, effective *controlv1alpha1.AgentRun, now metav1.Time) (ctrl.Result, error) {
+	if agentRunPhaseTerminal(obj.Status.Phase) || agentRunPhaseTerminal(status.Phase) {
+		return ctrl.Result{}, nil
+	}
 	live := r.substrateLiveClient()
 	if live == nil {
 		return ctrl.Result{}, nil
