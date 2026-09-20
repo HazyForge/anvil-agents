@@ -1,10 +1,25 @@
 # Generate-on-actor
 
-Status: **in this slice**. Primaris `substrate.actorsEnabled` and
-`substrate.generateOnActor` stay **false** until ATE is applied one-node-safe
-and a non-Desktop `acp-spike` smoke bind+generate succeeds. Desktop
-`desktop-standing-assistant` stays on API `ProcessBackend`
+Status: **code is in this slice and live on Primaris** (Helm 39,
+`ghcr.io/hazyforge/anvil-agents@sha256:c351edee68763238ad50a781ba99b5b96d914a6ff65e79cce8dad4b6160c0188`).
+`substrate.actorsEnabled` and `substrate.generateOnActor` stay **false** —
+ATE is applied one-node-safe on `anvil-primaris-worker-hel1-1`, but a real
+`acp-spike` smoke bind+generate has **not** succeeded end to end: it is
+blocked by ateapi's own JWT/OIDC issuer discovery, not by this code (see
+`config/ate-constrained-primaris/README.md#blocker-talos-jwt-issuer-oidc-discovery-is-not-reachable-from-workload-pods`).
+Desktop `desktop-standing-assistant` stays on API `ProcessBackend`
 (`actorClass: standing-chat`).
+
+Verified 2026-09-20 with a temporary, reverted smoke enable
+(`substrate.actorsEnabled=true generateOnActor=true
+generateActorClasses=[acp-spike]` via `--set`, never committed): the
+controller correctly held/released the run, dialed `ateapi` over mTLS,
+completed the TLS handshake against the (freshly restarted) `ateapi-tls`
+cert trusted via the `ateapi-ca` ConfigMap, and reached ateapi's own bearer
+validation — which then failed because `ateapi` cannot complete OIDC
+discovery against the configured Talos issuer from a workload pod. No actor
+reply was produced. Flags were reverted to `false` and the cluster
+redeployed from the committed overlay before ending the session.
 
 Anvil’s live ATE client is still lifecycle-only for Create/Resume/Suspend/Pause.
 Prompt delivery is HTTP/ACP through `atenet-router` **after** `ResumeActor`.

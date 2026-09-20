@@ -82,6 +82,63 @@ an `acp-spike` smoke bind+generate succeeds. Fleet includes
 `ActorTemplate/acp-spike` (ACP echo) and `standing-chat` (Desktop stays on
 ProcessBackend).
 
+## Operational gotcha: re-render regenerates the JWT CA
+
+`render-ate-constrained.sh` uses `helm template` with no `--kube-context`, so
+the chart's `auth.jwt.bootstrap` `lookup`-based reuse guard never sees the
+live cluster and **always** generates a brand-new random CA + `ateapi-tls`
+server cert on every render. Re-applying the render therefore rotates the CA
+and leaf cert in the `ateapi-ca` ConfigMap and `ateapi-tls` Secret, but the
+**already-running** `ate-api-server` pod keeps serving its old in-memory/
+`emptyDir` cert (populated once by an init container at pod start) until it
+restarts. Anvil (or any client) then fails TLS with
+`x509: certificate signed by unknown authority (... candidate authority
+certificate "api-ca")` because the CM now holds a CA that does not match the
+cert the pod is still serving.
+
+**After every re-render + re-apply of this overlay**, restart the API
+server so it picks up the matching secret:
+
+```bash
+kubectl --context hazyforge-anvil-primaris -n ate-system \
+  rollout restart deployment/ate-api-server-deployment
+```
+
+## Blocker: Talos JWT issuer OIDC discovery is not reachable from workload pods
+
+Verified 2026-09-20 on Primaris. `kubectl get --raw
+/.well-known/openid-configuration` (via the normal, reachable API server
+endpoint) returns:
+
+```json
+{"issuer":"https://[fdae:41e4:649b:9303::1]:10000","jwks_uri":"https://5.161.127.112:6443/openid/v1/jwks", ...}
+```
+
+`ateapi` (jwt mode) constructs its OIDC discovery request from the literal
+`issuer` string, i.e. it dials
+`https://[fdae:41e4:649b:9303::1]:10000/.well-known/openid-configuration`
+directly. From an `ate-system` pod with `hostNetwork: true` on
+`anvil-primaris-worker-hel1-1`, that address **is** routable (siderolink
+route present, TLS handshake completes, server presents a real
+`CN=kube-apiserver` cert) but the HTTP/2 request gets an immediate `GOAWAY`
+with no response body — confirmed with both `openssl s_client` and
+`curl -v`. The chart has no `jwksURI`/discovery override; only `auth.jwt.issuer`
+and `auth.jwt.audience` are configurable, and the `iss` claim in minted
+ServiceAccount tokens must match `issuer` exactly, so pointing `issuer` at a
+reachable alias (e.g. `https://kubernetes.default.svc.cluster.local`,
+the chart's own kind/kubeadm default) would break token validation instead.
+
+Net effect: `EnsureTurnActor`/`ResumeActor` calls from Anvil complete the
+mTLS/gRPC handshake to `ateapi` correctly (once the CA is fresh — see above),
+but `ateapi` itself then rejects the bearer token because it cannot complete
+OIDC discovery against its configured Talos issuer. This is a Talos/ATE
+network or issuer-configuration question outside `anvil-agents` code and
+requires operator access to Talos machine config (`cluster.apiServer` /
+`--service-account-issuer` reachability) or an ATE-side reachable-jwks-proxy
+to resolve. Do not set Primaris `substrate.actorsEnabled=true` /
+`generateOnActor=true` until this is fixed and a real `acp-spike` smoke
+bind+generate succeeds end to end.
+
 ## RustFS keys
 
 Chart default is `rustfsadmin` / `rustfsadmin`. This overlay **overrides**
