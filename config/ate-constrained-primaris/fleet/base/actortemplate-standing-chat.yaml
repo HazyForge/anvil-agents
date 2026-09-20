@@ -1,0 +1,24 @@
+# ActorTemplate name standing-chat matches desktop-standing-grok
+# execution.substrate.actorClass. Images must be digest-pinned (@).
+#
+# The grok-build image is Anvil's Job runner, NOT an ACP server. Resume +
+# atenet generate-on-actor is still blocked; do not flip Anvil
+# substrate.actorsEnabled on this template. See
+# docs/substrate-generate-on-actor.md.
+apiVersion: ate.dev/v1alpha1
+kind: ActorTemplate
+metadata:
+  name: standing-chat
+spec:
+  sandboxClass: gvisor
+  pauseImage: registry.k8s.io/pause:3.10.2@sha256:f548e0e8e3dc1896ca956272154dde3314e8cc4fde0a57577ee9fa1c63f5baf4
+  snapshotsConfig:
+    location: s3://ate-snapshots/standing-chat
+    onPause: Full
+    onCommit: Full
+  workerSelector:
+    matchLabels:
+      anvil.hazyforge.io/worker-pool: warm
+  containers:
+    - name: agent
+      image: ghcr.io/hazyforge/anvil-agent-run-grok-build@sha256:86b8d1a905c5e36af110fd880f2bb3db3efec5bc732bd16bff9ce8dc46f77f22
