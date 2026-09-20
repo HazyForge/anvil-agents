@@ -108,6 +108,13 @@ func (s *AgentRunHarnessExecutionSpec) UsesInProcess() bool {
 	return s.EffectiveRuntime() == AgentRunExecutionRuntimeInProcess
 }
 
+// UsesStandingChat reports whether this execution selects a standing Desktop
+// chat plane (InProcess or SubstrateActor). Job remains the default for
+// scouts, batch, and any other non-standing harness.
+func (s *AgentRunHarnessExecutionSpec) UsesStandingChat() bool {
+	return s.UsesInProcess() || s.UsesSubstrateActors()
+}
+
 // ValidateSubstrateExecution checks the structural shape of the optional
 // execution-plane surface. It returns a controller reason/message pair when
 // invalid and empty strings when valid. Unknown runtime spellings are not

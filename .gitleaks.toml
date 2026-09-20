@@ -1,0 +1,16 @@
+title = "anvil-agents"
+
+[extend]
+useDefault = true
+
+# archive.restartToken is a Helm rollout bounce nonce, not a credential.
+# Gitleaks generic-api-key matched the historical value in
+# 6848de49ec2cce2d72a4caf6e99402d52e6f1f3b (already on master).
+[allowlist]
+description = "Helm archive.restartToken bounce nonce"
+paths = [
+  '''\.hazyforge/clusters/anvil-primaris/namespace/anvil-agents-system/deploy\.yaml''',
+]
+regexes = [
+  '''restartToken:\s+\S+''',
+]

@@ -20,9 +20,9 @@ import (
 //
 // When the opt-in live gate is on (standing.liveEnabled config or the
 // ANVIL_AGENTS_STANDING_LIVE environment variable, plus an attached
-// standing.Backend), reconcileChatTurn executes InProcess threads through
-// their standing session instead of leaving the run for the Job /
-// NeedsHuman hold path. Every standing turn remains one durable AgentRun:
+// standing.Backend), reconcileChatTurn executes InProcess and SubstrateActor
+// threads through their standing session instead of leaving the run for the
+// Job / NeedsHuman hold path. Every standing turn remains one durable AgentRun:
 //
 //   - The append-only AgentRun is still created from the outbox-frozen
 //     turn.RunJSON exactly as today; the standing backend consumes that
@@ -95,7 +95,7 @@ func (server *Server) standingTurnEnabled() bool {
 }
 
 // reconcileStandingTurn streams one standing turn when the gate is on and the
-// thread's harness selects execution.runtime InProcess. It returns true when
+// thread's harness selects InProcess or SubstrateActor. It returns true when
 // the in-memory run now carries the streamed Succeeded result and the caller
 // should continue through the normal status switch; false means untouched
 // (today's behavior owns the turn from here).
@@ -159,6 +159,9 @@ func (server *Server) reconcileStandingTurn(ctx context.Context, turn *chat.Turn
 	harnessKind := agentsv1alpha1.AgentRunHarnessBackendKind(handle.HarnessKind)
 	run.Status.Phase = agentsv1alpha1.AgentRunPhaseSucceeded
 	run.Status.Backend = string(harnessKind)
+	if spec.Runtime != "" {
+		run.Status.ExecutionRuntime = spec.Runtime
+	}
 	run.Status.Output = standingTurnOutput(server.standing, harnessKind, strings.TrimSpace(reply))
 	completed := metav1.NewTime(time.Now())
 	run.Status.CompletedAt = &completed

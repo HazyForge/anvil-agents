@@ -434,10 +434,31 @@ ANVIL_AGENTS_JEV_INTENT=1 ANVIL_AGENTS_JEV_MODEL=jev-1.13.0 \
    envelope on the append path (the 10s cap is a wedge guard, not a
    budget).
 
+### Primaris live (2026-09-20)
+
+The Primaris overlay now enables the gate (chart defaults stay off):
+
+- `api.config.chat.jevIntentEnabled: true`
+- `api.config.chat.jevModel: jev-1.13.0`
+- API env `TYPESAFE_API_KEY` from Secret `anvil-typesafe-jev` (not in git;
+  also backed up in Azure Key Vault `anvil-primaris-eastus` /
+  `typesafe-jev-api-key`)
+- Helm release `anvil-agents-system-chart` revision 31; API/controller image
+  `ghcr.io/hazyforge/anvil-agents@sha256:6958334163c6162748bf73689bd97471e5a0d45308c38cce733bb1005897339e`
+- API log `jev intent classification enabled` model `jev-1.13.0`
+
+Every Desktop/console chat append is classified before the turn freezes.
+`hey` live-probes as `chat_reply` at 0.99. Jev still does not generate
+the reply and does not skip the AgentRun. Hazy Trade manager stays Job.
+Standing `desktop-standing-assistant` selects `SubstrateActor` and completes
+through the standing ProcessBackend (no Job). ATE bind stays optional:
+there is no `ate-system` on Primaris, so the controller yields
+`StandingClaimed` instead of dialing ateapi.
+
 ### Kind-local runbook (validated model pin, gate via env only)
 
 Kind-local measurement setup that reproduces the live e2e below without
-flipping production defaults (`chat.jevIntentEnabled: false`,
+flipping chart defaults (`chat.jevIntentEnabled: false`,
 `chat.jevModel: ""` stay the shipped defaults in chart values).
 
 - Example config: `examples/live-api/kind-local-api-config.yaml` pins
