@@ -107,6 +107,8 @@ else
 fi
 
 cp "${overlay}/patches/pin-one-node.yaml" "${tmp_dir}/pin-one-node.yaml"
+cp "${overlay}/patches/pin-local-storage.yaml" "${tmp_dir}/pin-local-storage.yaml"
+cp "${overlay}/patches/pin-local-storage-sts.yaml" "${tmp_dir}/pin-local-storage-sts.yaml"
 cat >"${tmp_dir}/kustomization.yaml" <<'EOF'
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
@@ -125,6 +127,12 @@ patches:
   - target:
       kind: Job
     path: pin-one-node.yaml
+  - target:
+      kind: PersistentVolumeClaim
+    path: pin-local-storage.yaml
+  - target:
+      kind: StatefulSet
+    path: pin-local-storage-sts.yaml
 EOF
 
 if [[ "${include_crds}" -eq 1 ]]; then
