@@ -29,9 +29,16 @@ fi
 if grep -E 'accessKey:[[:space:]]*rustfsadmin([[:space:]]|$)|secretKey:[[:space:]]*rustfsadmin([[:space:]]|$)' "${overlay}/values.secrets.yaml.example" >/dev/null 2>&1; then
   fail "values.secrets.yaml.example must not use rustfsadmin"
 fi
-[[ ! -f "${overlay}/values.secrets.yaml" ]] || fail "values.secrets.yaml must stay gitignored and uncommitted"
+if git ls-files --error-unmatch "${overlay}/values.secrets.yaml" >/dev/null 2>&1; then
+  fail "values.secrets.yaml must stay gitignored and uncommitted"
+fi
+grep -Fq '/config/ate-constrained-primaris/values.secrets.yaml' "${root_dir}/.gitignore" || fail "values.secrets.yaml must be gitignored"
 
 grep -Fq "kubernetes.io/hostname: ${worker}" "${overlay}/patches/pin-one-node.yaml" || fail "pin-one-node.yaml missing hostname ${worker}"
+grep -Fq 'observability-local' "${overlay}/patches/pin-local-storage.yaml" || fail "pin-local-storage.yaml must pin observability-local"
+grep -Fq 'observability-local' "${overlay}/patches/pin-local-storage-sts.yaml" || fail "pin-local-storage-sts.yaml must pin observability-local"
+grep -Fq 'createNamespace: true' "${values}" || fail "helm-values.yaml must create ate-system (helm template omits Namespace otherwise)"
+grep -Fq 'pod-security.kubernetes.io/enforce=privileged' "${overlay}/README.md" || fail "README must document PSA privileged for ateom workers"
 grep -Fq 'hostPort' "${overlay}/README.md" || fail "README must call out hostPorts"
 
 template="${overlay}/fleet/base/actortemplate-standing-chat.yaml"

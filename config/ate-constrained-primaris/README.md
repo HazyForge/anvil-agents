@@ -30,6 +30,7 @@ allowlist).
 | Release / namespace | `substrate` / `ate-system` (TLS ServerName `api.ate-system.svc`) |
 | Auth | `jwt` (ATE default). Issuer: Talos SA `https://[fdae:41e4:649b:9303::1]:10000`. Audience: `api.ate-system.svc` |
 | Node | `kubernetes.io/hostname=anvil-primaris-worker-hel1-1` on every workload **and** WorkerPool pods |
+| Storage | `observability-local` on rustfs + valkey PVCs (hel1-1 has no `hcloud-volumes` CSI topology) |
 | Fleet | `ActorTemplate/standing-chat` + `ActorTemplate/acp-spike` + `WorkerPool/warm` in `anvilhub` and `hazy-trade` |
 | Anvil client | Get/Create/Resume/Suspend/Pause; generate-on-actor is ACP/HTTP through atenet after Resume, opted in per actorClass |
 
@@ -65,6 +66,12 @@ Apply, if ever, is CRDs then the render — not stock helm install:
 # helm template substrate-crds oci://ghcr.io/kagent-dev/substrate/helm/substrate-crds --version 0.0.8 | kubectl apply --context hazyforge-anvil-primaris -f -
 # kubectl --context hazyforge-anvil-primaris apply -f /tmp/ate-constrained-primaris.yaml
 ```
+
+`createNamespace: true` so helm template emits `Namespace/ate-system`. Label that
+namespace (and `anvilhub` / `hazy-trade`, where WorkerPool ateom pods land)
+`pod-security.kubernetes.io/enforce=privileged`. Primaris cluster default is
+`baseline:latest`; without the label, warm workers are Forbidden (hostPath +
+privileged ateom). Do not stock-install.
 
 After ATE exists, Anvil JWT CA trust is chart `substrate.ca.configMapName=ateapi-ca`
 with `substrate.ca.namespace=ate-system` (cross-namespace lookup; the

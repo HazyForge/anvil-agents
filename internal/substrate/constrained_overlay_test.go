@@ -62,6 +62,14 @@ func TestConstrainedOverlayForbidsStockInstallAndDefaultRustFSKeys(t *testing.T)
 	if !strings.Contains(pin, "kubernetes.io/hostname: anvil-primaris-worker-hel1-1") {
 		t.Fatal("pin-one-node.yaml missing hostname selector")
 	}
+	storage := read("patches/pin-local-storage.yaml")
+	if !strings.Contains(storage, "observability-local") {
+		t.Fatal("pin-local-storage.yaml must pin observability-local (hel1-1 has no hcloud CSI topology)")
+	}
+	stsStorage := read("patches/pin-local-storage-sts.yaml")
+	if !strings.Contains(stsStorage, "observability-local") {
+		t.Fatal("pin-local-storage-sts.yaml must pin valkey PVCs to observability-local")
+	}
 
 	template := read("fleet/base/actortemplate-standing-chat.yaml")
 	if !strings.Contains(template, "name: standing-chat") {
@@ -93,7 +101,8 @@ func TestConstrainedOverlayForbidsStockInstallAndDefaultRustFSKeys(t *testing.T)
 		t.Fatal("WorkerPool must pin hel1-1")
 	}
 
-	if _, err := os.Stat(filepath.Join(root, "values.secrets.yaml")); err == nil {
-		t.Fatal("values.secrets.yaml must not be committed")
+	gitignore := read(filepath.Join("..", "..", ".gitignore"))
+	if !strings.Contains(gitignore, "/config/ate-constrained-primaris/values.secrets.yaml") {
+		t.Fatal("values.secrets.yaml must be gitignored")
 	}
 }

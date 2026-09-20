@@ -1,0 +1,5 @@
+# JSON6902 for valkey-cluster volumeClaimTemplates. Same reason as
+# pin-local-storage.yaml: hel1-1 cannot provision hcloud-volumes.
+- op: add
+  path: /spec/volumeClaimTemplates/0/spec/storageClassName
+  value: observability-local

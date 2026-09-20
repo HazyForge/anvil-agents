@@ -1,0 +1,7 @@
+# JSON6902. ATE 0.0.8 PVCs omit storageClassName, so they take the cluster
+# default (hcloud-volumes). hel1-1 has no Hetzner CSI topology, so those
+# claims never bind. Pin host-local storage used by other hel1-1 workloads.
+# Chart has no storageClass Helm knob.
+- op: add
+  path: /spec/storageClassName
+  value: observability-local

@@ -12,6 +12,12 @@
 # Apply only after generate-on-actor is in the live Anvil image. Leave Anvil
 # substrate.actorsEnabled=false and generateOnActor=false until an acp-spike
 # smoke succeeds.
+#
+# helm template does not emit a Namespace unless createNamespace is true.
+# StorageClass is not a chart knob; pin-local-storage*.yaml set
+# observability-local because hel1-1 cannot provision hcloud-volumes.
+
+createNamespace: true
 
 auth:
   mode: jwt
