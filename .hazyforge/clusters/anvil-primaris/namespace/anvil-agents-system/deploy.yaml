@@ -39,12 +39,13 @@ extraEnv:
     value: "true"
 applicationMaxConcurrentRuns: 4
 defaultStorageClass: observability-local
-# ATE jwt client. actorsEnabled/generateOnActor stay false until an
-# acp-spike smoke bind+generate succeeds. standing-chat is never generated.
+# ATE jwt client. acp-spike-smoke-005 bind+generate succeeded
+# (SubstrateActorGenerated). standing-chat is never generated.
 substrate:
-  actorsEnabled: false
-  generateOnActor: false
-  generateActorClasses: []
+  actorsEnabled: true
+  generateOnActor: true
+  generateActorClasses:
+    - acp-spike
   endpoint: api.ate-system.svc:443
   template: acp-spike
   ca:
