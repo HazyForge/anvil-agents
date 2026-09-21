@@ -116,7 +116,7 @@ backend-kind overlay, which stays orthogonal to the runtime plane).
 
   | `substrate.Client` | ateapi `Control` RPC | `kubectl ate` equivalent |
   | --- | --- | --- |
-  | `CreateActor` | `CreateActor` (after `GetActor`; `AlreadyExists` re-reads) | `create actor <name> -a <atespace> --template <template>` |
+  | `CreateActor` | `CreateActor` (after `GetActor`; `AlreadyExists` re-reads; ATE 0.0.8 `actor_template_namespace`) | `create actor <name> -a <atespace> --template <namespace>/<template>` |
   | `ResumeActor` | `ResumeActor` (`resumed` feeds the handle count) | `resume actor <name> -a <atespace>` |
   | `SuspendActor` | `SuspendActor` | `suspend actor <name> -a <atespace>` |
   | `PauseActor` | `PauseActor` | `pause actor <name> -a <atespace>` |

@@ -69,22 +69,29 @@ func (s *bufconnATEControlServer) GetActor(_ context.Context, req *ateapipb.GetA
 func (s *bufconnATEControlServer) CreateActor(_ context.Context, req *ateapipb.CreateActorRequest) (*ateapipb.Actor, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	want := req.GetActor()
-	key := bufconnActorKey(want.GetMetadata().GetAtespace(), want.GetMetadata().GetName())
+	if strings.TrimSpace(req.GetActorTemplateNamespace()) == "" {
+		return nil, status.Error(codes.InvalidArgument, "actor_template_namespace is required")
+	}
+	if strings.TrimSpace(req.GetActorTemplateName()) == "" {
+		return nil, status.Error(codes.InvalidArgument, "actor_template_name is required")
+	}
+	if req.GetActorRef().GetName() == "" {
+		return nil, status.Error(codes.InvalidArgument, "actor_id is required")
+	}
+	if req.GetActorRef().GetAtespace() == "" {
+		return nil, status.Error(codes.InvalidArgument, "atespace is required")
+	}
+	key := bufconnActorKey(req.GetActorRef().GetAtespace(), req.GetActorRef().GetName())
 	if _, ok := s.actors[key]; ok {
 		return nil, status.Errorf(codes.AlreadyExists, "actor %s already exists", key)
 	}
 	actor := &ateapipb.Actor{
-		Metadata: &ateapipb.ResourceMetadata{
-			Atespace: want.GetMetadata().GetAtespace(),
-			Name:     want.GetMetadata().GetName(),
-			Uid:      "ate-uid-wire-1",
-		},
-		ActorTemplate: want.GetActorTemplate(),
-		Status:        &ateapipb.ActorStatus{State: ateapipb.ActorState_ACTOR_STATE_RUNNING},
-	}
-	if want.GetWorkerSelector() != nil {
-		actor.WorkerSelector = &ateapipb.Selector{MatchLabels: want.GetWorkerSelector().GetMatchLabels()}
+		Atespace:               req.GetActorRef().GetAtespace(),
+		ActorId:                req.GetActorRef().GetName(),
+		ActorTemplateNamespace: req.GetActorTemplateNamespace(),
+		ActorTemplateName:      req.GetActorTemplateName(),
+		Status:                 ateapipb.ActorState_ACTOR_STATE_SUSPENDED,
+		WorkerSelector:         req.GetWorkerSelector(),
 	}
 	s.actors[key] = actor
 	s.creates = append(s.creates, actor)
@@ -99,10 +106,10 @@ func (s *bufconnATEControlServer) ResumeActor(_ context.Context, req *ateapipb.R
 	if !ok {
 		return nil, status.Errorf(codes.NotFound, "actor %s not found", key)
 	}
-	if actor.GetStatus().GetState() == ateapipb.ActorState_ACTOR_STATE_RUNNING {
+	if actor.GetStatus() == ateapipb.ActorState_ACTOR_STATE_RUNNING {
 		return &ateapipb.ResumeActorResponse{Actor: actor}, nil
 	}
-	actor.Status.State = ateapipb.ActorState_ACTOR_STATE_RUNNING
+	actor.Status = ateapipb.ActorState_ACTOR_STATE_RUNNING
 	return &ateapipb.ResumeActorResponse{Actor: actor, Resumed: true}, nil
 }
 
@@ -114,7 +121,7 @@ func (s *bufconnATEControlServer) SuspendActor(_ context.Context, req *ateapipb.
 	if !ok {
 		return nil, status.Errorf(codes.NotFound, "actor %s not found", key)
 	}
-	actor.Status.State = ateapipb.ActorState_ACTOR_STATE_SUSPENDED
+	actor.Status = ateapipb.ActorState_ACTOR_STATE_SUSPENDED
 	return &ateapipb.SuspendActorResponse{Actor: actor}, nil
 }
 
@@ -126,7 +133,7 @@ func (s *bufconnATEControlServer) PauseActor(_ context.Context, req *ateapipb.Pa
 	if !ok {
 		return nil, status.Errorf(codes.NotFound, "actor %s not found", key)
 	}
-	actor.Status.State = ateapipb.ActorState_ACTOR_STATE_PAUSED
+	actor.Status = ateapipb.ActorState_ACTOR_STATE_PAUSED
 	return &ateapipb.PauseActorResponse{Actor: actor}, nil
 }
 
@@ -286,14 +293,31 @@ func TestProtoCreateActorCarriesTemplateAndPool(t *testing.T) {
 
 	spec := ATECreateSpec{Atespace: "agents", Name: "chat-1", TemplateAtespace: "agents", TemplateName: "standing-chat", WorkerSelector: map[string]string{WorkerSelectorPoolLabel: "warm"}}
 	pb := protoCreateActor(spec)
-	if pb.GetMetadata().GetAtespace() != "agents" || pb.GetMetadata().GetName() != "chat-1" {
-		t.Fatalf("wire identity = %+v, want agents/chat-1", pb.GetMetadata())
+	if pb.GetActorRef().GetAtespace() != "agents" || pb.GetActorRef().GetName() != "chat-1" {
+		t.Fatalf("wire identity = %+v, want agents/chat-1", pb.GetActorRef())
 	}
-	if pb.GetActorTemplate().GetAtespace() != "agents" || pb.GetActorTemplate().GetName() != "standing-chat" {
-		t.Fatalf("wire template = %+v, want agents/standing-chat", pb.GetActorTemplate())
+	if pb.GetActorTemplateNamespace() != "agents" || pb.GetActorTemplateName() != "standing-chat" {
+		t.Fatalf("wire template = %q/%q, want agents/standing-chat", pb.GetActorTemplateNamespace(), pb.GetActorTemplateName())
 	}
 	if pb.GetWorkerSelector().GetMatchLabels()[WorkerSelectorPoolLabel] != "warm" {
 		t.Fatalf("wire selector = %+v, want pool warm", pb.GetWorkerSelector())
+	}
+
+	fallback := protoCreateActor(ATECreateSpec{Atespace: "anvilhub", Name: "chat-2", TemplateName: "acp-spike"})
+	if fallback.GetActorTemplateNamespace() != "anvilhub" {
+		t.Fatalf("empty TemplateAtespace must keep the actor atespace mapping, got %q", fallback.GetActorTemplateNamespace())
+	}
+}
+
+func TestGRPCCreateActorRequiresTemplateNamespace(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	server := newBufconnATEControlServer()
+	control, _ := dialBufconnATEControl(t, server)
+	_, err := control.CreateActor(ctx, ATECreateSpec{Name: "chat-1", TemplateName: "acp-spike"})
+	if err == nil || !strings.Contains(err.Error(), "actor_template_namespace is required") {
+		t.Fatalf("create without template namespace err = %v, want InvalidArgument actor_template_namespace is required", err)
 	}
 }
 
@@ -315,8 +339,8 @@ func TestGRPCControlWireRoundTrip(t *testing.T) {
 	if created.State != ActorStateActive || created.ID == "" {
 		t.Fatalf("created handle = %+v, want active with a server UID", created)
 	}
-	if len(server.creates) != 1 || server.creates[0].GetActorTemplate().GetName() != "standing-chat" {
-		t.Fatalf("server creates = %+v, want one standing-chat create", server.creates)
+	if len(server.creates) != 1 || server.creates[0].GetActorTemplateName() != "standing-chat" || server.creates[0].GetActorTemplateNamespace() != "agents" {
+		t.Fatalf("server creates = %+v, want one standing-chat create in agents", server.creates)
 	}
 	if server.creates[0].GetWorkerSelector().GetMatchLabels()[WorkerSelectorPoolLabel] != "warm" {
 		t.Fatalf("server selector = %+v, want pool warm", server.creates[0].GetWorkerSelector())
@@ -329,15 +353,15 @@ func TestGRPCControlWireRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resume over the wire: %v", err)
 	}
-	if resumed.Resumes != 1 {
-		t.Fatalf("resumed handle = %+v, want one observed resume workflow", resumed)
+	if resumed.Resumes != 2 {
+		t.Fatalf("resumed handle = %+v, want create-resume plus one later resume workflow", resumed)
 	}
 	// Warm reuse: re-create returns the same server UID with the count kept.
 	second, err := client.CreateActor(ctx, ActorSpec{Namespace: "agents", Name: "chat-thread-1"})
 	if err != nil {
 		t.Fatalf("re-create over the wire: %v", err)
 	}
-	if second.ID != created.ID || second.Resumes != 1 {
+	if second.ID != created.ID || second.Resumes != 2 {
 		t.Fatalf("re-created handle = %+v, want warm reuse of %+v", second, created)
 	}
 	if _, err := client.PauseActor(ctx, "agents", "chat-thread-1"); err != nil {
@@ -409,8 +433,8 @@ func TestDialInsecureLoopbackRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resume via dialed client: %v", err)
 	}
-	if resumed.Resumes != 1 {
-		t.Fatalf("resumed handle = %+v, want one observed resume", resumed)
+	if resumed.Resumes != 2 {
+		t.Fatalf("resumed handle = %+v, want create-resume plus one later resume", resumed)
 	}
 	// A file token on the insecure path must still attach over the TLS
 	// channel (per-RPC creds require transport security).

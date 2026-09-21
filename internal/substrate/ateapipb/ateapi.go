@@ -1,27 +1,24 @@
 // Package ateapipb is a minimal hand-written Go binding for the Substrate
 // ATE lifecycle surface (upstream ateapi.Control).
 //
-// Upstream source: github.com/agent-substrate/substrate,
-// pkg/proto/ateapipb/ateapi.proto, service ateapi.Control, at commit
-// 944abe3278b895ccbf5d45555a49dd0f2f6ceae7 (Sep 2026, RevertActor #1675).
-// Lifecycle-subset diff vs the previous pin af2477e: only
-// ACTOR_STATE_REVERTING = 9 was added; the five bound RPC signatures and all
-// lifecycle field numbers are unchanged. The full .proto
-// subset lives in ateapi.proto next to this file; the Go structs below carry
-// the same package (ateapi), service (Control), method, message, and field
-// numbers via protobuf struct tags, so they stay wire-compatible with ateapi
-// while avoiding generated code and extra vendoring.
+// Upstream source: github.com/kagent-dev/substrate ATE Helm 0.0.8
+// (pkg/proto/ateapipb/ateapi.proto at tag v0.0.8). Live Primaris ateapi is
+// that chart. Later agent-substrate CreateActorRequest nested a full Actor
+// (actor_template.atespace); 0.0.8 requires sibling fields
+// actor_template_namespace / actor_template_name and wraps Get/Create
+// responses. The subset proto next to this file is the source of truth;
+// struct tags below copy those field numbers.
 //
 // Why hand-written: protoc-gen-go output trips gosec G103 (unsafe) and pulls
 // a codegen toolchain into the spike; these ~400 lines of plain structs are
 // auditable, gosec-clean, and sufficient for the five lifecycle RPCs. Wire
 // compatibility is pinned by TestWireGoldenVectors, which asserts exact
-// protobuf bytes captured from the upstream-generated stubs.
+// protobuf bytes.
 //
 // How to refresh when upstream churns:
-//  1. Fetch the upstream proto and diff the Control service plus the
-//     ObjectRef/Selector/ResourceMetadata/Actor/ActorStatus messages and the
-//     five request/response shapes against ateapi.proto.
+//  1. Fetch the upstream proto (kagent-dev/substrate v0.0.8 or the live
+//     ateapi image's pin) and diff the Control service plus the
+//     ObjectRef/Actor/CreateActorRequest messages against ateapi.proto.
 //  2. Update the struct tags and method set below to match (field numbers are
 //     what matter on the wire; unknown server fields are skipped per proto3
 //     semantics).
@@ -181,32 +178,44 @@ func (m *ActorStatus) GetState() ActorState {
 	return m.State
 }
 
-// Actor is the lifecycle projection (upstream ateapi.Actor: metadata = 1,
-// actor_template = 4, worker_selector = 5, status = 7; source_tag = 6 is
-// create-only and never set by Anvil).
+// Actor is the ATE 0.0.8 lifecycle projection (actor_id = 1, version = 2,
+// actor_template_namespace = 3, actor_template_name = 4, status = 5,
+// worker_selector = 13, atespace = 15).
 type Actor struct {
-	Metadata       *ResourceMetadata `protobuf:"bytes,1,opt,name=metadata,proto3" json:"metadata,omitempty"`
-	ActorTemplate  *ObjectRef        `protobuf:"bytes,4,opt,name=actor_template,json=actorTemplate,proto3" json:"actor_template,omitempty"`
-	WorkerSelector *Selector         `protobuf:"bytes,5,opt,name=worker_selector,json=workerSelector,proto3" json:"worker_selector,omitempty"`
-	Status         *ActorStatus      `protobuf:"bytes,7,opt,name=status,proto3" json:"status,omitempty"`
+	ActorId                string     `protobuf:"bytes,1,opt,name=actor_id,json=actorId,proto3" json:"actor_id,omitempty"`
+	Version                int64      `protobuf:"varint,2,opt,name=version,proto3" json:"version,omitempty"`
+	ActorTemplateNamespace string     `protobuf:"bytes,3,opt,name=actor_template_namespace,json=actorTemplateNamespace,proto3" json:"actor_template_namespace,omitempty"`
+	ActorTemplateName      string     `protobuf:"bytes,4,opt,name=actor_template_name,json=actorTemplateName,proto3" json:"actor_template_name,omitempty"`
+	Status                 ActorState `protobuf:"varint,5,opt,name=status,proto3,enum=ateapi.ActorState" json:"status,omitempty"`
+	WorkerSelector         *Selector  `protobuf:"bytes,13,opt,name=worker_selector,json=workerSelector,proto3" json:"worker_selector,omitempty"`
+	Atespace               string     `protobuf:"bytes,15,opt,name=atespace,proto3" json:"atespace,omitempty"`
 }
 
-func (m *Actor) Reset()         { *m = Actor{} }
-func (m *Actor) String() string { return fmt.Sprintf("metadata:{%v} status:{%v}", m.GetMetadata(), m.GetStatus()) }
-func (*Actor) ProtoMessage()    {}
+func (m *Actor) Reset() { *m = Actor{} }
+func (m *Actor) String() string {
+	return fmt.Sprintf("atespace:%q actor_id:%q status:%v", m.GetAtespace(), m.GetActorId(), m.GetStatus())
+}
+func (*Actor) ProtoMessage() {}
 
-func (m *Actor) GetMetadata() *ResourceMetadata {
+func (m *Actor) GetActorId() string {
 	if m == nil {
-		return nil
+		return ""
 	}
-	return m.Metadata
+	return m.ActorId
 }
 
-func (m *Actor) GetActorTemplate() *ObjectRef {
+func (m *Actor) GetActorTemplateNamespace() string {
 	if m == nil {
-		return nil
+		return ""
 	}
-	return m.ActorTemplate
+	return m.ActorTemplateNamespace
+}
+
+func (m *Actor) GetActorTemplateName() string {
+	if m == nil {
+		return ""
+	}
+	return m.ActorTemplateName
 }
 
 func (m *Actor) GetWorkerSelector() *Selector {
@@ -216,11 +225,18 @@ func (m *Actor) GetWorkerSelector() *Selector {
 	return m.WorkerSelector
 }
 
-func (m *Actor) GetStatus() *ActorStatus {
+func (m *Actor) GetStatus() ActorState {
 	if m == nil {
-		return nil
+		return ActorState_ACTOR_STATE_UNSPECIFIED
 	}
 	return m.Status
+}
+
+func (m *Actor) GetAtespace() string {
+	if m == nil {
+		return ""
+	}
+	return m.Atespace
 }
 
 type GetActorRequest struct {
@@ -238,15 +254,75 @@ func (m *GetActorRequest) GetActor() *ObjectRef {
 	return m.Actor
 }
 
-type CreateActorRequest struct {
+type GetActorResponse struct {
 	Actor *Actor `protobuf:"bytes,1,opt,name=actor,proto3" json:"actor,omitempty"`
 }
 
-func (m *CreateActorRequest) Reset()         { *m = CreateActorRequest{} }
-func (m *CreateActorRequest) String() string { return fmt.Sprintf("actor:{%v}", m.GetActor()) }
-func (*CreateActorRequest) ProtoMessage()    {}
+func (m *GetActorResponse) Reset()         { *m = GetActorResponse{} }
+func (m *GetActorResponse) String() string { return fmt.Sprintf("actor:{%v}", m.GetActor()) }
+func (*GetActorResponse) ProtoMessage()    {}
 
-func (m *CreateActorRequest) GetActor() *Actor {
+func (m *GetActorResponse) GetActor() *Actor {
+	if m == nil {
+		return nil
+	}
+	return m.Actor
+}
+
+// CreateActorRequest is ATE Helm 0.0.8's create payload: actor_ref plus
+// sibling actor_template_namespace / actor_template_name. Later ateapi nested
+// those under Actor.actor_template.atespace; 0.0.8 rejects that shape with
+// InvalidArgument: actor_template_namespace is required.
+type CreateActorRequest struct {
+	ActorRef               *ObjectRef `protobuf:"bytes,1,opt,name=actor_ref,json=actorRef,proto3" json:"actor_ref,omitempty"`
+	ActorTemplateNamespace string     `protobuf:"bytes,2,opt,name=actor_template_namespace,json=actorTemplateNamespace,proto3" json:"actor_template_namespace,omitempty"`
+	ActorTemplateName      string     `protobuf:"bytes,3,opt,name=actor_template_name,json=actorTemplateName,proto3" json:"actor_template_name,omitempty"`
+	WorkerSelector         *Selector  `protobuf:"bytes,4,opt,name=worker_selector,json=workerSelector,proto3" json:"worker_selector,omitempty"`
+}
+
+func (m *CreateActorRequest) Reset() { *m = CreateActorRequest{} }
+func (m *CreateActorRequest) String() string {
+	return fmt.Sprintf("actor_ref:{%v} actor_template_namespace:%q actor_template_name:%q", m.GetActorRef(), m.GetActorTemplateNamespace(), m.GetActorTemplateName())
+}
+func (*CreateActorRequest) ProtoMessage() {}
+
+func (m *CreateActorRequest) GetActorRef() *ObjectRef {
+	if m == nil {
+		return nil
+	}
+	return m.ActorRef
+}
+
+func (m *CreateActorRequest) GetActorTemplateNamespace() string {
+	if m == nil {
+		return ""
+	}
+	return m.ActorTemplateNamespace
+}
+
+func (m *CreateActorRequest) GetActorTemplateName() string {
+	if m == nil {
+		return ""
+	}
+	return m.ActorTemplateName
+}
+
+func (m *CreateActorRequest) GetWorkerSelector() *Selector {
+	if m == nil {
+		return nil
+	}
+	return m.WorkerSelector
+}
+
+type CreateActorResponse struct {
+	Actor *Actor `protobuf:"bytes,1,opt,name=actor,proto3" json:"actor,omitempty"`
+}
+
+func (m *CreateActorResponse) Reset()         { *m = CreateActorResponse{} }
+func (m *CreateActorResponse) String() string { return fmt.Sprintf("actor:{%v}", m.GetActor()) }
+func (*CreateActorResponse) ProtoMessage()    {}
+
+func (m *CreateActorResponse) GetActor() *Actor {
 	if m == nil {
 		return nil
 	}
@@ -374,21 +450,21 @@ func NewControlClient(cc grpc.ClientConnInterface) ControlClient {
 }
 
 func (c *controlClient) GetActor(ctx context.Context, in *GetActorRequest, opts ...grpc.CallOption) (*Actor, error) {
-	out := new(Actor)
+	out := new(GetActorResponse)
 	err := c.cc.Invoke(ctx, Control_GetActor_FullMethodName, in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
-	return out, nil
+	return out.GetActor(), nil
 }
 
 func (c *controlClient) CreateActor(ctx context.Context, in *CreateActorRequest, opts ...grpc.CallOption) (*Actor, error) {
-	out := new(Actor)
+	out := new(CreateActorResponse)
 	err := c.cc.Invoke(ctx, Control_CreateActor_FullMethodName, in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
-	return out, nil
+	return out.GetActor(), nil
 }
 
 func (c *controlClient) SuspendActor(ctx context.Context, in *SuspendActorRequest, opts ...grpc.CallOption) (*SuspendActorResponse, error) {
@@ -475,17 +551,31 @@ var Control_ServiceDesc = grpc.ServiceDesc{
 	Metadata: "ateapi.proto",
 }
 
+func wrapGetActor(actor *Actor, err error) (any, error) {
+	if err != nil {
+		return nil, err
+	}
+	return &GetActorResponse{Actor: actor}, nil
+}
+
+func wrapCreateActor(actor *Actor, err error) (any, error) {
+	if err != nil {
+		return nil, err
+	}
+	return &CreateActorResponse{Actor: actor}, nil
+}
+
 func controlGetActorHandler(srv any, ctx context.Context, dec func(any) error, interceptor grpc.UnaryServerInterceptor) (any, error) {
 	in := new(GetActorRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(ControlServer).GetActor(ctx, in)
+		return wrapGetActor(srv.(ControlServer).GetActor(ctx, in))
 	}
 	info := &grpc.UnaryServerInfo{Server: srv, FullMethod: Control_GetActor_FullMethodName}
 	handler := func(ctx context.Context, req any) (any, error) {
-		return srv.(ControlServer).GetActor(ctx, req.(*GetActorRequest))
+		return wrapGetActor(srv.(ControlServer).GetActor(ctx, req.(*GetActorRequest)))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -496,11 +586,11 @@ func controlCreateActorHandler(srv any, ctx context.Context, dec func(any) error
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(ControlServer).CreateActor(ctx, in)
+		return wrapCreateActor(srv.(ControlServer).CreateActor(ctx, in))
 	}
 	info := &grpc.UnaryServerInfo{Server: srv, FullMethod: Control_CreateActor_FullMethodName}
 	handler := func(ctx context.Context, req any) (any, error) {
-		return srv.(ControlServer).CreateActor(ctx, req.(*CreateActorRequest))
+		return wrapCreateActor(srv.(ControlServer).CreateActor(ctx, req.(*CreateActorRequest)))
 	}
 	return interceptor(ctx, in, info, handler)
 }

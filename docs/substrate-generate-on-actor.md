@@ -1,31 +1,18 @@
 # Generate-on-actor
 
-Status: **code is in this slice and live on Primaris** (Helm 39,
-`ghcr.io/hazyforge/anvil-agents@sha256:c351edee68763238ad50a781ba99b5b96d914a6ff65e79cce8dad4b6160c0188`).
-`substrate.actorsEnabled` and `substrate.generateOnActor` stay **false** —
-ATE is applied one-node-safe on `anvil-primaris-worker-hel1-1`, but a real
-`acp-spike` smoke bind+generate has **not** succeeded end to end: it is
-blocked until Austin applies the Talos CP SA-issuer patch and ateapi can
-anonymously fetch in-cluster OIDC (see
-`config/ate-constrained-primaris/README.md`). Desktop
-`desktop-standing-assistant` stays on API `ProcessBackend`
-(`actorClass: standing-chat`).
+Status: **code is in this slice**. `substrate.actorsEnabled` and
+`substrate.generateOnActor` stay **false** until an `acp-spike` smoke
+bind+generate succeeds. Desktop `desktop-standing-assistant` stays on API
+`ProcessBackend` (`actorClass: standing-chat`).
 
-Verified 2026-09-20 with a temporary, reverted smoke enable
-(`substrate.actorsEnabled=true generateOnActor=true
-generateActorClasses=[acp-spike]` via `--set`, never committed): the
-controller correctly held/released the run, dialed `ateapi` over mTLS,
-completed the TLS handshake against the (freshly restarted) `ateapi-tls`
-cert trusted via the `ateapi-ca` ConfigMap, and reached ateapi's own bearer
-validation — which then failed because `ateapi` cannot complete OIDC
-discovery against Omni's SideroLink kube-apiserver VIP from a workload pod.
-Re-probe the same day: that VIP **is** kube-apiserver (`CN=kube-apiserver`),
-pods get `network is unreachable` (Cilium IPv6 off), hostNetwork GET is
-**401** (anonymous-auth off). GitOps fix is the Talos CP patch
-`talos/12-control-plane-sa-oidc-issuer.yaml` plus
-`oidc-discovery-unauthenticated.yaml` and ATE issuer
-`https://kubernetes.default.svc.cluster.local`. No actor reply yet. Do not
-flip the generate gates until a token validates.
+OIDC is done (anonymous in-cluster discovery HTTP 200; ateapi accepts Anvil
+projected SA tokens). Smoke `anvilhub/acp-spike-smoke-002` reached CreateActor
+and failed `InvalidArgument: actor_template_namespace is required` because
+Anvil sent later-ateapi `actor_template.atespace`. CreateActor now matches
+ATE Helm 0.0.8 (`actor_ref` + `actor_template_namespace` /
+`actor_template_name`, keeping the namespace→atespace mapping). Do not flip
+the generate gates until that image is live and an `acp-spike` smoke
+succeeds.
 
 Anvil’s live ATE client is still lifecycle-only for Create/Resume/Suspend/Pause.
 Prompt delivery is HTTP/ACP through `atenet-router` **after** `ResumeActor`.
