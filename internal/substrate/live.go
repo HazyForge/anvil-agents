@@ -11,7 +11,7 @@
 //
 // Upstream lifecycle mapping (see docs/substrate-spike.md for the full table):
 //
-//	CreateActor   -> Control/CreateActor  (kubectl ate create actor <name> -a <atespace> --template <template>)
+//	CreateActor   -> Control/CreateActor  (kubectl ate create actor <name> -a <atespace> --template <namespace>/<template>)
 //	ResumeActor   -> Control/ResumeActor  (kubectl ate resume actor <name> -a <atespace>)
 //	SuspendActor  -> Control/SuspendActor (kubectl ate suspend actor <name> -a <atespace>)
 //	PauseActor    -> Control/PauseActor   (kubectl ate pause actor <name> -a <atespace>)
@@ -94,9 +94,10 @@ type ATEActor struct {
 	State            ATEActorState
 }
 
-// ATECreateSpec is the create payload for ATEControl.CreateActor, mirroring
-// the actor field of ateapi.CreateActorRequest (metadata + actor_template
-// ref + worker_selector).
+// ATECreateSpec is the create payload for ATEControl.CreateActor. ATE 0.0.8
+// sends actor_ref (atespace/name), actor_template_namespace, actor_template_name,
+// and worker_selector. TemplateAtespace is the existing namespace→atespace
+// mapping and is required on the wire as actor_template_namespace.
 type ATECreateSpec struct {
 	Atespace         string
 	Name             string
@@ -174,10 +175,10 @@ type ATEControl interface {
 	// GetActor issues Control/GetActor (kubectl ate get actor <name> -a
 	// <atespace>). Unknown actors surface as ATECodeNotFound.
 	GetActor(ctx context.Context, ref ATEObjectRef) (ATEActor, error)
-	// CreateActor issues Control/CreateActor with the actor deriving from the
-	// given ActorTemplate (kubectl ate create actor <name> -a <atespace>
-	// --template <template>). An existing name surfaces as
-	// ATECodeAlreadyExists.
+	// CreateActor issues Control/CreateActor with actor_ref plus
+	// actor_template_namespace / actor_template_name (kubectl ate create
+	// actor <name> -a <atespace> --template <namespace>/<template>). An
+	// existing name surfaces as ATECodeAlreadyExists.
 	CreateActor(ctx context.Context, spec ATECreateSpec) (ATEActor, error)
 	// ResumeActor issues Control/ResumeActor (kubectl ate resume actor <name>
 	// -a <atespace>). The resumed flag mirrors
@@ -309,8 +310,8 @@ func (c *ATEClient) ref(namespace, name string) ATEObjectRef {
 }
 
 // createSpec resolves an ActorSpec to the ATE create payload: template from
-// ActorClass (or the configured default) in the actor's atespace, placement
-// from Pool.
+// ActorClass (or the configured default). TemplateAtespace stays the actor's
+// atespace (existing mapping) and is sent as actor_template_namespace.
 func (c *ATEClient) createSpec(spec ActorSpec) ATECreateSpec {
 	ref := c.ref(spec.Namespace, spec.Name)
 	template := strings.TrimSpace(spec.ActorClass)
@@ -424,7 +425,20 @@ func (c *ATEClient) CreateActor(ctx context.Context, spec ActorSpec) (ActorHandl
 		}
 		return ActorHandle{}, err
 	}
-	return c.handle(created), nil
+	// ATE 0.0.8 CreateActor records the actor as SUSPENDED. Generate-on-actor
+	// and FakeClient both need an Active handle, so Resume when create did
+	// not already leave the actor running.
+	if MapATEState(created.State) == ActorStateActive {
+		return c.handle(created), nil
+	}
+	resumed, ranResume, err := c.control.ResumeActor(ctx, ref)
+	if err != nil {
+		return ActorHandle{}, notFoundAsClient(ref, err)
+	}
+	if ranResume {
+		c.noteResumed(resumed)
+	}
+	return c.handle(resumed), nil
 }
 
 // ResumeActor resumes the actor before a turn, counting the resume when the

@@ -190,6 +190,14 @@ URL above. Do not set Primaris `substrate.actorsEnabled=true` /
 `generateOnActor=true` until a real `acp-spike` smoke bind+generate
 succeeds end to end.
 
+**Applied 2026-09-21:** Omni CP patch, unauthenticated discovery, and ateapi
+issuer are live. Anonymous in-cluster OIDC is HTTP 200; ateapi accepts Anvil
+projected SA tokens. The remaining CreateActor blocker was ATE 0.0.8
+`actor_template_namespace` (Anvil had only later-ateapi
+`actor_template.atespace`). Keep generate gates off until that image is
+hot-released and an `acp-spike` smoke succeeds. Do not re-render the live
+ATE overlay just to match Git — that rotates the JWT CA.
+
 ## RustFS keys
 
 Chart default is `rustfsadmin` / `rustfsadmin`. This overlay **overrides**

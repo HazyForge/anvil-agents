@@ -482,20 +482,19 @@ func ateStateFromProto(state ateapipb.ActorState) ATEActorState {
 }
 
 // ateActorFromProto projects a wire Actor onto the seam type. Template and
-// placement echoes let operators verify what a create requested.
+// placement echoes let operators verify what a create requested. ATE 0.0.8
+// identity is atespace + actor_id (no ResourceMetadata uid).
 func ateActorFromProto(pb *ateapipb.Actor) ATEActor {
 	if pb == nil {
 		return ATEActor{}
 	}
-	out := ATEActor{State: ATEActorStateUnspecified}
-	if pb.GetMetadata() != nil {
-		out.Atespace = pb.GetMetadata().GetAtespace()
-		out.Name = pb.GetMetadata().GetName()
-		out.UID = pb.GetMetadata().GetUid()
-	}
-	if pb.GetActorTemplate() != nil {
-		out.TemplateAtespace = pb.GetActorTemplate().GetAtespace()
-		out.TemplateName = pb.GetActorTemplate().GetName()
+	out := ATEActor{
+		Atespace:         pb.GetAtespace(),
+		Name:             pb.GetActorId(),
+		UID:              pb.GetActorId(),
+		TemplateAtespace: pb.GetActorTemplateNamespace(),
+		TemplateName:     pb.GetActorTemplateName(),
+		State:            ateStateFromProto(pb.GetStatus()),
 	}
 	if pb.GetWorkerSelector() != nil {
 		for key, value := range pb.GetWorkerSelector().GetMatchLabels() {
@@ -505,9 +504,6 @@ func ateActorFromProto(pb *ateapipb.Actor) ATEActor {
 			out.WorkerSelector[key] = value
 		}
 	}
-	if pb.GetStatus() != nil {
-		out.State = ateStateFromProto(pb.GetStatus().GetState())
-	}
 	return out
 }
 
@@ -516,17 +512,24 @@ func protoObjectRef(ref ATEObjectRef) *ateapipb.ObjectRef {
 	return &ateapipb.ObjectRef{Atespace: ref.Atespace, Name: ref.Name}
 }
 
-// protoCreateActor builds the wire create payload from the seam spec:
-// identity + template ref + per-actor worker selector.
-func protoCreateActor(spec ATECreateSpec) *ateapipb.Actor {
-	actor := &ateapipb.Actor{
-		Metadata:      &ateapipb.ResourceMetadata{Atespace: spec.Atespace, Name: spec.Name},
-		ActorTemplate: &ateapipb.ObjectRef{Atespace: spec.TemplateAtespace, Name: spec.TemplateName},
+// protoCreateActor builds the ATE 0.0.8 CreateActorRequest: actor_ref plus
+// sibling actor_template_namespace / actor_template_name. TemplateAtespace
+// (the existing namespace→atespace mapping) is sent as actor_template_namespace,
+// not only as a nested actor_template.atespace ObjectRef.
+func protoCreateActor(spec ATECreateSpec) *ateapipb.CreateActorRequest {
+	templateNS := strings.TrimSpace(spec.TemplateAtespace)
+	if templateNS == "" {
+		templateNS = strings.TrimSpace(spec.Atespace)
+	}
+	req := &ateapipb.CreateActorRequest{
+		ActorRef:               &ateapipb.ObjectRef{Atespace: spec.Atespace, Name: spec.Name},
+		ActorTemplateNamespace: templateNS,
+		ActorTemplateName:      strings.TrimSpace(spec.TemplateName),
 	}
 	if len(spec.WorkerSelector) > 0 {
-		actor.WorkerSelector = &ateapipb.Selector{MatchLabels: spec.WorkerSelector}
+		req.WorkerSelector = &ateapipb.Selector{MatchLabels: spec.WorkerSelector}
 	}
-	return actor
+	return req
 }
 
 // grpcATEControl adapts the generated ControlClient onto the ATEControl seam.
@@ -543,7 +546,7 @@ func (g *grpcATEControl) GetActor(ctx context.Context, ref ATEObjectRef) (ATEAct
 }
 
 func (g *grpcATEControl) CreateActor(ctx context.Context, spec ATECreateSpec) (ATEActor, error) {
-	pb, err := g.client.CreateActor(ctx, &ateapipb.CreateActorRequest{Actor: protoCreateActor(spec)})
+	pb, err := g.client.CreateActor(ctx, protoCreateActor(spec))
 	if err != nil {
 		return ATEActor{}, mapGRPCError(err)
 	}

@@ -22,6 +22,9 @@ type fakeATEControl struct {
 	creates []ATECreateSpec
 	calls   []string
 	uids    int
+	// createState is the server-side state after CreateActor. Empty means
+	// Running (in-memory default). Set to Suspended to match ATE 0.0.8.
+	createState ATEActorState
 }
 
 func newFakeATEControl() *fakeATEControl {
@@ -51,6 +54,10 @@ func (f *fakeATEControl) CreateActor(_ context.Context, spec ATECreateSpec) (ATE
 		return ATEActor{}, &ATEError{Code: ATECodeAlreadyExists, Err: fmt.Errorf("actor %s already exists", key)}
 	}
 	f.uids++
+	state := f.createState
+	if state == "" {
+		state = ATEActorStateRunning
+	}
 	actor := &ATEActor{
 		Atespace:         spec.Atespace,
 		Name:             spec.Name,
@@ -58,7 +65,7 @@ func (f *fakeATEControl) CreateActor(_ context.Context, spec ATECreateSpec) (ATE
 		TemplateAtespace: spec.TemplateAtespace,
 		TemplateName:     spec.TemplateName,
 		WorkerSelector:   spec.WorkerSelector,
-		State:            ATEActorStateRunning,
+		State:            state,
 	}
 	f.actors[key] = actor
 	f.creates = append(f.creates, spec)
@@ -290,8 +297,8 @@ func TestATEClientAtespaceOverride(t *testing.T) {
 	if _, err := client.CreateActor(ctx, ActorSpec{Namespace: "agents", Name: "chat-thread-1"}); err != nil {
 		t.Fatalf("create: %v", err)
 	}
-	if len(fake.creates) != 1 || fake.creates[0].Atespace != "shared" {
-		t.Fatalf("creates = %+v, want forced shared atespace", fake.creates)
+	if len(fake.creates) != 1 || fake.creates[0].Atespace != "shared" || fake.creates[0].TemplateAtespace != "shared" {
+		t.Fatalf("creates = %+v, want forced shared atespace on actor_ref and actor_template_namespace", fake.creates)
 	}
 }
 
@@ -307,6 +314,31 @@ func TestATEClientRejectsOverlongNames(t *testing.T) {
 	uuidThread := "123e4567-e89b-12d3-a456-426614174000"
 	if _, err := client.CreateActor(ctx, ActorSpec{Namespace: "agents", Name: ActorNameForThread(uuidThread)}); err != nil {
 		t.Fatalf("uuid thread actor name must fit the ATE bound: %v", err)
+	}
+}
+
+func TestATEClientCreateResumesSuspendedActor(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	fake := newFakeATEControl()
+	fake.createState = ATEActorStateSuspended
+	client, err := NewATEClient(liveTestConfig(), fake)
+	if err != nil {
+		t.Fatalf("NewATEClient: %v", err)
+	}
+	created, err := client.CreateActor(ctx, ActorSpec{Namespace: "agents", Name: "chat-thread-1", ActorClass: "acp-spike"})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if created.State != ActorStateActive {
+		t.Fatalf("created handle = %+v, want Active after 0.0.8 suspend-then-resume", created)
+	}
+	if created.Resumes != 1 {
+		t.Fatalf("created resumes = %d, want one resume workflow after suspended create", created.Resumes)
+	}
+	if len(fake.creates) != 1 || fake.creates[0].TemplateAtespace != "agents" || fake.creates[0].TemplateName != "acp-spike" {
+		t.Fatalf("creates = %+v, want agents/acp-spike template namespace mapping", fake.creates)
 	}
 }
 
