@@ -17,10 +17,23 @@ grep -q 'Do not' "${overlay}/README.md" || grep -qi 'do not' "${overlay}/README.
 grep -Fq 'helm upgrade --install' "${overlay}/README.md" || fail "README must mention helm upgrade --install in the do-not-stock-install warning"
 grep -Fq "${worker}" "${overlay}/README.md" || fail "README must pin ${worker}"
 grep -Fq 'substrate.actorsEnabled' "${overlay}/README.md" || fail "README must keep actorsEnabled off"
+grep -Fq '12-control-plane-sa-oidc-issuer.yaml' "${overlay}/README.md" || fail "README must name the Talos CP SA OIDC patch"
+grep -Fq 'oidc-discovery-unauthenticated' "${overlay}/README.md" || fail "README must name the unauthenticated OIDC binding"
 
 values="${overlay}/helm-values.yaml"
-grep -Fq 'https://[fdae:41e4:649b:9303::1]:10000' "${values}" || fail "helm-values.yaml missing Talos SA issuer"
+grep -Fq 'issuer: https://kubernetes.default.svc.cluster.local' "${values}" || fail "helm-values.yaml missing in-cluster kube SA issuer"
+if grep -E '^[[:space:]]*issuer:[[:space:]]*"?https://\[fdae:' "${values}" >/dev/null 2>&1; then
+  fail "helm-values.yaml must not use the SideroLink VIP as jwt issuer"
+fi
 grep -Fq 'audience: api.ate-system.svc' "${values}" || fail "helm-values.yaml missing jwt audience"
+talos_patch="${overlay}/talos/12-control-plane-sa-oidc-issuer.yaml"
+[[ -f "${talos_patch}" ]] || fail "Talos CP SA OIDC patch missing"
+grep -Fq 'service-account-issuer: https://kubernetes.default.svc.cluster.local' "${talos_patch}" || fail "Talos patch missing in-cluster service-account-issuer"
+grep -Fq 'anonymous-auth: "true"' "${talos_patch}" || fail "Talos patch missing anonymous-auth for OIDC GET"
+rbac="${overlay}/oidc-discovery-unauthenticated.yaml"
+grep -Fq 'name: oidc-discovery-unauthenticated' "${rbac}" || fail "OIDC unauthenticated binding missing"
+grep -Fq 'name: system:service-account-issuer-discovery' "${rbac}" || fail "OIDC binding must use kube default discovery role"
+grep -Fq 'name: system:unauthenticated' "${rbac}" || fail "OIDC binding must include system:unauthenticated"
 grep -Fq 'accessKey: SET_AT_APPLY_DO_NOT_COMMIT' "${values}" || fail "helm-values.yaml must override rustfs accessKey placeholder"
 grep -Fq 'secretKey: SET_AT_APPLY_DO_NOT_COMMIT' "${values}" || fail "helm-values.yaml must override rustfs secretKey placeholder"
 if grep -E 'accessKey:[[:space:]]*rustfsadmin([[:space:]]|$)|secretKey:[[:space:]]*rustfsadmin([[:space:]]|$)' "${values}" >/dev/null 2>&1; then
@@ -141,5 +154,7 @@ grep -Fq 'kind: WorkerPool' "${tmp_dir}/render.yaml" || fail "fleet WorkerPool m
 grep -Fq 'name: standing-chat' "${tmp_dir}/render.yaml" || fail "standing-chat template missing from render"
 grep -Fq 'namespace: anvilhub' "${tmp_dir}/render.yaml" || fail "anvilhub fleet missing from render"
 grep -Fq 'namespace: hazy-trade' "${tmp_dir}/render.yaml" || fail "hazy-trade fleet missing from render"
+grep -Fq 'name: oidc-discovery-unauthenticated' "${tmp_dir}/render.yaml" || fail "render missing OIDC unauthenticated binding"
+grep -Fq 'https://kubernetes.default.svc.cluster.local' "${tmp_dir}/render.yaml" || fail "render missing in-cluster jwt issuer"
 
 printf 'ATE constrained overlay static+render contract passed\n'

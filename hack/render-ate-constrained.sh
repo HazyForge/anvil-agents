@@ -149,6 +149,9 @@ fi
 
 "${kustomize_cmd[@]}" "${tmp_dir}"
 
+printf '\n---\n'
+cat "${overlay}/oidc-discovery-unauthenticated.yaml"
+
 if [[ "${include_fleet}" -eq 1 ]]; then
   printf '\n---\n'
   "${kustomize_cmd[@]}" "${overlay}/fleet"

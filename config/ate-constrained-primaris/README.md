@@ -28,7 +28,7 @@ allowlist).
 | Chart | `oci://ghcr.io/kagent-dev/substrate/helm/substrate` **0.0.8** |
 | CRDs | `oci://ghcr.io/kagent-dev/substrate/helm/substrate-crds` **0.0.8** |
 | Release / namespace | `substrate` / `ate-system` (TLS ServerName `api.ate-system.svc`) |
-| Auth | `jwt` (ATE default). Issuer: Talos SA `https://[fdae:41e4:649b:9303::1]:10000`. Audience: `api.ate-system.svc` |
+| Auth | `jwt` (ATE default). Issuer: in-cluster kube SA `https://kubernetes.default.svc.cluster.local` **after** the Talos CP patch. Audience: `api.ate-system.svc` |
 | Node | `kubernetes.io/hostname=anvil-primaris-worker-hel1-1` on every workload **and** WorkerPool pods |
 | Storage | `observability-local` on rustfs + valkey PVCs (hel1-1 has no `hcloud-volumes` CSI topology) |
 | Fleet | `ActorTemplate/standing-chat` + `ActorTemplate/acp-spike` + `WorkerPool/warm` in `anvilhub` and `hazy-trade` |
@@ -82,6 +82,63 @@ an `acp-spike` smoke bind+generate succeeds. Fleet includes
 `ActorTemplate/acp-spike` (ACP echo) and `standing-chat` (Desktop stays on
 ProcessBackend).
 
+`hack/render-ate-constrained.sh` also emits
+`ClusterRoleBinding/oidc-discovery-unauthenticated` (kube default role
+`system:service-account-issuer-discovery` bound to
+`system:unauthenticated`). That binding is a no-op until the Talos CP patch
+turns `--anonymous-auth=true`.
+
+## Austin: Talos CP patch (required; this workstation cannot apply Omni)
+
+The VIP `https://[fdae:41e4:649b:9303::1]:10000` is **Omni's SideroLink
+kube-apiserver**, not the Talos maintenance API (50000). Cert is
+`CN=kube-apiserver` with that ULA in SAN. It is the string kube stamps into
+SA `iss`. It is not a reachable OIDC issuer from workload pods.
+
+Paste **Control Plane** config patch (not workers, not cluster-wide Cilium):
+
+`config/ate-constrained-primaris/talos/12-control-plane-sa-oidc-issuer.yaml`
+
+Same extraArgs: `anvil-primaris` `tools/talos-omni/patches/12-control-plane-sa-oidc-issuer.yaml`
+(already listed on the generated `anvil-primaris` ControlPlane template).
+
+Omni UI → cluster anvil-primaris → Control Plane patches, **or**
+`omnictl cluster template sync` of that template. This restarts
+kube-apiserver. Projected tokens refresh; expect a short 401 window.
+
+Do **not** enable Cilium IPv6 for this. Do **not** expose Talos API :50000.
+
+After apply, all of these must be true before changing ATE live issuer or
+flipping generate gates:
+
+```bash
+kubectl --context hazyforge-anvil-primaris get --raw /.well-known/openid-configuration
+# issuer and jwks_uri both https://kubernetes.default.svc.cluster.local…
+
+kubectl --context hazyforge-anvil-primaris apply -f \
+  config/ate-constrained-primaris/oidc-discovery-unauthenticated.yaml
+
+# From an ate-system debug pod (no token): HTTP 200
+curl --cacert /var/run/secrets/kubernetes.io/serviceaccount/ca.crt \
+  https://kubernetes.default.svc.cluster.local/.well-known/openid-configuration
+```
+
+Then point ateapi at the new issuer **without** a full overlay re-render if
+possible (re-render rotates the JWT CA; restart `ate-api-server` if you do):
+
+```bash
+# Prefer a one-arg patch over helm template re-apply.
+kubectl --context hazyforge-anvil-primaris -n ate-system \
+  get deploy ate-api-server-deployment -o jsonpath='{.spec.template.spec.containers[0].args}' ; echo
+# Replace --client-jwt-issuer=https://[fdae:…]:10000 with
+# --client-jwt-issuer=https://kubernetes.default.svc.cluster.local
+# and the matching ATE_API_K8SJWT_ISSUER in ConfigMap ate-api-server-envvars.
+```
+
+Leave `actorsEnabled` / `generateOnActor` false until a projected token
+validates. Then a bounded `acp-spike` smoke is OK. Do not list
+`standing-chat`. Do not flip `hazy-trade-agent-manager` off Job.
+
 ## Operational gotcha: re-render regenerates the JWT CA
 
 `render-ate-constrained.sh` uses `helm template` with no `--kube-context`, so
@@ -104,40 +161,34 @@ kubectl --context hazyforge-anvil-primaris -n ate-system \
   rollout restart deployment/ate-api-server-deployment
 ```
 
-## Blocker: Talos JWT issuer OIDC discovery is not reachable from workload pods
+## Verified 2026-09-20: Omni SideroLink VIP is kube-apiserver, not Talos API
 
-Verified 2026-09-20 on Primaris. `kubectl get --raw
-/.well-known/openid-configuration` (via the normal, reachable API server
-endpoint) returns:
+`kubectl get --raw /.well-known/openid-configuration` (via the normal,
+reachable API server endpoint) returned:
 
 ```json
 {"issuer":"https://[fdae:41e4:649b:9303::1]:10000","jwks_uri":"https://5.161.127.112:6443/openid/v1/jwks", ...}
 ```
 
-`ateapi` (jwt mode) constructs its OIDC discovery request from the literal
-`issuer` string, i.e. it dials
-`https://[fdae:41e4:649b:9303::1]:10000/.well-known/openid-configuration`
-directly. From an `ate-system` pod with `hostNetwork: true` on
-`anvil-primaris-worker-hel1-1`, that address **is** routable (siderolink
-route present, TLS handshake completes, server presents a real
-`CN=kube-apiserver` cert) but the HTTP/2 request gets an immediate `GOAWAY`
-with no response body — confirmed with both `openssl s_client` and
-`curl -v`. The chart has no `jwksURI`/discovery override; only `auth.jwt.issuer`
-and `auth.jwt.audience` are configurable, and the `iss` claim in minted
-ServiceAccount tokens must match `issuer` exactly, so pointing `issuer` at a
-reachable alias (e.g. `https://kubernetes.default.svc.cluster.local`,
-the chart's own kind/kubeadm default) would break token validation instead.
+From `ate-system` on `anvil-primaris-worker-hel1-1`:
 
-Net effect: `EnsureTurnActor`/`ResumeActor` calls from Anvil complete the
-mTLS/gRPC handshake to `ateapi` correctly (once the CA is fresh — see above),
-but `ateapi` itself then rejects the bearer token because it cannot complete
-OIDC discovery against its configured Talos issuer. This is a Talos/ATE
-network or issuer-configuration question outside `anvil-agents` code and
-requires operator access to Talos machine config (`cluster.apiServer` /
-`--service-account-issuer` reachability) or an ATE-side reachable-jwks-proxy
-to resolve. Do not set Primaris `substrate.actorsEnabled=true` /
-`generateOnActor=true` until this is fixed and a real `acp-spike` smoke
-bind+generate succeeds end to end.
+| Path | Result |
+| --- | --- |
+| Workload pod → `[fdae:…]:10000` | `network is unreachable` (Cilium `enable-ipv6=false`; no IPv6 default route) |
+| hostNetwork → that VIP:10000 | TLS `CN=kube-apiserver`, SAN includes the ULA **and** `kubernetes.default.svc`. HTTP GET `/.well-known/openid-configuration` is **401 Unauthorized** (anonymous-auth off). Re-probe was 401, not GOAWAY. |
+| Pod → `https://kubernetes.default.svc/.well-known/openid-configuration` | **401** anonymous, **200** with SA bearer. JWKS same. |
+| Public `https://5.161.127.112:6443` OIDC | Same 401 anonymous / 200 with bearer |
+
+SA tokens still have `iss` equal to the SideroLink URL until the Talos CP
+patch is applied. ATE 0.0.8 `ateapi` flags are only `--client-jwt-issuer`,
+`--client-jwt-audience`, `--client-jwt-ca-cert` — no JWKS override. Pointing
+`issuer` at `kubernetes.default.svc.cluster.local` **before** Talos changes
+`--service-account-issuer` would fail `iss` matching.
+
+Fix is the Talos CP patch + unauthenticated discovery binding + ATE issuer
+URL above. Do not set Primaris `substrate.actorsEnabled=true` /
+`generateOnActor=true` until a real `acp-spike` smoke bind+generate
+succeeds end to end.
 
 ## RustFS keys
 
