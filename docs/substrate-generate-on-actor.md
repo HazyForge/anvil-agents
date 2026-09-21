@@ -1,18 +1,18 @@
 # Generate-on-actor
 
-Status: **code is in this slice**. `substrate.actorsEnabled` and
-`substrate.generateOnActor` stay **false** until an `acp-spike` smoke
-bind+generate succeeds. Desktop `desktop-standing-assistant` stays on API
-`ProcessBackend` (`actorClass: standing-chat`).
+Status: **CreateActor 0.0.8 wire is live** (Helm 44,
+`ghcr.io/hazyforge/anvil-agents@sha256:2eb01ba2ae7d74ad2794bf3508e0407820b26749d9d69229328fa8fc7298ab51`).
+`substrate.actorsEnabled` and `substrate.generateOnActor` stay **false**.
+Desktop `desktop-standing-assistant` stays on API `ProcessBackend`
+(`actorClass: standing-chat`).
 
-OIDC is done (anonymous in-cluster discovery HTTP 200; ateapi accepts Anvil
-projected SA tokens). Smoke `anvilhub/acp-spike-smoke-002` reached CreateActor
-and failed `InvalidArgument: actor_template_namespace is required` because
-Anvil sent later-ateapi `actor_template.atespace`. CreateActor now matches
-ATE Helm 0.0.8 (`actor_ref` + `actor_template_namespace` /
-`actor_template_name`, keeping the namespace→atespace mapping). Do not flip
-the generate gates until that image is live and an `acp-spike` smoke
-succeeds.
+OIDC is done. [#272](https://github.com/HazyForge/anvil-agents/pull/272)
+sends ATE 0.0.8 `actor_template_namespace`. Bounded smoke
+`anvilhub/acp-spike-smoke-003` passed CreateActor auth+namespace, created
+Redis atespaces `anvilhub`/`hazy-trade`, then failed
+`Internal: while creating pause container: while running runsc create: exit status 128`.
+No actor reply. Gates reverted with the overlay values file (no Helm `--set`
+drift). Do not flip generate gates until runsc/gVisor on hel1-1 is fixed.
 
 Anvil’s live ATE client is still lifecycle-only for Create/Resume/Suspend/Pause.
 Prompt delivery is HTTP/ACP through `atenet-router` **after** `ResumeActor`.
