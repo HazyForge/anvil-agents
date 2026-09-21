@@ -9,9 +9,10 @@
 # Release name MUST be "substrate" in namespace ate-system so the API
 # Service is api.ate-system.svc (TLS ServerName Anvil dials).
 #
-# Apply only after generate-on-actor is in the live Anvil image. Leave Anvil
-# substrate.actorsEnabled=false and generateOnActor=false until an acp-spike
-# smoke succeeds.
+# Apply only after generate-on-actor is in the live Anvil image. Bounded
+# acp-spike-smoke-005 bind+generate succeeded; Primaris GitOps may set
+# substrate.actorsEnabled/generateOnActor for actorClass acp-spike only.
+# Do not list standing-chat. Do not flip the Hazy Trade manager off Job.
 #
 # helm template does not emit a Namespace unless createNamespace is true.
 # StorageClass is not a chart knob; pin-local-storage*.yaml set

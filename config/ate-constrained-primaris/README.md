@@ -15,9 +15,10 @@ ApplicationSet applies). It is files only until an operator:
 3. Confirms generate-on-actor is in the live Anvil image (see
    [`docs/substrate-generate-on-actor.md`](../../docs/substrate-generate-on-actor.md)).
 
-Apply this overlay only after that image is live. Do **not** set Primaris
-`substrate.actorsEnabled=true` or `substrate.generateOnActor=true` until an
-`acp-spike` smoke bind+generate succeeds. Desktop standing grok stays on API
+Apply this overlay only after that image is live. Bounded
+`acp-spike-smoke-005` bind+generate succeeded; Primaris GitOps may set
+`substrate.actorsEnabled=true` and `substrate.generateOnActor=true` for
+`generateActorClasses: [acp-spike]` only. Desktop standing grok stays on API
 `ProcessBackend` (`actorClass: standing-chat` is not in the generate
 allowlist).
 
@@ -99,6 +100,16 @@ Paste **Control Plane** config patch (not workers, not cluster-wide Cilium):
 
 `config/ate-constrained-primaris/talos/12-control-plane-sa-oidc-issuer.yaml`
 
+gVisor on hel1-1 also needs a **rust-build Worker** patch (not control
+plane, not metal, not cluster-wide atelet):
+
+`config/ate-constrained-primaris/talos/13-worker-hel1-gvisor-userns.yaml`
+
+Same sysctl: `anvil-primaris`
+`tools/talos-omni/patches/13-worker-hel1-gvisor-userns.yaml`. Talos KSPP
+defaults `user.max_user_namespaces=0`; gVisor gofer create then fails
+ENOSPC (`runsc create` 128). Do not enable Cilium IPv6 for this.
+
 Same extraArgs: `anvil-primaris` `tools/talos-omni/patches/12-control-plane-sa-oidc-issuer.yaml`
 (already listed on the generated `anvil-primaris` ControlPlane template).
 
@@ -154,11 +165,15 @@ certificate "api-ca")` because the CM now holds a CA that does not match the
 cert the pod is still serving.
 
 **After every re-render + re-apply of this overlay**, restart the API
-server so it picks up the matching secret:
+server so it picks up the matching secret, then restart atenet-router so it
+reloads the same CA (otherwise ExtProc 503s `actor unavailable` with
+`x509: certificate signed by unknown authority`):
 
 ```bash
 kubectl --context hazyforge-anvil-primaris -n ate-system \
   rollout restart deployment/ate-api-server-deployment
+kubectl --context hazyforge-anvil-primaris -n ate-system \
+  rollout restart deployment/atenet-router
 ```
 
 ## Verified 2026-09-20: Omni SideroLink VIP is kube-apiserver, not Talos API
@@ -193,9 +208,14 @@ succeeds end to end.
 **Applied 2026-09-21:** Omni CP patch, unauthenticated discovery, and ateapi
 issuer are live. Anonymous in-cluster OIDC is HTTP 200; ateapi accepts Anvil
 SA tokens. CreateActor now sends ATE 0.0.8 `actor_template_namespace` (#272).
-Redis atespaces `anvilhub`/`hazy-trade` exist. Next smoke blocker is
-`runsc create` exit 128 on the pause container. Keep generate gates off.
-Do not re-render the live ATE overlay just to match Git — that rotates the JWT CA.
+Redis atespaces `anvilhub`/`hazy-trade` exist.
+
+`runsc create` exit 128 on the pause container was **not** missing KVM,
+Cilium IPv6, or disk: ateom logs `gofer: fork/exec /proc/self/exe: no space
+left on device` because Talos KSPP sets `user.max_user_namespaces=0`. The
+fix is rust-build-only (hel1-1)
+`talos/13-worker-hel1-gvisor-userns.yaml`. Do not re-render the live ATE
+overlay just to match Git — that rotates the JWT CA.
 
 ## RustFS keys
 

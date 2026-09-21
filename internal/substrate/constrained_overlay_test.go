@@ -42,6 +42,9 @@ func TestConstrainedOverlayForbidsStockInstallAndDefaultRustFSKeys(t *testing.T)
 	if !strings.Contains(readme, "12-control-plane-sa-oidc-issuer.yaml") {
 		t.Fatal("README must name the Talos CP SA OIDC patch")
 	}
+	if !strings.Contains(readme, "13-worker-hel1-gvisor-userns.yaml") {
+		t.Fatal("README must name the hel1-1 gVisor userns patch")
+	}
 	if !strings.Contains(readme, "substrate.actorsEnabled") {
 		t.Fatal("README must keep actorsEnabled off")
 	}
@@ -70,6 +73,14 @@ func TestConstrainedOverlayForbidsStockInstallAndDefaultRustFSKeys(t *testing.T)
 	}
 	if strings.Contains(talos, "50000") && !strings.Contains(talos, "Do not expose the Talos API") {
 		t.Fatal("Talos CP patch must warn against exposing Talos API")
+	}
+
+	userns := read("talos/13-worker-hel1-gvisor-userns.yaml")
+	if !strings.Contains(userns, `user.max_user_namespaces: "65536"`) {
+		t.Fatal("hel1-1 gVisor patch missing user.max_user_namespaces override")
+	}
+	if !strings.Contains(userns, "rust-build") {
+		t.Fatal("hel1-1 gVisor patch must target the rust-build machine set")
 	}
 
 	rbac := read("oidc-discovery-unauthenticated.yaml")

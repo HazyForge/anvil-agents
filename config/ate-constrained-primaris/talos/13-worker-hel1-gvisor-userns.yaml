@@ -1,0 +1,21 @@
+# OMNI TARGET: rust-build Worker Config Patches (hel1-1 only).
+# Canonical copy also lives in anvil-primaris:
+# tools/talos-omni/patches/13-worker-hel1-gvisor-userns.yaml
+# Keep these files identical.
+#
+# ATE ateom-gvisor runsc create on hel1-1 failed with:
+#   creating container: cannot create gofer process:
+#   gofer: fork/exec /proc/self/exe: no space left on device
+#   (surfaced as runsc create exit status 128)
+#
+# That ENOSPC is Linux user-namespace exhaustion, not disk. Talos KSPP
+# defaults user.max_user_namespaces=0. gVisor clones a userns for the
+# gofer (gvisor.dev/issue/5964). Disk on hel1-1 was ~47% used; no
+# DiskPressure/PIDPressure; no /dev/kvm required for systrap.
+#
+# The rust-build machine set has only anvil-primaris-worker-hel1-1.
+# Do not add this sysctl to control-plane, metal, or other worker sets.
+# Do not enable Cilium IPv6. Do not stock-install ATE.
+machine:
+  sysctls:
+    user.max_user_namespaces: "65536"

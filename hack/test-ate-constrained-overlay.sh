@@ -18,6 +18,7 @@ grep -Fq 'helm upgrade --install' "${overlay}/README.md" || fail "README must me
 grep -Fq "${worker}" "${overlay}/README.md" || fail "README must pin ${worker}"
 grep -Fq 'substrate.actorsEnabled' "${overlay}/README.md" || fail "README must keep actorsEnabled off"
 grep -Fq '12-control-plane-sa-oidc-issuer.yaml' "${overlay}/README.md" || fail "README must name the Talos CP SA OIDC patch"
+grep -Fq '13-worker-hel1-gvisor-userns.yaml' "${overlay}/README.md" || fail "README must name the hel1-1 gVisor userns patch"
 grep -Fq 'oidc-discovery-unauthenticated' "${overlay}/README.md" || fail "README must name the unauthenticated OIDC binding"
 
 values="${overlay}/helm-values.yaml"
@@ -30,6 +31,12 @@ talos_patch="${overlay}/talos/12-control-plane-sa-oidc-issuer.yaml"
 [[ -f "${talos_patch}" ]] || fail "Talos CP SA OIDC patch missing"
 grep -Fq 'service-account-issuer: https://kubernetes.default.svc.cluster.local' "${talos_patch}" || fail "Talos patch missing in-cluster service-account-issuer"
 grep -Fq 'anonymous-auth: "true"' "${talos_patch}" || fail "Talos patch missing anonymous-auth for OIDC GET"
+userns_patch="${overlay}/talos/13-worker-hel1-gvisor-userns.yaml"
+[[ -f "${userns_patch}" ]] || fail "Talos hel1-1 gVisor userns patch missing"
+grep -Fq 'user.max_user_namespaces: "65536"' "${userns_patch}" || fail "userns patch missing Talos KSPP override"
+if grep -Eq 'control-plane|metal|vultr' "${userns_patch}"; then
+  grep -Fq 'Do not add this sysctl to control-plane, metal, or other worker sets' "${userns_patch}" || fail "userns patch must stay rust-build/hel1-1 only"
+fi
 rbac="${overlay}/oidc-discovery-unauthenticated.yaml"
 grep -Fq 'name: oidc-discovery-unauthenticated' "${rbac}" || fail "OIDC unauthenticated binding missing"
 grep -Fq 'name: system:service-account-issuer-discovery' "${rbac}" || fail "OIDC binding must use kube default discovery role"

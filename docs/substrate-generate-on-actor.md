@@ -1,18 +1,20 @@
 # Generate-on-actor
 
-Status: **CreateActor 0.0.8 wire is live** (Helm 44,
-`ghcr.io/hazyforge/anvil-agents@sha256:2eb01ba2ae7d74ad2794bf3508e0407820b26749d9d69229328fa8fc7298ab51`).
-`substrate.actorsEnabled` and `substrate.generateOnActor` stay **false**.
-Desktop `desktop-standing-assistant` stays on API `ProcessBackend`
+Status: **live on Primaris** after `anvilhub/acp-spike-smoke-005`
+(`Succeeded/SubstrateActorGenerated`, output echoed the frozen prompt).
+Digest still
+`ghcr.io/hazyforge/anvil-agents@sha256:2eb01ba2ae7d74ad2794bf3508e0407820b26749d9d69229328fa8fc7298ab51`.
+`substrate.actorsEnabled` and `substrate.generateOnActor` are **true** for
+`generateActorClasses: [acp-spike]` only. Desktop
+`desktop-standing-assistant` stays on API `ProcessBackend`
 (`actorClass: standing-chat`).
 
-OIDC is done. [#272](https://github.com/HazyForge/anvil-agents/pull/272)
-sends ATE 0.0.8 `actor_template_namespace`. Bounded smoke
-`anvilhub/acp-spike-smoke-003` passed CreateActor auth+namespace, created
-Redis atespaces `anvilhub`/`hazy-trade`, then failed
-`Internal: while creating pause container: while running runsc create: exit status 128`.
-No actor reply. Gates reverted with the overlay values file (no Helm `--set`
-drift). Do not flip generate gates until runsc/gVisor on hel1-1 is fixed.
+OIDC and CreateActor 0.0.8 (`actor_template_namespace`) are done. Smoke-003
+failed `runsc create` 128 because Talos KSPP sets
+`user.max_user_namespaces=0` (gVisor gofer ENOSPC, not disk/KVM). Hel1-1
+rust-build patch `talos/13-worker-hel1-gvisor-userns.yaml` sets it to 65536.
+Atenet then 503'd `actor unavailable` until `atenet-router` restarted onto
+the live `ateapi-ca` (same CA-rotation gotcha as ate-api-server).
 
 Anvil’s live ATE client is still lifecycle-only for Create/Resume/Suspend/Pause.
 Prompt delivery is HTTP/ACP through `atenet-router` **after** `ResumeActor`.
@@ -63,14 +65,9 @@ harness: `config/samples/control_v1alpha1_agentharnessprofile_acp_spike.yaml`.
 `cmd/anvil-actor-acp` is the same protocol compiled into the controller image
 for Kind/local (`anvil-actor-acp --listen :80`).
 
-## Primaris enablement (after this image is live)
+## Primaris enablement
 
-Do **not** set `actorsEnabled=true` until:
-
-1. Constrained overlay is applied one-node-safe (`hack/render-ate-constrained.sh`)
-2. A smoke AgentRun with `actorClass: acp-spike` bind+generates (or curl
-   through atenet to that actor)
-3. Overlay pin:
+Live overlay pin (smoke-005 succeeded; do not list `standing-chat`):
 
 ```yaml
 substrate:
