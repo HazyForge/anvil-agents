@@ -24,7 +24,7 @@ const context = await browser.newContext();
 const page = await context.newPage();
 await page.clock.install();
 page.setDefaultTimeout(10000);
-const errors = [], posts = [], creates = [], threads = new Map();
+const errors = [], posts = [], synthesisRetries = [], creates = [], threads = new Map();
 let failNext = false, loseNextReceipt = false;
 let createGate = null, appendGate = null, receiptGate = null;
 const standing = new Map(), standingGates = new Map(), standingFailures = new Set();
@@ -103,7 +103,20 @@ await context.route('**/*', async route => {
       return reply(route,snapshot);
     }
     if(appendGate) await appendGate;
-    const body=request.postDataJSON(); posts.push({thread:t.id,...body});
+    const body=request.postDataJSON();
+    if(body.retryTurnId) {
+      synthesisRetries.push({thread:t.id,...body});
+      const turn=t.turns.find(turn=>turn.id===body.retryTurnId);
+      const user=t.messages.find(message=>message.id===turn?.userMessageId);
+      const parent=t.turns.find(parent=>parent.id===turn?.parentTurnId);
+      if(!turn?.resumption||!user||user.metadata?.authorKind!=='agent_results'||!parent) return reply(route,{},400);
+      if((turn.retryCount||0)===body.retryCount) {
+        turn.retryCount=(turn.retryCount||0)+1; turn.status='waiting'; turn.runName='fixture-retried-final';
+        parent.coordination={status:'resuming',resumeTurnId:turn.id,retryCount:turn.retryCount};t.activeTurn=turn;
+      }
+      return reply(route,{thread:t,user,turn},202);
+    }
+    posts.push({thread:t.id,...body});
     if(failNext) {failNext=false;return reply(route,{error:{code:'temporarily_unavailable',message:'Fixture temporary transport failure'}},503);}
     if(loseNextReceipt) withheldDetails.set(t.id,structuredClone(t));
     let turn=t.turns.find(x=>x.id===body.requestId);
@@ -701,6 +714,30 @@ try {
   assert.equal(posts.length,beforeJourneyPosts);
   assert.deepEqual(errors,[]);
   console.log('PASS automatic final appears in origin conversation; service results are not user messages; stale journey snapshots, reconnect and Stop preserve draft without additional sends');
+  const beforeFinalRetryPosts=posts.length;
+  const retryParent={id:'fixture-final-retry-parent',requestId:'fixture-final-retry-parent',status:'succeeded',runName:'fixture-parent-final-retry',coordination:{status:'failed',resumeTurnId:'fixture-failed-synthesis',retryCount:0}};
+  const savedResults={id:'fixture-saved-results',threadId:manuallyRetried.id,role:'user',content:'PRIVATE_PEER_DATA_DO_NOT_PROMOTE_TO_USER',sequence:manuallyRetried.messages.length+1,metadata:{authorKind:'agent_results',sourceTurnId:retryParent.id,sourceThreadId:manuallyRetried.id}};
+  const failedFinal={id:'fixture-failed-synthesis',requestId:'fixture-synthesis-request',status:'failed',runName:'fixture-failed-final',resumption:true,parentTurnId:retryParent.id,userMessageId:savedResults.id,retryCount:0,error:'Final answer failed after peer completed'};
+  manuallyRetried.turns.push(retryParent,failedFinal);manuallyRetried.messages.push(savedResults);
+  await page.getByRole('button',{name:'Retry final answer',exact:true}).waitFor();
+  assert.equal(await page.getByRole('button',{name:'Retry last message',exact:true}).count(),0);
+  assert.equal(await page.getByText('PRIVATE_PEER_DATA_DO_NOT_PROMOTE_TO_USER',{exact:true}).count(),0);
+  await page.getByRole('button',{name:'Retry final answer',exact:true}).click();
+  await visible('Peer results received. The agent is preparing the final answer.');
+  await draftVisible('Draft retained during explicit retry');
+  assert.deepEqual(synthesisRetries.at(-1),{thread:manuallyRetried.id,retryTurnId:failedFinal.id,retryCount:0});
+  assert.equal(posts.length,beforeFinalRetryPosts);
+  assert.equal(failedFinal.resumption,true);assert.equal(failedFinal.parentTurnId,retryParent.id);
+  assert.equal(failedFinal.userMessageId,savedResults.id);assert.equal(failedFinal.retryCount,1);
+  assert.equal(manuallyRetried.messages.filter(message=>message.id===savedResults.id).length,1);
+  failedFinal.status='succeeded';delete manuallyRetried.activeTurn;
+  retryParent.coordination={status:'done',resumeTurnId:failedFinal.id,retryCount:1};
+  manuallyRetried.messages.push({id:'fixture-final-after-safe-retry',threadId:manuallyRetried.id,role:'assistant',content:'Final answer from the saved peer results',sequence:manuallyRetried.messages.length+1});
+  await visible('Final answer from the saved peer results');
+  await page.reload();await visible('Final answer from the saved peer results');
+  await draftVisible('Draft retained during explicit retry');
+  assert.equal(posts.length,beforeFinalRetryPosts);assert.equal(synthesisRetries.length,1);assert.deepEqual(errors,[]);
+  console.log('PASS failed synthesis retries saved turn/attempt only; no promoted human data, no new input or fanout, same parent/turn identity and preserved draft across reload');
   config.chat.enabled=false;
   await page.reload();
   await visible('Remote chat is not enabled on this server.');

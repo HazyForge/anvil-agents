@@ -52,6 +52,9 @@ func chatHarness(thread chat.Thread) string {
 }
 
 func (server *Server) queueChatTurn(ctx context.Context, ns, id string, body AppendChatMessageRequest) (ChatAppendResponse, error) {
+	if body.RetryTurnID != "" {
+		return server.queueChatSynthesisRetry(ctx, ns, id, body)
+	}
 	return server.queueChatTurnInternal(ctx, ns, id, body, false)
 }
 func (server *Server) queueChatTurnInternal(ctx context.Context, ns, id string, body AppendChatMessageRequest, deferred bool) (ChatAppendResponse, error) {
@@ -96,6 +99,11 @@ func (server *Server) queueChatTurnWithOptions(ctx context.Context, ns, id strin
 	messages, err := server.chatStore.ListMessages(ctx, ns, id)
 	if err != nil {
 		return ChatAppendResponse{}, err
+	}
+	if !options.resumption {
+		if err := rejectSynthesisPromotion(messages, body.Content); err != nil {
+			return ChatAppendResponse{}, err
+		}
 	}
 	inventory, err := server.chatWorkInventory(ctx, thread)
 	if err != nil {
@@ -292,6 +300,20 @@ func (server *Server) reconcileChatTurnMode(ctx context.Context, turn *chat.Turn
 		if err = json.Unmarshal(turn.RunJSON, run); err != nil {
 			return err
 		}
+		dispatchOwner := ""
+		if turn.ParentTurnID != "" {
+			dispatchOwner = uuid.NewString()
+			claimed, claimErr := server.chatStore.ClaimDispatch(ctx, *turn, dispatchOwner)
+			if errors.Is(claimErr, chat.ErrCoordinationCancelled) {
+				return server.cancelChatChild(ctx, turn)
+			}
+			if claimErr != nil {
+				return claimErr
+			}
+			if !claimed {
+				return nil
+			}
+		}
 		err = server.writes.Create(ctx, run)
 		if err != nil && !apierrors.IsInvalid(err) && !apierrors.IsForbidden(err) {
 			// A timeout/reset may follow a successful API-server commit. Resolve that
@@ -304,6 +326,24 @@ func (server *Server) reconcileChatTurnMode(ctx context.Context, turn *chat.Turn
 				run = existing
 				err = nil
 			}
+		}
+		if dispatchOwner != "" {
+			state := ""
+			if err == nil {
+				state = "created"
+			}
+			if apierrors.IsInvalid(err) || apierrors.IsForbidden(err) {
+				state = "rejected"
+			}
+			if state != "" {
+				recordCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
+				finishErr := server.chatStore.FinishDispatch(recordCtx, *turn, dispatchOwner, state)
+				cancel()
+				if finishErr != nil {
+					return finishErr
+				}
+			}
+			// Unknown Create outcomes retain the durable ownership fence.
 		}
 	}
 	if err != nil {

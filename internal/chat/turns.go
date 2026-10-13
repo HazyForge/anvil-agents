@@ -21,11 +21,13 @@ var ErrRequestConflict = errors.New("request ID already used with different cont
 // Coordination tracks one bounded request/reply journey separately from the
 // originating execution receipt. It lives in the existing durable JSON outbox.
 type Coordination struct {
+	RetryCount   int    `json:"retryCount,omitempty"`
 	Status       string `json:"status"`
 	ResumeTurnID string `json:"resumeTurnId,omitempty"`
 }
 
 type Turn struct {
+	Dispatch         *Dispatch       `json:"dispatch,omitempty"`
 	Coordination     *Coordination   `json:"coordination,omitempty"`
 	ParentTurnID     string          `json:"parentTurnId,omitempty"`
 	ParentThreadID   string          `json:"parentThreadId,omitempty"`
@@ -288,6 +290,9 @@ func (s *PostgresStore) CompleteTurn(ctx context.Context, t Turn, m Message) err
 	if !Active(old) {
 		return nil
 	}
+	if old.Dispatch != nil && old.Dispatch.State == "creating" {
+		return ErrDispatchPending
+	}
 	if !sameTurnAttempt(old, t) {
 		return ErrRequestConflict
 	}
@@ -312,7 +317,7 @@ func (s *PostgresStore) CompleteTurn(ctx context.Context, t Turn, m Message) err
 		if t.Status != "succeeded" {
 			state = "failed"
 		}
-		parent.Coordination = &Coordination{Status: state, ResumeTurnID: old.ID}
+		parent.Coordination = &Coordination{Status: state, ResumeTurnID: old.ID, RetryCount: old.RetryCount}
 		if err = writeCoordination(ctx, tx, parent); err != nil {
 			return err
 		}
@@ -422,6 +427,9 @@ func (s *MemoryStore) CompleteTurn(_ context.Context, t Turn, m Message) error {
 	if !Active(old) {
 		return nil
 	}
+	if old.Dispatch != nil && old.Dispatch.State == "creating" {
+		return ErrDispatchPending
+	}
 	if !sameTurnAttempt(old, t) {
 		return ErrRequestConflict
 	}
@@ -455,7 +463,7 @@ func (s *MemoryStore) CompleteTurn(_ context.Context, t Turn, m Message) error {
 		if t.Status != "succeeded" {
 			state = "failed"
 		}
-		parent.Coordination = &Coordination{Status: state, ResumeTurnID: old.ID}
+		parent.Coordination = &Coordination{Status: state, ResumeTurnID: old.ID, RetryCount: old.RetryCount}
 		s.turns[parent.ID] = parent
 	}
 	return nil

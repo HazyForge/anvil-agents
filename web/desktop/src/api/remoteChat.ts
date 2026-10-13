@@ -8,7 +8,9 @@ export type RemoteTurn = {
   runName: string;
   requestId?: string;
   status: 'waiting' | 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled';
-  coordination?: {status: 'waiting' | 'resuming' | 'done' | 'failed' | 'cancelled'; resumeTurnId?: string};
+  coordination?: {status: 'waiting' | 'resuming' | 'done' | 'failed' | 'cancelled'; resumeTurnId?: string; retryCount?: number};
+  resumption?: boolean;
+  parentTurnId?: string;
   error?: string;
   retryCount?: number;
   retryAt?: string;
@@ -56,6 +58,11 @@ export function ensureRemoteStandingThread(token: string, ns: string, profileNam
 export function sendRemoteMessage(token: string, ns: string, id: string, content: string, requestId: string) {
   return json<AcceptedTurn>(`${base(ns)}/${encodeURIComponent(id)}/messages`, token, {
     method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({content, requestId}),
+  });
+}
+export function retryRemoteSynthesis(token: string, ns: string, id: string, turnId: string, retryCount: number) {
+  return json<AcceptedTurn>(`${base(ns)}/${encodeURIComponent(id)}/messages`, token, {
+    method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({retryTurnId: turnId, retryCount}),
   });
 }
 export function cancelRemoteCoordination(token: string, ns: string, id: string, turnId: string) {

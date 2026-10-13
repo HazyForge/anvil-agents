@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import type { UIConfig } from '../auth/config';
 import { APIError, backendKindFromComposition, harnessRefFromRunProfile, listRunProfiles, type CompositionDocument } from '../api/client';
-import { cancelRemoteCoordination, ensureRemoteStandingThread, createRemoteThread, getRemoteThread, listRemoteHarnesses, listRemoteThreads, sendRemoteMessage, threadHarness, type RemoteThread, type RemoteThreadDetail, type RemoteTurn } from '../api/remoteChat';
+import { retryRemoteSynthesis, cancelRemoteCoordination, ensureRemoteStandingThread, createRemoteThread, getRemoteThread, listRemoteHarnesses, listRemoteThreads, sendRemoteMessage, threadHarness, type RemoteThread, type RemoteThreadDetail, type RemoteTurn } from '../api/remoteChat';
 import { loadNamespace, saveNamespace } from '../state/namespace';
 import { readChatDraft, saveChatDraft, readSelectedChat, saveSelectedChat, readNewChatConfig, saveNewChatConfig, type NewChatConfig } from '../state/chatWorkspace';
 import { RemoteTurnActivity } from '../components/RemoteTurnActivity';
@@ -43,7 +43,7 @@ function regresses(next: RemoteThreadDetail, previous: RemoteThreadDetail | null
   return [...(previous.turns ?? []), ...(previous.activeTurn ? [previous.activeTurn] : [])].some(before =>
     nextTurns.some(after => sameTurn(before, after) && ((after.retryCount ?? 0) < (before.retryCount ?? 0) ||
       ((after.retryCount ?? 0) === (before.retryCount ?? 0) && turnProgress(after) < turnProgress(before)) ||
-      (before.coordination && (!after.coordination || coordinationProgress(after) < coordinationProgress(before))))));
+      (before.coordination && (!after.coordination || (after.coordination.retryCount ?? 0) < (before.coordination.retryCount ?? 0) || ((after.coordination.retryCount ?? 0) === (before.coordination.retryCount ?? 0) && coordinationProgress(after) < coordinationProgress(before)))))));
 }
 
 // A delayed pre-repair response must not remove a verified answer already read.
@@ -123,7 +123,8 @@ export function EntityChatPage({token, config}: Props) {
   const enabled = Boolean(config.chat?.enabled);
   const lastTurn = detail?.turns?.at(-1);
   const latestFailed = !optimistic && lastTurn?.status === 'failed' ? lastTurn : undefined;
-  const retryMessage = latestFailed ? detail?.messages.find(message => message.id === latestFailed.userMessageId && message.role === 'user') : undefined;
+  const retryMessage = latestFailed ? detail?.messages.find(message => message.id === latestFailed.userMessageId && message.role === 'user' && (message.metadata as {authorKind?: string} | undefined)?.authorKind !== 'agent_results') : undefined;
+  const failedSynthesis = latestFailed?.resumption && latestFailed.parentTurnId && (latestFailed.retryCount ?? 0) < 2 ? latestFailed : undefined;
   const retryPending = Boolean(optimistic && pending.current?.preserveDraft);
   const earlierFailures = detail?.turns?.filter(t => t.status === 'failed' && t.id !== latestFailed?.id) ?? [];
   const coordinating = detail?.turns?.find(t => t.coordination?.status === 'waiting' || t.coordination?.status === 'resuming');
@@ -351,6 +352,17 @@ export function EntityChatPage({token, config}: Props) {
     finally { submitting.current = false; setBusy(false); }
   }
 
+  async function retryFinalAnswer(turn: RemoteTurn) {
+    if (!threadID || busy || submitting.current || active || coordinating || !enabled) return;
+    submitting.current = true; setBusy(true); setError('');
+    try {
+      await retryRemoteSynthesis(token, namespace, threadID, turn.id, turn.retryCount ?? 0);
+      const next = await getRemoteThread(token, namespace, threadID);
+      setDetail(previous => regresses(next, previous) ? previous : retainRecoveredReplies(next, previous));
+    } catch (err) { setError(formatTurnError(err)); }
+    finally { submitting.current = false; setBusy(false); }
+  }
+
   const configuration = (
     <div className="remote-chat-config">
           <label className="field"><span className="label">Agent</span><select className="input" aria-label="Agent" value={profile} disabled={busy || Boolean(threadID)} onChange={e => changeConfig({profile: e.target.value})}>
@@ -560,7 +572,7 @@ export function EntityChatPage({token, config}: Props) {
 
           {detail?.turns?.filter(t => t.coordination).map(t => <div className="remote-turn-status" key={`coordination-${t.id}`} role="status"><span>{t.coordination?.status === 'waiting' ? 'Waiting for peer replies. The agent will answer here automatically.' : t.coordination?.status === 'resuming' ? 'Peer results received. The agent is preparing the final answer.' : t.coordination?.status === 'cancelled' ? 'Coordination cancelled.' : t.coordination?.status === 'failed' ? 'The agent could not complete the final answer.' : 'Coordination complete.'}</span>{(t.coordination?.status === 'waiting' || t.coordination?.status === 'resuming') && <button className="btn btn-ghost" disabled={busy} onClick={() => {setBusy(true); void cancelRemoteCoordination(token, namespace, detail!.id, t.id).then(() => getRemoteThread(token, namespace, detail!.id)).then(next => setDetail(previous => regresses(next, previous) ? previous : next)).catch(err => setError(formatTurnError(err))).finally(() => setBusy(false));}}>Stop coordination</button>}</div>)}
           {detail?.turns?.flatMap(t => t.delegates ?? []).map(delivery => <div className="remote-turn-status" key={delivery.turnId}>{delivery.status === 'succeeded' ? `${delivery.profileName} replied.` : delivery.status === 'running' ? `${delivery.profileName} is working.` : delivery.status === 'cancelled' ? `${delivery.profileName} coordination cancelled.` : delivery.status === 'failed' ? `${delivery.profileName} could not finish.` : `Message saved for ${delivery.profileName}.`} <button className="btn btn-ghost" disabled={busy} onClick={() => {const thread = threads.find(t => t.id === delivery.threadId); openThread(thread ?? {id: delivery.threadId, namespace, profileName: delivery.profileName, mode: 'persona', title: delivery.profileName, createdAt: '', updatedAt: '', createdBy: ''});}}>Open peer conversation</button></div>)}
-          {latestFailed && <div className="banner banner-error"><span>Turn failed: {latestFailed.error || latestFailed.runName}</span>{retryMessage && <button type="button" className="btn btn-ghost" disabled={busy || Boolean(active) || unavailable || initializing || !enabled} onClick={() => void submit(undefined, {content: retryMessage.content, forceNew: true})}>Retry last message</button>}</div>}
+          {latestFailed && <div className="banner banner-error"><span>Turn failed: {latestFailed.error || latestFailed.runName}</span>{retryMessage && <button type="button" className="btn btn-ghost" disabled={busy || Boolean(active) || unavailable || initializing || !enabled} onClick={() => void submit(undefined, {content: retryMessage.content, forceNew: true})}>Retry last message</button>}{failedSynthesis && <button type="button" className="btn btn-ghost" disabled={busy || Boolean(active) || Boolean(coordinating) || unavailable || initializing || !enabled} onClick={() => void retryFinalAnswer(failedSynthesis)}>Retry final answer</button>}</div>}
           {(active ?? lastTurn)?.attempts?.length ? <details className="remote-chat-caption"><summary>Earlier startup attempts ({(active ?? lastTurn)!.attempts!.length})</summary>{(active ?? lastTurn)!.attempts!.map(attempt => <p key={attempt.runName}>{attempt.error} <button type="button" className="btn btn-ghost" onClick={() => {setHistoricalOutput({runName: attempt.runName, backend}); setRawActivityOpen(true);}}>View attempt output</button></p>)}</details> : null}
           {earlierFailures.length > 0 && <details className="remote-chat-caption"><summary>Earlier failed turns ({earlierFailures.length})</summary>{earlierFailures.map(t => <p key={t.id}>Turn failed: {t.error || t.runName}</p>)}</details>}
           <div ref={end}/>

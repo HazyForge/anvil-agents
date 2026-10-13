@@ -22,6 +22,10 @@ func SynthesisRequestID(parentID string) string {
 }
 
 func cloneTurn(t Turn) Turn {
+	if t.Dispatch != nil {
+		d := *t.Dispatch
+		t.Dispatch = &d
+	}
 	if t.Coordination != nil {
 		c := *t.Coordination
 		t.Coordination = &c

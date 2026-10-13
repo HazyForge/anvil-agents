@@ -155,9 +155,15 @@ func (s *Server) cancelChatChild(ctx context.Context, turn *chat.Turn) error {
 			return nil
 		}
 	}
+	previousStatus, previousError := turn.Status, turn.Error
 	turn.Status = "cancelled"
 	turn.Error = "Coordination cancelled"
-	return s.chatStore.CompleteTurn(ctx, *turn, chat.Message{Role: chat.RoleSystem, Content: "Coordination cancelled", Metadata: json.RawMessage(`{"kind":"coordination_cancelled"}`)})
+	err = s.chatStore.CompleteTurn(ctx, *turn, chat.Message{Role: chat.RoleSystem, Content: "Coordination cancelled", Metadata: json.RawMessage(`{"kind":"coordination_cancelled"}`)})
+	if errors.Is(err, chat.ErrDispatchPending) {
+		turn.Status, turn.Error = previousStatus, previousError
+		return nil
+	}
+	return err
 }
 
 func (s *Server) handleCancelChatCoordination(w http.ResponseWriter, r *http.Request) {

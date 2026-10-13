@@ -66,3 +66,18 @@ Protocol references:
 [initialization](https://agentclientprotocol.com/protocol/v1/initialization),
 [session setup](https://agentclientprotocol.com/protocol/v1/session-setup), and
 [prompt turns/cancellation](https://agentclientprotocol.com/protocol/v1/prompt-turn).
+
+
+## Owned process teardown
+
+Native stdio mode currently requires Linux. The actor is a dedicated supervisor
+for one harness, using a private process group and subreaping so detached and
+orphaned tool descendants remain owned. Teardown stops deepest descendants before
+the harness, waits for owned processes to terminate, and reaps adopted children.
+PID start times fence reuse; pre-existing unrelated children are excluded. Client
+closure is published only after transport teardown has completed. Kernel teardown
+delays retain ownership rather than returning an early completion. Echo mode is
+unchanged on other platforms; unsupported native ownership fails before launch.
+
+Regression tests exercise ordinary/detached tool children, context cancellation,
+no writes after Close, direct harness reaping, and an unrelated process left alive.

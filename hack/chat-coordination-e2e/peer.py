@@ -10,6 +10,7 @@ role, log_file = sys.argv[1:]
 lock = threading.Lock()
 sessions = {}
 active = {}
+failed_syntheses = set()
 
 def send(message):
     with lock:
@@ -38,6 +39,11 @@ def prompt(request):
         data = json.loads(latest.split('PEER_RESULTS_JSON:\n',1)[1])
         assert len(data['results']) == 1
         peer = data['results'][0]
+        if 'FAIL_SYNTH_ONCE' in peer['content'] and session not in failed_syntheses:
+            failed_syntheses.add(session)
+            send({'jsonrpc':'2.0','id':request['id'],'error':{'code':-32000,'message':'inert synthesis failure'}})
+            audit('failed',session=session)
+            return
         reply = 'INERT_FINAL: ' + (peer['content'] if peer['status']=='succeeded' else 'peer failed: '+peer['content'])
         if 'SYNTH_CANCEL' in peer['content']:
             chunk(session,'inert synthesis in progress')

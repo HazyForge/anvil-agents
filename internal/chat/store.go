@@ -126,6 +126,9 @@ type Store interface {
 	CompleteTurn(context.Context, Turn, Message) error
 	CancelCoordination(context.Context, string, string, string) (Turn, error)
 	RecordRun(context.Context, Turn, string) error
+	ClaimDispatch(context.Context, Turn, string) (bool, error)
+	FinishDispatch(context.Context, Turn, string, string) error
+	RetrySynthesis(context.Context, Turn, TurnRetry) (Turn, error)
 	RetryTurn(context.Context, Turn, TurnRetry) (Turn, error)
 	ActivateTurn(context.Context, Turn) (bool, error)
 

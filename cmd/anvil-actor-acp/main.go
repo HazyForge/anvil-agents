@@ -30,6 +30,7 @@ func (a *arguments) Set(value string) error { *a = append(*a, value); return nil
 type processTransport struct {
 	io.Reader
 	io.Writer
+	fence  *processFence
 	cmd    *exec.Cmd
 	stdin  io.Closer
 	stdout io.Closer
@@ -40,8 +41,9 @@ func (p *processTransport) Close() error {
 	p.once.Do(func() {
 		_ = p.stdin.Close()
 		_ = p.stdout.Close()
-		_ = p.cmd.Process.Kill()
+		_ = p.fence.kill()
 		_ = p.cmd.Wait()
+		p.fence.waitDescendants()
 	})
 	return nil
 }
@@ -52,6 +54,10 @@ func startHarness(ctx context.Context, command, workdir string, args []string) (
 	}
 	cmd := exec.CommandContext(ctx, command, args...)
 	cmd.Dir = workdir
+	fence, err := newProcessFence(cmd)
+	if err != nil {
+		return nil, err
+	}
 	cmd.WaitDelay = time.Second
 	// Fixed operator environment only. HTTP authorization, kubeconfig and
 	// cluster tokens cannot reach the child. No auth material is provisioned.
@@ -75,7 +81,7 @@ func startHarness(ctx context.Context, command, workdir string, args []string) (
 		_ = stdout.Close()
 		return nil, fmt.Errorf("start ACP harness failed")
 	}
-	return &processTransport{Reader: stdout, Writer: stdin, cmd: cmd, stdin: stdin, stdout: stdout}, nil
+	return &processTransport{Reader: stdout, Writer: stdin, cmd: cmd, fence: fence, stdin: stdin, stdout: stdout}, nil
 }
 
 func main() {
@@ -90,12 +96,14 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	var handler http.Handler = http.HandlerFunc(substrate.ServeACPEcho)
+	var ownedClient *actoracp.Client
 	if *command != "" {
 		transport, err := startHarness(ctx, *command, *workdir, args)
 		if err != nil {
 			log.Fatal(err)
 		}
 		client := actoracp.NewClient(transport)
+		ownedClient = client
 		defer client.Close()
 		setupCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 		adapter, err := actoracp.NewServer(setupCtx, client, actoracp.Config{Workdir: *workdir, TurnTimeout: *turnTimeout})
@@ -116,6 +124,9 @@ func main() {
 	}()
 	log.Printf("anvil-actor-acp listening on %s", *listen)
 	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		if ownedClient != nil {
+			_ = ownedClient.Close()
+		}
 		log.Fatal(err)
 	}
 }

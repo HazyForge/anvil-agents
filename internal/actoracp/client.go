@@ -68,8 +68,8 @@ func NewClient(transport io.ReadWriteCloser) *Client {
 
 func (c *Client) Close() error {
 	c.once.Do(func() {
-		close(c.closed)
 		_ = c.transport.Close()
+		close(c.closed)
 	})
 	return nil
 }

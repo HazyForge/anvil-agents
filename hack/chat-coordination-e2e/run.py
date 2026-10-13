@@ -239,6 +239,25 @@ def restart_after_peer(j):
     assert len([x for x in audit(j.logs['A']) if x['event']=='prompt'])==2
     return {'api_restarted_after_peer_receipt':True,'automatic_final_replies':1,'peer_replays':0}
 
+def retry_synthesis(j):
+    j.start('FAIL_SYNTH_ONCE')
+    failed=wait(lambda:j.parent_state('failed'))
+    source=failed['turns'][-1]
+    saved=next(m for m in failed['messages'] if m['id']==source['userMessageId'])
+    assert source['resumption'] and saved['metadata']['authorKind']=='agent_results'
+    j.call('POST',j.base+'/'+j.thread+'/messages',{'content':saved['content'],'requestId':str(uuid.uuid4())},400)
+    body={'retryTurnId':source['id'],'retryCount':source.get('retryCount',0)}
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        receipts=list(pool.map(lambda _:j.call('POST',j.base+'/'+j.thread+'/messages',body,202),range(4)))
+    assert all(x['turn']['id']==source['id'] and x['turn']['resumption'] and x['turn']['parentTurnId']==j.parent and x['turn']['retryCount']==1 for x in receipts)
+    final=wait(lambda:j.parent_state('done'))
+    assert len(j.final_messages(final))==1 and len(final['turns'])==2
+    assert len([x for x in audit(j.logs['A']) if x['event']=='prompt'])==3
+    assert len([x for x in audit(j.logs['B']) if x['event']=='prompt'])==1
+    assert len([m for m in final['messages'] if m.get('metadata',{}).get('authorKind')=='agent_results'])==1
+    return {'same_synthesis_turn':True,'same_parent':True,'service_input_count':1,'duplicate_retry_receipts':4,'extra_peer_fanouts':0,'automatic_final_replies':1}
+
+case('failed synthesis retry preserves provenance and never repeats peer',retry_synthesis)
 case('automatic round-trip + identity/correlation + duplicate/reconnect',automatic)
 case('busy recipient waits then completes automatic round-trip',busy_recipient)
 if os.environ.get('INERT_CHAT_DATABASE_URL'):

@@ -32,9 +32,11 @@ type CreateChatThreadRequest struct {
 }
 
 type AppendChatMessageRequest struct {
-	RequestID string          `json:"requestId,omitempty"`
-	Content   string          `json:"content"`
-	Metadata  json.RawMessage `json:"metadata"`
+	RetryTurnID string          `json:"retryTurnId,omitempty"`
+	RetryCount  *int            `json:"retryCount,omitempty"`
+	RequestID   string          `json:"requestId,omitempty"`
+	Content     string          `json:"content"`
+	Metadata    json.RawMessage `json:"metadata"`
 }
 
 type ChatThreadListResponse struct {

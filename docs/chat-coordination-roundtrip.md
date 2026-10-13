@@ -43,6 +43,21 @@ new synthesis admission. The API interrupts its own standing contexts; execution
 locks remain held until teardown or a terminal execution receipt. A foreign API
 replica or Job is not forcibly killed. If its owner disappears without a terminal
 receipt, its exclusive resources remain reserved for operator reconciliation.
+A coordinated turn reserves durable dispatch ownership before issuing AgentRun
+Create. A missing AgentRun during an unresolved Create is not proof that the run
+cannot commit later. Cancellation retains its exclusive resource lock until the
+owner records a known outcome or an operator reconciles an ambiguous request.
+There is no lease expiry or automatic replay of uncertain creation.
+
+Desktop offers **Retry final answer** for a failed synthesis within the existing
+two-retry budget. It submits the saved turn ID and expected retry count, with no
+service content in the request. The API retains the same turn, parent, input
+message and frozen prompt, and creates only a new append-only execution attempt.
+Duplicate retry receipts do not create more attempts. Synthesis remains excluded
+from intent routing and fanout. The parent journey carries its retry count so
+stale terminal snapshots cannot hide the renewed final-answer work. Resending
+the exact saved service result as a human message is rejected.
+
 This endpoint becomes available after the originating turn has queued peers; it
 does not add general interruption of the original pre-delegation turn.
 
@@ -72,7 +87,10 @@ during synthesis, one terminal failure explanation without peer replay, and the
 existing cross-application allowlist boundary. It stops every owned subprocess.
 Store race tests additionally cover atomic duplicate synthesis admission,
 cancellation against enqueue/completion, resource exclusion and store reconnect.
-Browser contract tests cover stale journey snapshots and receipt visibility.
+Browser contract tests cover stale journey snapshots, receipt visibility and
+failed-synthesis retry without promotion to human input. The actual inert E2E
+also retries a failed native synthesis with four duplicate retry submissions and
+checks that the peer ran once and the source produced one final answer.
 
 This proves local protocol and UX plumbing. Live non-Grok harness compatibility,
 provider authorization, model cost, ATE routing, production PostgreSQL and Desktop
