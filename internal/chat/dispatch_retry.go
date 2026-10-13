@@ -76,6 +76,9 @@ func (s *MemoryStore) ClaimDispatch(_ context.Context, t Turn, owner string) (bo
 	return claimed, err
 }
 func finishDispatch(old, expected Turn, owner, state string) (Turn, error) {
+	if sameTurnAttempt(old, expected) && old.Dispatch != nil && old.Dispatch.Owner == owner && old.Dispatch.State == "terminal" && (state == "created" || state == "rejected") {
+		return old, nil
+	}
 	if !Active(old) || !sameTurnAttempt(old, expected) || old.Dispatch == nil || old.Dispatch.Owner != owner || old.Dispatch.State != "creating" || (state != "created" && state != "rejected") {
 		return old, ErrRequestConflict
 	}

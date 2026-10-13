@@ -128,6 +128,7 @@ type Store interface {
 	RecordRun(context.Context, Turn, string) error
 	ClaimDispatch(context.Context, Turn, string) (bool, error)
 	FinishDispatch(context.Context, Turn, string, string) error
+	ResolveTerminalDispatch(context.Context, Turn, TerminalRunReceipt) (Turn, error)
 	RetrySynthesis(context.Context, Turn, TurnRetry) (Turn, error)
 	RetryTurn(context.Context, Turn, TurnRetry) (Turn, error)
 	ActivateTurn(context.Context, Turn) (bool, error)

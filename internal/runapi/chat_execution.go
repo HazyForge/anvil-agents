@@ -352,6 +352,9 @@ func (server *Server) reconcileChatTurnMode(ctx context.Context, turn *chat.Turn
 		}
 		return err
 	}
+	if !chatRunIdentityMatches(*turn, run) {
+		return server.failChatTurn(ctx, turn, "AgentRun identity does not match the accepted chat turn")
+	}
 	// Slice-2 standing turn wiring, beside (never instead of) the durable
 	// turn above: when the thread's harness selects execution.runtime
 	// InProcess and the live gate is on, the run created from the
@@ -362,8 +365,11 @@ func (server *Server) reconcileChatTurnMode(ctx context.Context, turn *chat.Turn
 	if _, err := server.reconcileStandingTurn(ctx, turn, run, driveStanding); err != nil {
 		return err
 	}
-	if (turn.RunUID != "" && turn.RunUID != string(run.UID)) || run.Labels[chatTurnLabel] != turn.ID || run.Labels[chatThreadLabel] != turn.ThreadID || run.Spec.SourceRef.Kind != "ChatThread" || run.Spec.SourceRef.Name != turn.ThreadID {
-		return server.failChatTurn(ctx, turn, "AgentRun identity does not match the accepted chat turn")
+	// This also covers an API that crashed after external Create committed
+	// but before FinishDispatch. Only a verified terminal receipt can resolve
+	// the abandoned fence; an absent/nonterminal run remains reserved.
+	if err = server.resolveTerminalChatDispatch(ctx, turn, run); err != nil {
+		return err
 	}
 	if turn.RunUID == "" && run.UID != "" {
 		if err = server.chatStore.RecordRun(ctx, *turn, string(run.UID)); err != nil {

@@ -139,6 +139,11 @@ func (s *Server) cancelChatChild(ctx context.Context, turn *chat.Turn) error {
 	if err != nil && !apierrors.IsNotFound(err) {
 		return err
 	}
+	if err == nil {
+		if resolveErr := s.resolveTerminalChatDispatch(ctx, turn, run); resolveErr != nil {
+			return resolveErr
+		}
+	}
 	if err == nil && run.Status.Phase != agents.AgentRunPhaseSucceeded && run.Status.Phase != agents.AgentRunPhaseFailed {
 		if claim, err := standing.ParseClaim(run.Annotations[agents.AgentRunStandingClaimAnnotation]); err == nil && claim.TurnID == turn.ID {
 			// An expired lease is not proof a foreign process stopped. Keep

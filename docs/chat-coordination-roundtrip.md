@@ -46,7 +46,14 @@ receipt, its exclusive resources remain reserved for operator reconciliation.
 A coordinated turn reserves durable dispatch ownership before issuing AgentRun
 Create. A missing AgentRun during an unresolved Create is not proof that the run
 cannot commit later. Cancellation retains its exclusive resource lock until the
-owner records a known outcome or an operator reconciles an ambiguous request.
+owner records a known outcome, recovery observes an identity-verified terminal
+AgentRun receipt, or an operator reconciles a genuinely ambiguous request. A crash
+after external Create commits but before its acknowledgement cannot wedge a
+completed execution: recovery atomically binds the terminal UID and marks that
+exact dispatch attempt terminal. Namespace, run name, turn/thread labels, source
+reference and recorded UID must match the accepted intent; success and failure
+receipts both qualify. Missing/nonterminal runs and mismatched/stale receipts keep
+the fence. Late owner acknowledgements cannot downgrade terminal ownership.
 There is no lease expiry or automatic replay of uncertain creation.
 
 Desktop offers **Retry final answer** for a failed synthesis within the existing
