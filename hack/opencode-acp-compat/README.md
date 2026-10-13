@@ -40,7 +40,7 @@ That step requires explicit approval after the automatic rejection. Do not run
 an equivalent install through another route while approval is pending.
 
 After approval, complete the affected CLI typecheck, build a project-only
-`2.0.15-anvil-acp-catalog.1` artifact, record its SHA-256, and retain the original
+`2.0.15-anvil-acp-catalog.2` artifact, record its SHA-256, and retain the original
 binary/configuration. Obtain exact-head independent review. Then prove cold
 native ACP startup and exact selection using only metadata in a private offline
 namespace, including timeout/cancellation and no substitute model. Only after
@@ -64,3 +64,10 @@ provider configuration are changed.
 The initial runtime-preload prototype was rejected after a safe trace showed
 no preload execution in this exact compiled artifact. It is not part of this
 patch and must not be used as a claimed compatibility fix.
+
+Revision 2 passes request cancellation/deadlines through argument two of the
+pinned generated SDK methods for model, agent, default and command reads, and
+checks cancellation again before accepting metadata. Both config-option and
+legacy `session/set_mode` paths refresh attached metadata and use the same
+operator-owned mode restriction before mutation. Original reviewer probes are
+retained outside this directory and replayed unchanged.

@@ -24,9 +24,10 @@ export async function readyCatalog(client: OpenCodeClient, cwd: string, required
   while (!signal.aborted) {
     const location = { directory: cwd }
     const [modelResult, agentResult] = await Promise.all([
-      client.model.list({ location, signal }),
-      client.agent.list({ location, signal }),
+      client.model.list({ location }, { signal }),
+      client.agent.list({ location }, { signal }),
     ])
+    signal.throwIfAborted()
     const models = modelResult.data.filter((model) => model.enabled)
     const agents = agentResult.data.filter((agent) => agent.mode !== "subagent" && !agent.hidden)
     if (models.some((model) => `${model.providerID}/${model.id}` === required.model) && agents.some((agent) => agent.id === required.mode && agent.mode === "primary")) {

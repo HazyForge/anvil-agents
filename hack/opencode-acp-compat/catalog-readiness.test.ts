@@ -21,7 +21,7 @@ function fixture() {
   const read = async (path: string, options: { signal?: AbortSignal }) => (await fetch(`http://127.0.0.1:${server.port}${path}`, { signal: options.signal })).json()
   // Real loopback transport at the existing injected SDK boundary. This proves
   // the readiness helper; native SDK/binary integration remains a separate gate.
-  const client = { model: { list: (options: { signal?: AbortSignal }) => read("/model", options) }, agent: { list: (options: { signal?: AbortSignal }) => read("/agent", options) } } as unknown as OpenCodeClient
+  const client = { model: { list: (_input: unknown, options: { signal?: AbortSignal } = {}) => read("/model", options) }, agent: { list: (_input: unknown, options: { signal?: AbortSignal } = {}) => read("/agent", options) } } as unknown as OpenCodeClient
   return { state, client }
 }
 

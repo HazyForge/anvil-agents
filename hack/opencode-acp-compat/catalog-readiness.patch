@@ -8,7 +8,7 @@
  import { withTimestampedFallback } from "@opencode/util/session-title-fallback"
  import type {
    AuthenticateRequest,
-@@ -109,21 +110,13 @@
+@@ -109,25 +110,20 @@
    readonly connection: ACPConnection.Connection
  }): Interface {
    const sessions = new Map<string, Attached>()
@@ -16,7 +16,7 @@
    const registeredMcp = new Map<string, Set<string>>()
    const active = new Map<string, { readonly control: TurnControl; readonly turn: Promise<PromptResponse> }>()
    const capabilities = { writeTextFile: false, childSessionUpdates: false }
- 
+
 -  const catalog = (cwd: string) => {
 -    const cached = catalogs.get(cwd)
 -    if (cached) return cached
@@ -27,28 +27,49 @@
 -    catalogs.set(cwd, loaded)
 -    return loaded
 -  }
+-
+-  const requireSession = async (sessionID: string) => {
 +  // Re-read metadata for each attachment/selection instead of retaining the
 +  // first bootstrap snapshot indefinitely. The requirements are owner flags.
 +  const catalog = (cwd: string) => loadCatalog(input.client, cwd, input.connection.signal)
- 
-   const requireSession = async (sessionID: string) => {
++
++  const requireSession = async (sessionID: string, refreshCatalog = false) => {
      const current = sessions.get(sessionID)
-@@ -280,6 +273,11 @@
+-    if (current) return current
++    if (current) {
++      if (refreshCatalog) current.catalog = await catalog(current.cwd)
++      return current
++    }
+     throw new ACPError.SessionNotFoundError({ sessionId: sessionID })
+   }
+
+@@ -278,8 +274,12 @@
+       return { sessionId: state.id, configOptions: configOptions(state) }
+     },
      setSessionConfigOption: async (params) => {
-       const state = await requireSession(params.sessionId)
+-      const state = await requireSession(params.sessionId)
++      const state = await requireSession(params.sessionId, true)
        if (typeof params.value !== "string") throw new ACPError.InvalidConfigOptionError({ configId: params.configId })
 +      const required = catalogRequirements()
 +      if ((params.configId === "model" && params.value !== required.model) || (params.configId === "mode" && params.value !== required.mode)) {
 +        throw new ACPError.InvalidConfigOptionError({ configId: params.configId })
 +      }
-+      state.catalog = await catalog(state.cwd)
        switch (params.configId) {
          case "model": {
            const selected = requireModel(state.catalog, params.value, state.model)
-@@ -410,44 +408,33 @@
+@@ -309,7 +309,7 @@
+       return { configOptions: configOptions(state) }
+     },
+     setSessionMode: async (params) => {
+-      await selectMode(input.client, await requireSession(params.sessionId), params.modeId)
++      await selectMode(input.client, await requireSession(params.sessionId, true), params.modeId)
+       return {}
+     },
+     prompt: async (params, signal) => {
+@@ -410,44 +410,34 @@
    return { type: "input", id: messageID }
  }
- 
+
 -async function loadCatalog(client: OpenCodeClient, cwd: string): Promise<Catalog> {
 +async function loadCatalog(client: OpenCodeClient, cwd: string, closed?: AbortSignal): Promise<Catalog> {
 +  const required = catalogRequirements()
@@ -92,9 +113,10 @@
 -  throw new Error(missing)
 +  // Read defaults after provider/agent activation, using the same bounded signal.
 +  const [defaultResult, commandResult] = await Promise.all([
-+    client.model.default({ location, signal: current.signal }),
-+    client.command.list({ location, signal: current.signal }),
++    client.model.default({ location }, { signal: current.signal }),
++    client.command.list({ location }, { signal: current.signal }),
 +  ])
++  current.signal.throwIfAborted()
 +  const preferred = defaultResult.data
 +  const defaultModel = preferred
 +    ? current.models.find((model) => model.providerID === preferred.providerID && model.id === preferred.id)
@@ -114,5 +136,13 @@
 +    commands: commandResult.data,
 +  }
  }
- 
+
  function providers(models: readonly ModelInfo[]): ConfigOptionProvider[] {
+@@ -481,6 +471,7 @@
+ }
+
+ async function selectMode(client: OpenCodeClient, state: Attached, modeID: string) {
++  if (modeID !== catalogRequirements().mode) throw new ACPError.InvalidModeError({ mode: modeID })
+   if (!state.catalog.modes.some((mode) => mode.id === modeID)) throw new ACPError.InvalidModeError({ mode: modeID })
+   state.modeID = modeID
+   await client.session.switchAgent({ sessionID: state.id, agent: modeID })

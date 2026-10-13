@@ -11,8 +11,8 @@
   },
   "bun_lock_sha256": "ea344d16b31b6233fe6a298290ca1a35e310d48f08e907b4b2469f643a7550a6",
   "installed_reference_binary_sha256": "b8ed44e893a3307cf23b4e0c83a4bb52b2c38d580fff33d3d9ec16477efb6077",
-  "helper_sha256": "1d7c9d32c70742e0e45edcf7336794c9d757b6f6c07823f02df5873a4bb59db7",
-  "patch_sha256": "491810cc2139f078b95658e66ab7f7705f55272f3af9fb46d97895b1bbcb1183",
-  "artifact_version": "2.0.15-anvil-acp-catalog.1",
+  "helper_sha256": "1702d0e6cc3db90e0a93c20ae67bd8c626927f989ac7bde289ac23ab81b9967c",
+  "patch_sha256": "cfa7bf11ae2c7f562dda08bb343bfe52a2ed68a077154f0d2c718111e6203732",
+  "artifact_version": "2.0.15-anvil-acp-catalog.2",
   "build_status": "blocked pending explicit approval for isolated frozen dependencies"
 }
