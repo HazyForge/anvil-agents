@@ -32,6 +32,10 @@ const (
 // without failing the AgentRun (parking 503, 429, 504, transport blips).
 var ErrGenerateTransient = errors.New("substrate atenet generate transient")
 
+// ErrGenerateCancelled is terminal for this AgentRun. A partial cancelled
+// reply must not be persisted as success or automatically replayed.
+var ErrGenerateCancelled = errors.New("substrate actor generation cancelled")
+
 // AtenetConfig is the HTTP client for generate-on-actor. Endpoint is
 // host:port of atenet-router (or an httptest server). Token bytes are
 // attached as Authorization and must never appear in errors, logs, or status.
@@ -184,6 +188,9 @@ func (c *AtenetClient) Generate(ctx context.Context, req GenerateRequest) (Gener
 	result, err := parseGenerateBody(raw)
 	if err != nil {
 		return GenerateResult{}, err
+	}
+	if result.StopReason == "cancelled" {
+		return GenerateResult{}, ErrGenerateCancelled
 	}
 	if strings.TrimSpace(result.Text) == "" {
 		return GenerateResult{}, fmt.Errorf("atenet actor %s returned an empty reply", authority)
