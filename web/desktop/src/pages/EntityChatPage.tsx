@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import type { UIConfig } from '../auth/config';
 import { APIError, backendKindFromComposition, harnessRefFromRunProfile, listRunProfiles, type CompositionDocument } from '../api/client';
-import { ensureRemoteStandingThread, createRemoteThread, getRemoteThread, listRemoteHarnesses, listRemoteThreads, sendRemoteMessage, threadHarness, type RemoteThread, type RemoteThreadDetail, type RemoteTurn } from '../api/remoteChat';
+import { cancelRemoteCoordination, ensureRemoteStandingThread, createRemoteThread, getRemoteThread, listRemoteHarnesses, listRemoteThreads, sendRemoteMessage, threadHarness, type RemoteThread, type RemoteThreadDetail, type RemoteTurn } from '../api/remoteChat';
 import { loadNamespace, saveNamespace } from '../state/namespace';
 import { readChatDraft, saveChatDraft, readSelectedChat, saveSelectedChat, readNewChatConfig, saveNewChatConfig, type NewChatConfig } from '../state/chatWorkspace';
 import { RemoteTurnActivity } from '../components/RemoteTurnActivity';
@@ -29,7 +29,8 @@ import {
 interface Props { token: string; config: UIConfig }
 const agentName = (name: string) => name.replace(/[-_]+/g, ' ').replace(/\bprimaris\b/gi, 'Primaris').replace(/\bagy\b/gi, 'AGY').replace(/\bprime\b/gi, 'Prime').replace(/^./, letter => letter.toUpperCase());
 
-const turnProgress = (turn: RemoteTurn) => ({waiting: 0, queued: 1, running: 2, succeeded: 3, failed: 3})[turn.status];
+const turnProgress = (turn: RemoteTurn) => ({waiting: 0, queued: 1, running: 2, succeeded: 3, failed: 3, cancelled: 3})[turn.status];
+const coordinationProgress = (turn: RemoteTurn) => ({waiting: 0, resuming: 1, done: 2, failed: 2, cancelled: 2})[turn.coordination?.status ?? 'waiting'];
 const sameTurn = (a: RemoteTurn, b: RemoteTurn) => a.id === b.id || Boolean(a.requestId && a.requestId === b.requestId);
 const latestSequence = (detail: RemoteThreadDetail) => Math.max(0, ...detail.messages.map(message => message.sequence));
 // Reads and accepted POST receipts can arrive out of order. The append-only
@@ -41,7 +42,8 @@ function regresses(next: RemoteThreadDetail, previous: RemoteThreadDetail | null
   if (previous.activeTurn && !nextTurns.some(turn => sameTurn(turn, previous.activeTurn!))) return true;
   return [...(previous.turns ?? []), ...(previous.activeTurn ? [previous.activeTurn] : [])].some(before =>
     nextTurns.some(after => sameTurn(before, after) && ((after.retryCount ?? 0) < (before.retryCount ?? 0) ||
-      ((after.retryCount ?? 0) === (before.retryCount ?? 0) && turnProgress(after) < turnProgress(before)))));
+      ((after.retryCount ?? 0) === (before.retryCount ?? 0) && turnProgress(after) < turnProgress(before)) ||
+      (before.coordination && (!after.coordination || coordinationProgress(after) < coordinationProgress(before))))));
 }
 
 // A delayed pre-repair response must not remove a verified answer already read.
@@ -124,6 +126,7 @@ export function EntityChatPage({token, config}: Props) {
   const retryMessage = latestFailed ? detail?.messages.find(message => message.id === latestFailed.userMessageId && message.role === 'user') : undefined;
   const retryPending = Boolean(optimistic && pending.current?.preserveDraft);
   const earlierFailures = detail?.turns?.filter(t => t.status === 'failed' && t.id !== latestFailed?.id) ?? [];
+  const coordinating = detail?.turns?.find(t => t.coordination?.status === 'waiting' || t.coordination?.status === 'resuming');
   const active = detail?.activeTurn ?? detail?.turns?.find(t => t.status === 'waiting' || t.status === 'queued' || t.status === 'running');
   const roster = [...profiles].sort((a, b) => Number(b.metadata.name === 'desktop-assistant') - Number(a.metadata.name === 'desktop-assistant') || a.metadata.name.localeCompare(b.metadata.name));
   const managers = projectManagers(roster, namespace);
@@ -309,7 +312,7 @@ export function EntityChatPage({token, config}: Props) {
   async function submit(event?: FormEvent, retry?: {content: string; forceNew?: boolean}) {
     event?.preventDefault();
     const content = (retry?.content ?? draft).trim();
-    if (!content || busy || submitting.current || (retryPending && !retry) || active || unavailable || initializing || (!profile && !harness) || !enabled || (coordinate && !peers.length)) return;
+    if (!content || busy || submitting.current || (retryPending && !retry) || active || coordinating || unavailable || initializing || (!profile && !harness) || !enabled || (coordinate && !peers.length)) return;
     submitting.current = true;
     setBusy(true); setError(''); setOptimistic({content}); setSendPhase(threadID ? 'sending' : 'saving');
     let target = threadID;
@@ -317,7 +320,7 @@ export function EntityChatPage({token, config}: Props) {
       if (!target) {
         const thread = await createRemoteThread(token, namespace, {
           profileName: profile || undefined, harnessProfileName: harness || undefined, mode,
-          metadata: coordinate ? {coordination: {enabled: true, allowedProfiles: peers}} : undefined,
+          metadata: coordinate ? {coordination: {enabled: true, allowedProfiles: peers, returnReplies: true}} : undefined,
           title: `${mode === 'fleet' ? 'Manager · ' : ''}${profile || harness}`,
         });
         target = thread.id; setThreadID(target); saveSelectedChat(namespace, target);
@@ -490,6 +493,9 @@ export function EntityChatPage({token, config}: Props) {
               if (metadata?.kind !== 'legacy_output_unavailable' || !['hermesAgent', 'openClaw'].includes(metadata.backend || '')) return null;
               return <aside key={message.id} className="remote-chat-caption" aria-label="Earlier reply unavailable"><strong>Earlier reply unavailable</strong><p>{metadata.backend === 'openClaw' ? 'This older answer could not be recovered from its runner output yet. Your message is saved. The answer will be saved permanently when recovery succeeds.' : 'An older Hermes runner did not separate its final answer from internal output. The original message has been preserved. Reasoning and original output can be inspected in the runner output while its logs are retained.'}</p>{metadata.runName && /^[a-z0-9]([a-z0-9.-]{0,251}[a-z0-9])?$/.test(metadata.runName) && <button type="button" className="btn btn-ghost" onClick={() => {setHistoricalOutput({runName: metadata.runName!, backend: metadata.backend!}); setRawActivityOpen(true);}}>View original runner output</button>}</aside>;
             }
+            if ((message.metadata as {authorKind?: string} | undefined)?.authorKind === 'agent_results') {
+              return <aside className="remote-chat-caption" key={message.id}>Peer results received for the agent’s final answer.</aside>;
+            }
             const jevCaption = jevIntentCaption(message);
             // Manager-only affordance: a classified, non-unclear
             // create_agent_request user message carries
@@ -552,7 +558,8 @@ export function EntityChatPage({token, config}: Props) {
           {optimistic && <div className="remote-turn-status" role="status">{busy ? (sendPhase === 'saving' ? 'Saving conversation…' : 'Sending message…') : 'Message not confirmed. Retry to check delivery.'}{retryPending && !busy && <button type="button" className="btn btn-ghost" disabled={Boolean(active) || unavailable || initializing} onClick={() => {if (pending.current) void submit(undefined, {content: pending.current.content});}}>Check retry delivery</button>}</div>}
           <RemoteTurnActivity token={token} namespace={namespace} turn={active ?? (optimistic ? undefined : detail?.turns?.at(-1))} recoveryPending={detail?.recoveryPending} agentLabel={detail?.profileName || profile || harness}/>
 
-          {detail?.turns?.flatMap(t => t.delegates ?? []).map(delivery => <div className="remote-turn-status" key={delivery.turnId}>{delivery.status === 'succeeded' ? `${delivery.profileName} replied.` : delivery.status === 'running' ? `${delivery.profileName} is working.` : delivery.status === 'failed' ? `${delivery.profileName} could not finish.` : `Message saved for ${delivery.profileName}.`} <button className="btn btn-ghost" disabled={busy} onClick={() => {const thread = threads.find(t => t.id === delivery.threadId); openThread(thread ?? {id: delivery.threadId, namespace, profileName: delivery.profileName, mode: 'persona', title: delivery.profileName, createdAt: '', updatedAt: '', createdBy: ''});}}>Open peer conversation</button></div>)}
+          {detail?.turns?.filter(t => t.coordination).map(t => <div className="remote-turn-status" key={`coordination-${t.id}`} role="status"><span>{t.coordination?.status === 'waiting' ? 'Waiting for peer replies. The agent will answer here automatically.' : t.coordination?.status === 'resuming' ? 'Peer results received. The agent is preparing the final answer.' : t.coordination?.status === 'cancelled' ? 'Coordination cancelled.' : t.coordination?.status === 'failed' ? 'The agent could not complete the final answer.' : 'Coordination complete.'}</span>{(t.coordination?.status === 'waiting' || t.coordination?.status === 'resuming') && <button className="btn btn-ghost" disabled={busy} onClick={() => {setBusy(true); void cancelRemoteCoordination(token, namespace, detail!.id, t.id).then(() => getRemoteThread(token, namespace, detail!.id)).then(next => setDetail(previous => regresses(next, previous) ? previous : next)).catch(err => setError(formatTurnError(err))).finally(() => setBusy(false));}}>Stop coordination</button>}</div>)}
+          {detail?.turns?.flatMap(t => t.delegates ?? []).map(delivery => <div className="remote-turn-status" key={delivery.turnId}>{delivery.status === 'succeeded' ? `${delivery.profileName} replied.` : delivery.status === 'running' ? `${delivery.profileName} is working.` : delivery.status === 'cancelled' ? `${delivery.profileName} coordination cancelled.` : delivery.status === 'failed' ? `${delivery.profileName} could not finish.` : `Message saved for ${delivery.profileName}.`} <button className="btn btn-ghost" disabled={busy} onClick={() => {const thread = threads.find(t => t.id === delivery.threadId); openThread(thread ?? {id: delivery.threadId, namespace, profileName: delivery.profileName, mode: 'persona', title: delivery.profileName, createdAt: '', updatedAt: '', createdBy: ''});}}>Open peer conversation</button></div>)}
           {latestFailed && <div className="banner banner-error"><span>Turn failed: {latestFailed.error || latestFailed.runName}</span>{retryMessage && <button type="button" className="btn btn-ghost" disabled={busy || Boolean(active) || unavailable || initializing || !enabled} onClick={() => void submit(undefined, {content: retryMessage.content, forceNew: true})}>Retry last message</button>}</div>}
           {(active ?? lastTurn)?.attempts?.length ? <details className="remote-chat-caption"><summary>Earlier startup attempts ({(active ?? lastTurn)!.attempts!.length})</summary>{(active ?? lastTurn)!.attempts!.map(attempt => <p key={attempt.runName}>{attempt.error} <button type="button" className="btn btn-ghost" onClick={() => {setHistoricalOutput({runName: attempt.runName, backend}); setRawActivityOpen(true);}}>View attempt output</button></p>)}</details> : null}
           {earlierFailures.length > 0 && <details className="remote-chat-caption"><summary>Earlier failed turns ({earlierFailures.length})</summary>{earlierFailures.map(t => <p key={t.id}>Turn failed: {t.error || t.runName}</p>)}</details>}
@@ -560,7 +567,7 @@ export function EntityChatPage({token, config}: Props) {
         </div>
         <form className="chat-composer" onSubmit={e => void submit(e)}>
           <label className="field"><span className="label">Message</span><textarea className="textarea chat-composer-input" rows={3} aria-label="Message" value={draft} disabled={busy || !enabled || initializing} onChange={e => changeDraft(e.target.value)} onKeyDown={e => {if(e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {e.preventDefault(); void submit();}}} placeholder="Message this agent…"/></label>
-          <div className="chat-composer-actions"><span className="chat-composer-hint">Enter to send · Shift + Enter for a new line</span><button className="btn btn-primary" disabled={busy || retryPending || Boolean(active) || unavailable || initializing || !draft.trim() || (!profile && !harness) || !enabled || (coordinate && !peers.length)}>{busy ? 'Sending…' : active ? 'Waiting for reply…' : 'Send'}</button></div>
+          <div className="chat-composer-actions"><span className="chat-composer-hint">Enter to send · Shift + Enter for a new line</span><button className="btn btn-primary" disabled={busy || retryPending || Boolean(active) || Boolean(coordinating) || unavailable || initializing || !draft.trim() || (!profile && !harness) || !enabled || (coordinate && !peers.length)}>{busy ? 'Sending…' : (active || coordinating) ? 'Waiting for reply…' : 'Send'}</button></div>
         </form>
         {outputRun && <details className="remote-run-details" open={rawActivityOpen} onToggle={e => setRawActivityOpen(e.currentTarget.open)}><summary>{outputBackend === 'hermesAgent' ? 'Reasoning and runner output' : 'Runner activity'}</summary>{rawActivityOpen && <><p className="remote-chat-caption">Original runner output for {outputRun}. Access uses your current run-read permissions; older logs may no longer be retained.</p>{historicalOutput && currentOutputRun && currentOutputRun !== outputRun && <button type="button" className="btn btn-ghost" onClick={() => {setHistoricalOutput(undefined); setRawActivityOpen(false);}}>Back to latest turn output</button>}<LiveStream token={token} namespace={namespace} name={outputRun}/></>}</details>}
       </section>

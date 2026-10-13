@@ -76,6 +76,14 @@ await context.route('**/*', async route => {
     const t={id:`thread-${creates.length}`,namespace:ns,...body,createdBy:'fixture',createdAt:new Date().toISOString(),updatedAt:new Date().toISOString(),messages:[],turns:[]};
     threads.set(t.id,t); return reply(route,t,201);
   }
+  const cancelPath=tail.match(/^chat\/threads\/([^/]+)\/turns\/([^/]+)\/cancel$/);
+  if(cancelPath && request.method()==='POST') {
+    const t=threads.get(cancelPath[1]);
+    const turn=t?.turns.find(turn=>turn.id===cancelPath[2]);
+    if(!t||t.namespace!==ns||!turn?.coordination) return reply(route,{},404);
+    turn.coordination={...turn.coordination,status:'cancelled'};
+    return reply(route,turn);
+  }
   const tm=tail.match(/^chat\/threads\/([^/]+)(\/messages)?$/);
   if(tm) {
     const t=threads.get(tm[1]);
@@ -176,7 +184,7 @@ try {
   assert.equal(await page.getByRole('article',{name:'Your pending message'}).count(),1);
   releaseAppend(); appendGate=null;
   await page.getByRole('status').filter({hasText:'Message received; waiting for the agent to start'}).waitFor();
-  assert.deepEqual(creates[0],{ns:'anvilhub',profileName:'agent-alpha',harnessProfileName:'agy-review',mode:'fleet',title:'Manager · agent-alpha',metadata:{coordination:{enabled:true,allowedProfiles:['agent-beta']}}});
+  assert.deepEqual(creates[0],{ns:'anvilhub',profileName:'agent-alpha',harnessProfileName:'agy-review',mode:'fleet',title:'Manager · agent-alpha',metadata:{coordination:{enabled:true,allowedProfiles:['agent-beta'],returnReplies:true}}});
   assert.equal(await page.getByRole('button',{name:'Waiting for reply…'}).isDisabled(),true);
   assert.equal(await page.getByText('Coordinate the fixture agents',{exact:true}).count(),1);
   console.log('PASS slow create/append show immediate user bubble and honest saving/sending status');
@@ -658,6 +666,41 @@ try {
   await draftVisible('Draft retained during explicit retry');
   assert.equal(posts.length,postsBeforeManual+1);
   console.log('PASS recovered OpenClaw answer survives stale unavailable refresh, reload, and retains draft without sending another message');
+  const journeyParent=manuallyRetried.turns.at(-1);
+  journeyParent.coordination={status:'waiting'};
+  const beforeJourneyPosts=posts.length;
+  await visible('Waiting for peer replies. The agent will answer here automatically.');
+  await page.getByRole('button',{name:'Stop coordination',exact:true}).waitFor();
+  assert.equal(await page.getByRole('button',{name:'Waiting for reply…'}).isDisabled(),true);
+  journeyParent.coordination={status:'resuming',resumeTurnId:'fixture-synthesis'};
+  manuallyRetried.messages.push({id:'fixture-peer-results',threadId:manuallyRetried.id,role:'user',content:'SERVICE_INTERNAL_PEER_RESULTS_JSON',sequence:manuallyRetried.messages.length+1,metadata:{authorKind:'agent_results'}});
+  await visible('Peer results received. The agent is preparing the final answer.');
+  await visible('Peer results received for the agent’s final answer.');
+  assert.equal(await page.getByText('SERVICE_INTERNAL_PEER_RESULTS_JSON',{exact:true}).count(),0);
+  const staleJourney=structuredClone(manuallyRetried);
+  staleJourney.turns.at(-1).coordination.status='waiting';
+  withheldDetails.set(manuallyRetried.id,staleJourney);
+  await page.waitForTimeout(4400);
+  await visible('Peer results received. The agent is preparing the final answer.');
+  withheldDetails.delete(manuallyRetried.id);
+  journeyParent.coordination={status:'done',resumeTurnId:'fixture-synthesis'};
+  manuallyRetried.messages.push({id:'fixture-automatic-final',threadId:manuallyRetried.id,role:'assistant',content:'One automatic final answer from the originating agent',sequence:manuallyRetried.messages.length+1});
+  await visible('One automatic final answer from the originating agent');
+  await visible('Coordination complete.');
+  await page.reload();
+  await visible('One automatic final answer from the originating agent');
+  await draftVisible('Draft retained during explicit retry');
+  assert.equal(posts.length,beforeJourneyPosts);
+  journeyParent.coordination={status:'waiting'};
+  // New journey identity distinguishes the next request from the terminal one.
+  journeyParent.id='fixture-next-coordination';journeyParent.requestId='fixture-next-coordination';
+  await visible('Waiting for peer replies. The agent will answer here automatically.');
+  await page.getByRole('button',{name:'Stop coordination',exact:true}).click();
+  await visible('Coordination cancelled.');
+  await page.reload();await visible('Coordination cancelled.');
+  assert.equal(posts.length,beforeJourneyPosts);
+  assert.deepEqual(errors,[]);
+  console.log('PASS automatic final appears in origin conversation; service results are not user messages; stale journey snapshots, reconnect and Stop preserve draft without additional sends');
   config.chat.enabled=false;
   await page.reload();
   await visible('Remote chat is not enabled on this server.');

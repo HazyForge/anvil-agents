@@ -7,7 +7,8 @@ export type RemoteTurn = {
   id: string;
   runName: string;
   requestId?: string;
-  status: 'waiting' | 'queued' | 'running' | 'succeeded' | 'failed';
+  status: 'waiting' | 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled';
+  coordination?: {status: 'waiting' | 'resuming' | 'done' | 'failed' | 'cancelled'; resumeTurnId?: string};
   error?: string;
   retryCount?: number;
   retryAt?: string;
@@ -40,7 +41,7 @@ export async function getRemoteThread(token: string, ns: string, id: string, sig
   return {...detail, messages: detail.messages ?? [], turns: detail.turns ?? []};
 }
 export function createRemoteThread(token: string, ns: string, body: {
-  profileName?: string; harnessProfileName?: string; metadata?: {coordination: {enabled: boolean; allowedProfiles: string[]}}; mode: 'persona' | 'fleet'; title: string;
+  profileName?: string; harnessProfileName?: string; metadata?: {coordination: {enabled: boolean; allowedProfiles: string[]; returnReplies?: boolean}}; mode: 'persona' | 'fleet'; title: string;
 }) {
   return json<RemoteThread>(base(ns), token, {
     method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body),
@@ -56,6 +57,9 @@ export function sendRemoteMessage(token: string, ns: string, id: string, content
   return json<AcceptedTurn>(`${base(ns)}/${encodeURIComponent(id)}/messages`, token, {
     method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({content, requestId}),
   });
+}
+export function cancelRemoteCoordination(token: string, ns: string, id: string, turnId: string) {
+  return json<RemoteTurn>(`${base(ns)}/${encodeURIComponent(id)}/turns/${encodeURIComponent(turnId)}/cancel`, token, {method: 'POST'});
 }
 export async function listRemoteHarnesses(token: string, ns: string, signal?: AbortSignal) {
   return (await json<{items: CompositionDocument[]}>(

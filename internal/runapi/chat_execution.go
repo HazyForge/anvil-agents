@@ -17,6 +17,7 @@ import (
 
 	agentsv1alpha1 "github.com/hazyforge/anvil-agents/api/v1alpha1"
 	"github.com/hazyforge/anvil-agents/internal/chat"
+	"github.com/hazyforge/anvil-agents/internal/jev"
 	"github.com/hazyforge/anvil-agents/internal/standing"
 )
 
@@ -54,9 +55,15 @@ func (server *Server) queueChatTurn(ctx context.Context, ns, id string, body App
 	return server.queueChatTurnInternal(ctx, ns, id, body, false)
 }
 func (server *Server) queueChatTurnInternal(ctx context.Context, ns, id string, body AppendChatMessageRequest, deferred bool) (ChatAppendResponse, error) {
-	return server.queueChatTurnAttempt(ctx, ns, id, body, deferred, 0)
+	return server.queueChatTurnWithOptions(ctx, ns, id, body, chatTurnOptions{deferred: deferred}, 0)
 }
-func (server *Server) queueChatTurnAttempt(ctx context.Context, ns, id string, body AppendChatMessageRequest, deferred bool, attempt int) (ChatAppendResponse, error) {
+
+type chatTurnOptions struct {
+	deferred, noDrive, resumption bool
+	parent, parentThread          string
+}
+
+func (server *Server) queueChatTurnWithOptions(ctx context.Context, ns, id string, body AppendChatMessageRequest, options chatTurnOptions, attempt int) (ChatAppendResponse, error) {
 	thread, err := server.chatStore.GetThread(ctx, ns, id)
 	if err != nil {
 		return ChatAppendResponse{}, err
@@ -73,8 +80,18 @@ func (server *Server) queueChatTurnAttempt(ctx context.Context, ns, id string, b
 	if err = server.validateChatTarget(ctx, ns, thread.ProfileName, chatHarness(thread)); err != nil {
 		return ChatAppendResponse{}, fmt.Errorf("%w: %v", chat.ErrInvalid, err)
 	}
-	if _, err = server.reconcileChatThread(ctx, ns, id); err != nil {
-		return ChatAppendResponse{}, err
+	if !options.resumption {
+		if _, err = server.reconcileChatThread(ctx, ns, id); err != nil {
+			return ChatAppendResponse{}, err
+		}
+	}
+	promptThread := thread
+	if options.resumption {
+		// Disable peer dispatch instructions only for this accepted synthesis.
+		var metadata map[string]any
+		_ = json.Unmarshal(thread.Metadata, &metadata)
+		delete(metadata, "coordination")
+		promptThread.Metadata, _ = json.Marshal(metadata)
 	}
 	messages, err := server.chatStore.ListMessages(ctx, ns, id)
 	if err != nil {
@@ -89,8 +106,12 @@ func (server *Server) queueChatTurnAttempt(ctx context.Context, ns, id string, b
 	// execution intent. Gate off, missing TYPESAFE_API_KEY, or any Jev
 	// error falls back to today's behavior — never a hard fail, never a
 	// route on a guess. See docs/jev-intent-routing.md.
-	intent, classified := server.classifyChatIntent(ctx, body.Content, messages)
-	prompt, err := buildChatPromptWithIntent(thread, messages, body.Content, intent, classified)
+	var intent jev.Decision
+	var classified bool
+	if !options.resumption {
+		intent, classified = server.classifyChatIntent(ctx, body.Content, messages)
+	}
+	prompt, err := buildChatPromptWithIntent(promptThread, messages, body.Content, intent, classified)
 	if err != nil {
 		return ChatAppendResponse{}, err
 	}
@@ -134,17 +155,19 @@ func (server *Server) queueChatTurnAttempt(ctx context.Context, ns, id string, b
 	if len(messages) > 0 {
 		expectedSequence = messages[len(messages)-1].Sequence
 	}
-	turn, user, thread, err := server.chatStore.QueueTurn(ctx, chat.Turn{ID: turnID, ExpectedSequence: &expectedSequence, LockKeys: lockKeys, Deferred: deferred, ProfileName: chatExecutionKey(thread), Namespace: ns, ThreadID: id, RequestID: body.RequestID, RunName: runName, RunJSON: raw}, chat.Message{Content: body.Content, Metadata: chatAuthorMetadataWithIntent(thread, deferred, intent, classified)})
+	turn, user, thread, err := server.chatStore.QueueTurn(ctx, chat.Turn{ID: turnID, ExpectedSequence: &expectedSequence, LockKeys: lockKeys, Deferred: options.deferred, ParentTurnID: options.parent, ParentThreadID: options.parentThread, Resumption: options.resumption, ProfileName: chatExecutionKey(thread), Namespace: ns, ThreadID: id, RequestID: body.RequestID, RunName: runName, RunJSON: raw}, chat.Message{Content: body.Content, Metadata: chatTurnAuthorMetadata(thread, options, intent, classified)})
 	if errors.Is(err, chat.ErrConversationChanged) && attempt < 3 {
-		return server.queueChatTurnAttempt(ctx, ns, id, body, deferred, attempt+1)
+		return server.queueChatTurnWithOptions(ctx, ns, id, body, options, attempt+1)
 	}
 	if err != nil {
 		return ChatAppendResponse{}, err
 	}
 	// The outbox is committed before Kubernetes creation. A failed request or
 	// process restart cannot lose accepted work or create a second execution.
-	if err = server.reconcileChatTurn(ctx, &turn); err != nil {
-		server.log.Error(err, "chat turn remains queued for recovery", "namespace", ns, "turn", turn.ID)
+	if !options.noDrive {
+		if err = server.reconcileChatTurn(ctx, &turn); err != nil {
+			server.log.Error(err, "chat turn remains queued for recovery", "namespace", ns, "turn", turn.ID)
+		}
 	}
 	return ChatAppendResponse{Thread: thread, User: user, Turn: turn}, nil
 }
@@ -191,7 +214,7 @@ func (server *Server) reconcileChatThreadMode(ctx context.Context, ns, id string
 		return nil, err
 	}
 	for i := range turns {
-		if chat.Active(turns[i]) {
+		if chat.Active(turns[i]) || (driveStanding && chat.CoordinationPending(turns[i])) {
 			if err = server.reconcileChatTurnMode(ctx, &turns[i], driveStanding); err != nil {
 				return nil, err
 			}
@@ -220,7 +243,19 @@ func (server *Server) reconcileChatTurn(ctx context.Context, turn *chat.Turn) er
 
 func (server *Server) reconcileChatTurnMode(ctx context.Context, turn *chat.Turn, driveStanding bool) error {
 	if !chat.Active(*turn) {
+		if driveStanding && chat.CoordinationPending(*turn) {
+			return server.reconcileChatReplyBack(ctx, turn)
+		}
 		return nil
+	}
+	if turn.ParentTurnID != "" {
+		parent, err := server.coordinationParent(ctx, *turn)
+		if err != nil {
+			return err
+		}
+		if parent.Coordination != nil && parent.Coordination.Status == "cancelled" {
+			return server.cancelChatChild(ctx, turn)
+		}
 	}
 	if turn.RetryAt != nil && time.Now().Before(*turn.RetryAt) {
 		return nil

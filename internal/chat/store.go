@@ -124,6 +124,7 @@ type Store interface {
 	ListTurns(context.Context, string, string) ([]Turn, error)
 	PendingTurns(context.Context, int) ([]Turn, error)
 	CompleteTurn(context.Context, Turn, Message) error
+	CancelCoordination(context.Context, string, string, string) (Turn, error)
 	RecordRun(context.Context, Turn, string) error
 	RetryTurn(context.Context, Turn, TurnRetry) (Turn, error)
 	ActivateTurn(context.Context, Turn) (bool, error)

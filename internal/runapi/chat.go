@@ -63,6 +63,7 @@ func (server *Server) registerChatRoutes(mux *http.ServeMux) {
 	mux.Handle("GET /api/v1/namespaces/{namespace}/chat/threads/{threadID}", server.authenticate(http.HandlerFunc(server.handleGetChatThread)))
 	mux.Handle("GET /api/v1/namespaces/{namespace}/chat/threads/{threadID}/messages", server.authenticate(http.HandlerFunc(server.handleListChatMessages)))
 	mux.Handle("POST /api/v1/namespaces/{namespace}/chat/threads/{threadID}/messages", server.authenticate(http.HandlerFunc(server.handleAppendChatMessage)))
+	mux.Handle("POST /api/v1/namespaces/{namespace}/chat/threads/{threadID}/turns/{turnID}/cancel", server.authenticate(http.HandlerFunc(server.handleCancelChatCoordination)))
 	// Slice-1 standing stream: same snapshot + terminal events over SSE or a
 	// WebSocket upgrade. Browser WebSocket clients cannot set Authorization,
 	// so this route authenticates itself (header bearer or verified bearer
