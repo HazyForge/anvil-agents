@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -20,35 +21,56 @@ const maxStreamBytes = 512 << 10
 // directory, model, credentials or MCP servers. Sessions survive turns only
 // while this actor/harness connection survives; session/load is not supported.
 type Config struct {
-	Workdir     string
-	TurnTimeout time.Duration
-	MaxSessions int
+	Workdir        string
+	TurnTimeout    time.Duration
+	MaxSessions    int
+	ExpectedModel  string
+	ExpectedMode   string
+	CatalogTimeout time.Duration
 }
 
 type session struct {
-	nativeID        string
-	busy            bool
-	promptSent      bool
-	cancelRequested bool
+	nativeID          string
+	busy              bool
+	promptSent        bool
+	cancelRequested   bool
+	setupCancel       context.CancelFunc
+	dispatchCancelled atomic.Bool
 }
 
 type Server struct {
-	client   *Client
-	cfg      Config
-	mu       sync.Mutex
-	sessions map[string]*session
-	setup    chan struct{}
+	client        *Client
+	cfg           Config
+	mu            sync.Mutex
+	sessions      map[string]*session
+	setup         chan struct{}
+	supportsClose bool
 }
 
 func NewServer(ctx context.Context, client *Client, cfg Config) (*Server, error) {
 	if client == nil || !filepath.IsAbs(cfg.Workdir) {
 		return nil, errors.New("ACP client and absolute working directory required")
 	}
+	if (cfg.ExpectedModel == "") != (cfg.ExpectedMode == "") {
+		return nil, errors.New("expected-model and expected-mode must be set together")
+	}
+	if cfg.ExpectedModel != "" && (!validSelectionValue(cfg.ExpectedModel) || !strings.Contains(cfg.ExpectedModel, "/") || strings.HasPrefix(cfg.ExpectedModel, "/") || strings.HasSuffix(cfg.ExpectedModel, "/") || !validSelectionValue(cfg.ExpectedMode)) {
+		return nil, errors.New("fixed provider/model and mode identifiers required")
+	}
+	if cfg.CatalogTimeout == 0 {
+		cfg.CatalogTimeout = 5 * time.Second
+	}
+	if cfg.CatalogTimeout < 0 || cfg.CatalogTimeout > 30*time.Second {
+		return nil, errors.New("catalog readiness timeout must be positive and at most 30 seconds")
+	}
 	if cfg.TurnTimeout <= 0 {
 		cfg.TurnTimeout = 2 * time.Minute
 	}
 	if cfg.MaxSessions <= 0 {
 		cfg.MaxSessions = 64
+	}
+	if cfg.ExpectedModel != "" {
+		client.trackCatalogs(cfg.MaxSessions)
 	}
 	result, err := client.call(ctx, "initialize", map[string]any{
 		"protocolVersion":    1,
@@ -60,13 +82,17 @@ func NewServer(ctx context.Context, client *Client, cfg Config) (*Server, error)
 		return nil, err
 	}
 	var initialized struct {
-		ProtocolVersion int `json:"protocolVersion"`
+		ProtocolVersion   int `json:"protocolVersion"`
+		AgentCapabilities struct {
+			SessionCapabilities map[string]json.RawMessage `json:"sessionCapabilities"`
+		} `json:"agentCapabilities"`
 	}
 	if json.Unmarshal(result, &initialized) != nil || initialized.ProtocolVersion != 1 {
 		_ = client.Close()
 		return nil, ErrProtocol
 	}
-	return &Server{client: client, cfg: cfg, sessions: map[string]*session{}, setup: make(chan struct{}, 1)}, nil
+	_, supportsClose := initialized.AgentCapabilities.SessionCapabilities["close"]
+	return &Server{client: client, cfg: cfg, sessions: map[string]*session{}, setup: make(chan struct{}, 1), supportsClose: supportsClose}, nil
 }
 
 func validSessionID(id string) bool {
@@ -76,19 +102,6 @@ func validSessionID(id string) bool {
 func (s *Server) ensureSession(ctx context.Context, id string) (*session, error) {
 	s.mu.Lock()
 	current := s.sessions[id]
-	ready := current != nil && current.nativeID != ""
-	s.mu.Unlock()
-	if ready {
-		return current, nil
-	}
-	select {
-	case s.setup <- struct{}{}:
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	}
-	defer func() { <-s.setup }()
-	s.mu.Lock()
-	current = s.sessions[id]
 	if current != nil && current.nativeID != "" {
 		s.mu.Unlock()
 		return current, nil
@@ -101,20 +114,43 @@ func (s *Server) ensureSession(ctx context.Context, id string) (*session, error)
 		current = &session{}
 		s.sessions[id] = current
 	}
+	timeout := 5 * time.Second
+	if s.selectionEnabled() {
+		timeout = s.cfg.CatalogTimeout
+	}
+	setupCtx, cancel := context.WithTimeout(ctx, timeout)
+	if s.selectionEnabled() {
+		current.setupCancel = cancel
+	}
+	if current.cancelRequested && s.selectionEnabled() {
+		cancel()
+	}
 	s.mu.Unlock()
 	initialized := false
 	defer func() {
-		if initialized {
-			return
-		}
+		cancel()
 		s.mu.Lock()
-		if s.sessions[id] == current && current.nativeID == "" && !current.busy {
+		current.setupCancel = nil
+		if !initialized && s.sessions[id] == current && current.nativeID == "" && !current.busy {
 			delete(s.sessions, id)
 		}
 		s.mu.Unlock()
 	}()
-	setupCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
+	// The setup queue shares the same deadline as catalog readiness. Waiting
+	// behind another conversation cannot extend the operator's setup bound.
+	select {
+	case s.setup <- struct{}{}:
+	case <-setupCtx.Done():
+		return nil, setupCtx.Err()
+	}
+	defer func() { <-s.setup }()
+	s.mu.Lock()
+	if current.nativeID != "" {
+		s.mu.Unlock()
+		initialized = true
+		return current, nil
+	}
+	s.mu.Unlock()
 	result, err := s.client.call(setupCtx, "session/new", map[string]any{"cwd": s.cfg.Workdir, "mcpServers": []any{}}, "", nil, nil)
 	if err != nil {
 		return nil, err
@@ -126,8 +162,20 @@ func (s *Server) ensureSession(ctx context.Context, id string) (*session, error)
 		_ = s.client.Close()
 		return nil, ErrProtocol
 	}
+	selected := false
+	defer func() {
+		if !selected {
+			s.releaseRejectedSession(created.SessionID)
+		}
+	}()
+	if err := s.selectSession(setupCtx, created.SessionID); err != nil {
+		return nil, err
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if current.cancelRequested && s.selectionEnabled() {
+		return nil, context.Canceled
+	}
 	for _, existing := range s.sessions {
 		if existing.nativeID == created.SessionID {
 			_ = s.client.Close()
@@ -135,6 +183,7 @@ func (s *Server) ensureSession(ctx context.Context, id string) (*session, error)
 		}
 	}
 	current.nativeID = created.SessionID
+	selected = true
 	initialized = true
 	return current, nil
 }
@@ -238,7 +287,11 @@ func (s *Server) cancel(w http.ResponseWriter, r *http.Request, raw json.RawMess
 	defer s.mu.Unlock()
 	if busy {
 		current.cancelRequested = true
+		current.dispatchCancelled.Store(true)
 		if !current.promptSent {
+			if current.setupCancel != nil {
+				current.setupCancel()
+			}
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}
@@ -296,6 +349,7 @@ func (s *Server) prompt(ctx context.Context, w http.ResponseWriter, request mess
 	current.busy = true
 	current.promptSent = false
 	current.cancelRequested = false
+	current.dispatchCancelled.Store(false)
 	s.mu.Unlock()
 	defer func() {
 		s.mu.Lock()
@@ -305,9 +359,45 @@ func (s *Server) prompt(ctx context.Context, w http.ResponseWriter, request mess
 		}
 		s.mu.Unlock()
 	}()
-	if _, err := s.ensureSession(ctx, params.SessionID); err != nil {
+	catalogCtx := ctx
+	catalogCancel := func() {}
+	if s.selectionEnabled() {
+		catalogCtx, catalogCancel = context.WithTimeout(ctx, s.cfg.CatalogTimeout)
+	}
+	defer catalogCancel()
+	if _, err := s.ensureSession(catalogCtx, params.SessionID); err != nil {
+		s.mu.Lock()
+		cancelled := current.cancelRequested
+		s.mu.Unlock()
+		if cancelled {
+			rpcResult(w, request.ID, map[string]any{"stopReason": "cancelled"})
+			return
+		}
 		rpcFailure(w, request.ID, -32000, "harness session unavailable")
 		return
+	}
+	if s.selectionEnabled() {
+		selectionCtx, selectionCancel := catalogCtx, catalogCancel
+		s.mu.Lock()
+		current.setupCancel = selectionCancel
+		if current.cancelRequested {
+			selectionCancel()
+		}
+		s.mu.Unlock()
+		err := s.selectSession(selectionCtx, current.nativeID)
+		selectionCancel()
+		s.mu.Lock()
+		current.setupCancel = nil
+		cancelled := current.cancelRequested
+		s.mu.Unlock()
+		if cancelled {
+			rpcResult(w, request.ID, map[string]any{"stopReason": "cancelled"})
+			return
+		}
+		if err != nil {
+			rpcFailure(w, request.ID, -32000, "harness selection unavailable")
+			return
+		}
 	}
 	s.mu.Lock()
 	cancelled := current.cancelRequested
@@ -336,7 +426,7 @@ func (s *Server) prompt(ctx context.Context, w http.ResponseWriter, request mess
 		}
 		return controller.Flush()
 	}
-	result, err := s.client.call(ctx, "session/prompt", map[string]any{"sessionId": current.nativeID, "prompt": params.Prompt}, current.nativeID, func(raw json.RawMessage) error {
+	result, err := s.client.callChecked(ctx, "session/prompt", map[string]any{"sessionId": current.nativeID, "prompt": params.Prompt}, current.nativeID, func(raw json.RawMessage) error {
 		var event struct {
 			SessionID string `json:"sessionId"`
 			Update    struct {
@@ -370,6 +460,14 @@ func (s *Server) prompt(ctx context.Context, w http.ResponseWriter, request mess
 		cancelCtx, cancel := context.WithTimeout(ctx, time.Second)
 		defer cancel()
 		return s.client.notify(cancelCtx, "session/cancel", map[string]any{"sessionId": current.nativeID})
+	}, func() error {
+		if current.dispatchCancelled.Load() {
+			return context.Canceled
+		}
+		if s.selectionEnabled() && !s.client.catalog(current.nativeID).selected(s.cfg.ExpectedModel, s.cfg.ExpectedMode) {
+			return ErrSelection
+		}
+		return nil
 	})
 	var completed struct {
 		StopReason string `json:"stopReason"`

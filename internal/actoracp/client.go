@@ -42,25 +42,36 @@ type frame struct {
 }
 
 type writeRequest struct {
-	data []byte
-	done chan error
+	data  []byte
+	done  chan error
+	ctx   context.Context
+	check func() error
+}
+
+type pendingCall struct {
+	events  chan frame
+	method  string
+	session string
 }
 
 // Client owns one native ACP connection. Close must unblock transport IO.
 // It never retries a prompt or starts a replacement harness after failure.
 type Client struct {
-	transport io.ReadWriteCloser
-	mu        sync.Mutex
-	seq       uint64
-	pending   map[string]chan frame
-	streams   map[string]chan frame
-	closed    chan struct{}
-	once      sync.Once
-	writes    chan writeRequest
+	transport      io.ReadWriteCloser
+	mu             sync.Mutex
+	seq            uint64
+	pending        map[string]pendingCall
+	streams        map[string]chan frame
+	closed         chan struct{}
+	once           sync.Once
+	writes         chan writeRequest
+	catalogLimit   int
+	catalogs       map[string]catalogSnapshot
+	catalogChanged chan struct{}
 }
 
 func NewClient(transport io.ReadWriteCloser) *Client {
-	c := &Client{transport: transport, pending: map[string]chan frame{}, streams: map[string]chan frame{}, closed: make(chan struct{}), writes: make(chan writeRequest, 8)}
+	c := &Client{transport: transport, pending: map[string]pendingCall{}, streams: map[string]chan frame{}, closed: make(chan struct{}), writes: make(chan writeRequest, 8), catalogChanged: make(chan struct{}, 1)}
 	go c.readLoop()
 	go c.writeLoop()
 	return c
@@ -89,6 +100,16 @@ func (c *Client) writeLoop() {
 		case <-c.closed:
 			return
 		case request := <-c.writes:
+			// Check the latest observed selection and cancellation at the
+			// actual write boundary, not merely while preparing the RPC.
+			checkErr := request.ctx.Err()
+			if checkErr == nil && request.check != nil {
+				checkErr = request.check()
+			}
+			if checkErr != nil {
+				request.done <- checkErr
+				continue
+			}
 			data := request.data
 			var err error
 			for len(data) > 0 {
@@ -113,11 +134,15 @@ func (c *Client) writeLoop() {
 }
 
 func (c *Client) send(ctx context.Context, value any) error {
+	return c.sendChecked(ctx, value, nil)
+}
+
+func (c *Client) sendChecked(ctx context.Context, value any, check func() error) error {
 	data, err := json.Marshal(value)
 	if err != nil || len(data) > maxFrameBytes {
 		return ErrProtocol
 	}
-	request := writeRequest{data: append(data, '\n'), done: make(chan error, 1)}
+	request := writeRequest{data: append(data, '\n'), done: make(chan error, 1), ctx: ctx, check: check}
 	select {
 	case <-c.closed:
 		return ErrClosed
@@ -142,6 +167,10 @@ func (c *Client) notify(ctx context.Context, method string, params any) error {
 }
 
 func (c *Client) call(ctx context.Context, method string, params any, session string, update func(json.RawMessage) error, sent func() error) (json.RawMessage, error) {
+	return c.callChecked(ctx, method, params, session, update, sent, nil)
+}
+
+func (c *Client) callChecked(ctx context.Context, method string, params any, session string, update func(json.RawMessage) error, sent func() error, check func() error) (json.RawMessage, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -153,7 +182,7 @@ func (c *Client) call(ctx context.Context, method string, params any, session st
 	}
 	c.seq++
 	id := strconv.FormatUint(c.seq, 10)
-	c.pending[id] = events
+	c.pending[id] = pendingCall{events: events, method: method, session: session}
 	if session != "" {
 		c.streams[session] = events
 	}
@@ -166,7 +195,7 @@ func (c *Client) call(ctx context.Context, method string, params any, session st
 		}
 		c.mu.Unlock()
 	}()
-	if err := c.send(ctx, map[string]any{"jsonrpc": "2.0", "id": json.RawMessage(id), "method": method, "params": params}); err != nil {
+	if err := c.sendChecked(ctx, map[string]any{"jsonrpc": "2.0", "id": json.RawMessage(id), "method": method, "params": params}, check); err != nil {
 		if !errors.Is(err, ErrClosed) || len(events) == 0 {
 			return nil, err
 		}
@@ -238,6 +267,7 @@ func (c *Client) readLoop() {
 		}
 		c.mu.Lock()
 		var events chan frame
+		var pending pendingCall
 		if msg.Method == "session/update" {
 			var params struct {
 				SessionID string `json:"sessionId"`
@@ -248,11 +278,16 @@ func (c *Client) readLoop() {
 			}
 			events = c.streams[params.SessionID]
 		} else if msg.Method == "" && len(msg.ID) > 0 {
-			events = c.pending[string(msg.ID)]
+			pending = c.pending[string(msg.ID)]
+			events = pending.events
 			if (msg.Error == nil) == (len(msg.Result) == 0) {
 				c.mu.Unlock()
 				return
 			}
+		}
+		if !c.recordCatalog(msg, pending) {
+			c.mu.Unlock()
+			return
 		}
 		c.mu.Unlock()
 		if events != nil {

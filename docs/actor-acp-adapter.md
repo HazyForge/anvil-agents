@@ -43,7 +43,9 @@ Its stderr is discarded and never appears in a public error or reply.
 Connecting an actual harness/model requires separate approval and verified
 ACP invocation/auth behavior. Existing one-shot Job/ProcessBackend
 recipes are not a native ACP session contract. Model selection belongs to
-the approved native harness invocation; this adapter does not provision it.
+the approved native harness invocation. The fixed selection gate below verifies
+and, when advertised, explicitly selects that existing model and mode for the
+native session; it does not provision accounts, keys or provider access.
 The integration target is harness-neutral native ACP; there is no Grok
 dependency. OpenCode documents `opencode acp` as its native JSON-RPC stdio
 entrypoint ([OpenCode ACP support](https://opencode.ai/docs/acp/)), making it
@@ -81,3 +83,47 @@ unchanged on other platforms; unsupported native ownership fails before launch.
 
 Regression tests exercise ordinary/detached tool children, context cancellation,
 no writes after Close, direct harness reaping, and an unrelated process left alive.
+
+
+## Fixed model and mode selection
+
+For an authorized native model run, supply both `--expected-model=provider/model`
+and `--expected-mode=mode`. They are exact, case-sensitive operator values; HTTP
+input cannot override them. `--catalog-ready-timeout` defaults to five seconds
+and is bounded to at most thirty seconds. Omitting both preserves the inert and
+existing unpinned contract; supplying only one is rejected.
+
+The selection deadline covers queueing, native session creation, idle catalog
+updates and explicit selection acknowledgments. A `session/new` result or
+`config_option_update` must advertise both required values. If a required value
+is not yet advertised, the adapter waits within that deadline without issuing
+a prompt or a polling RPC. When an advertised value is not selected, it sends
+`session/set_config_option` with the fixed operator value and checks the full
+acknowledgment. Missing, malformed, rejected or wrong acknowledgments fail closed.
+The latest observed catalog and cancellation are checked again at the native
+write boundary before every prompt. There is no provider/model fallback, native
+process restart or prompt replay.
+
+Cancellation during constrained readiness stops the wait promptly and releases
+the rejected native session through the advertised `session/close` surface. A
+harness without that close capability is closed and reaped instead. Existing
+unpinned setup cancellation keeps its earlier resumable-session behavior.
+The transport health endpoint alone does not certify model/mode selection.
+
+OpenCode 2.0.15 can cache its first successful per-directory ACP catalog before
+configuration activation finishes. A later ordinary CLI metadata read can expose
+the configured OpenAI model while that ACP catalog still lacks it. This gate
+rejects or times out on that stale catalog; it does not fabricate readiness or
+work around it by generating a model turn. Native catalog readiness/refresh must
+be confirmed before any live pilot. Credentials, entitlement and cost are not
+proved by a catalog entry or a successful selection acknowledgment.
+
+`python3 hack/acp-selection-e2e/run.py` builds the real API/standing fixture and
+actor binaries with inert stdio peers. It proves delayed catalog selection, the
+automatic correlated A-to-B-to-A return, wrong model/mode acknowledgments,
+timeout and cancellation with zero peer prompts on rejected paths. Set
+`ANVIL_SELECTION_EVIDENCE_DIR` outside the temporary runtime to retain receipts.
+`--parent-control` uses an unchanged `22d19b76` overlay and proves that the earlier
+adapter dispatched one wrong-provider peer prompt where the new assertions
+require zero. It reports this reproduced defect as a passing control, not as a
+successful corrected behavior or a real harness/model run.

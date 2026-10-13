@@ -89,6 +89,9 @@ func main() {
 	command := flag.String("stdio-command", "", "Absolute native ACP executable; empty retains the echo spike")
 	workdir := flag.String("workdir", "", "Absolute operator-owned harness working directory")
 	turnTimeout := flag.Duration("turn-timeout", 2*time.Minute, "Maximum adapter prompt duration")
+	expectedModel := flag.String("expected-model", "", "Fixed provider/model identifier required before native prompts (paired with expected-mode)")
+	expectedMode := flag.String("expected-mode", "", "Fixed native agent/mode required before prompts (paired with expected-model)")
+	catalogTimeout := flag.Duration("catalog-ready-timeout", 5*time.Second, "Maximum native catalog/selection setup duration (at most 30s)")
 	var args arguments
 	flag.Var(&args, "stdio-arg", "One fixed native ACP executable argument; repeat as needed")
 	flag.Parse()
@@ -106,13 +109,14 @@ func main() {
 		ownedClient = client
 		defer client.Close()
 		setupCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-		adapter, err := actoracp.NewServer(setupCtx, client, actoracp.Config{Workdir: *workdir, TurnTimeout: *turnTimeout})
+		adapter, err := actoracp.NewServer(setupCtx, client, actoracp.Config{Workdir: *workdir, TurnTimeout: *turnTimeout, ExpectedModel: *expectedModel, ExpectedMode: *expectedMode, CatalogTimeout: *catalogTimeout})
 		cancel()
 		if err != nil {
+			_ = client.Close()
 			log.Fatal("ACP harness initialization failed")
 		}
 		handler = adapter
-	} else if len(args) > 0 || *workdir != "" {
+	} else if len(args) > 0 || *workdir != "" || *expectedModel != "" || *expectedMode != "" {
 		log.Fatal("stdio arguments/workdir require stdio-command")
 	}
 	server := &http.Server{Addr: *listen, Handler: handler, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, IdleTimeout: 30 * time.Second}
