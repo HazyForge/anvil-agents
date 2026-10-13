@@ -1,0 +1,118 @@
+--- a/packages/cli/src/acp/service.ts
++++ b/packages/cli/src/acp/service.ts
+@@ -8,6 +8,7 @@
+   type SessionMessageInfo,
+ } from "@opencode/client/promise"
+ import { FSUtil } from "@opencode/util/fs-util"
++import { catalogRequirements, readyCatalog } from "./catalog-readiness"
+ import { withTimestampedFallback } from "@opencode/util/session-title-fallback"
+ import type {
+   AuthenticateRequest,
+@@ -109,21 +110,13 @@
+   readonly connection: ACPConnection.Connection
+ }): Interface {
+   const sessions = new Map<string, Attached>()
+-  const catalogs = new Map<string, Promise<Catalog>>()
+   const registeredMcp = new Map<string, Set<string>>()
+   const active = new Map<string, { readonly control: TurnControl; readonly turn: Promise<PromptResponse> }>()
+   const capabilities = { writeTextFile: false, childSessionUpdates: false }
+ 
+-  const catalog = (cwd: string) => {
+-    const cached = catalogs.get(cwd)
+-    if (cached) return cached
+-    const loaded = loadCatalog(input.client, cwd).catch((error) => {
+-      catalogs.delete(cwd)
+-      throw error
+-    })
+-    catalogs.set(cwd, loaded)
+-    return loaded
+-  }
++  // Re-read metadata for each attachment/selection instead of retaining the
++  // first bootstrap snapshot indefinitely. The requirements are owner flags.
++  const catalog = (cwd: string) => loadCatalog(input.client, cwd, input.connection.signal)
+ 
+   const requireSession = async (sessionID: string) => {
+     const current = sessions.get(sessionID)
+@@ -280,6 +273,11 @@
+     setSessionConfigOption: async (params) => {
+       const state = await requireSession(params.sessionId)
+       if (typeof params.value !== "string") throw new ACPError.InvalidConfigOptionError({ configId: params.configId })
++      const required = catalogRequirements()
++      if ((params.configId === "model" && params.value !== required.model) || (params.configId === "mode" && params.value !== required.mode)) {
++        throw new ACPError.InvalidConfigOptionError({ configId: params.configId })
++      }
++      state.catalog = await catalog(state.cwd)
+       switch (params.configId) {
+         case "model": {
+           const selected = requireModel(state.catalog, params.value, state.model)
+@@ -410,44 +408,33 @@
+   return { type: "input", id: messageID }
+ }
+ 
+-async function loadCatalog(client: OpenCodeClient, cwd: string): Promise<Catalog> {
++async function loadCatalog(client: OpenCodeClient, cwd: string, closed?: AbortSignal): Promise<Catalog> {
++  const required = catalogRequirements()
++  const current = await readyCatalog(client, cwd, required, closed)
+   const location = { directory: cwd }
+-  // Some providers discover models in the background after plugin startup begins.
+-  const deadline = Date.now() + 5_000
+-  let missing = "No models are available"
+-  while (Date.now() < deadline) {
+-    const [modelResult, defaultResult, agentResult, commandResult] = await Promise.all([
+-      client.model.list({ location }),
+-      client.model.default({ location }),
+-      client.agent.list({ location }),
+-      client.command.list({ location }),
+-    ])
+-    const models = modelResult.data.filter((model) => model.enabled)
+-    const preferred = defaultResult.data
+-    // Parallel reads can straddle initialization; select only from this model list.
+-    const defaultModel = preferred
+-      ? models.find((model) => model.providerID === preferred.providerID && model.id === preferred.id)
+-      : models[0]
+-    const agents = agentResult.data.filter((agent) => agent.mode !== "subagent" && !agent.hidden)
+-    const defaultAgent = agents.find((agent) => agent.mode === "primary") ?? agents[0]
+-    if (defaultModel && defaultAgent) {
+-      return {
+-        providers: providers(models),
+-        models,
+-        defaultModel: {
+-          providerID: defaultModel.providerID,
+-          id: defaultModel.id,
+-          variant: defaultModel.variants.find((variant) => variant.id === "default")?.id,
+-        },
+-        modes: agents.map((agent) => ({ id: agent.id, name: agent.name, description: agent.description })),
+-        defaultModeID: defaultAgent.id,
+-        commands: commandResult.data,
+-      }
+-    }
+-    missing = defaultModel ? "No primary agents are available" : "No models are available"
+-    await Bun.sleep(25)
+-  }
+-  throw new Error(missing)
++  // Read defaults after provider/agent activation, using the same bounded signal.
++  const [defaultResult, commandResult] = await Promise.all([
++    client.model.default({ location, signal: current.signal }),
++    client.command.list({ location, signal: current.signal }),
++  ])
++  const preferred = defaultResult.data
++  const defaultModel = preferred
++    ? current.models.find((model) => model.providerID === preferred.providerID && model.id === preferred.id)
++    : current.models[0]
++  const defaultAgent = current.agents.find((agent) => agent.mode === "primary")
++  if (!defaultModel || !defaultAgent) throw new Error("Native ACP catalog readiness unavailable")
++  return {
++    providers: providers(current.models),
++    models: current.models,
++    defaultModel: {
++      providerID: defaultModel.providerID,
++      id: defaultModel.id,
++      variant: defaultModel.variants.find((variant) => variant.id === "default")?.id,
++    },
++    modes: current.agents.map((agent) => ({ id: agent.id, name: agent.name, description: agent.description })),
++    defaultModeID: defaultAgent.id,
++    commands: commandResult.data,
++  }
+ }
+ 
+ function providers(models: readonly ModelInfo[]): ConfigOptionProvider[] {

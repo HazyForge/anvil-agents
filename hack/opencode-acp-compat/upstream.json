@@ -1,0 +1,18 @@
+{
+  "upstream_url": "https://github.com/anomalyco/opencode",
+  "version": "2.0.15",
+  "commit": "6f3639d82ed0760091792189b78f8eeb44f699b1",
+  "archive_url": "https://codeload.github.com/anomalyco/opencode/tar.gz/6f3639d82ed0760091792189b78f8eeb44f699b1",
+  "archive_sha256": "f3c554f05cd4aeeb44d480e5d8902ea75a2aa157d65e908db097717f09293375",
+  "source_sha256": {
+    "packages/cli/src/acp/service.ts": "9280db65395358c920aee29e047967d1fdc16a149d33684f4cf05ac645fcd93e",
+    "packages/cli/src/services/standalone.ts": "05b425f5b096770f9aa9c0fea938ce91e7ffdd368f19b3d6440a592dec3113ca",
+    "packages/cli/src/commands/handlers/models.ts": "1ff0d05430bccace7854677511f29f2e1443466fa071caa0b0ae6b0ead7ae697"
+  },
+  "bun_lock_sha256": "ea344d16b31b6233fe6a298290ca1a35e310d48f08e907b4b2469f643a7550a6",
+  "installed_reference_binary_sha256": "b8ed44e893a3307cf23b4e0c83a4bb52b2c38d580fff33d3d9ec16477efb6077",
+  "helper_sha256": "1d7c9d32c70742e0e45edcf7336794c9d757b6f6c07823f02df5873a4bb59db7",
+  "patch_sha256": "491810cc2139f078b95658e66ab7f7705f55272f3af9fb46d97895b1bbcb1183",
+  "artifact_version": "2.0.15-anvil-acp-catalog.1",
+  "build_status": "blocked pending explicit approval for isolated frozen dependencies"
+}
