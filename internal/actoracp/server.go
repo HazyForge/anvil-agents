@@ -440,6 +440,19 @@ func (s *Server) prompt(ctx context.Context, w http.ResponseWriter, request mess
 		if json.Unmarshal(raw, &event) != nil || event.SessionID != current.nativeID {
 			return ErrProtocol
 		}
+		if s.selectionEnabled() && event.Update.SessionUpdate == "config_option_update" {
+			// Inspect the ordered frame itself. Later catalog snapshots cannot
+			// wash away a violation observed during this active prompt.
+			var catalogEvent struct {
+				Update struct {
+					Options json.RawMessage `json:"configOptions"`
+				} `json:"update"`
+			}
+			if json.Unmarshal(raw, &catalogEvent) != nil || !parseCatalog(catalogEvent.Update.Options).selected(s.cfg.ExpectedModel, s.cfg.ExpectedMode) {
+				return ErrSelection
+			}
+			return nil
+		}
 		// Publish only assistant text. Thoughts, tool traces and user echoes
 		// never become AgentRun output or an assistant reply.
 		if event.Update.SessionUpdate != "agent_message_chunk" {
@@ -472,6 +485,9 @@ func (s *Server) prompt(ctx context.Context, w http.ResponseWriter, request mess
 	var completed struct {
 		StopReason string `json:"stopReason"`
 	}
+	if err == nil && s.selectionEnabled() && !s.client.catalog(current.nativeID).selected(s.cfg.ExpectedModel, s.cfg.ExpectedMode) {
+		err = ErrSelection
+	}
 	if err == nil {
 		if json.Unmarshal(result, &completed) != nil {
 			err = ErrProtocol
@@ -486,7 +502,7 @@ func (s *Server) prompt(ctx context.Context, w http.ResponseWriter, request mess
 		}
 	}
 	if err != nil {
-		if errors.Is(err, ErrProtocol) {
+		if errors.Is(err, ErrProtocol) || errors.Is(err, ErrSelection) {
 			_ = s.client.Close()
 		}
 		if err := write(map[string]any{"jsonrpc": "2.0", "id": request.ID, "error": rpcError{Code: -32000, Message: "harness turn failed"}}, true); err != nil {

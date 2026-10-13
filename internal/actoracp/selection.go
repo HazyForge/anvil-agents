@@ -219,8 +219,17 @@ func (s *Server) selectSession(ctx context.Context, id string) error {
 				if s.client.catalog(id).options[choice.key].current == choice.value {
 					continue
 				}
-				_, err := s.client.call(ctx, "session/set_config_option", map[string]any{"sessionId": id, "configId": choice.key, "value": choice.value}, id, nil, nil)
-				if err != nil {
+				raw, err := s.client.call(ctx, "session/set_config_option", map[string]any{"sessionId": id, "configId": choice.key, "value": choice.value}, id, nil, nil)
+				var acknowledged struct {
+					Options json.RawMessage `json:"configOptions"`
+				}
+				if err != nil || json.Unmarshal(raw, &acknowledged) != nil {
+					return ErrSelection
+				}
+				// Validate this correlated response before consulting mutable state.
+				// A later notification cannot repair a rejected or malformed ack.
+				ack := parseCatalog(acknowledged.Options)
+				if !ack.advertises(s.cfg.ExpectedModel, s.cfg.ExpectedMode) || ack.options[choice.key].current != choice.value {
 					return ErrSelection
 				}
 				confirmed := s.client.catalog(id)

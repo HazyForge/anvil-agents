@@ -18,6 +18,15 @@ def send(message):
     with lock:
         print(json.dumps(message), flush=True)
 
+def send_many(messages):
+    with lock:
+        print('\n'.join(json.dumps(message) for message in messages), flush=True)
+
+def selection_notice(session, config=None):
+    update={'sessionUpdate':'config_option_update'}
+    if config is not None:update['configOptions']=config
+    return {'jsonrpc':'2.0','method':'session/update','params':{'sessionId':session,'update':update}}
+
 def audit(event, **fields):
     with lock:
         with open(log_file, 'a') as output:
@@ -84,7 +93,19 @@ def prompt(request):
             send({'jsonrpc':'2.0','id':request['id'],'error':{'code':-32000,'message':'inert failure'}})
             audit('failed',session=session)
             return
-        reply = 'INERT_B_RESULT: reviewed '+latest
+        if scenario.startswith('drift-'):
+            if scenario=='drift-partial-model':chunk(session,'INERT_VALID_PARTIAL_BEFORE_DRIFT')
+            selection[session]=['foreign/bootstrap','build'] if 'model' in scenario else [expected_model,'plan']
+            audit('selection_drift',session=session,model=selection[session][0],mode=selection[session][1])
+            if scenario=='drift-missing-update':send(selection_notice(session))
+            elif scenario=='drift-malformed-update':send(selection_notice(session,{'invalid':'not-an-array'}))
+            else:send(selection_notice(session,options(session)))
+            if 'restored' in scenario:
+                selection[session]=[expected_model,'build']
+                send(selection_notice(session,options(session)))
+                audit('selection_restored',session=session)
+            reply='INERT_UNVERIFIED_REPLY_AFTER_SELECTION_DRIFT'
+        else:reply = 'INERT_B_RESULT: reviewed '+latest
     chunk(session,reply)
     time.sleep(.25)
     audit('completed',session=session)
@@ -101,8 +122,8 @@ for line in sys.stdin:
         assert request['params']['mcpServers']==[]
         session=f'inert-{role}-{len(sessions)+1}'
         sessions[session]=[]
-        selection[session]=[expected_model,'build'] if role=='A' else ['foreign/bootstrap','plan']
-        complete=role=='A' or scenario in ['mismatch','mode-mismatch']
+        selection[session]=[expected_model,'build'] if role=='A' or scenario.startswith('drift-') else ['foreign/bootstrap','plan']
+        complete=role=='A' or scenario not in ['delay','timeout','cancel']
         result(request['id'],{'sessionId':session,'configOptions':options(session,complete)})
         audit('new',session=session,complete=complete)
         if role=='B' and scenario=='delay':threading.Thread(target=catalog_update,args=(session,),daemon=True).start()
@@ -110,6 +131,15 @@ for line in sys.stdin:
         session=request['params']['sessionId']
         key=request['params']['configId'];value=request['params']['value']
         assert value==(expected_model if key=='model' else 'build')
+        bad_key='mode' if scenario=='ack-mode-update' else 'model'
+        if role=='B' and scenario.startswith('ack-') and key==bad_key:
+            acknowledged={'configOptions':options(session)}
+            if scenario=='ack-missing-update':acknowledged={}
+            elif scenario=='ack-malformed-update':acknowledged={'configOptions':{'invalid':'not-an-array'}}
+            selection[session]=[expected_model,'build']
+            audit('invalid_ack_followed_by_update',session=session,key=key,kind=scenario)
+            send_many([{'jsonrpc':'2.0','id':request['id'],'result':acknowledged},selection_notice(session,options(session))])
+            continue
         if not (role=='B' and (scenario=='mismatch' or (scenario=='mode-mismatch' and key=='mode'))):
             selection[session][0 if key=='model' else 1]=value
         audit('selection',session=session,key=key,value=value,actual_model=selection[session][0],actual_mode=selection[session][1])

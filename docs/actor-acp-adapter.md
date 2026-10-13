@@ -99,10 +99,19 @@ updates and explicit selection acknowledgments. A `session/new` result or
 is not yet advertised, the adapter waits within that deadline without issuing
 a prompt or a polling RPC. When an advertised value is not selected, it sends
 `session/set_config_option` with the fixed operator value and checks the full
-acknowledgment. Missing, malformed, rejected or wrong acknowledgments fail closed.
-The latest observed catalog and cancellation are checked again at the native
+acknowledgment directly from its correlated RPC response. Missing, malformed,
+rejected or wrong acknowledgments fail closed; a later catalog notification cannot
+repair that response. The latest observed catalog and cancellation are checked again at the native
 write boundary before every prompt. There is no provider/model fallback, native
 process restart or prompt replay.
+
+During an active prompt, each ordered `config_option_update` must still prove the
+required model and mode. Missing/malformed metadata or observed selection drift
+fails the turn and closes/reaps the owned connection. Later restoration cannot
+erase that violation. Subsequent output is suppressed; a previously streamed
+partial reply cannot become a successful AgentRun. Completion also checks the
+latest observed catalog. This is observed ACP selection proof, not independent
+attestation of a provider's actual billed model.
 
 Cancellation during constrained readiness stops the wait promptly and releases
 the rejected native session through the advertised `session/close` surface. A
@@ -121,7 +130,11 @@ proved by a catalog entry or a successful selection acknowledgment.
 `python3 hack/acp-selection-e2e/run.py` builds the real API/standing fixture and
 actor binaries with inert stdio peers. It proves delayed catalog selection, the
 automatic correlated A-to-B-to-A return, wrong model/mode acknowledgments,
-timeout and cancellation with zero peer prompts on rejected paths. Set
+timeout and cancellation with zero peer prompts on rejected setup paths. Invalid
+acknowledgments followed immediately by correct notifications still dispatch zero
+peer prompts. Active model/mode drift, later restoration, malformed/missing
+catalog updates and failure after partial output produce one failed peer turn,
+one correlated failure explanation and no unverified reply. Set
 `ANVIL_SELECTION_EVIDENCE_DIR` outside the temporary runtime to retain receipts.
 `--parent-control` uses an unchanged `22d19b76` overlay and proves that the earlier
 adapter dispatched one wrong-provider peer prompt where the new assertions

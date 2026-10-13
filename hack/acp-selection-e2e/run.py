@@ -97,7 +97,12 @@ class Journey:
             except subprocess.TimeoutExpired:p.kill();p.wait(timeout=2);raise AssertionError('owned inert process shutdown exceeded bound')
 
 try:
-    cases=['mismatch','timeout'] if args.parent_control else ['delay','mismatch','mode-mismatch','timeout','cancel']
+    cases=['mismatch','timeout'] if args.parent_control else [
+        'delay','mismatch','mode-mismatch','timeout','cancel',
+        'ack-model-update','ack-mode-update','ack-missing-update','ack-malformed-update',
+        'drift-model','drift-mode','drift-model-restored','drift-mode-restored',
+        'drift-partial-model','drift-missing-update','drift-malformed-update',
+    ]
     for case in cases:
         journey=Journey.__new__(Journey);journey.processes=[]
         try:
@@ -129,6 +134,15 @@ try:
             elif case=='cancel':
                 assert len(promptsB)==0 and len(promptsA)==1
                 assert not [m for m in final['messages'] if m['content'].startswith('INERT_FINAL:')]
+            elif case.startswith('drift-'):
+                assert len(promptsB)==1 and child['turns'][0]['status']=='failed'
+                assert promptsB[0]['model']=='synthetic/opencode-model' and promptsB[0]['mode']=='build'
+                assert len(promptsA)==2
+                assert len([m for m in final['messages'] if m['role']=='assistant' and m['content'].startswith('INERT_FINAL: peer failed:')])==1
+                published=json.dumps([final,child,promptsA])
+                assert 'INERT_UNVERIFIED_REPLY_AFTER_SELECTION_DRIFT' not in published
+                assert 'INERT_VALID_PARTIAL_BEFORE_DRIFT' not in published
+                check['unverified_reply_suppressed']=True
             else:
                 assert len(promptsB)==0 and child['turns'][0]['status']=='failed'
                 assert len(promptsA)==2
