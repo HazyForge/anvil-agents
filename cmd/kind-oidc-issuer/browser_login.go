@@ -134,10 +134,14 @@ func (login *browserLogin) authorize(writer http.ResponseWriter, request *http.R
 		http.Error(writer, "invalid response_type or client_id", http.StatusBadRequest)
 		return
 	}
-	if !slices.Contains(login.opts.redirectURIs, query.Get("redirect_uri")) {
+	// Redirect only to the configured URI the request names, never to the
+	// request's own copy of it.
+	configured := slices.Index(login.opts.redirectURIs, query.Get("redirect_uri"))
+	if configured < 0 {
 		http.Error(writer, "invalid redirect_uri", http.StatusBadRequest)
 		return
 	}
+	redirectURI := login.opts.redirectURIs[configured]
 	challenge := query.Get("code_challenge")
 	decoded, err := base64.RawURLEncoding.DecodeString(challenge)
 	if query.Get("code_challenge_method") != "S256" || err != nil || len(decoded) != sha256.Size || base64.RawURLEncoding.EncodeToString(decoded) != challenge {
@@ -162,13 +166,13 @@ func (login *browserLogin) authorize(writer http.ResponseWriter, request *http.R
 		}
 	}
 	login.codes[code] = authorizationCode{
-		clientID: login.opts.clientID, redirectURI: query.Get("redirect_uri"),
+		clientID: login.opts.clientID, redirectURI: redirectURI,
 		challenge: challenge, expiresAt: now.Add(time.Minute),
 	}
 	login.mu.Unlock()
 
 	// Only the configured redirect's own query, code and original state survive.
-	redirect, _ := url.Parse(query.Get("redirect_uri")) // Already validated at startup.
+	redirect, _ := url.Parse(redirectURI) // Validated at startup.
 	values := redirect.Query()
 	values.Set("code", code)
 	if state, present := query["state"]; present {
