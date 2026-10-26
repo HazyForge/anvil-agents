@@ -10,6 +10,7 @@ import { AuthCallbackPage } from "./pages/AuthCallbackPage";
 import { EntityChatPage } from "./pages/EntityChatPage";
 import { HarnessesPage } from "./pages/HarnessesPage";
 import { LocalChatPage } from "./pages/LocalChatPage";
+import { ManagerPage } from "./pages/ManagerPage";
 import { WrapperPage } from "./pages/WrapperPage";
 import { DesktopIcon } from "./components/AgentAvatar";
 import { PRODUCT_TITLE } from "./product";
@@ -164,6 +165,8 @@ export default function App() {
   ) : (
     login
   );
+  const managerReady = signedIn && Boolean(config?.chat?.subjectRoutingEnabled);
+  const manager = snapshot && signedIn && config ? <ManagerPage token={token} config={config}/> : login;
   const chat = <>
     <div className="chat-location" role="group" aria-label="Chat execution location">
       <span className="chat-location-label">Location</span>
@@ -174,7 +177,7 @@ export default function App() {
   </>;
 
   return (
-    <div className={`desktop-shell ${location.pathname === "/chat" ? "desktop-shell-chat" : ""}`}>
+    <div className={`desktop-shell ${location.pathname === "/chat" ? "desktop-shell-chat" : ""}${location.pathname === '/manager' ? ' desktop-shell-manager' : ''}`}>
       <div className="titlebar">
         <span className="desktop-brand-mark"><DesktopIcon kind="forge"/></span>
         <div className="titlebar-title">{snapshot?.productTitle ?? PRODUCT_TITLE}</div>
@@ -208,6 +211,9 @@ export default function App() {
         </div>
       </div>
       <nav className="rail" aria-label="Primary">
+        {signedIn && config?.chat?.enabled && <NavLink to="/manager" aria-disabled={localChatBusy} onClick={event => { if (localChatBusy) event.preventDefault(); }} className={({ isActive }) => isActive ? 'rail-link active' : 'rail-link'}>
+          <DesktopIcon kind="project"/>Manager
+        </NavLink>}
         <NavLink to="/chat" className={({ isActive }) => (isActive ? "rail-link active" : "rail-link")}>
           <DesktopIcon kind="chat"/>Chat
         </NavLink>
@@ -225,6 +231,7 @@ export default function App() {
           <Route path="/auth/callback" element={<AuthCallbackPage onAuthenticated={handleAuthenticated} />} />
           <Route path="/callback" element={<AuthCallbackPage onAuthenticated={handleAuthenticated} />} />
           <Route path="/chat" element={chat} />
+          <Route path="/manager" element={manager}/>
           <Route
             path="/wrapper"
             element={
@@ -245,7 +252,7 @@ export default function App() {
               )
             }
           />
-          <Route path="/" element={<Navigate to="/chat" replace />} />
+          <Route path="/" element={snapshot && (!snapshot.prefs.apiOrigin || config || configError) ? <Navigate to={managerReady && chatLocation === 'remote' ? '/manager' : '/chat'} replace/> : <div className="empty">Loading Anvil Agents Desktop…</div>} />
           <Route path="*" element={<Navigate to="/chat" replace />} />
         </Routes>
       </main>

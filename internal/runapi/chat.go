@@ -93,6 +93,7 @@ func (server *Server) handleListChatThreads(writer http.ResponseWriter, request 
 	}
 	threads, err := server.chatStore.ListThreads(request.Context(), chat.ThreadFilter{
 		Namespace:   namespace,
+		VisibleTo:   principal.Subject,
 		ProfileName: strings.TrimSpace(request.URL.Query().Get("profileName")),
 		Mode:        strings.TrimSpace(request.URL.Query().Get("mode")),
 		Limit:       limit,
@@ -143,6 +144,8 @@ func (server *Server) handleCreateChatThread(writer http.ResponseWriter, request
 	delete(metadata, "sourceTurnId")
 	delete(metadata, "sourceThreadId")
 	delete(metadata, "sourceProfileName")
+	delete(metadata, "subjectOwner")
+	delete(metadata, "subjectId")
 	if body.HarnessProfileName != "" {
 		metadata["harnessProfileName"] = strings.TrimSpace(body.HarnessProfileName)
 	}
@@ -315,6 +318,17 @@ func (server *Server) authorizeChat(writer http.ResponseWriter, request *http.Re
 	if server.chatStore == nil {
 		writeAPIError(writer, http.StatusServiceUnavailable, "chat_unavailable", "standing-chat store is unavailable")
 		return "", principal, false
+	}
+	if id := request.PathValue("threadID"); id != "" {
+		thread, err := server.chatStore.GetThread(request.Context(), namespace, id)
+		if err != nil {
+			server.writeChatStoreError(writer, err, principal, namespace)
+			return "", principal, false
+		}
+		if !chatThreadVisibleTo(thread, principal.Subject) {
+			writeAPIError(writer, http.StatusNotFound, "not_found", "resource not found")
+			return "", principal, false
+		}
 	}
 	return namespace, principal, true
 }

@@ -238,6 +238,9 @@ api:
       # api.extraEnv). Without a backend attached every turn falls back to
       # today's behavior. See docs/jev-intent-routing.md.
       jevIntentEnabled: false
+      # Per-user subject vault and central manager with streamed routing receipts.
+      # Uses the same server-side Jev backend; existing run permissions still apply.
+      subjectRoutingEnabled: false
       # Optional Jev serving-model pin for chat-turn intent classification
       # (Router.ClassifyIntent). Empty (the default) tracks the jev-latest
       # alias via jev.DefaultModel. Set a versioned ID once thresholds are
