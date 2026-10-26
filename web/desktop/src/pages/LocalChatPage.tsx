@@ -1,4 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
+import {Link} from 'react-router-dom';
+import {useLocalManagerLoop} from '../state/localManagerLoop';
+import {loopStateLabel} from '../components/LocalManagerLoop';
 import { AgentAvatar } from '../components/AgentAvatar';
 import { MarkdownBody } from '../components/MarkdownBody';
 import type { UIConfig } from '../auth/config';
@@ -6,11 +9,12 @@ import type { Snapshot } from '../api/types';
 import { activityFromLog } from '../api/runActivity';
 import { completedLocalReply, LocalChatRequestError, streamLocalChat } from '../api/localChat';
 
-import { useLocalConversations, acknowledgeLocalConversation, admitLocalTurn, setLocalConversations, setLocalConversationRunning, buildLocalConversationPrompt, observeLocalNativeSession, localRuntimeIdentity as runtimeIdentity, localHarnessName as harnessName, localConversationSelectedKey as selectedKey, type LocalConversation as Conversation } from '../state/localConversations';
+import { useLocalConversations, acknowledgeLocalConversation, admitLocalTurn, saveLocalDraft, setLocalConversations, setLocalConversationRunning, buildLocalConversationPrompt, observeLocalNativeSession, localRuntimeIdentity as runtimeIdentity, localHarnessName as harnessName, localConversationSelectedKey as selectedKey, type LocalConversation as Conversation } from '../state/localConversations';
 function savedSelection() { try { return localStorage.getItem(selectedKey) || ''; } catch { return ''; } }
 
 export function LocalChatPage({snapshot, onBusyChange, signedIn = false, config, getAccessToken}: {snapshot: Snapshot; onBusyChange?: (busy: boolean) => void; signedIn?: boolean; config?: UIConfig | null; getAccessToken?: () => Promise<string | null>}) {
   const {conversations, running, storageError} = useLocalConversations(snapshot);
+  const managerLoop = useLocalManagerLoop(snapshot);
   const setConversations = setLocalConversations;
   const [selected, setSelected] = useState(savedSelection);
   const [edits, setEdits] = useState<Record<string, Partial<Conversation>>>({});
@@ -36,8 +40,9 @@ export function LocalChatPage({snapshot, onBusyChange, signedIn = false, config,
   const selectedHarness = creating ? harness : thread?.harness || 'prime';
   const selectedWorkdir = creating ? workdir : thread?.workdir ?? '';
   const text = thread?.draft || '';
+  const managedTask = managerLoop.loop?.tasks.find(task => task.id === thread?.managerTaskId);
   const {target: currentTarget, wslDistro: currentDistro} = runtimeIdentity(snapshot);
-  const unconfirmed = !busy ? conversations.filter(c => c.pending && !running.has(c.id)) : [];
+  const unconfirmed = !busy ? conversations.filter(c => c.pending && !running.has(c.id) && !c.managerTaskId && !c.managerRequestId) : [];
   const targetChanged = Boolean(!creating && thread && (thread.target !== currentTarget || (thread.wslDistro || '') !== currentDistro));
   const location = 'Local';
   const runtimeLocation = currentTarget === 'wsl' ? `WSL${currentDistro ? ` · ${currentDistro}` : ''}` : 'Native';
@@ -58,6 +63,7 @@ export function LocalChatPage({snapshot, onBusyChange, signedIn = false, config,
     // Keep typing synchronous while the durable write waits for the shared lock.
     const key = `${id}:${field}`, version = (editVersions.current.get(key) || 0) + 1;
     editVersions.current.set(key, version);
+    if (field === 'draft') saveLocalDraft(id,value as string);
     setEdits(previous => ({...previous,[id]:{...previous[id],[field]:value}}));
     void update(id, conversation => ({...conversation,[field]:value})).then(() => {
       if (editVersions.current.get(key) !== version) return;
@@ -83,7 +89,7 @@ export function LocalChatPage({snapshot, onBusyChange, signedIn = false, config,
   async function send(event?: FormEvent) {
     event?.preventDefault();
     const content = text.trim();
-    if (!thread || creating || !content || busy || controller.current || conversations.some(c => c.pending) || targetChanged || !choices.some(h => h.id === selectedHarness)) return;
+    if (!thread || creating || !content || busy || controller.current || managerLoop.loading || managerLoop.error || managerLoop.projectionError || thread.managerTaskId || thread.managerRequestId || conversations.some(c => c.pending) || targetChanged || !choices.some(h => h.id === selectedHarness)) return;
     if (wantsAnvil && signedIn && !canConnectAnvil) { setError('Anvil tools are enabled, but the Anvil connection is unavailable or still loading. Refresh the connection, or turn off Anvil tools in Agent settings to send local-only work. Your message has not been sent.'); return; }
     const prompt = buildLocalConversationPrompt(thread, content);
     if (new TextEncoder().encode(prompt).length > 64000) { setError('This conversation exceeds the local prompt limit. This agent’s saved history is unchanged. Use a new agent with a summary to continue.'); return; }
@@ -101,7 +107,7 @@ export function LocalChatPage({snapshot, onBusyChange, signedIn = false, config,
         if (abort.signal.aborted) throw new Error('The local turn was cancelled before starting.');
       } catch (err) { setError(err instanceof Error ? err.message : String(err)); setStatus(''); setBusy(false); controller.current = null; return; }
     }
-    try { await admitLocalTurn(snapshot, thread, content); }
+    try { await admitLocalTurn(snapshot, thread, content, connectionRequested); }
     catch (err) { setError(err instanceof Error ? err.message : String(err)); setStatus(''); setBusy(false); controller.current = null; return; }
     startedAt.current = Date.now(); reportedAt.current = Date.now(); setElapsed(0);
     setBusy(true); setError(''); setActivity([]); setStatus(`Starting ${choices.find(h => h.id === selectedHarness)?.displayName || selectedHarness} on ${location}…`);
@@ -114,7 +120,7 @@ export function LocalChatPage({snapshot, onBusyChange, signedIn = false, config,
       update(id, c => ({...c, pending: !confirmed, lastError: message}));
     };
     try {
-      await streamLocalChat({harness: selectedHarness, prompt, workdir: selectedWorkdir || undefined, expectedRuntime: {target: thread.target!, wslDistro: thread.wslDistro}, ...(connectionRequested ? {remoteNamespace} : {})}, abort.signal, (kind, data) => {
+      await streamLocalChat({conversationId: id, harness: selectedHarness, prompt, workdir: selectedWorkdir || undefined, expectedRuntime: {target: thread.target!, wslDistro: thread.wslDistro}, ...(connectionRequested ? {remoteNamespace} : {})}, abort.signal, (kind, data) => {
         if (kind === 'started') {
           setStatus('Local harness is running');
           setAnvilConnected(connectionRequested && data.anvilConnected === true && data.remoteNamespace === remoteNamespace);
@@ -145,11 +151,14 @@ export function LocalChatPage({snapshot, onBusyChange, signedIn = false, config,
   }
   return <div className="human-page">
     {(error || thread?.lastError || storageError) && <div className="banner banner-error" role="alert">{error || thread?.lastError || storageError}</div>}
+    {(managerLoop.error||managerLoop.projectionError)&&<div className="banner banner-error" role="alert">{managerLoop.error||managerLoop.projectionError} Local execution is paused until host state can be checked.</div>}
+    {thread?.managerTaskId&&<div className="banner" role="status">{managedTask ? loopStateLabel(managedTask.state) : 'The manager is tracking this conversation'}. Its saved progress and decisions are in <Link to="/local-manager">Local Manager</Link>.</div>}
+    {thread?.managerRequestId&&!thread.managerTaskId&&<div className="banner" role="status">Checking the saved manager submission. This message will not be sent again.</div>}
     {unconfirmed.map(c => <div key={c.id} className="banner banner-error" role="alert">Completion was not confirmed for “{c.name}”. Check its harness and working folder ({c.workdir || 'default workspace'}) before sending more work. Nothing has been resumed or resent. <button type="button" className="btn btn-ghost" disabled={acknowledging} onClick={() => void acknowledge(c.id)}>{acknowledging ? 'Saving acknowledgment…' : 'I checked that this work has stopped'}</button></div>)}
     <div className="remote-chat-layout">
       <aside className="panel agent-roster" aria-label="Local agents">
         <div className="agent-roster-heading"><h2>Your agents</h2><button type="button" className="btn btn-ghost" disabled={busy} onClick={() => {setCreating(true); setNewName(''); setHarness('prime'); setWorkdir(''); setStatus(''); setActivity([]); setError('');}}>New agent</button></div>
-        {conversations.map(c => <button key={c.id} aria-label={`Open ${c.name}`} aria-pressed={!creating && thread?.id === c.id} className={`agent-row ${!creating && thread?.id === c.id ? 'agent-row-selected' : ''}`} disabled={busy} onClick={() => {setSelected(c.id); setCreating(false); setStatus(''); setActivity([]); setError('');}}><AgentAvatar name={c.name} identity={c.id}/><span className="agent-row-copy"><span className="agent-name">{c.name}</span><span className="agent-meta">{harnessName(c.harness)}</span></span></button>)}
+        {conversations.map(c => <button key={c.id} aria-label={`Open ${c.name}`} aria-pressed={!creating && thread?.id === c.id} className={`agent-row ${!creating && thread?.id === c.id ? 'agent-row-selected' : ''}`} disabled={busy} onClick={() => {setSelected(c.id); setCreating(false); setStatus(''); setActivity([]); setError('');}}><AgentAvatar name={c.name} identity={c.id}/><span className="agent-row-copy"><span className="agent-name">{c.name}</span><span className="agent-meta">{harnessName(c.harness)}{c.managerTaskId ? ` · ${loopStateLabel(managerLoop.loop?.tasks.find(task=>task.id===c.managerTaskId)?.state || 'needs_decision')}` : ''}</span></span></button>)}
       </aside>
       <section className="panel entity-chat-main">
         {creating ? <form className="agent-settings" onSubmit={createAgent}>
@@ -165,12 +174,12 @@ export function LocalChatPage({snapshot, onBusyChange, signedIn = false, config,
           <summary>Agent settings</summary>
           <div className="remote-chat-config">
             <p className="agent-meta">{currentTarget === 'wsl' && (snapshot.wsl.insideWSL || snapshot.wsl.available) ? '✓ ' : ''}{runtimeLocation}{currentTarget === 'wsl' && !snapshot.wsl.insideWSL && !snapshot.wsl.available ? ' · unavailable' : ''}</p>
-            <label className="field"><span className="label"><input type="checkbox" checked={wantsAnvil} disabled={busy || conversations.some(c => c.pending)} onChange={e => edit(thread.id,'connectAnvil',e.target.checked)}/> Use Anvil tools</span></label>
-            {canConnectAnvil && wantsAnvil && <label className="field"><span className="label">Anvil namespace</span><select className="input" aria-label="Anvil namespace" disabled={busy || conversations.some(c => c.pending)} value={remoteNamespace} onChange={e => edit(thread.id,'remoteNamespace',e.target.value)}>{!namespaces.includes(remoteNamespace) && <option value={remoteNamespace}>{remoteNamespace} (unavailable)</option>}{namespaces.map(ns => <option key={ns} value={ns}>{ns}</option>)}</select></label>}
+            <label className="field"><span className="label"><input type="checkbox" checked={wantsAnvil} disabled={busy || !!thread.managerTaskId || !!thread.managerRequestId || conversations.some(c => c.pending)} onChange={e => edit(thread.id,'connectAnvil',e.target.checked)}/> Use Anvil tools</span></label>
+            {canConnectAnvil && wantsAnvil && <label className="field"><span className="label">Anvil namespace</span><select className="input" aria-label="Anvil namespace" disabled={busy || !!thread.managerTaskId || !!thread.managerRequestId || conversations.some(c => c.pending)} value={remoteNamespace} onChange={e => edit(thread.id,'remoteNamespace',e.target.value)}>{!namespaces.includes(remoteNamespace) && <option value={remoteNamespace}>{remoteNamespace} (unavailable)</option>}{namespaces.map(ns => <option key={ns} value={ns}>{ns}</option>)}</select></label>}
             <p className="remote-chat-caption">{!wantsAnvil ? 'Anvil tools are off for this agent. Local workspace tools remain available.' : canConnectAnvil ? 'Connects to Anvil for each turn using your signed-in permissions. The harness can inspect and manage agents through Anvil tools.' : !signedIn ? 'Sign in to connect this agent to Primaris. Local workspace tools work without signing in.' : 'Configure a reachable Anvil API with an available namespace to connect this agent to Primaris.'}</p>
             <label className="field"><span className="label">Local harness</span><select aria-label="Local harness" className="input" value={selectedHarness} disabled><option value={selectedHarness}>{harnessName(selectedHarness)}{!choices.some(h => h.id === selectedHarness) ? ' (not found)' : ''}</option></select></label>
-            <label className="field"><span className="label">Working folder</span><input aria-label="Working folder" className="input" value={selectedWorkdir} disabled={busy || conversations.some(c => c.pending)} onChange={e => edit(thread.id,'workdir',e.target.value)} placeholder="Default local workspace"/></label>
-            {targetChanged && <div className="banner banner-error" role="alert">This agent was saved for {thread.target ? `${thread.target}${thread.wslDistro ? ` · ${thread.wslDistro}` : ''}` : 'an unrecorded location'}. Check its working folder before using {runtimeLocation}. <button type="button" className="btn btn-ghost" disabled={busy || conversations.some(c => c.pending)} onClick={() => update(thread.id, c => ({...c, target: currentTarget, wslDistro: currentDistro}))}>Use this folder on {runtimeLocation}</button></div>}
+            <label className="field"><span className="label">Working folder</span><input aria-label="Working folder" className="input" value={selectedWorkdir} disabled={busy || !!thread.managerTaskId || !!thread.managerRequestId || conversations.some(c => c.pending)} onChange={e => edit(thread.id,'workdir',e.target.value)} placeholder="Default local workspace"/></label>
+            {targetChanged && <div className="banner banner-error" role="alert">This agent was saved for {thread.target ? `${thread.target}${thread.wslDistro ? ` · ${thread.wslDistro}` : ''}` : 'an unrecorded location'}. Check its working folder before using {runtimeLocation}. <button type="button" className="btn btn-ghost" disabled={busy || !!thread.managerTaskId || !!thread.managerRequestId || conversations.some(c => c.pending)} onClick={() => update(thread.id, c => ({...c, target: currentTarget, wslDistro: currentDistro}))}>Use this folder on {runtimeLocation}</button></div>}
             <p className="remote-chat-caption">Files stay in this folder across turns. Changing folders does not move earlier files. Messages are saved on this device.</p>
           </div>
         </details>
@@ -180,7 +189,7 @@ export function LocalChatPage({snapshot, onBusyChange, signedIn = false, config,
           {status && <section className="turn-activity" aria-label="Local agent activity"><div className="turn-activity-heading"><span className="turn-activity-indicator" aria-hidden="true"/><div><p role="status">{status}</p></div>{busy && <span className="turn-activity-elapsed" aria-hidden="true">{elapsed}s</span>}</div><ol className="turn-activity-events">{activity.map((a, i) => <li key={i}>{a}</li>)}</ol>{busy && Date.now() - reportedAt.current > 15000 && <p className="turn-activity-note">No new activity reported recently. Waiting for the next harness update.</p>}</section>}
           <div ref={end}/>
         </div>
-        <form className="chat-composer" onSubmit={e => void send(e)}><label className="field"><span className="label">Message</span><textarea aria-label="Message" className="textarea chat-composer-input" value={text} onChange={e => changeDraft(e.target.value)} onKeyDown={e => {if(e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {e.preventDefault(); void send();}}} placeholder={`Message ${thread.name}…`}/></label><div className="chat-composer-actions"><span className="agent-compose-hint">Enter to send · Shift+Enter for a new line</span><button className="btn btn-primary" disabled={busy || conversations.some(c => c.pending) || targetChanged || !text.trim() || !choices.some(h => h.id === selectedHarness)}>{busy ? 'Working locally…' : 'Send'}</button></div></form>
+        <form className="chat-composer" onSubmit={e => void send(e)}><label className="field"><span className="label">Message</span><textarea aria-label="Message" className="textarea chat-composer-input" value={text} onChange={e => changeDraft(e.target.value)} onKeyDown={e => {if(e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {e.preventDefault(); void send();}}} placeholder={`Message ${thread.name}…`}/></label><div className="chat-composer-actions"><span className="agent-compose-hint">Enter to send · Shift+Enter for a new line</span><button className="btn btn-primary" disabled={busy || managerLoop.loading || !!managerLoop.error || !!managerLoop.projectionError || !!thread.managerTaskId || !!thread.managerRequestId || conversations.some(c => c.pending) || targetChanged || !text.trim() || !choices.some(h => h.id === selectedHarness)}>{busy ? 'Working locally…' : 'Send'}</button></div></form>
         </>}
       </section>
     </div>

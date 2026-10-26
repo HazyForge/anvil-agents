@@ -11,6 +11,7 @@ const posts=[],errors=[];let distro='Ubuntu';
 const reply=text=>JSON.stringify({type:'message_end',message:{role:'assistant',stopReason:'stop',content:[{type:'text',text}]}});
 const server=createServer(async(req,res)=>{
   const url=new URL(req.url,'http://fixture');
+  if(url.pathname==='/local/v1/manager/loop') {res.setHeader('Content-Type','application/json');res.end(JSON.stringify({revision:0,tasks:[],decisions:[],events:[]}));return;}
   if(url.pathname==='/local/v1/snapshot') {
     res.setHeader('Content-Type','application/json');
     res.end(JSON.stringify({productTitle:'Anvil Agents Desktop',prefs:{harnessTarget:'wsl'},api:{reachable:false},harnessTarget:'wsl',wsl:{insideWSL:true,available:true,defaultDistro:distro},harnesses:[{id:'prime',displayName:'Prime Agent',kind:'harness',present:true,delegatable:true,binaries:['prime-agent']}]}));return;
@@ -30,7 +31,7 @@ const server=createServer(async(req,res)=>{
   try {res.setHeader('Content-Type',({'.js':'application/javascript','.css':'text/css','.html':'text/html'})[extname(path)]||'application/octet-stream');res.end(await readFile(path));} catch {res.writeHead(404).end();}
 });
 await new Promise(r=>server.listen(0,'127.0.0.1',r));
-const browser=await chromium.launch({headless:true});const page=await browser.newPage();
+const browser=await chromium.launch({headless:true,...(process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE?{executablePath:process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE}:{})});const page=await browser.newPage();
 page.on('pageerror',e=>errors.push(e.message));
 await page.addInitScript(()=>{
   const key='anvil-agents-desktop.local-chat.v1';

@@ -58,14 +58,19 @@ type issuerCache struct {
 
 // Server is the loopback desktop host.
 type Server struct {
-	agentToolSessions map[string]*agentToolSession
-	chatWorkspaces    map[string]bool
-	opts              Options
-	mu                sync.Mutex
-	prefs             Prefs
-	issuer            issuerCache
-	httpClient        *http.Client
-	mux               http.Handler
+	loopMu               sync.Mutex
+	loop                 *localLoop
+	loopClosed           bool
+	agentToolSessions    map[string]*agentToolSession
+	chatWorkspaces       map[string]bool
+	chatWorkspaceUnknown map[string]bool
+	chatWorkspaceOwners  map[string]string
+	opts                 Options
+	mu                   sync.Mutex
+	prefs                Prefs
+	issuer               issuerCache
+	httpClient           *http.Client
+	mux                  http.Handler
 	// chatLatencyPath is the resolved absolute JSONL sink ("" = disabled).
 	// The full path is never exposed to the SPA; snapshot reports a boolean.
 	chatLatencyPath string
@@ -130,6 +135,11 @@ func NewServer(opts Options) (*Server, error) {
 	mux.HandleFunc("POST /local/v1/manager/route", server.handleLocalManagerRoute)
 	mux.HandleFunc("GET /local/v1/manager/bench", server.handleLocalManagerScenarios)
 	mux.HandleFunc("POST /local/v1/manager/bench", server.handleLocalManagerBench)
+	mux.HandleFunc("GET /local/v1/manager/loop", server.handleLocalLoop)
+	mux.HandleFunc("POST /local/v1/manager/loop/work", server.handleLocalLoopWork)
+	mux.HandleFunc("POST /local/v1/manager/loop/observe", server.handleLocalLoopObserve)
+	mux.HandleFunc("POST /local/v1/manager/loop/decisions/{id}", server.handleLocalLoopDecision)
+	mux.HandleFunc("POST /local/v1/manager/loop/decisions/{id}/answer", server.handleLocalLoopAnswer)
 	mux.HandleFunc("POST /local/v1/agent-tool", server.handleAgentTool)
 	mux.HandleFunc("/ui-config.json", server.handleAPIProxy)
 	mux.HandleFunc("/api/", server.handleAPIProxy)
@@ -172,6 +182,10 @@ func (s *Server) setPrefs(prefs Prefs) {
 }
 
 func (s *Server) Start(ctx context.Context) error {
+	defer s.Close()
+	if _, err := s.getLoop(); err != nil {
+		return err
+	}
 	httpServer := &http.Server{
 		Addr:              s.opts.Listen,
 		Handler:           s.mux,

@@ -1,5 +1,7 @@
 import { useSyncExternalStore } from 'react';
 import type { Snapshot } from '../api/types';
+import type { LoopConversation, LoopSnapshot } from '../api/localManagerLoop';
+import { taskBlocksConversation } from '../api/localManagerLoop';
 
 export type LocalMessage = { role: 'user' | 'assistant'; content: string };
 export type LocalConversation = {
@@ -8,10 +10,14 @@ export type LocalConversation = {
   target?: string; wslDistro?: string; connectAnvil?: boolean; remoteNamespace?: string;
   createdAt?: string; touchedAt?: string;
   managerKind?: 'general'; managerDefaultWorkdir?: string;
+  managerTaskId?: string; managerRequestId?: string; managerAppliedTasks?: string[];
+  managerSubmission?: {requestId: string; conversation: LoopConversation; content: string};
+  lastTurnAnvilConnected?: boolean;
   nativeSession?: { id: string; harness: string; observedAt: string; source: 'native_event' };
 };
 export const localConversationStorageKey = 'anvil-agents-desktop.local-chat.v1';
 export const localConversationSelectedKey = `${localConversationStorageKey}.selected`;
+const draftPrefix = `${localConversationStorageKey}.draft.v1.`;
 const harnessNames: Record<string, string> = { prime: 'Prime Agent', codex: 'Codex', opencode: 'OpenCode', agy: 'Antigravity', grok: 'Grok', pi: 'Pi' };
 export const localHarnessName = (id: string) => harnessNames[id] || id;
 export function localRuntimeIdentity(snapshot: Snapshot) {
@@ -46,7 +52,19 @@ function restore(snapshot: Snapshot, raw: string | null): LocalConversation[] {
     return { ...c, name };
   });
   if (!records.some(c => c.harness === 'prime')) records.unshift({ id: 'local-prime-agent', name: 'Prime Agent', title: 'Prime Agent', harness: 'prime', workdir: '', messages: [], draft: '', ...localRuntimeIdentity(snapshot) });
-  return records;
+  return records.map(c => ({...c,draft:readDraft(c.id,c.draft)}));
+}
+function readDraft(id: string, fallback: string): string {
+  try {return localStorage.getItem(draftPrefix+id) ?? fallback;} catch {return fallback;}
+}
+/** Drafts have their own synchronous slot, so a reload immediately after a
+ * keystroke cannot outrun the asynchronous lock used for transcript writes. */
+export function saveLocalDraft(id: string, draft: string): void {
+  try {localStorage.setItem(draftPrefix+id,draft);}
+  catch {if (state) publish({...state,storageError:'This draft could not be saved. Keep this tab open until browser storage is available.'});}
+}
+function clearSubmittedDraft(id: string, content: string) {
+  if (readDraft(id,'').trim() === content.trim()) saveLocalDraft(id,'');
 }
 function initialize(snapshot: Snapshot) {
   currentSnapshot = snapshot;
@@ -59,6 +77,7 @@ function initialize(snapshot: Snapshot) {
     }
     window.addEventListener('storage', event => {
       if (event.key === localConversationStorageKey || event.key === null) {refreshFromStorage(); void refreshRunningLocks();}
+      else if (event.key?.startsWith(draftPrefix) && state) publish({...state,conversations:state.conversations.map(c=>({...c,draft:readDraft(c.id,c.draft)}))});
     });
     // An abandoned page releases its Web Lock without changing localStorage.
     // Refresh pending conversations so another tab can distinguish running from
@@ -153,6 +172,8 @@ export function setLocalConversationRunning(id: string, running: boolean) {
   publish({ ...state, running: next });
 }
 export async function acknowledgeLocalConversation(id: string): Promise<void> {
+  const managed = state?.conversations.find(c => c.id === id);
+  if (managed?.managerTaskId || managed?.managerRequestId) throw new Error('This work is tracked by the manager. Resolve its saved decision in Local Manager.');
   if (!navigator.locks) throw new Error('This browser cannot verify whether another tab is still running local work.');
   await navigator.locks.request(executionLock, {ifAvailable: true}, async lock => {
     if (!lock) throw new Error('Local work is still running in another tab. Wait for completion before clearing this guard.');
@@ -182,7 +203,7 @@ export function observeLocalNativeSession(id: string, harness: string, line: str
 }
 
 /** Atomically re-read the wrapper binding and transcript before native admission. */
-export async function admitLocalTurn(snapshot: Snapshot, expected: LocalConversation, content: string): Promise<{conversation: LocalConversation; prompt: string}> {
+export async function admitLocalTurn(snapshot: Snapshot, expected: LocalConversation, content: string, anvilConnected = false): Promise<{conversation: LocalConversation; prompt: string}> {
   if (!navigator.locks) throw new Error('This browser cannot coordinate local execution across tabs. Use a browser with Web Locks support. Your message was not sent.');
   return new Promise((resolve, reject) => {
     // Hold the execution lease until the stream is settled, not just until its
@@ -198,6 +219,7 @@ export async function admitLocalTurn(snapshot: Snapshot, expected: LocalConversa
           if (unsaved && !persist(state!)) throw new Error('Unsaved local messages could not be saved. Restore browser storage before sending.');
           const fresh = state!.conversations.find(c => c.id === expected.id);
           if (!fresh) throw new Error('This conversation is no longer available. Your message was not sent.');
+          if (fresh.managerTaskId || fresh.managerRequestId) throw new Error('The manager is still tracking this conversation. Resolve its saved decision in Local Manager before sending new work.');
           if (state!.conversations.some(c => c.pending)) throw new Error('Another local conversation is running or its completion is unconfirmed. Your message was not sent.');
           const binding = (c: LocalConversation) => JSON.stringify([c.harness, c.workdir, c.target, c.wslDistro || '', c.connectAnvil, c.remoteNamespace]);
           if (binding(fresh) !== binding(expected) || JSON.stringify(fresh.messages) !== JSON.stringify(expected.messages)) throw new Error('This conversation changed while the manager was choosing. Review it and route again. Your message was not sent.');
@@ -206,13 +228,14 @@ export async function admitLocalTurn(snapshot: Snapshot, expected: LocalConversa
           if (!snapshot.harnesses.some(h => h.id === fresh.harness && h.present && h.delegatable)) throw new Error('This conversation’s harness is unavailable. Your message was not sent.');
           const prompt = buildLocalConversationPrompt(fresh, content);
           if (new TextEncoder().encode(prompt).length > 64000) throw new Error('This conversation exceeds the local prompt limit. Its saved history is unchanged. Start a new conversation with a summary.');
-          if (!mutate(previous => previous.map(c => c.id === fresh.id ? { ...c, messages: [...c.messages, { role: 'user', content }], draft: c.draft.trim() === content.trim() ? '' : c.draft, pending: true, lastError: undefined } : c))) {
+          if (!mutate(previous => previous.map(c => c.id === fresh.id ? { ...c, messages: [...c.messages, { role: 'user', content }], draft: c.draft.trim() === content.trim() ? '' : c.draft, pending: true, lastError: undefined, lastTurnAnvilConnected: anvilConnected } : c))) {
             // Admission failed before a process existed. Retain the original
             // draft/history in memory instead of inventing an unconfirmed run.
             publish({...state!, conversations: state!.conversations.map(c => c.id === fresh.id ? fresh : c)});
             throw new Error('The pending turn could not be saved. Restore browser storage before sending local work.');
           }
           executionReleases.set(fresh.id, release);
+          clearSubmittedDraft(fresh.id,content);
           setLocalConversationRunning(fresh.id, true);
           return {conversation: fresh, prompt};
         });
@@ -221,4 +244,92 @@ export async function admitLocalTurn(snapshot: Snapshot, expected: LocalConversa
       } catch (err) {release(); reject(err);}
     }).catch(reject);
   });
+}
+
+export function loopConversation(conversation: LocalConversation): LoopConversation {
+  return {id: conversation.id, name: conversation.name, harness: conversation.harness, workdir: conversation.workdir,
+    target: conversation.target || '', ...(conversation.wslDistro ? {wslDistro: conversation.wslDistro} : {}), messages: conversation.messages};
+}
+export const requiresBrowserRecovery = (conversation: LocalConversation) => !!conversation.lastTurnAnvilConnected || conversation.connectAnvil === true || !!conversation.remoteNamespace;
+
+/** Save an admission marker before asking the host. A lost HTTP reply retains
+ * this identity; it cannot be turned into a fresh execution by reloading. */
+export async function prepareManagedTurn(snapshot: Snapshot, expected: LocalConversation, content: string, requestId: string): Promise<LocalConversation> {
+  if (!navigator.locks) throw new Error('This browser cannot coordinate local conversation writes.');
+  return navigator.locks.request(admissionLock, () => {
+    initialize(snapshot);
+    if (!refreshFromStorage() || storageConflict || (unsaved && !persist(state!))) throw new Error('Restore browser storage before sending work to the manager.');
+    const fresh = state!.conversations.find(c => c.id === expected.id);
+    if (!fresh || JSON.stringify(loopConversation(fresh)) !== JSON.stringify(loopConversation(expected))) throw new Error('This conversation changed while routing. Review it before sending.');
+    if (fresh.pending || fresh.managerTaskId || fresh.managerRequestId) throw new Error('The manager must finish or resolve this conversation’s current work before accepting another message.');
+    if (!mutate(previous => previous.map(c => c.id === fresh.id ? {...c, messages: [...c.messages, {role: 'user', content}], draft: c.draft.trim() === content.trim() ? '' : c.draft, pending: true, lastError: undefined, managerRequestId: requestId, managerSubmission: {requestId,conversation:loopConversation(fresh),content}} : c))) {
+      publish({...state!, conversations: state!.conversations.map(c => c.id === fresh.id ? fresh : c)});
+      throw new Error('The pending message could not be saved. Restore browser storage before sending.');
+    }
+    clearSubmittedDraft(fresh.id,content);
+    return fresh;
+  });
+}
+
+export async function rejectManagedTurn(before: LocalConversation, requestId: string): Promise<void> {
+  await setLocalConversations(previous => previous.map(c => {
+    if (c.id !== before.id || c.managerRequestId !== requestId || c.managerTaskId) return c;
+    const draft = c.draft || before.draft;
+    saveLocalDraft(c.id,draft);
+    return {...before,draft};
+  }));
+}
+
+/** The host owns results. Apply each result only to its frozen baseline, never
+ * overwrite unrelated browser edits or append a duplicate on reconnect. */
+export async function projectManagerLoop(snapshot: Snapshot, loop: LoopSnapshot): Promise<string> {
+  initialize(snapshot);
+  if (!loop.tasks.length) return '';
+  let conflict = '';
+  const project = () => {
+    if (!refreshFromStorage() || storageConflict) return;
+    let changed = false;
+    const conversations = [...state!.conversations];
+    const tasks = [...loop.tasks].sort((a,b) => a.createdAt.localeCompare(b.createdAt));
+    const latestByConversation = new Map(tasks.map(task => [task.conversation.id,task]));
+    // A new browser has no local history to protect. Its most recent host
+    // snapshot includes intervening direct-Chat turns; replaying oldest-first
+    // would manufacture a conflict and strand that newer saved transcript.
+    for (const latest of latestByConversation.values()) {
+      const index = conversations.findIndex(c => c.id === latest.conversation.id);
+      const existing = index < 0 ? undefined : conversations[index];
+      const emptyDefault = !lastStorageRaw && !unsaved && existing?.id === 'local-prime-agent' && !existing.messages.length && !existing.draft && !existing.workdir;
+      if (existing && !emptyDefault) continue;
+      const restored: LocalConversation = {...latest.conversation,title:latest.conversation.name,draft:'',connectAnvil:false,
+        managerAppliedTasks: tasks.filter(task => task.conversation.id === latest.conversation.id && task.id !== latest.id && ['completed','cancelled'].includes(task.state)).map(task => task.id)};
+      if (index < 0) conversations.push(restored); else conversations[index] = restored;
+      changed = true;
+    }
+    for (const task of tasks) {
+      const index = conversations.findIndex(c => c.id === task.conversation.id);
+      const current = index < 0 ? {...task.conversation, title: task.conversation.name, draft: '', connectAnvil: false} as LocalConversation : conversations[index];
+      if (current.managerAppliedTasks?.includes(task.id)) continue;
+      const base = task.conversation.messages;
+      const admitted = task.content ? [...base, {role: 'user' as const, content: task.content}] : base;
+      const completed = task.state === 'completed' && task.reply ? [...admitted, {role: 'assistant' as const, content: task.reply}] : admitted;
+      const canonicalizedSubmission = current.managerRequestId === task.requestId && current.managerSubmission?.requestId === task.requestId && current.workdir === current.managerSubmission.conversation.workdir;
+      const canonicalizedObservation = task.origin === 'observed' && task.submittedWorkdir !== undefined && current.workdir === task.submittedWorkdir;
+      const sameBinding = current.harness === task.conversation.harness && current.target === task.conversation.target && (current.wslDistro || '') === (task.conversation.wslDistro || '') && (current.workdir === task.conversation.workdir || canonicalizedSubmission || canonicalizedObservation);
+      const currentMessages = JSON.stringify(current.messages);
+      if (!sameBinding || ![base, admitted, completed].some(messages => JSON.stringify(messages) === currentMessages)) {
+        conflict = `Saved work for “${task.conversation.name}” differs from this browser’s conversation. Its host record is intact; review the saved reply in Manager before changing this chat.`;
+        continue;
+      }
+      const terminal = task.state === 'completed' || task.state === 'cancelled';
+      const next: LocalConversation = {...current, workdir: task.conversation.workdir, messages: completed,
+        pending: taskBlocksConversation(task), lastError: terminal ? undefined : task.error,
+        managerTaskId: terminal ? undefined : task.id, managerRequestId: terminal ? undefined : task.requestId,
+        managerSubmission: terminal ? undefined : current.managerSubmission,
+        managerAppliedTasks: terminal ? [...(current.managerAppliedTasks || []),task.id] : current.managerAppliedTasks};
+      if (JSON.stringify(next) !== JSON.stringify(current)) {changed = true; if (index < 0) conversations.push(next); else conversations[index] = next;}
+    }
+    if (changed) mutate(() => conversations);
+  };
+  if (navigator.locks) await navigator.locks.request(admissionLock, project); else project();
+  return conflict;
 }

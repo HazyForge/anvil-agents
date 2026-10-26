@@ -9,7 +9,7 @@ const browser = await chromium.launch({headless: true, ...(process.env.PLAYWRIGH
 const page = await browser.newPage({viewport: {width: 1440, height: 1000}});
 const errors = [], dispatches = [];
 page.on('pageerror', error => errors.push(error.message));
-page.on('request', request => { if (new URL(request.url()).pathname === '/local/v1/chat/stream') dispatches.push(request.postDataJSON()); });
+page.on('request', request => { if (new URL(request.url()).pathname === '/local/v1/manager/loop/work') dispatches.push(request.postDataJSON()); });
 await page.addInitScript(({launch, camera}) => {
   const key = 'anvil-agents-desktop.local-chat.v1';
   localStorage.setItem('anvil-agents-desktop.chat-location', 'local');
@@ -74,10 +74,10 @@ try {
     .find(value => value.content === 'Add a contact page to the launch website' && (value.reply || value.error)));
   assert.equal(launchReceipt.error, undefined, launchReceipt.error);
   assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem('anvil-agents-desktop.local-chat.v1')).find(c => c.id === 'launch').draft), 'Keep this separate Chat draft', 'A manager message must preserve the target conversation’s unrelated draft');
-  await page.getByText('Launch fixture finished in its own folder.', {exact: true}).first().waitFor();
+  await page.locator('.manager-assistant-message').getByText('Launch fixture finished in its own folder.', {exact: true}).first().waitFor();
   assert.equal(dispatches.length, 1);
-  assert.equal(dispatches[0].harness, 'prime');
-  assert.equal(dispatches[0].workdir, process.env.ANVIL_LOCAL_MANAGER_LAUNCH_DIR);
+  assert.equal(dispatches[0].conversation.harness, 'prime');
+  assert.equal(dispatches[0].conversation.workdir, process.env.ANVIL_LOCAL_MANAGER_LAUNCH_DIR);
   await observed(() => window.__managerQuotaFailures > 0);
   const retained = await route('How is the launch website going?');
   assert.equal(retained.action.kind, 'read_status');
@@ -98,10 +98,10 @@ try {
   const camera = await route('Add a tracking example to camera research');
   assert.equal(camera.action.kind, 'continue');
   assert.equal(camera.action.targetId, 'camera');
-  await page.getByText('Camera fixture finished in its own folder.', {exact: true}).first().waitFor();
+  await page.locator('.manager-assistant-message').getByText('Camera fixture finished in its own folder.', {exact: true}).first().waitFor();
   assert.equal(dispatches.length, 2);
-  assert.equal(dispatches[1].harness, 'codex');
-  assert.equal(dispatches[1].workdir, process.env.ANVIL_LOCAL_MANAGER_CAMERA_DIR);
+  assert.equal(dispatches[1].conversation.harness, 'codex');
+  assert.equal(dispatches[1].conversation.workdir, process.env.ANVIL_LOCAL_MANAGER_CAMERA_DIR);
   const saved = await page.evaluate(() => JSON.parse(localStorage.getItem('anvil-agents-desktop.local-chat.v1')));
   assert.ok(saved.find(item => item.id === 'launch').messages.some(message => message.content === 'Launch fixture finished in its own folder.'));
   assert.ok(saved.find(item => item.id === 'camera').messages.some(message => message.content === 'Camera fixture finished in its own folder.'));
@@ -109,7 +109,7 @@ try {
 
   await page.reload();
   await page.getByRole('heading', {name: 'Local Manager', exact: true}).waitFor();
-  await page.getByText('Camera fixture finished in its own folder.', {exact: true}).first().waitFor();
+  await page.locator('.manager-assistant-message').getByText('Camera fixture finished in its own folder.', {exact: true}).first().waitFor();
   assert.equal(dispatches.length, 2, 'Reload must not replay work');
   await page.screenshot({path: process.env.ANVIL_LOCAL_MANAGER_SCREENSHOT || '/tmp/anvil-local-manager-live.png', fullPage: true});
 
@@ -128,13 +128,13 @@ try {
   // by the manager. This is the wrapper-continuity contract.
   await page.goto(`${origin}/chat`);
   await page.getByRole('button', {name: 'Open Camera research', exact: true}).click();
-  await page.getByText('Camera fixture finished in its own folder.', {exact: true}).first().waitFor();
+  await page.locator('.chat-messages').getByText('Camera fixture finished in its own folder.', {exact: true}).first().waitFor();
   await page.goto(`${origin}/local-manager`);
   await page.setViewportSize({width: 390, height: 844});
   await page.getByRole('heading', {name: 'Local Manager', exact: true}).waitFor();
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1), true, 'Narrow viewport must not overflow horizontally');
   assert.deepEqual(errors, []);
-  console.log('PASS real local manager SSE, two harness bindings/folders, isolated saved history, quota-failure retention/recovery, status without execution, shared Chat history, reload without replay, and narrow viewport');
+  console.log('PASS real local manager routing and host admission, two harness bindings/folders, isolated saved history, quota-failure retention/recovery, status without execution, shared Chat history, reload without replay, and narrow viewport');
 } finally {
   await browser.close();
 }

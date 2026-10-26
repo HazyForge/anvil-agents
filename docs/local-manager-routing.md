@@ -17,6 +17,9 @@ execution permission or a guarantee that work succeeded.
 The current local conversation source is this Desktop browser origin's existing
 `anvil-agents-desktop.local-chat.v1` registry. Local Chat and Local Manager share
 it. IDs, drafts, history, unresolved work, and runtime bindings survive migration.
+Accepted Manager work and pending questions now also live in the Desktop host's
+durable store. See [the persistent manager loop](local-manager-loop.md) for
+browser-close continuity, recovery, and turn-level verification.
 Other browser profiles/origins and conversations created directly inside external
 harnesses are not discovered. This feature does not scan native transcript folders.
 
@@ -28,8 +31,8 @@ does not add a native resume or cross-harness transcript-import adapter.
 Remote Manager remains the separately authenticated, PostgreSQL-backed subject
 vault described in [subject-vault-routing.md](subject-vault-routing.md). Local
 routing does not acquire cluster permissions. A local conversation's existing
-opt-in Anvil tool connection still uses its signed-in namespace and ordinary
-per-turn capability bridge.
+opt-in Anvil tool connection uses its signed-in namespace and ordinary per-turn
+capability bridge in direct Chat. Host-managed work does not persist that token.
 
 ## Decisions and delivery
 
@@ -45,17 +48,18 @@ provider; working folders, tokens, and full native transcripts do not.
 | Action | What happens |
 | --- | --- |
 | `read_status` | Read the selected wrapper's saved state without launching a harness. The UI identifies this as saved local state. |
-| `continue` | Revalidate the existing wrapper binding and send its saved transcript plus this message through the existing local adapter. |
+| `continue` | Revalidate the wrapper binding, durably admit work, and send its saved transcript plus this message through the existing local adapter. |
 | `new_conversation` | Create an Anvil conversation on the selected available harness, then run its first turn. |
 | `general` | Handle an aside in a general conversation rather than opening a project for every message. |
-| `wait` | Keep the message unsent while execution is busy or completion is unconfirmed. There is no implied local execution queue. |
+| `wait` | Keep the message unsent. For a known target, the UI can offer explicit queue admission; the host checks its unresolved work and workspace before accepting or executing. |
 | `clarify` | Ask the user to select a conversation or resolve unavailable runtime information. No harness is invoked. |
 
 An explicit target choice is recorded as a user choice, without fabricated model
 probabilities. The execution path rechecks conversation state before dispatch;
 routing alone does not reserve a workspace. A disconnected or uncertain local
-execution is not automatically retried. Local Chat's existing recovery rules
-continue to apply.
+execution is not automatically retried. The persistent loop records a pending
+decision when it detects failed or unconfirmed work. Direct Chat retains its
+browser-bound stream and observes host-owned work guards.
 
 ## Run and evaluate
 

@@ -1177,3 +1177,46 @@ form.agent-settings h2 { margin: 0; font-size: 18px; }
 .local-bench-turn th, .local-bench-turn td { padding: .5rem; text-align: left; border-bottom: 1px solid var(--border); }
 .local-bench-turn th { color: var(--text-dim); font-weight: 500; }
 @media (max-width: 760px) { .local-bench-layout { display: flex; flex-direction: column; } .local-bench-catalog { max-height: 20rem; overflow: auto; border-right: 0; border-bottom: 1px solid var(--border); } .local-bench-results, .local-bench-controls { padding: 1rem; } .local-new-settings[open] { width: 100%; } .local-bench-turn { padding: .7rem; } }
+
+/* Durable host manager: intent, execution, and observed verification stay visible. */
+.local-manager-loop { margin: .6rem 0 1.4rem; padding: 1rem; border: 1px solid var(--border-strong); border-radius: 12px; background: rgba(14, 28, 21, .55); }
+.loop-heading, .loop-heading > div { display: flex; align-items: center; gap: .55rem; }
+.loop-heading { justify-content: space-between; flex-wrap: wrap; }
+.loop-heading h2 { margin: 0; font-size: .92rem; font-weight: 500; }
+.loop-heading .btn { font-size: .72rem; min-height: 2.2rem; }
+.loop-decision-count { color: var(--text-dim); font-size: .69rem; }
+.loop-summary, .loop-empty p { color: var(--text-dim); font-size: .76rem; line-height: 1.6; margin: .6rem 0; }
+.loop-task { margin-top: .85rem; padding: .8rem; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-panel); }
+.loop-task-needs_decision { border-color: rgba(240,180,41,.45); }
+.loop-task header { display: flex; justify-content: space-between; gap: .5rem; }
+.loop-task header > div { min-width: 0; display: grid; gap: .3rem; }
+.loop-task header strong { font-size: .86rem; font-weight: 500; overflow-wrap: anywhere; }
+.loop-task header span { color: var(--teal); font-size: .7rem; }
+.loop-task-needs_decision header span, .loop-task-paused header span { color: var(--amber); }
+.loop-task time { color: var(--text-mute); font-family: var(--font-mono); font-size: .62rem; }
+.loop-task-content { margin: .65rem 0; color: var(--text-dim); font-size: .78rem; line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; }
+.loop-phases { list-style: none; padding: 0; display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: .3rem; margin: .8rem 0; }
+.loop-phases li { display: flex; align-items: center; justify-content: center; gap: .3rem; padding: .45rem .2rem; border-bottom: 2px solid var(--border); color: var(--text-mute); font-size: .68rem; }
+.loop-phases li.is-observed { color: var(--text-dim); }
+.loop-phases li.is-current { border-color: var(--teal); color: var(--teal); background: rgba(61,224,197,.05); }
+.loop-task-needs_decision .loop-phases li.is-current { border-color: var(--amber); color: var(--amber); }
+.loop-decision { margin-top: .8rem; padding-top: .3rem; }
+.loop-decision p { font-size: .8rem; line-height: 1.6; overflow-wrap: anywhere; }
+.loop-decision-options { display: flex; flex-wrap: wrap; gap: .4rem; }
+.loop-decision-options .btn { font-size: .75rem; white-space: normal; min-height: 2.5rem; text-align: left; }
+.loop-decision form { display: grid; justify-items: end; gap: .5rem; margin-top: .75rem; }
+.loop-decision textarea { width: 100%; min-height: 3.5rem; resize: vertical; padding: .65rem; color: var(--text); background: var(--bg-input); border: 1px solid var(--border-strong); border-radius: 6px; font: inherit; font-size: .78rem; }
+.loop-decision textarea:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }
+.loop-decision form .btn { font-size: .75rem; min-height: 2.5rem; }
+.loop-answer-result { color: var(--teal); }
+.loop-verification { color: var(--text-dim); font-size: .75rem; line-height: 1.6; }
+.loop-evidence { margin-top: .7rem; font-size: .72rem; color: var(--text-dim); }
+.loop-evidence summary { cursor: pointer; min-height: 1.6rem; }
+.loop-evidence ol { padding: 0; list-style: none; }
+.loop-evidence li { display: grid; grid-template-columns: 2.7rem minmax(0,1fr); gap: .4rem .6rem; margin-top: .6rem; padding-top: .6rem; border-top: 1px solid var(--border); }
+.loop-evidence li > span { color: var(--teal); }
+.loop-evidence li p { margin: 0; line-height: 1.6; overflow-wrap: anywhere; }
+.loop-evidence li time { grid-column: 2; }
+.loop-saved-reply { padding-top: .8rem; overflow-wrap: anywhere; }
+.loop-saved-reply > strong { font-weight: 500; color: var(--text); }
+@media (max-width:760px) { .local-manager-loop { padding: .75rem; } .loop-heading > div { flex-wrap: wrap; } .loop-task { padding: .65rem; } .loop-decision-count { flex-basis: 100%; padding-left: 1.1rem; } }

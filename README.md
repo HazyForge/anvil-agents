@@ -227,6 +227,7 @@ audience, and explicit namespace authorization bindings are configured. See
 - [Standing chat storage and API](docs/standing-chat.md)
 - [Central manager, subject vault, and live routing](docs/subject-vault-routing.md)
 - [Local conversation routing and scenario bench](docs/local-manager-routing.md)
+- [Persistent local manager loop and recovery](docs/local-manager-loop.md)
 - [Design roadmap and known alpha boundaries](docs/design-roadmap.md)
 - [AgentRun API reference](docs/agent-run.md)
 - [Chat mailbox contract (interactive purpose)](docs/chat-delivery.md)
