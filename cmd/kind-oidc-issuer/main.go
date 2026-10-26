@@ -8,6 +8,13 @@
 //
 //	kind-oidc-issuer --listen 127.0.0.1:18081 --key-file /tmp/kind-oidc.key.json
 //
+// TEST ONLY: opt in to auto-approved browser login for a local console:
+//
+//	kind-oidc-issuer --listen 127.0.0.1:18181 --issuer http://127.0.0.1:18181 \
+//	  --key-file /tmp/kind-oidc.key.json --browser-login --login-client-id simulator \
+//	  --login-redirect-uri http://127.0.0.1:5173/auth/callback \
+//	  --login-allowed-origin http://127.0.0.1:5173
+//
 // Mint a signed RS256 access token against the same key (printed to stdout,
 // nothing else):
 //
@@ -77,33 +84,86 @@ func main() {
 }
 
 func runServe(args []string) error {
+	server, err := newIssuerServer(args)
+	if err != nil {
+		return err
+	}
+	return server.ListenAndServe()
+}
+
+func newIssuerServer(args []string) (*http.Server, error) {
 	flags := flag.NewFlagSet("kind-oidc-issuer", flag.ContinueOnError)
 	listen := flags.String("listen", defaultListenAddress, "Loopback listen address (non-loopback addresses are refused).")
 	keyFile := flags.String("key-file", "", "Persist the signing key to this path (0600) so mint can reuse it. Empty keeps an ephemeral in-memory key.")
 	issuerOverride := flags.String("issuer", "", "Advertised issuer URL. Defaults to http://<listen>. Must have no query or fragment.")
+	browserLogin := flags.Bool("browser-login", false, "TEST ONLY: auto-approve browser login on loopback (requires --key-file and login client/redirect configuration).")
+	clientID := flags.String("login-client-id", "", "Public browser login client ID (required with --browser-login).")
+	var redirectURIs, allowedOrigins []string
+	flags.Func("login-redirect-uri", "Exact browser login redirect URI (repeatable).", func(value string) error {
+		redirectURIs = append(redirectURIs, value)
+		return nil
+	})
+	flags.Func("login-allowed-origin", "Exact browser origin allowed by CORS (repeatable; no wildcard).", func(value string) error {
+		allowedOrigins = append(allowedOrigins, value)
+		return nil
+	})
+	audiences := flags.String("audience", defaultAudience, "Comma-separated API audiences for browser access tokens.")
+	subject := flags.String("login-subject", defaultSubject, "Subject for browser access tokens.")
+	roles := flags.String("login-roles", "kind-local-desktop", "Comma-separated roles claim for browser access tokens.")
+	namespaces := flags.String("login-namespaces", "agents", "Comma-separated namespace claim values for browser access tokens.")
+	namespaceClaim := flags.String("login-namespace-claim", "anvil_agents_namespaces", "Namespace claim name for browser access tokens.")
+	email := flags.String("login-email", "", "Optional email claim for browser access tokens (email_verified remains false).")
+	ttl := flags.Duration("login-ttl", 15*time.Minute, "Browser access token lifetime (capped at 1h).")
+	scope := flags.String("login-scope", "openid profile email", "Space-separated scope claim for browser access tokens.")
 	if err := flags.Parse(args); err != nil {
-		return err
+		return nil, err
 	}
 	if flags.NArg() > 0 {
-		return fmt.Errorf("unexpected arguments: %v", flags.Args())
+		return nil, fmt.Errorf("unexpected arguments: %v", flags.Args())
 	}
 	host, port, err := ensureLoopbackListen(*listen)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	issuer := strings.TrimSpace(*issuerOverride)
 	if issuer == "" {
 		issuer = "http://" + net.JoinHostPort(host, port)
 	}
 	if err := validateIssuerURL(issuer); err != nil {
-		return err
+		return nil, err
+	}
+	login := browserLoginOptions{
+		clientID:       strings.TrimSpace(*clientID),
+		redirectURIs:   redirectURIs,
+		allowedOrigins: allowedOrigins,
+		mint: mintOptions{
+			issuer:         issuer,
+			audiences:      splitList(*audiences),
+			subject:        strings.TrimSpace(*subject),
+			ttl:            *ttl,
+			roles:          splitList(*roles),
+			namespaces:     splitList(*namespaces),
+			namespaceClaim: strings.TrimSpace(*namespaceClaim),
+			email:          strings.TrimSpace(*email),
+			scope:          strings.TrimSpace(*scope),
+		},
+	}
+	if *browserLogin {
+		if strings.TrimSpace(*keyFile) == "" {
+			return nil, fmt.Errorf("--key-file is required with --browser-login")
+		}
+		if err := login.validate(); err != nil {
+			return nil, err
+		}
 	}
 	key, publicJWK, err := loadOrGenerateKey(*keyFile)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	_ = key
 	handler := newIssuerHandler(issuer, publicJWK)
+	if *browserLogin {
+		handler = newBrowserLoginHandler(key, login, handler)
+	}
 	server := &http.Server{
 		Addr:              *listen,
 		Handler:           handler,
@@ -116,7 +176,7 @@ func runServe(args []string) error {
 	if *keyFile == "" {
 		fmt.Fprintln(os.Stderr, "kind-oidc-issuer TEST ONLY: ephemeral key; mint is unavailable without --key-file")
 	}
-	return server.ListenAndServe()
+	return server, nil
 }
 
 func runMint(args []string) error {

@@ -1,0 +1,56 @@
+{
+ "summary": "Scan Hazy Trade images and charts; stop for a human on a fixable HIGH.",
+ "steps": [
+  {
+   "t": 2,
+   "think": "Scanning the deployed images and the chart"
+  },
+  {
+   "t": 2,
+   "report": {
+    "type": "progress",
+    "stage": "images",
+    "summary": "Scanning 3 deployed images"
+   }
+  },
+  {
+   "t": 3,
+   "work": {
+    "pool": "security",
+    "seconds": 160
+   }
+  },
+  {
+   "t": 2,
+   "report": {
+    "type": "progress",
+    "stage": "chart",
+    "summary": "Chart misconfiguration scan: 1 HIGH"
+   }
+  },
+  {
+   "t": 4,
+   "say": "One fixable HIGH in golang.org/x/net (CVE-2026-31337, fixed in 0.33.0) and the worker container writes to its root filesystem."
+  },
+  {
+   "t": 3,
+   "work": {
+    "pool": "security",
+    "seconds": 90
+   }
+  },
+  {
+   "t": 2,
+   "report": {
+    "type": "needsHuman",
+    "summary": "Fixable HIGH CVE-2026-31337 in hazy-trade-api 1.4.2. Approve a dependency bump PR?",
+    "humanFollowUp": "Reply 'bump' to open the PR, or 'accept' with a reason to record a risk acceptance.",
+    "level": "warning"
+   }
+  },
+  {
+   "t": 1,
+   "exit": 0
+  }
+ ]
+}

@@ -1,0 +1,85 @@
+{
+ "summary": "Find a flaky test, prove the cause, open a fix PR.",
+ "steps": [
+  {
+   "t": 2,
+   "think": "Reproducing the flake before touching code"
+  },
+  {
+   "t": 3,
+   "cmd": "go test ./internal/runapi -run TestStreamReconnect -count=20",
+   "out": [
+    "--- FAIL: TestStreamReconnect (2.01s)",
+    "    stream_test.go:144: expected reset event, got status",
+    "FAIL",
+    "ok  \t(18 of 20 passed)"
+   ],
+   "ok": false,
+   "ms": 41200
+  },
+  {
+   "t": 2,
+   "report": {
+    "type": "progress",
+    "stage": "reproduce",
+    "summary": "TestStreamReconnect fails 2 of 20 runs"
+   }
+  },
+  {
+   "t": 5,
+   "say": "The reset event races the first status poll. The test waits a fixed 2s instead of for the event."
+  },
+  {
+   "t": 3,
+   "work": {
+    "pool": "go",
+    "seconds": 140
+   }
+  },
+  {
+   "t": 2,
+   "edit": "internal/runapi/stream_test.go",
+   "added": 12,
+   "removed": 5
+  },
+  {
+   "t": 4,
+   "cmd": "go test ./internal/runapi -run TestStreamReconnect -count=50",
+   "out": [
+    "ok  \tgithub.com/hazyforge/anvil-agents/internal/runapi\t61.884s"
+   ],
+   "ms": 61900
+  },
+  {
+   "t": 2,
+   "report": {
+    "type": "progress",
+    "stage": "verify",
+    "summary": "50/50 passes after waiting on the event"
+   }
+  },
+  {
+   "t": 3,
+   "cmd": "gh pr create --title 'Wait for the reset event in TestStreamReconnect' --fill",
+   "out": [
+    "https://github.com/HazyForge/anvil-agents/pull/274"
+   ],
+   "ms": 1730
+  },
+  {
+   "t": 2,
+   "report": {
+    "type": "decision",
+    "classification": "flaky-test",
+    "action": "open-pr",
+    "summary": "Fixed the TestStreamReconnect race (2/20 → 0/50 failures) in PR #274.",
+    "pullRequestURL": "https://github.com/HazyForge/anvil-agents/pull/274",
+    "residualRisk": "Other stream tests use the same fixed sleep."
+   }
+  },
+  {
+   "t": 1,
+   "exit": 0
+  }
+ ]
+}

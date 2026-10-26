@@ -1,0 +1,91 @@
+{
+ "summary": "Plan an Anvil Primaris release without applying it.",
+ "steps": [
+  {
+   "t": 2,
+   "think": "Checking targets, policy and the newest accepted artifact"
+  },
+  {
+   "t": 3,
+   "cmd": "anvilctl delivery targets --application anvil-primaris --output table",
+   "out": [
+    "TARGET                         STAGE        READY  CHECKS",
+    "anvil-primaris-prod            production   True   off (quick-release)",
+    "anvild-z400-build-worker-prod  production   True   release"
+   ],
+   "ms": 1240
+  },
+  {
+   "t": 2,
+   "report": {
+    "type": "progress",
+    "stage": "targets",
+    "summary": "2 targets ready; anvil-primaris-prod has artifact checks off"
+   }
+  },
+  {
+   "t": 4,
+   "cmd": "anvilctl delivery artifacts --application anvil-primaris --limit 3",
+   "out": [
+    "anvil-primaris-0-14-2   v0.14.2   OperatorLocal   sha256:9c41d7b2…88ce07a   12m ago",
+    "anvil-primaris-0-14-1   v0.14.1   DistributedWorker sha256:3df425fb…5c30f8  3d ago"
+   ],
+   "ms": 980
+  },
+  {
+   "t": 5,
+   "say": "v0.14.2 is operator-built. The target accepts operator-local builds during the quick-release window, so the plan is valid but I'll call that out."
+  },
+  {
+   "t": 3,
+   "work": {
+    "pool": "go",
+    "seconds": 120
+   }
+  },
+  {
+   "t": 2,
+   "report": {
+    "type": "progress",
+    "stage": "plan",
+    "summary": "Planning promotion of v0.14.2 to anvil-primaris-prod"
+   }
+  },
+  {
+   "t": 6,
+   "cmd": "anvilctl release plan --target anvil-primaris-prod --artifact anvil-primaris-0-14-2 --output json | jq .actions",
+   "out": [
+    "[",
+    "  {\"name\": \"promote-image\", \"phase\": \"Promote\", \"forEach\": [\"operator\", \"anvilhub\"]},",
+    "  {\"name\": \"verify-target\", \"phase\": \"VerifyTarget\"}",
+    "]"
+   ],
+   "ms": 2310
+  },
+  {
+   "t": 3,
+   "work": {
+    "pool": "ops",
+    "seconds": 120
+   }
+  },
+  {
+   "t": 4,
+   "say": "Plan is consistent: two image promotions, then target verification. Hub rollout uses Recreate and the pinned volume's node is schedulable."
+  },
+  {
+   "t": 2,
+   "report": {
+    "type": "decision",
+    "classification": "release-plan",
+    "action": "propose",
+    "summary": "Release v0.14.2 to anvil-primaris-prod is ready to apply: 2 promotions + target verification.",
+    "residualRisk": "Artifact verification is off for this target; built on an operator workstation."
+   }
+  },
+  {
+   "t": 1,
+   "exit": 0
+  }
+ ]
+}

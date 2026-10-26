@@ -9,7 +9,7 @@ RELEASE_REPO ?= HazyForge/anvil-agents
 RELEASE_DEPLOY_VALUES ?= .hazyforge/clusters/anvil-primaris/namespace/anvil-agents-system/deploy.yaml
 RELEASE_IMAGE_LOCK ?= $(RELEASE_OUTPUT)/images-$(VERSION).lock.tsv
 
-.PHONY: generate manifests test verify verify-runner-contract security security-govulncheck security-gosec security-trivy security-all build console-build console-typecheck console-embed console-embed-restore desktop-build desktop-typecheck desktop-chat-tests desktop-embed desktop-embed-restore desktop-run desktop-package desktop-package-check docker-build images image-checks helm-lint archive-postgres-integration chart-package release-tag release-tag-push release-local release-publish release-github release-local-all release-pin-deploy release-primaris release-primaris-fast release-primaris-hot deploy-primaris judge-prerequisites judge-kind-e2e kind-upgrade-e2e kind-e2e
+.PHONY: generate manifests test verify verify-runner-contract security security-govulncheck security-gosec security-trivy security-all build console-build console-typecheck console-embed console-embed-restore desktop-build desktop-typecheck desktop-chat-tests desktop-embed desktop-embed-restore desktop-run desktop-package desktop-package-check docker-build images image-checks helm-lint archive-postgres-integration chart-package release-tag release-tag-push release-local release-publish release-github release-local-all release-pin-deploy release-primaris release-primaris-fast release-primaris-hot deploy-primaris judge-prerequisites judge-kind-e2e kind-upgrade-e2e kind-e2e simulator
 
 generate:
 	$(CONTROLLER_GEN) object paths=./api/...
@@ -234,6 +234,11 @@ kind-upgrade-e2e:
 kind-e2e: kind-upgrade-e2e
 	./hack/test-kind.sh
 
+# Local simulator: real controller in Kind, API + console on loopback,
+# simulated harnesses. See docs/simulator.md.
+simulator:
+	./hack/simulator.sh up
+
 verify-runner-contract:
 	@bash -n docker/agent-run-hermes/entrypoint.sh
 	@docker/agent-run-hermes/entrypoint_test.sh
@@ -278,6 +283,8 @@ verify-runner-contract:
 	@bash -n hack/test-runner-github-auth.sh
 	@bash -n hack/test-opencode-runner.sh
 	@bash -n hack/stream-agent-run.sh
+	@bash -n hack/simulator.sh
+	@hack/simulator_test.sh
 	@hack/build-images.sh --help >/dev/null
 	@hack/build-images.sh --list >/dev/null
 	@hack/publish-images.sh --help >/dev/null

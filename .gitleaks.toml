@@ -6,11 +6,21 @@ useDefault = true
 # archive.restartToken is a Helm rollout bounce nonce, not a credential.
 # Gitleaks generic-api-key matched the historical value in
 # 6848de49ec2cce2d72a4caf6e99402d52e6f1f3b (already on master).
-[allowlist]
+[[allowlists]]
 description = "Helm archive.restartToken bounce nonce"
 paths = [
   '''\.hazyforge/clusters/anvil-primaris/namespace/anvil-agents-system/deploy\.yaml''',
 ]
 regexes = [
   '''restartToken:\s+\S+''',
+]
+
+# Sec-WebSocket-Key dGhlIHNhbXBsZSBub25jZQ== is the sample nonce from RFC 6455
+# section 1.3, not a credential. WebSocket handshake test fixtures use it;
+# generic-api-key matched it in internal/desktop/proxy_stream_test.go
+# (c94f174a9427e7af3ea386a5fcd278afec96d372 on feat/desktop-chat-live-events).
+[[allowlists]]
+description = "RFC 6455 sample WebSocket key"
+regexes = [
+  '''^dGhlIHNhbXBsZSBub25jZQ==$''',
 ]

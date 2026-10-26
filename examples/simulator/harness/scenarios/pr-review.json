@@ -1,0 +1,102 @@
+{
+ "summary": "Review a Hazy Trade pull request: read the diff, run the risk tests, leave findings.",
+ "steps": [
+  {
+   "t": 2,
+   "think": "Reading the pull request and the files it touches"
+  },
+  {
+   "t": 3,
+   "cmd": "gh pr view 1184 --repo HazyForge/hazy-trade --json title,files",
+   "out": [
+    "{\"title\":\"Tighten per-venue order limits\",\"files\":[\"crates/hazy-trade-risk/src/limits.rs\",\"crates/hazy-trade-risk/tests/limits.rs\"]}"
+   ],
+   "ms": 640
+  },
+  {
+   "t": 2,
+   "report": {
+    "type": "progress",
+    "stage": "read-diff",
+    "summary": "Reading PR #1184: per-venue order limits"
+   }
+  },
+  {
+   "t": 4,
+   "cmd": "git diff origin/master...pr-1184 -- crates/hazy-trade-risk",
+   "out": [
+    "@@ -88,9 +88,21 @@ impl Limits {",
+    "-        if order.notional > self.max_notional {",
+    "+        let cap = self.venue_caps.get(&order.venue).copied().unwrap_or(self.max_notional);",
+    "+        if order.notional > cap {"
+   ],
+   "ms": 210
+  },
+  {
+   "t": 5,
+   "say": "The change looks up a per-venue cap and falls back to the global limit. I'll check the fallback and the new tests."
+  },
+  {
+   "t": 3,
+   "work": {
+    "pool": "rust",
+    "seconds": 150
+   }
+  },
+  {
+   "t": 2,
+   "report": {
+    "type": "progress",
+    "stage": "run-tests",
+    "summary": "Risk crate tests pass (184/184)"
+   }
+  },
+  {
+   "t": 4,
+   "cmd": "rg -n 'venue_caps' crates/",
+   "out": [
+    "crates/hazy-trade-risk/src/limits.rs:31:    venue_caps: HashMap<Venue, Notional>,",
+    "crates/hazy-trade-risk/src/config.rs:58:            venue_caps: HashMap::new(),"
+   ],
+   "ms": 95
+  },
+  {
+   "t": 6,
+   "think": "An empty venue_caps map silently means global limit everywhere; worth a note"
+  },
+  {
+   "t": 3,
+   "work": {
+    "pool": "rust",
+    "seconds": 90
+   }
+  },
+  {
+   "t": 4,
+   "say": "Two findings: config.rs never loads venue_caps from the environment, so the new cap is unreachable in production; and the test only covers the fallback path."
+  },
+  {
+   "t": 2,
+   "cmd": "gh pr review 1184 --comment --body-file review.md",
+   "out": [
+    "- Reviewed pull request #1184"
+   ],
+   "ms": 880
+  },
+  {
+   "t": 2,
+   "report": {
+    "type": "decision",
+    "classification": "code-review",
+    "action": "comment",
+    "summary": "PR #1184: 2 findings. Venue caps are never loaded from config; tests cover only the fallback.",
+    "residualRisk": "Did not run the full workspace test suite.",
+    "pullRequestURL": "https://github.com/HazyForge/hazy-trade/pull/1184"
+   }
+  },
+  {
+   "t": 1,
+   "exit": 0
+  }
+ ]
+}

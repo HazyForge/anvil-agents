@@ -1,0 +1,51 @@
+{
+ "summary": "Update docs that still mention a retired command.",
+ "steps": [
+  {
+   "t": 2,
+   "cmd": "rg -l 'anvilctl agent' docs/",
+   "out": [
+    "docs/cli.md",
+    "docs/operations.md"
+   ],
+   "ms": 70
+  },
+  {
+   "t": 3,
+   "say": "Two pages still describe `anvilctl agent`, which does not exist. Pointing them at anvil-agentctl."
+  },
+  {
+   "t": 3,
+   "edit": "docs/cli.md",
+   "added": 8,
+   "removed": 11
+  },
+  {
+   "t": 3,
+   "edit": "docs/operations.md",
+   "added": 4,
+   "removed": 6
+  },
+  {
+   "t": 2,
+   "work": {
+    "pool": "docs",
+    "seconds": 45
+   }
+  },
+  {
+   "t": 2,
+   "report": {
+    "type": "decision",
+    "classification": "docs",
+    "action": "commit",
+    "summary": "Replaced retired `anvilctl agent` references in 2 docs.",
+    "residualRisk": "none"
+   }
+  },
+  {
+   "t": 1,
+   "exit": 0
+  }
+ ]
+}

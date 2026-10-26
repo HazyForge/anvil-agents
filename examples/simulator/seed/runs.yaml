@@ -1,0 +1,175 @@
+# Anvil Agents simulator: one wave of runs. Apply with `kubectl create` (each
+# run uses generateName, so every wave is new, append-only history).
+# The "sim-scenario:" line in a prompt picks the scripted work the simulated
+# harness plays; see examples/simulator/harness/scenarios/.
+apiVersion: control.anvil.hazyforge.io/v1alpha1
+kind: AgentRun
+metadata:
+  generateName: incident-worker-oom-
+  namespace: agents
+spec:
+  purpose: manual
+  sourceRef:
+    kind: ManualRequest
+    name: pager-hazy-trade-worker
+  profileRef:
+    name: incident-responder
+  prompt: |
+    Alert: hazy-trade-worker restarting with quote timeouts since 16:40 UTC. Find the cause.
+    sim-scenario: incident-triage
+  scope:
+    applicationRef:
+      name: hazy-trade
+---
+apiVersion: control.anvil.hazyforge.io/v1alpha1
+kind: AgentRun
+metadata:
+  generateName: review-pr-1184-
+  namespace: agents
+spec:
+  purpose: manual
+  sourceRef:
+    kind: ManualRequest
+    name: review-request
+  profileRef:
+    name: pr-reviewer
+  prompt: |
+    Review HazyForge/hazy-trade#1184 "Tighten per-venue order limits".
+    sim-scenario: pr-review
+  scope:
+    applicationRef:
+      name: hazy-trade
+---
+apiVersion: control.anvil.hazyforge.io/v1alpha1
+kind: AgentRun
+metadata:
+  generateName: build-pipeline-close-
+  namespace: agents
+spec:
+  purpose: manual
+  sourceRef:
+    kind: ManualRequest
+    name: ci-rerun
+  profileRef:
+    name: pr-reviewer
+  prompt: |
+    Build hazy-trade-pipeline on branch close-batches and run its tests.
+    sim-scenario: failing-build
+  scope:
+    applicationRef:
+      name: hazy-trade
+---
+apiVersion: control.anvil.hazyforge.io/v1alpha1
+kind: AgentRun
+metadata:
+  generateName: release-plan-0-14-2-
+  namespace: agents
+spec:
+  purpose: manual
+  sourceRef:
+    kind: ManualRequest
+    name: release-request
+  profileRef:
+    name: release-steward
+  prompt: |
+    Plan the release of anvil-primaris v0.14.2 to anvil-primaris-prod. Do not apply it.
+    sim-scenario: release-dry-run
+  scope:
+    applicationRef:
+      name: anvil-primaris
+---
+apiVersion: control.anvil.hazyforge.io/v1alpha1
+kind: AgentRun
+metadata:
+  generateName: archive-v2-migration-
+  namespace: agents
+spec:
+  purpose: manual
+  sourceRef:
+    kind: ManualRequest
+    name: migration-ticket
+  profileRef:
+    name: migration-runner
+  prompt: |
+    Migrate all 48 namespaces' chart values to the archive v2 schema.
+    sim-scenario: long-migration
+  scope:
+    applicationRef:
+      name: anvil-agents
+---
+apiVersion: control.anvil.hazyforge.io/v1alpha1
+kind: AgentRun
+metadata:
+  generateName: security-hazy-social-
+  namespace: agents
+spec:
+  purpose: manual
+  sourceRef:
+    kind: ManualRequest
+    name: security-request
+  profileRef:
+    name: security-auditor
+  prompt: |
+    Scan the deployed Hazy Social images and chart.
+    sim-scenario: security-sweep
+  scope:
+    applicationRef:
+      name: hazy-social
+---
+apiVersion: control.anvil.hazyforge.io/v1alpha1
+kind: AgentRun
+metadata:
+  generateName: docs-retired-commands-
+  namespace: agents
+spec:
+  purpose: manual
+  sourceRef:
+    kind: ManualRequest
+    name: docs-request
+  profileRef:
+    name: docs-gardener
+  prompt: |
+    Fix docs that still mention `anvilctl agent`.
+    sim-scenario: docs-refresh
+  scope:
+    applicationRef:
+      name: anvil-agents
+---
+# Held by the pause-legacy-billing AgentRunControl until it is resumed.
+apiVersion: control.anvil.hazyforge.io/v1alpha1
+kind: AgentRun
+metadata:
+  generateName: billing-cutover-check-
+  namespace: agents
+spec:
+  purpose: manual
+  sourceRef:
+    kind: ManualRequest
+    name: billing-cutover
+  profileRef:
+    name: incident-responder
+  prompt: |
+    Check the billing cut-over before traffic moves.
+    sim-scenario: incident-triage
+  scope:
+    applicationRef:
+      name: legacy-billing
+---
+apiVersion: control.anvil.hazyforge.io/v1alpha1
+kind: AgentRun
+metadata:
+  generateName: strategy-momentum-v3-
+  namespace: hazy-trade-agents
+spec:
+  purpose: manual
+  sourceRef:
+    kind: ManualRequest
+    name: strategy-review
+  profileRef:
+    name: strategy-reviewer
+  prompt: |
+    Review the momentum v3 strategy change and its backtest.
+    sim-scenario: pr-review
+  scope:
+    applicationRef:
+      name: hazy-trade-strategies

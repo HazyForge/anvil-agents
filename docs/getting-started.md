@@ -68,6 +68,14 @@ kubectl --context kind-anvil-agents logs -n agents-quickstart \
 kind delete cluster --name anvil-agents
 ```
 
+## Local Simulator
+
+To see many agents working at once in the console, without a model provider or
+credentials, run `make simulator`. It installs the controller in its own Kind
+cluster, seeds profiles, schedules, launch controls and a wave of scripted
+runs, and serves the console on `http://127.0.0.1:18180/` with a one-click
+test login. See [Local Simulator](simulator.md).
+
 ## Existing Cluster
 
 The public `v0.1.1` chart and six Linux amd64 images are available from GHCR:

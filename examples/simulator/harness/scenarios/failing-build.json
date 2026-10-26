@@ -1,0 +1,46 @@
+{
+ "summary": "A build that cannot succeed: shows a failed run end to end.",
+ "steps": [
+  {
+   "t": 2,
+   "think": "Building the pipeline crate before running its tests"
+  },
+  {
+   "t": 3,
+   "work": {
+    "pool": "rust",
+    "seconds": 60
+   }
+  },
+  {
+   "t": 3,
+   "cmd": "cargo build -p hazy-trade-pipeline --release",
+   "out": [
+    "error[E0599]: no method named `settle_batch` found for struct `Ledger` in the current scope",
+    "   --> crates/hazy-trade-pipeline/src/close.rs:211:18",
+    "error: could not compile `hazy-trade-pipeline` (lib) due to 1 previous error"
+   ],
+   "ok": false,
+   "ms": 48100
+  },
+  {
+   "t": 2,
+   "say": "The pipeline calls Ledger::settle_batch, which was renamed to settle in the ledger crate on master. This branch is stale."
+  },
+  {
+   "t": 2,
+   "report": {
+    "type": "decision",
+    "classification": "build",
+    "action": "stop",
+    "summary": "Build fails: Ledger::settle_batch no longer exists on master. Rebase required.",
+    "residualRisk": "No tests ran.",
+    "level": "error"
+   }
+  },
+  {
+   "t": 1,
+   "exit": 1
+  }
+ ]
+}

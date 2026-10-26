@@ -15,3 +15,6 @@
 /web/desktop/release/
 /web/desktop/*.tsbuildinfo
 **/__pycache__/
+
+# hack/simulator.sh state (kubeconfig, keys, binaries, logs)
+/.sim/
