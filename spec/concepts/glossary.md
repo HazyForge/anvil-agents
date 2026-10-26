@@ -11,6 +11,10 @@ concepts to the present implementation; names do not require one future schema.
 | Run profile | Reusable defaults for a role, prompt, scope, intent, and selected composition | Mutable configuration; a particular execution records its resolved inputs. |
 | Harness | Runtime adapter that carries a task to an executable agent system | Distinct from its model provider, provider account, process, and conversation. |
 | Harness profile | Reusable backend and execution envelope | Selects runtime, identity, credentials, storage, placement, and limits. Changing it does not itself migrate memory or authenticate a provider. |
+| Shared work layer | **Proposed:** Anvil's superset of the conversations, tasks, decisions and artifacts it coordinates | Keeps links and provenance across harnesses while preserving constituent identities and access; it does not require universal native-history import. |
+| Execution setup | **Proposed:** A named selectable combination of harness, location, models, tools and scope | Multiple setups can use the same harness. Exact persistence and relationship to existing profiles remain to be defined. |
+| Strength tag / preference | **Proposed:** User-authored description of work a setup is suited for | Informs ranking but does not grant authority or prove tool/model availability. Definitions are editable and versioned for selection receipts. |
+| Model binding | Provider/model choice for a particular role in execution | Agent model, classifier model, and models used through image/video tools are distinct; preferred identity and observed actual identity may differ. |
 | Skill | Named instructions or delegated persona | Does not own credentials or create a child execution merely by being present. |
 | Tool contract | Installation and verification description for an external capability | Does not own the external service or grant authority to use it. |
 | Council | Named workforce inventory and optional interaction guidance | Membership does not combine permissions or automatically dispatch work. |

@@ -17,6 +17,18 @@ cluster runtimes. Roles, instructions, tools, runtime configuration, and durable
 state have separate lifecycles. People can work directly with an agent or use a
 manager to route and coordinate work.
 
+**Operator direction, 2026-10-26:** Anvil maintains a superset of the conversations
+and work it coordinates across harnesses such as Codex and Claude Code, reducing
+the need to switch tools or restate context. The person can define each configured
+harness's strengths with tags and notes, including specializations tied to a
+particular model or tool: one setup for image generation, another for video.
+The manager uses those definitions to choose where work goes while preserving
+the overarching conversation and links to each harness's work.
+
+The [shared work and harness-strength contract](contracts/shared-work-and-harness-strengths.md)
+develops that product direction. Its new selection behavior is **Proposed**;
+it does not imply every named harness or media capability is already integrated.
+
 **Proposed product direction:** A central conversation can move between the
 person's ongoing work. The product identifies the relevant Anvil conversation,
 chooses an authorized delivery action, shows its decisions and execution events
@@ -55,6 +67,7 @@ relevant implementation slice rather than turned into an immediate interview.
 | [Execution and durable state](contracts/execution.md) | Acceptance, runtimes, lifecycle, recovery, storage, and evidence |
 | [Composition and authority](contracts/authority-and-composition.md) | Roles, capabilities, identities, API gates, and external policy |
 | [Conversations and coordination](contracts/conversations-and-coordination.md) | Local and remote chat, manager routing, decisions, and peer delivery |
+| [Shared work and harness strengths](contracts/shared-work-and-harness-strengths.md) | Conversation superset, editable specialization tags, harness/model selection, and cross-harness handoff |
 | [Implementation evidence](implementation-notes/reconnaissance-evidence.md) | Source baseline, verification entry points, discrepancies, and limits |
 
 `spec/` owns the product model and candidate behavior. `docs/` continues to own

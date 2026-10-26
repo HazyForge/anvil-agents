@@ -23,6 +23,13 @@ reproducibility boundaries, not a universal immutable-source abstraction.
 model/harness, or execution location should identify exactly which inputs change.
 It should not silently migrate credentials, erase history, or expand authority.
 
+**Proposed:** User-defined strength tags and preference notes describe a configured
+harness/model/tool setup for manager selection. They have a distinct role from
+tool installation, adapter capabilities, and authority. For example, an
+`image-generation` tag can express suitability, while an installed image tool and
+its selected generation model establish how that setup would perform the task.
+See [shared work and harness strengths](shared-work-and-harness-strengths.md).
+
 ## 2. Authority boundaries
 
 **Observed:** Resource authors with control over images, commands, identities,

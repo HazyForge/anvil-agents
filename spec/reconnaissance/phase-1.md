@@ -20,6 +20,13 @@ domains today; a seamless shared workspace is not established.
 coherent product vocabulary. The user can inspect or correct a manager decision,
 continue a specific conversation, and understand which runtime is doing the work.
 
+**Operator direction, 2026-10-26:** The shared Anvil work layer maintains a
+superset of participating chats across harnesses such as Codex and Claude Code,
+reducing context switching. User-defined strengths, tags, and model/tool
+specializations guide which setup receives coding, review, image, video, or other
+work. The [candidate contract](../contracts/shared-work-and-harness-strengths.md)
+defines this selection and handoff behavior; it remains proposed implementation.
+
 ## 2. Candidate component boundaries
 
 | Boundary | Owns | Inputs and outputs | Exclusions / status |
@@ -117,12 +124,14 @@ suite has been implemented or run. Existing evidence is linked by ID below.
 | Inspect another owner's private manager work | Subject/thread/run/log access remains scoped; ordinary shared chat retains its documented semantics | E5. Shared-chat privacy changes require explicit migration design. |
 | Preserve a durable home and archive terminal work | Correct PVC identity is used; copy verifies distinct source/destination; configured archive precedes retention deletion | E7. Object-store synchronization is not implemented. |
 | Observe an unsupported or disabled runtime | Visible hold/failure explains missing capability; no implicit switch to a different execution plane | E1, E8. Production enablement requires separate proof. |
+| Coordinate code, review, image and video work from one conversation | Linked harness conversations preserve shared context; editable strengths guide eligible setup/model selection; real artifacts and receipts return to the work | E10 establishes the current gap. Dedicated acceptance scenarios are in the shared-work contract; they are not implemented tests. |
 
 ## 6. Investigation priorities
 
 | Priority | State | Next contract question |
 | --- | --- | --- |
 | 1 | **Unknown** | How should a common work identity link local tasks, remote turns, runs, and delivered artifacts without conflating their lifecycles? |
+| 1 | **Proposed** | Implement user-defined setup strengths and capability-aware harness/model selection within the shared work layer, including a delegatable Claude Code adapter. |
 | 1 | **Proposed** | Domain verifiers and addressed completion delivery should close the manager loop beyond successful process execution. |
 | 1 | **Unknown** | Which conversation migration/export and owner model should bridge local browser history, host snapshots, and remote storage? |
 | 2 | **Proposed** | Strengthen admission policy, namespace/provider budgets, and fairness before broader multi-tenant operation. |

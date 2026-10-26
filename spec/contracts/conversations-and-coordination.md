@@ -22,6 +22,15 @@ selected remote recipes. Local wrapper replay, durable remote message history,
 and native resume are different mechanisms. Changing a harness binding does not
 automatically migrate its home, native session, or provider authentication.
 
+**Proposed, operator direction:** Anvil maintains a superset of the chats and work
+it coordinates across harnesses, so users can continue one project without
+repeatedly switching tools or reconstructing context. Linked harness conversations
+retain their identities and results within that shared work. The manager uses
+user-defined strengths on configured harness/model/tool combinations to choose
+an executor as well as a conversation. See the
+[shared work and harness-strength contract](shared-work-and-harness-strengths.md)
+for selection, handoff, live UI and media-workflow scenarios.
+
 ## 2. Message routing and delivery
 
 **Observed:** Routing considers a bounded inventory of existing Anvil work and

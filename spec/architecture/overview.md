@@ -77,6 +77,13 @@ provider state; that does not make it an Anvil conversation archive.
 
 ## Extension seams
 
+**Proposed, operator direction:** A shared Anvil work layer links participating
+conversations and artifacts across harnesses, with editable strengths describing
+eligible harness/model/tool setups. The manager selects both work context and an
+executor, and returns delivery/results to that shared view. This extends the
+current local/remote paths; the diagram above does not depict it as implemented.
+See [shared work and harness strengths](../contracts/shared-work-and-harness-strengths.md).
+
 **Proposed:** Portable harness capability declarations, outcome verifiers, richer
 workflow transitions, and addressed completion delivery belong at explicit seams
 between these components. A common work identity could link their evidence while
