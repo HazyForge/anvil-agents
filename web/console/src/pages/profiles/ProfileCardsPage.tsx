@@ -4,6 +4,7 @@ import { APIError } from "../../api/client";
 import { listComposition } from "../../api/composition";
 import type { CompositionDocument } from "../../api/types.composition";
 import { CompositionResourceCard } from "../../components/CompositionResourceCard";
+import { Icon } from "../../components/Icon";
 import { CRD_AS_CARD_HELP, CRD_AS_CARD_MANTRA } from "../../design/mantra";
 import { compositionCardSummary } from "../../utils/compositionSummary";
 
@@ -62,60 +63,76 @@ export function ProfileCardsPage({ token, namespace, writeEnabled }: Props) {
 
   if (!namespace) {
     return (
-      <div className="panel">
-        <div className="panel-body empty">Select a namespace to browse AgentRunProfiles.</div>
+      <div className="empty-state plate">
+        <Icon name="profiles" />
+        <p className="empty">Select a namespace to browse AgentRunProfiles.</p>
       </div>
     );
   }
 
+  const writableCount = items.filter((doc) => doc.management.writable).length;
+
   return (
     <div className="profiles-page">
-      <div className="page-header">
+      <header className="page-header">
         <div>
+          <span className="page-kicker kicker-id">{namespace} · AgentRunProfile</span>
           <h1 className="page-title">Profiles</h1>
           <p className="page-sub">
             AgentRunProfile CRDs for namespace <span className="mono">{namespace}</span>
           </p>
         </div>
-        <div className="chip-row">
+        <div className="page-actions">
+          {!loading && !error ? (
+            <span className="count-pill">
+              {items.length} profiles · {writableCount} console
+            </span>
+          ) : null}
           {writeEnabled ? (
             <button
               type="button"
               className="btn btn-primary"
               onClick={() => navigate("/profiles/new")}
             >
+              <Icon name="plus" />
               New profile
             </button>
           ) : (
             <span className="chip chip-mute">create disabled</span>
           )}
         </div>
-      </div>
+      </header>
 
       <div className="banner banner-info">
-        <strong>{CRD_AS_CARD_MANTRA}</strong> {CRD_AS_CARD_HELP} Assign avatars via{" "}
-        <span className="mono">ui.anvil.hazyforge.io/icon</span>. GitOps-owned profiles stay
-        read-only.
+        <span>
+          <strong>{CRD_AS_CARD_MANTRA}</strong> {CRD_AS_CARD_HELP} Assign avatars via{" "}
+          <span className="mono">ui.anvil.hazyforge.io/icon</span>. GitOps-owned profiles stay
+          read-only.
+        </span>
       </div>
 
       <div className="filters-bar">
-        <label className="field" style={{ flex: 1, minWidth: "14rem" }}>
+        <label className="field">
           <span className="label">Search</span>
-          <input
-            className="input"
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder="name, description, harness…"
-          />
+          <span className="input-icon">
+            <Icon name="search" />
+            <input
+              className="input"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="name, description, harness…"
+            />
+          </span>
         </label>
       </div>
 
       {error ? <div className="banner banner-error">{error}</div> : null}
-      {loading ? <div className="empty">Loading profiles…</div> : null}
+      {loading ? <div className="empty empty-loading">Loading profiles…</div> : null}
 
       {!loading && !error && filtered.length === 0 ? (
-        <div className="panel">
-          <div className="panel-body empty">No AgentRunProfiles in this namespace.</div>
+        <div className="empty-state plate">
+          <Icon name="profiles" />
+          <p className="empty">No AgentRunProfiles in this namespace.</p>
         </div>
       ) : null}
 
@@ -140,7 +157,7 @@ export function ProfileCardsPage({ token, namespace, writeEnabled }: Props) {
         </div>
       ) : null}
 
-      <p className="page-sub" style={{ marginTop: "1rem" }}>
+      <p className="page-sub page-footnote">
         Supporting CRDs (harness, skills, tools, volumes) are also cards under{" "}
         <Link to="/library">Library</Link>.
       </p>

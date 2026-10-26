@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { openAgentRunStream } from "../api/stream";
 import type { AgentRunView, StreamEnvelope } from "../api/types";
 import { copyText, formatTime } from "../utils/format";
+import { Icon } from "./Icon";
 
 interface StreamRow {
   key: string;
@@ -148,45 +149,54 @@ export function LiveStream({ token, namespace, name, onRunUpdate }: Props) {
     window.setTimeout(() => setCopyState(""), 1500);
   }
 
+  const tone = status === "live" ? "live" : status === "error" ? "error" : status === "connecting" ? "connecting" : "idle";
+
   return (
-    <div className="panel stream-panel span-2">
+    <div className={`panel stream-panel span-2${status === "live" ? " live" : status === "error" ? " danger" : ""}`}>
       <div className="stream-toolbar">
-        <span className="panel-title">Live stream</span>
-        <button type="button" className="btn" onClick={handleCopyName}>
-          Copy run name{copyState ? ` (${copyState})` : ""}
-        </button>
-        <label className="check">
-          <input type="checkbox" checked={follow} onChange={(e) => setFollow(e.target.checked)} />
-          Follow latest
-        </label>
-        <button
-          type="button"
-          className="btn"
-          title="Open a new stream without Last-Event-ID"
-          onClick={() => {
-            restartFromBeginning.current = true;
-            setReconnectKey((k) => k + 1);
-          }}
-        >
-          Restart stream
-        </button>
-        <button
-          type="button"
-          className="btn"
-          title="Reconnect using Last-Event-ID when available"
-          onClick={() => {
-            setReconnectKey((k) => k + 1);
-          }}
-        >
-          Resume / reconnect
-        </button>
-        <span className={`stream-status ${status === "live" ? "live" : status === "error" ? "error" : ""}`}>
-          {statusText}
+        <span className="panel-title">
+          <Icon name="stream" />
+          Live stream
         </span>
+        <span className={`stream-status ${tone}`}>{statusText}</span>
+        <span className="stream-count mono" aria-hidden="true">
+          {rows.length} lines
+        </span>
+        <div className="stream-actions">
+          <label className="check">
+            <input type="checkbox" checked={follow} onChange={(e) => setFollow(e.target.checked)} />
+            Follow latest
+          </label>
+          <button type="button" className="btn btn-ghost" onClick={handleCopyName}>
+            <Icon name="copy" />
+            Copy run name{copyState ? ` (${copyState})` : ""}
+          </button>
+          <button
+            type="button"
+            className="btn"
+            title="Open a new stream without Last-Event-ID"
+            onClick={() => {
+              restartFromBeginning.current = true;
+              setReconnectKey((k) => k + 1);
+            }}
+          >
+            Restart stream
+          </button>
+          <button
+            type="button"
+            className="btn"
+            title="Reconnect using Last-Event-ID when available"
+            onClick={() => {
+              setReconnectKey((k) => k + 1);
+            }}
+          >
+            Resume / reconnect
+          </button>
+        </div>
       </div>
       <div className="stream-log" ref={scrollerRef}>
         {rows.length === 0 ? (
-          <div className="empty">Waiting for SSE events…</div>
+          <div className="empty empty-loading">Waiting for SSE events…</div>
         ) : (
           rows.map((row) => (
             <div key={row.key} className={`stream-line kind-${row.kind}`}>

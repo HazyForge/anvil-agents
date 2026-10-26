@@ -325,6 +325,7 @@ select option { background: var(--ink); color: var(--paper); }
   box-shadow: 0 0 0 3px rgba(80, 216, 250, 0.14);
 }
 .input:disabled, .select:disabled, .textarea:disabled { opacity: 0.55; cursor: not-allowed; }
+:is(.input, .textarea).mono { font-family: var(--font-mono); font-size: 13px; }
 
 input[type="checkbox"] {
   appearance: none;
@@ -414,6 +415,8 @@ input[type="checkbox"]:disabled { opacity: 0.45; cursor: not-allowed; }
 .banner-ok { --tone: var(--mint); }
 .banner-warn { --tone: var(--amber); color: #ffe3a8; }
 .banner-error { --tone: var(--red); color: #ffd5d0; }
+/* Flex keeps a trailing action aligned; wrap mixed inline text in one span. */
+.banner > span { flex: 1 1 auto; min-width: 0; }
 .banner > .btn { margin-left: auto; }
 
 /* ── Pre, meta, tables ────────────────────────────────────────────────── */

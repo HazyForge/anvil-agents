@@ -7,7 +7,8 @@ import {
   shortError,
   sourceLabel,
 } from "../utils/format";
-import { PhaseBadge } from "./PhaseBadge";
+import { Icon } from "./Icon";
+import { PhaseBadge, phaseKey } from "./PhaseBadge";
 
 interface Props {
   runs: AgentRunView[];
@@ -19,8 +20,11 @@ interface Props {
 export function RunBoard({ runs, namespace, emptyHint }: Props) {
   if (runs.length === 0) {
     return (
-      <div className="empty">
-        {emptyHint || `No AgentRuns match the current filters in ${namespace}.`}
+      <div className="empty-state plate">
+        <Icon name="runs" />
+        <p className="empty">
+          {emptyHint || `No AgentRuns match the current filters in ${namespace}.`}
+        </p>
       </div>
     );
   }
@@ -31,26 +35,39 @@ export function RunBoard({ runs, namespace, emptyHint }: Props) {
         const report = latestReportSummary(run);
         const error = shortError(run.error);
         const href = `/ns/${encodeURIComponent(run.namespace)}/runs/${encodeURIComponent(run.name)}`;
+        const tone = phaseKey(run.phase);
         return (
-          <article key={`${run.namespace}/${run.name}/${run.uid}`} className="agent-card run-card">
-            <header className="agent-card-header">
-              <div className="chip-row">
-                <PhaseBadge phase={run.phase} />
-                <span className="chip chip-mute">AgentRun</span>
-                {run.backend ? <span className="chip mono">{run.backend}</span> : null}
-                {run.model ? (
-                  <span className="chip mono" title="Model">
-                    {run.model}
-                  </span>
-                ) : null}
-              </div>
-              <h2 className="agent-card-title mono">
-                <Link to={href}>{run.name}</Link>
-              </h2>
+          <article
+            key={`${run.namespace}/${run.name}/${run.uid}`}
+            className={`agent-card run-card card tone-${tone}${toneClass(tone)}`}
+          >
+            <span className="run-card-rail" aria-hidden="true" />
+            <header className="run-card-head">
+              <PhaseBadge phase={run.phase} />
+              <span className="run-card-duration mono" title="Duration">
+                {formatDuration(run)}
+              </span>
             </header>
+            <h2 className="agent-card-title run-card-title mono">
+              <Link to={href}>{run.name}</Link>
+            </h2>
             <p className="agent-card-desc">
               {report || error || run.intent || "No report summary yet."}
             </p>
+            {error ? (
+              <div className="run-card-error" title={run.error}>
+                {error}
+              </div>
+            ) : null}
+            <div className="chip-row">
+              <span className="chip chip-mute mono">AgentRun</span>
+              {run.backend ? <span className="chip mono">{run.backend}</span> : null}
+              {run.model ? (
+                <span className="chip mono chip-info" title="Model">
+                  {run.model}
+                </span>
+              ) : null}
+            </div>
             <div className="agent-card-meta mono">
               {[
                 run.model ? `model:${run.model}` : null,
@@ -62,18 +79,11 @@ export function RunBoard({ runs, namespace, emptyHint }: Props) {
                 .filter(Boolean)
                 .join(" · ")}
             </div>
-            <div className="agent-card-meta">
+            <div className="agent-card-meta run-card-time mono">
               created {formatTime(run.createdAt)}
               {run.startedAt ? ` · started ${formatTime(run.startedAt)}` : ""}
               {run.completedAt ? ` · done ${formatTime(run.completedAt)}` : ""}
-              {" · "}
-              {formatDuration(run)}
             </div>
-            {error ? (
-              <div className="run-card-error" title={run.error}>
-                {error}
-              </div>
-            ) : null}
             <footer className="agent-card-actions">
               <Link className="btn btn-primary" to={href}>
                 Open
@@ -87,6 +97,7 @@ export function RunBoard({ runs, namespace, emptyHint }: Props) {
                   onClick={(event) => event.stopPropagation()}
                 >
                   PR
+                  <Icon name="external" />
                 </a>
               ) : null}
             </footer>
@@ -95,4 +106,18 @@ export function RunBoard({ runs, namespace, emptyHint }: Props) {
       })}
     </div>
   );
+}
+
+/** Plate edge tone for a phase: live, failed, and waiting-on-a-human read at a glance. */
+function toneClass(tone: string): string {
+  switch (tone) {
+    case "running":
+      return " live";
+    case "failed":
+      return " danger";
+    case "needshuman":
+      return " warn";
+    default:
+      return "";
+  }
 }

@@ -180,7 +180,7 @@ export function CompositionCardPicker(props: Props) {
                 key={opt.name}
                 type="button"
                 className={[
-                  "compose-pick-card",
+                  "compose-pick-card card",
                   isSelected ? "compose-pick-card-selected" : "",
                   opt.danger ? "compose-pick-card-danger" : "",
                   disabled ? "compose-pick-card-disabled" : "",

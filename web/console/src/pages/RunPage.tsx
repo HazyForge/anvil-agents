@@ -95,8 +95,8 @@ export function RunPage({ token, onViewNamespace }: Props) {
   }
 
   return (
-    <div className="stack">
-      <div className="toolbar-inline">
+    <div className="run-page">
+      <div className="run-toolbar">
         <Link className="back-link" to="/" onClick={handleBackToBoard}>
           ← Run board{namespace ? ` (${namespace})` : ""}
         </Link>
@@ -108,7 +108,7 @@ export function RunPage({ token, onViewNamespace }: Props) {
       {run && run.namespace === namespace && run.name === name ? (
         <RunDetail run={run} token={token} onRunUpdate={setRun} />
       ) : !error ? (
-        <div className="empty">Loading run…</div>
+        <div className="empty empty-loading">Loading run…</div>
       ) : null}
     </div>
   );

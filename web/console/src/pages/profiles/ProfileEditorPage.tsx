@@ -13,6 +13,7 @@ import {
   CompositionCardPicker,
   optionsFromDocs,
 } from "../../components/CompositionCardPicker";
+import { Icon } from "../../components/Icon";
 import { IconPicker } from "../../components/IconPicker";
 import {
   getIconUrl,
@@ -418,36 +419,43 @@ export function ProfileEditorPage({ token, namespace: activeNamespace, writeEnab
   }
 
   return (
-    <div className="profile-editor">
-      <div className="page-header">
+    <div className="profile-editor editor-page">
+      <header className="page-header">
         <div>
           <div className="breadcrumb">
             <Link to="/profiles">Profiles</Link>
             <span>/</span>
             <span>{isCreate ? "new" : nameParam}</span>
           </div>
-          <h1 className="page-title">{isCreate ? "New AgentRunProfile" : nameParam}</h1>
+          <h1 className={`page-title page-title-icon${isCreate ? "" : " page-title-id"}`}>
+            <span className="kind-tile" aria-hidden="true">
+              <Icon name="profiles" />
+            </span>
+            {isCreate ? "New AgentRunProfile" : nameParam}
+          </h1>
           <p className="page-sub">
             Namespace <span className="mono">{namespace}</span>
             {" · "}
             compose by picking harness / skill / tool / council cards
           </p>
         </div>
-        <div className="chip-row">
+        <div className="page-actions">
           {writable ? (
             <button type="button" className="btn btn-primary" disabled={saving} onClick={() => void onSave()}>
               {saving ? "Saving…" : isCreate ? "Create profile" : "Save"}
             </button>
           ) : (
-            <span className="chip chip-mute">
+            <span className="chip chip-lock">
+              <Icon name="lock" />
               {writeEnabled ? "GitOps / non-console profile" : "write disabled"}
             </span>
           )}
         </div>
-      </div>
+      </header>
 
       {!isCreate && doc && !doc.management.writable ? (
         <div className="banner banner-lock">
+          <Icon name="lock" />
           {doc.management.reason === "gitops_protected"
             ? `GitOps source of truth (${doc.management.managedBy || "gitops"}). Edit the Git repository instead.`
             : "This profile is not console-managed and cannot be updated through the API."}
@@ -456,10 +464,10 @@ export function ProfileEditorPage({ token, namespace: activeNamespace, writeEnab
 
       {error ? <div className="banner banner-error">{error}</div> : null}
       {info ? <div className="banner banner-ok">{info}</div> : null}
-      {loading ? <div className="empty">Loading…</div> : null}
+      {loading ? <div className="empty empty-loading">Loading…</div> : null}
 
       {!loading ? (
-        <div className="panel">
+        <div className="panel editor-panel">
           <div className="panel-header">
             <h2 className="panel-title">Profile composition</h2>
             {!isCreate && doc ? (
@@ -582,7 +590,10 @@ export function ProfileEditorPage({ token, namespace: activeNamespace, writeEnab
 
             {!isCreate && writable ? (
               <div className="danger-zone">
-                <div className="label">Delete</div>
+                <div className="label">
+                  <Icon name="alert" />
+                  Delete
+                </div>
                 <p className="page-sub">
                   Type <span className="mono">{doc?.metadata.name}</span> to confirm.
                 </p>

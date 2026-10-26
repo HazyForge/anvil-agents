@@ -31,6 +31,8 @@ export default defineConfig(({ mode }) => {
       emptyOutDir: true,
       // Do not ship .map files on the API host (token-bearing operator console).
       sourcemap: false,
+      // Never inline fonts as data: URLs; the API CSP is font-src 'self'.
+      assetsInlineLimit: (filePath: string) => (/\.(woff2?|ttf|otf)$/i.test(filePath) ? false : undefined),
     },
   };
 });

@@ -109,7 +109,7 @@ export function HarnessProfileForm({
               <button
                 key={opt.kind}
                 type="button"
-                className={["backend-kind-card", selected ? "backend-kind-card-selected" : ""]
+                className={["backend-kind-card card", selected ? "backend-kind-card-selected" : ""]
                   .filter(Boolean)
                   .join(" ")}
                 disabled={disabled}
@@ -127,7 +127,9 @@ export function HarnessProfileForm({
 
       {kindMeta ? (
         <div className="banner banner-info harness-kind-banner">
-          <strong>{kindMeta.title}</strong> — {kindMeta.detail}
+          <span>
+            <strong>{kindMeta.title}</strong> — {kindMeta.detail}
+          </span>
         </div>
       ) : null}
 
