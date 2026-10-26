@@ -416,22 +416,6 @@ export function EntityChatPage({token, config}: Props) {
     </div></div>
     {!enabled && <div className="banner banner-error">Remote chat is not enabled on this server.</div>}
     {error && <div className="banner banner-error" role="alert">{error}</div>}
-    {enabled ? (
-      <CreateAgentPanel
-        token={token}
-        namespace={namespace}
-        principal={createPrincipal}
-        writeEnabled={Boolean(config.composition.writeEnabled)}
-        chatEnabled={Boolean(config.chat?.enabled)}
-        threadId={threadID || undefined}
-        prefill={createPrefill}
-        onCreated={(result) => {
-          if (result.ok) {
-            void listRunProfiles(token, namespace).then(setProfiles).catch(() => { /* roster refresh is optional */ });
-          }
-        }}
-      />
-    ) : null}
     <div className="remote-chat-layout">
       <aside className="panel remote-chat-sidebar agent-roster" aria-label="Agents">
         <ProjectSwitcher projects={projects} selected={namespace} disabled={busy} onChange={next => {
@@ -455,9 +439,28 @@ export function EntityChatPage({token, config}: Props) {
           })}
         </section>)}
         {!profiles.length && <p className="agent-empty">{loading ? 'Loading agents…' : `No agents are available in ${selectedProject?.name || 'this project'}.`}</p>}
-        <details className="agent-settings"><summary>Other chats</summary>
-          <button type="button" className="btn btn-ghost" onClick={() => newChat(true)} disabled={busy || initializing}>Chat with a harness</button>
-        </details>
+        <div className="agent-roster-foot">
+          <details className="agent-settings"><summary>Other chats</summary>
+            <button type="button" className="btn btn-ghost" onClick={() => newChat(true)} disabled={busy || initializing}>Chat with a harness</button>
+          </details>
+          {enabled ? (
+            <CreateAgentPanel
+              variant="drawer"
+              token={token}
+              namespace={namespace}
+              principal={createPrincipal}
+              writeEnabled={Boolean(config.composition.writeEnabled)}
+              chatEnabled={Boolean(config.chat?.enabled)}
+              threadId={threadID || undefined}
+              prefill={createPrefill}
+              onCreated={(result) => {
+                if (result.ok) {
+                  void listRunProfiles(token, namespace).then(setProfiles).catch(() => { /* roster refresh is optional */ });
+                }
+              }}
+            />
+          ) : null}
+        </div>
       </aside>
       <section className="panel entity-chat-main">
         <header className="agent-chat-header">
@@ -558,7 +561,7 @@ export function EntityChatPage({token, config}: Props) {
           {earlierFailures.length > 0 && <details className="remote-chat-caption"><summary>Earlier failed turns ({earlierFailures.length})</summary>{earlierFailures.map(t => <p key={t.id}>Turn failed: {t.error || t.runName}</p>)}</details>}
           <div ref={end}/>
         </div>
-        <form className="chat-composer" onSubmit={e => void submit(e)}>
+        <form className="chat-composer plate" onSubmit={e => void submit(e)}>
           <label className="field"><span className="label">Message</span><textarea className="textarea chat-composer-input" rows={3} aria-label="Message" value={draft} disabled={busy || !enabled || initializing} onChange={e => changeDraft(e.target.value)} onKeyDown={e => {if(e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {e.preventDefault(); void submit();}}} placeholder="Message this agent…"/></label>
           <div className="chat-composer-actions"><span className="chat-composer-hint">Enter to send · Shift + Enter for a new line</span><button className="btn btn-primary" disabled={busy || retryPending || Boolean(active) || unavailable || initializing || !draft.trim() || (!profile && !harness) || !enabled || (coordinate && !peers.length)}>{busy ? 'Sending…' : active ? 'Waiting for reply…' : 'Send'}</button></div>
         </form>

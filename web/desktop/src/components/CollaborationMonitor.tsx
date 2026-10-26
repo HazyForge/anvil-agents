@@ -78,7 +78,7 @@ export function CollaborationMonitor({ token, namespace, runA, runB, objective }
   }, [bothRunning, peerDetected, phaseA, phaseB]);
 
   return (
-    <section className="panel" style={{ marginTop: "0.75rem" }}>
+    <section className="panel">
       <div className="panel-header">
         <h2 className="panel-title">Shared objective · in-flight collaboration</h2>
         <span className={`chip ${bothRunning ? "chip-ok" : ""}`}>

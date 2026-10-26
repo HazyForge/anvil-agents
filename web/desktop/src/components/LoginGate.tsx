@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { beginLogin } from "../auth/oidc";
 import { saveStubSession } from "../auth/session";
 import { DEFAULT_API_ORIGIN } from "../product";
+import { HazyForgeMark } from "./AgentAvatar";
 import type { OIDCClientSource } from "../auth/config";
 
 interface Props {
@@ -73,6 +74,8 @@ export function LoginGate({
 
   return (
     <div className="panel token-gate">
+      <HazyForgeMark className="token-gate-mark"/>
+      <span className="page-kicker">Anvil Agents</span>
       <h1>Sign in</h1>
       <p>Use your Hazy Forge account to see cluster agents and runs.</p>
       {oidcClientSource === "console" && oidcClientId ? (

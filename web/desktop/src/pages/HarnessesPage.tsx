@@ -1,7 +1,13 @@
 import { useMemo, useState } from "react";
 import { delegateHarness } from "../api/client";
 import type { DelegateResult, Prefs, Snapshot } from "../api/types";
+import { AgentAvatar } from "../components/AgentAvatar";
 import { LocalRuntimeCard } from "../components/LocalRuntimeCard";
+
+/** Tile initials come from the product, not the vendor prefix. */
+function tileName(displayName: string): string {
+  return displayName.replace(/^(OpenAI|xAI)\s+/, "");
+}
 
 export function HarnessesPage({
   snapshot,
@@ -46,7 +52,8 @@ export function HarnessesPage({
     <div>
       <div className="page-header">
         <div>
-          <h1 className="page-title">Local</h1>
+          <span className="page-kicker">Local</span>
+          <h1 className="page-title">Harnesses</h1>
           <p className="page-sub">Run a program already on this machine. Cluster agents stay on Chat and Runs.</p>
         </div>
       </div>
@@ -55,9 +62,14 @@ export function HarnessesPage({
         <div>
           <div className="card-grid">
             {harnesses.map((item) => (
-              <article key={item.id} className={`card ${item.present ? "card-present" : "card-missing"}`}>
-                <div className="card-kicker">{item.backend || "harness"}</div>
-                <h2 className="card-title">{item.displayName}</h2>
+              <article key={item.id} className={`card ${item.present ? "card-present" : "card-missing off"}`}>
+                <header className="card-head">
+                  <AgentAvatar name={tileName(item.displayName)} identity={item.id}/>
+                  <div className="card-head-copy">
+                    <div className="card-kicker">{item.backend || "harness"}</div>
+                    <h2 className="card-title">{item.displayName}</h2>
+                  </div>
+                </header>
                 <div className="chip-row">
                   <span className={`chip ${item.present ? "chip-ok" : ""}`}>
                     {item.present ? sourceLabel : "not found"}
@@ -78,9 +90,14 @@ export function HarnessesPage({
               <h2 className="section-title">Also on this machine</h2>
               <div className="card-grid">
                 {others.map((item) => (
-                  <article key={item.id} className={`card ${item.present ? "card-present" : "card-missing"}`}>
-                    <div className="card-kicker">{item.kind}</div>
-                    <h2 className="card-title">{item.displayName}</h2>
+                  <article key={item.id} className={`card ${item.present ? "card-present" : "card-missing off"}`}>
+                    <header className="card-head">
+                      <AgentAvatar name={tileName(item.displayName)} identity={item.id}/>
+                      <div className="card-head-copy">
+                        <div className="card-kicker">{item.kind}</div>
+                        <h2 className="card-title">{item.displayName}</h2>
+                      </div>
+                    </header>
                     <div className="chip-row">
                       <span className={`chip ${item.present ? "chip-ok" : ""}`}>{item.present ? sourceLabel : "not found"}</span>
                       {item.version ? <span className="chip mono">{item.version}</span> : null}
@@ -93,7 +110,7 @@ export function HarnessesPage({
             </>
           ) : null}
         </div>
-        <section className="panel">
+        <section className="panel activate-panel">
           <div className="panel-header">
             <h2 className="panel-title">Activate</h2>
           </div>

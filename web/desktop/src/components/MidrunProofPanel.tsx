@@ -70,7 +70,7 @@ export function MidrunProofPanel({ token, namespace, onLoaded }: Props) {
   }, [watching, token, namespace]);
 
   return (
-    <section className="panel" style={{ marginTop: "0.75rem" }}>
+    <section className="panel">
       <div className="panel-header">
         <h2 className="panel-title">Midrun grok proof (existing)</h2>
         <span className="chip mono">{MIDRUN_OBJECTIVE}</span>

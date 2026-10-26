@@ -19,6 +19,7 @@ terms; this file does not replace their license texts or grant model/API access.
 | Kubernetes kubectl | `v1.34.0`, [kubernetes/kubernetes](https://github.com/kubernetes/kubernetes) | Apache-2.0 | Downloaded into runner images for optional cluster workflows. |
 | Helm | `v3.21.2`, [helm/helm](https://github.com/helm/helm) | Apache-2.0 | Downloaded into Codex and Grok Build runners; used on the judge host. |
 | GitHub CLI | distribution package, [cli/cli](https://github.com/cli/cli) | MIT; GitHub service terms apply | Installed in runner images for optional repository workflows. |
+| Barlow, Manrope, JetBrains Mono and Michroma typefaces | `@fontsource/barlow@5.3.0`, `@fontsource-variable/manrope@5.3.0`, `@fontsource-variable/jetbrains-mono@5.3.0`, `@fontsource/michroma@5.3.0` via [Fontsource](https://fontsource.org/) | SIL Open Font License 1.1 | Bundled as WOFF/WOFF2 files into the Console and Desktop web builds, which are served under `font-src 'self'`. Each npm package carries the font's license text. |
 
 Runner images also contain Go, Node.js, Debian packages, base-image contents,
 and Go/npm transitive dependencies. Their package metadata and upstream license

@@ -11,7 +11,7 @@ import { EntityChatPage } from "./pages/EntityChatPage";
 import { HarnessesPage } from "./pages/HarnessesPage";
 import { LocalChatPage } from "./pages/LocalChatPage";
 import { WrapperPage } from "./pages/WrapperPage";
-import { DesktopIcon } from "./components/AgentAvatar";
+import { DesktopIcon, HazyForgeMark } from "./components/AgentAvatar";
 import { PRODUCT_TITLE } from "./product";
 
 export default function App() {
@@ -156,7 +156,7 @@ export default function App() {
       onAuthenticated={handleAuthenticated}
     />
   ) : (
-    <div className="empty">Loading Anvil Agents Desktop…</div>
+    <div className="empty empty-loading">Loading Anvil Agents Desktop…</div>
   );
 
   const remoteChat = snapshot && signedIn && config ? (
@@ -164,61 +164,74 @@ export default function App() {
   ) : (
     login
   );
+  const chooseLocation = (next: 'local' | 'remote') => {
+    setChatLocation(next);
+    try { localStorage.setItem('anvil-agents-desktop.chat-location', next); } catch { /* In-memory selection remains. */ }
+  };
   const chat = <>
     <div className="chat-location" role="group" aria-label="Chat execution location">
       <span className="chat-location-label">Location</span>
-      <button aria-pressed={chatLocation === 'local'} className={`btn ${chatLocation === 'local' ? 'btn-primary' : 'btn-ghost'}`} disabled={localChatBusy} onClick={() => {setChatLocation('local'); try {localStorage.setItem('anvil-agents-desktop.chat-location', 'local');} catch { /* In-memory selection remains. */ }}}>Local</button>
-      <button aria-pressed={chatLocation === 'remote'} className={`btn ${chatLocation === 'remote' ? 'btn-primary' : 'btn-ghost'}`} disabled={localChatBusy} onClick={() => {setChatLocation('remote'); try {localStorage.setItem('anvil-agents-desktop.chat-location', 'remote');} catch { /* In-memory selection remains. */ }}}>Primaris</button>
+      <div className="seg">
+        <button type="button" aria-pressed={chatLocation === 'local'} className={`seg-btn ${chatLocation === 'local' ? 'active' : ''}`} disabled={localChatBusy} onClick={() => chooseLocation('local')}>Local</button>
+        <button type="button" aria-pressed={chatLocation === 'remote'} className={`seg-btn ${chatLocation === 'remote' ? 'active' : ''}`} disabled={localChatBusy} onClick={() => chooseLocation('remote')}>Primaris</button>
+      </div>
+      <span className="chat-location-hint">{chatLocation === 'local' ? 'Harnesses on this machine' : 'Agents on the Primaris cluster'}</span>
     </div>
-    {chatLocation === 'local' ? snapshot ? <LocalChatPage snapshot={snapshot} onBusyChange={setLocalChatBusy} signedIn={signedIn} config={config} getAccessToken={freshLocalAccessToken}/> : <div className="empty">Loading local harnesses…</div> : remoteChat}
+    {chatLocation === 'local' ? snapshot ? <LocalChatPage snapshot={snapshot} onBusyChange={setLocalChatBusy} signedIn={signedIn} config={config} getAccessToken={freshLocalAccessToken}/> : <div className="empty empty-loading">Loading local harnesses…</div> : remoteChat}
   </>;
 
   return (
     <div className={`desktop-shell ${location.pathname === "/chat" ? "desktop-shell-chat" : ""}`}>
-      <div className="titlebar">
-        <span className="desktop-brand-mark"><DesktopIcon kind="forge"/></span>
-        <div className="titlebar-title">{snapshot?.productTitle ?? PRODUCT_TITLE}</div>
-        <div className="titlebar-meta">
-          <span className={`pill ${snapshot?.api.reachable ? "pill-ok" : "pill-mute"}`}>{originHost}</span>
-          {onLocal ? (
-            <span className={`pill ${snapshot?.harnessTarget === "wsl" ? "pill-ok" : "pill-mute"}`}>
-              {snapshot?.harnessTarget === "wsl"
-                ? `WSL${snapshot.wsl.defaultDistro || snapshot.prefs.wslDistro ? ` · ${snapshot.prefs.wslDistro || snapshot.wsl.defaultDistro}` : ""}`
-                : "native PATH"}
-            </span>
-          ) : null}
-          <span className={`pill ${signedIn ? "pill-ok" : "pill-mute"}`}>{signedIn ? "signed in" : "signed out"}</span>
-          <button type="button" className="btn btn-ghost" onClick={() => void refresh()} disabled={busy}>
-            {busy ? "Refreshing" : "Refresh"}
-          </button>
-          {signedIn ? (
-            <button type="button" className="btn btn-ghost" disabled={localChatBusy} onClick={() => void logout()}>
-              Sign out
-            </button>
-          ) : (
-            <button
-              type="button"
-              className="btn btn-ghost"
-              disabled={localChatBusy}
-              onClick={() => void beginLogin(location.pathname + location.search)}
-            >
-              Sign in
-            </button>
-          )}
+      <aside className="sidebar">
+        <div className="brand-lockup" title={snapshot?.productTitle ?? PRODUCT_TITLE}>
+          <HazyForgeMark/>
+          <div className="wordmark"><strong>Anvil Agents</strong><small>Desktop</small></div>
         </div>
-      </div>
-      <nav className="rail" aria-label="Primary">
-        <NavLink to="/chat" className={({ isActive }) => (isActive ? "rail-link active" : "rail-link")}>
-          <DesktopIcon kind="chat"/>Chat
-        </NavLink>
-        <NavLink to="/wrapper" aria-disabled={localChatBusy} onClick={e => {if(localChatBusy) e.preventDefault();}} className={({ isActive }) => (isActive ? "rail-link active" : "rail-link")}>
-          <DesktopIcon kind="activity"/>Activity
-        </NavLink>
-        <NavLink to="/local" aria-disabled={localChatBusy} onClick={e => {if(localChatBusy) e.preventDefault();}} className={({ isActive }) => (isActive ? "rail-link active" : "rail-link")}>
-          <DesktopIcon kind="harness"/>Harnesses
-          <span className="rail-count">{presentCount}</span>
-        </NavLink>
-      </nav>
+        <nav className="rail" aria-label="Primary">
+          <NavLink to="/chat" className={({ isActive }) => (isActive ? "rail-link active" : "rail-link")}>
+            <DesktopIcon kind="chat"/><span className="rail-label">Chat</span>
+          </NavLink>
+          <NavLink to="/wrapper" aria-disabled={localChatBusy} onClick={e => {if(localChatBusy) e.preventDefault();}} className={({ isActive }) => (isActive ? "rail-link active" : "rail-link")}>
+            <DesktopIcon kind="activity"/><span className="rail-label">Activity</span>
+          </NavLink>
+          <NavLink to="/local" aria-disabled={localChatBusy} onClick={e => {if(localChatBusy) e.preventDefault();}} className={({ isActive }) => (isActive ? "rail-link active" : "rail-link")}>
+            <DesktopIcon kind="harness"/><span className="rail-label">Harnesses</span>
+            <span className="rail-count">{presentCount}</span>
+          </NavLink>
+        </nav>
+        <div className="sidebar-foot">
+          <div className="sidebar-status" aria-label="Connection">
+            <span className={`pill ${snapshot?.api.reachable ? "pill-ok" : "pill-mute"}`} title={snapshot?.api.message}>{originHost}</span>
+            {onLocal ? (
+              <span className={`pill ${snapshot?.harnessTarget === "wsl" ? "pill-ok" : "pill-mute"}`}>
+                {snapshot?.harnessTarget === "wsl"
+                  ? `WSL${snapshot.wsl.defaultDistro || snapshot.prefs.wslDistro ? ` · ${snapshot.prefs.wslDistro || snapshot.wsl.defaultDistro}` : ""}`
+                  : "native PATH"}
+              </span>
+            ) : null}
+            <span className={`pill ${signedIn ? "pill-ok" : "pill-mute"}`}>{signedIn ? "signed in" : "signed out"}</span>
+          </div>
+          <div className="sidebar-actions">
+            <button type="button" className="btn btn-ghost" onClick={() => void refresh()} disabled={busy}>
+              <DesktopIcon kind="refresh"/><span>{busy ? "Refreshing" : "Refresh"}</span>
+            </button>
+            {signedIn ? (
+              <button type="button" className="btn btn-ghost" disabled={localChatBusy} onClick={() => void logout()}>
+                <DesktopIcon kind="signout"/><span>Sign out</span>
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="btn btn-ghost"
+                disabled={localChatBusy}
+                onClick={() => void beginLogin(location.pathname + location.search)}
+              >
+                <DesktopIcon kind="signin"/><span>Sign in</span>
+              </button>
+            )}
+          </div>
+        </div>
+      </aside>
       <main className="desktop-main">
         {error ? <div className="banner banner-error">{error}</div> : null}
         <Routes>
@@ -241,7 +254,7 @@ export default function App() {
               snapshot ? (
                 <HarnessesPage snapshot={snapshot} busy={busy} onSavePrefs={persistPrefs} />
               ) : (
-                <div className="empty">Loading Anvil Agents Desktop…</div>
+                <div className="empty empty-loading">Loading Anvil Agents Desktop…</div>
               )
             }
           />

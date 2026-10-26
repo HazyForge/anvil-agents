@@ -34,6 +34,34 @@ interface Props {
   config: UIConfig;
 }
 
+/** Chip tone for an AgentRun phase: mint while live, red on failure. */
+function phaseChip(phase?: string): string {
+  switch ((phase || "").toLowerCase()) {
+    case "running":
+      return "chip-ok chip-live";
+    case "succeeded":
+      return "chip-info";
+    case "failed":
+    case "error":
+      return "chip-fail";
+    case "pending":
+    case "queued":
+      return "chip-warn";
+    default:
+      return "";
+  }
+}
+
+function runTally(runs: AgentRunView[]): { label: string; count: number; tone: string }[] {
+  const count = (...phases: string[]) => runs.filter((run) => phases.includes((run.phase || "").toLowerCase())).length;
+  return [
+    { label: "Running", count: count("running"), tone: "live" },
+    { label: "Pending", count: count("pending", "queued"), tone: "warn" },
+    { label: "Succeeded", count: count("succeeded"), tone: "info" },
+    { label: "Failed", count: count("failed", "error"), tone: "fail" },
+  ];
+}
+
 export function WrapperPage({ token, config }: Props) {
   const [params] = useSearchParams();
   const lab = params.get("lab") === "1";
@@ -285,6 +313,7 @@ export function WrapperPage({ token, config }: Props) {
     <div className="human-page">
       <div className="page-header">
         <div>
+          <span className="page-kicker">Activity</span>
           <h1 className="page-title">Runs</h1>
           <p className="page-sub">Cluster work. Wrapper create-agent is the skill that POSTs AgentRunProfiles. See what is running, or start a run.</p>
         </div>
@@ -292,111 +321,124 @@ export function WrapperPage({ token, config }: Props) {
 
       {error ? <div className="banner banner-error">{error}</div> : null}
 
-      <CreateAgentPanel
-        token={token}
-        namespace={namespace}
-        principal={WRAPPER_PROFILE_NAME}
-        writeEnabled={Boolean(config.composition.writeEnabled)}
-        chatEnabled={Boolean(config.chat?.enabled)}
-        onCreated={(result) => {
-          if (result.ok) {
-            void (async () => {
-              try {
-                const items = await listRunProfiles(token, namespace);
-                setProfiles(items);
-              } catch {
-                /* roster refresh is optional */
-              }
-            })();
-          }
-        }}
-      />
 
-      <section className="panel">
-        <div className="panel-header">
-          <h2 className="panel-title">Now</h2>
-          <span className="muted">{runs.length}</span>
-        </div>
-        <div className="panel-body">
-          {runs.length === 0 ? (
-            <p className="muted">No runs yet in this workspace.</p>
-          ) : (
-            <table className="run-table">
-              <thead>
-                <tr>
-                  <th>Name</th>
-                  <th>Status</th>
-                  <th>Agent</th>
-                </tr>
-              </thead>
-              <tbody>
-                {runs.slice(0, 20).map((run) => (
-                  <tr key={run.name}>
-                    <td className="mono">{run.name}</td>
-                    <td>{run.phase || "—"}</td>
-                    <td>
-                      {run.resolvedComposition?.profileRef?.name
-                        ? personaLabel(run.resolvedComposition.profileRef.name)
-                        : run.backend || "—"}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </div>
-      </section>
-
-      <section className="panel" style={{ marginTop: "0.75rem" }}>
-        <div className="panel-header">
-          <h2 className="panel-title">Start a run</h2>
-        </div>
-        <div className="panel-body">
-          <label className="field">
-            <span className="label">Agent</span>
-            <select
-              className="select"
-              value={profileName}
-              onChange={(event) => setProfileName(event.target.value)}
-            >
-              {entityProfiles.length === 0 ? <option value="">Loading agents…</option> : null}
-              {entityProfiles.map((doc) => (
-                <option key={doc.metadata.name} value={doc.metadata.name}>
-                  {personaLabel(doc.metadata.name)}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="field">
-            <span className="label">What should they do?</span>
-            <textarea
-              className="input textarea"
-              rows={3}
-              value={prompt}
-              onChange={(event) => setPrompt(event.target.value)}
-              placeholder="Describe the work"
-            />
-          </label>
-          {config.runs.createEnabled ? (
-            <div className="btn-row">
-              <button
-                type="button"
-                className="btn btn-primary"
-                disabled={busy || !namespace || !prompt.trim() || !profileName.trim()}
-                onClick={() => void onCreateRun()}
-              >
-                {busy ? "Starting…" : "Start run"}
-              </button>
+      <div className="activity-grid">
+        <div className="activity-main">
+          <section className="panel activity-now">
+            <div className="panel-header">
+              <h2 className="panel-title">Now</h2>
+              <span className="chip mono">{runs.length} runs</span>
             </div>
-          ) : (
-            <p className="muted">Starting a run is turned off on this server.</p>
-          )}
+            <div className="panel-body">
+              <div className="stat-row" aria-label="Runs by status">
+                {runTally(runs).map((stat) => (
+                  <div key={stat.label} className={`stat stat-${stat.tone}`}>
+                    <span className="stat-value">{stat.count}</span>
+                    <span className="stat-label">{stat.label}</span>
+                  </div>
+                ))}
+              </div>
+              {runs.length === 0 ? (
+                <p className="muted">No runs yet in this workspace.</p>
+              ) : (
+                <table className="run-table">
+                  <thead>
+                    <tr>
+                      <th>Name</th>
+                      <th>Status</th>
+                      <th>Agent</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {runs.slice(0, 20).map((run) => (
+                      <tr key={run.name}>
+                        <td className="mono">{run.name}</td>
+                        <td><span className={`chip ${phaseChip(run.phase)}`}>{run.phase || "—"}</span></td>
+                        <td>
+                          {run.resolvedComposition?.profileRef?.name
+                            ? personaLabel(run.resolvedComposition.profileRef.name)
+                            : run.backend || "—"}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          </section>
         </div>
-      </section>
+        <div className="activity-side">
+          <CreateAgentPanel
+            token={token}
+            namespace={namespace}
+            principal={WRAPPER_PROFILE_NAME}
+            writeEnabled={Boolean(config.composition.writeEnabled)}
+            chatEnabled={Boolean(config.chat?.enabled)}
+            onCreated={(result) => {
+              if (result.ok) {
+                void (async () => {
+                  try {
+                    const items = await listRunProfiles(token, namespace);
+                    setProfiles(items);
+                  } catch {
+                    /* roster refresh is optional */
+                  }
+                })();
+              }
+            }}
+          />
+          <section className="panel">
+            <div className="panel-header">
+              <h2 className="panel-title">Start a run</h2>
+            </div>
+            <div className="panel-body">
+              <label className="field">
+                <span className="label">Agent</span>
+                <select
+                  className="select"
+                  value={profileName}
+                  onChange={(event) => setProfileName(event.target.value)}
+                >
+                  {entityProfiles.length === 0 ? <option value="">Loading agents…</option> : null}
+                  {entityProfiles.map((doc) => (
+                    <option key={doc.metadata.name} value={doc.metadata.name}>
+                      {personaLabel(doc.metadata.name)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="field">
+                <span className="label">What should they do?</span>
+                <textarea
+                  className="input textarea"
+                  rows={3}
+                  value={prompt}
+                  onChange={(event) => setPrompt(event.target.value)}
+                  placeholder="Describe the work"
+                />
+              </label>
+              {config.runs.createEnabled ? (
+                <div className="btn-row">
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    disabled={busy || !namespace || !prompt.trim() || !profileName.trim()}
+                    onClick={() => void onCreateRun()}
+                  >
+                    {busy ? "Starting…" : "Start run"}
+                  </button>
+                </div>
+              ) : (
+                <p className="muted">Starting a run is turned off on this server.</p>
+              )}
+            </div>
+          </section>
+        </div>
+      </div>
 
       {lab ? (
         <div className="lab-chrome">
-          <div className="banner banner-warn" style={{ marginTop: "0.75rem" }}>
+          <div className="banner banner-warn">
             Lab controls. Not the default Runs page.
           </div>
           {watchA && watchB ? (
@@ -413,7 +455,7 @@ export function WrapperPage({ token, config }: Props) {
             namespace={namespace}
             onLoaded={(pair) => setApiOutput(JSON.stringify(pair, null, 2))}
           />
-          <section className="panel" style={{ marginTop: "0.75rem" }}>
+          <section className="panel">
             <div className="panel-header">
               <h2 className="panel-title">Grok requestPeer proof</h2>
             </div>
@@ -456,7 +498,7 @@ export function WrapperPage({ token, config }: Props) {
               {requestPeerStatus ? <p className="muted">{requestPeerStatus}</p> : null}
             </div>
           </section>
-          <section className="panel" style={{ marginTop: "0.75rem" }}>
+          <section className="panel">
             <div className="panel-header">
               <h2 className="panel-title">Lab API</h2>
             </div>
