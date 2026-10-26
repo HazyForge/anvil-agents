@@ -14,7 +14,6 @@ import (
 	"os"
 	"path"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -64,9 +63,18 @@ func (s *Server) handleChatStream(writer http.ResponseWriter, request *http.Requ
 	var body struct {
 		DelegateRequest
 		RemoteNamespace string `json:"remoteNamespace,omitempty"`
+		ConversationID  string `json:"conversationId,omitempty"`
+		ExpectedRuntime *struct {
+			Target    string `json:"target"`
+			WSLDistro string `json:"wslDistro,omitempty"`
+		} `json:"expectedRuntime,omitempty"`
 	}
 	if json.Unmarshal(raw, &body) != nil || strings.TrimSpace(body.Prompt) == "" || len(body.Prompt) > maxPromptBytes {
 		writeError(writer, http.StatusBadRequest, "invalid_body", "local chat requires a harness and a prompt of at most 64KiB")
+		return
+	}
+	if s.loopConversationUnsettled(body.ConversationID) {
+		writeError(writer, http.StatusConflict, "conversation_unsettled", "Resolve this conversation's existing manager work before starting a direct turn.")
 		return
 	}
 	ctx, cancel := context.WithTimeout(request.Context(), delegateTimeout(body.TimeoutSeconds))
@@ -74,6 +82,10 @@ func (s *Server) handleChatStream(writer http.ResponseWriter, request *http.Requ
 	tool, target, err := s.resolveDelegate(ctx, body.Harness)
 	if err != nil {
 		writeError(writer, http.StatusBadRequest, "invalid_harness", "the selected local harness is unavailable")
+		return
+	}
+	if expected := body.ExpectedRuntime; expected != nil && (expected.Target != target.Mode || expected.WSLDistro != target.Distro) {
+		writeError(writer, http.StatusConflict, "runtime_changed", "the local runtime changed; review this conversation's runtime before sending")
 		return
 	}
 	tool = tool.forLocalChat()
@@ -85,33 +97,13 @@ func (s *Server) handleChatStream(writer http.ResponseWriter, request *http.Requ
 		writeError(writer, http.StatusBadRequest, "invalid_workdir", "working directory must be an existing absolute directory, or left empty for the Desktop workspace")
 		return
 	}
-	workspaceKey := workdir
-	if d.useWSL() {
-		workspaceKey = "wsl:" + strings.ToLower(target.Distro) + ":" + workdir
-	} else if runtime.GOOS == "windows" {
-		workspaceKey = strings.ToLower(workdir)
-	}
-	s.mu.Lock()
-	if s.chatWorkspaces == nil {
-		s.chatWorkspaces = make(map[string]bool)
-	}
-	occupied := s.chatWorkspaces[workspaceKey]
-	if !occupied {
-		s.chatWorkspaces[workspaceKey] = true
-	}
-	s.mu.Unlock()
-	if occupied {
+	workspaceKey := chatWorkspaceKey(d, target, workdir)
+	if !s.acquireChatWorkspace(d, target, workdir, "", body.ConversationID) {
 		writeError(writer, http.StatusConflict, "workdir_busy", "a local turn is still running or its cleanup is unconfirmed in this workspace")
 		return
 	}
 	cleanupConfirmed := true
-	defer func() {
-		if cleanupConfirmed {
-			s.mu.Lock()
-			delete(s.chatWorkspaces, workspaceKey)
-			s.mu.Unlock()
-		}
-	}()
+	defer func() { s.releaseChatWorkspace(workspaceKey, cleanupConfirmed) }()
 	writer.Header().Set("Content-Type", "text/event-stream")
 	writer.Header().Set("Cache-Control", "no-store")
 	writer.Header().Set("X-Accel-Buffering", "no")

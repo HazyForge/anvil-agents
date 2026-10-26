@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/hazyforge/anvil-agents/internal/desktop/uifs"
+	"github.com/hazyforge/anvil-agents/internal/subjectrouting"
 )
 
 const (
@@ -39,10 +40,14 @@ type Options struct {
 	// chat-latency reports. Empty falls back to ANVIL_CHAT_LATENCY_JSONL
 	// on the host process. Relative/empty values disable the sink.
 	ChatLatencyJSONL string
-	Discoverer       Discoverer
-	HTTPClient       *http.Client
-	Transport        http.RoundTripper
-	OnListen         func(addr string)
+	// SubjectRoutingEnabled opts into local manager classification. The provider
+	// stays in the loopback host; its credentials are never returned to the UI.
+	SubjectRoutingEnabled   bool
+	SubjectDecisionProvider subjectrouting.Provider
+	Discoverer              Discoverer
+	HTTPClient              *http.Client
+	Transport               http.RoundTripper
+	OnListen                func(addr string)
 }
 
 type issuerCache struct {
@@ -53,14 +58,19 @@ type issuerCache struct {
 
 // Server is the loopback desktop host.
 type Server struct {
-	agentToolSessions map[string]*agentToolSession
-	chatWorkspaces    map[string]bool
-	opts              Options
-	mu                sync.Mutex
-	prefs             Prefs
-	issuer            issuerCache
-	httpClient        *http.Client
-	mux               http.Handler
+	loopMu               sync.Mutex
+	loop                 *localLoop
+	loopClosed           bool
+	agentToolSessions    map[string]*agentToolSession
+	chatWorkspaces       map[string]bool
+	chatWorkspaceUnknown map[string]bool
+	chatWorkspaceOwners  map[string]string
+	opts                 Options
+	mu                   sync.Mutex
+	prefs                Prefs
+	issuer               issuerCache
+	httpClient           *http.Client
+	mux                  http.Handler
 	// chatLatencyPath is the resolved absolute JSONL sink ("" = disabled).
 	// The full path is never exposed to the SPA; snapshot reports a boolean.
 	chatLatencyPath string
@@ -122,6 +132,14 @@ func NewServer(opts Options) (*Server, error) {
 	mux.HandleFunc("POST /local/v1/prefs", server.handlePrefs)
 	mux.HandleFunc("POST /local/v1/delegate", server.handleDelegate)
 	mux.HandleFunc("POST /local/v1/chat/stream", server.handleChatStream)
+	mux.HandleFunc("POST /local/v1/manager/route", server.handleLocalManagerRoute)
+	mux.HandleFunc("GET /local/v1/manager/bench", server.handleLocalManagerScenarios)
+	mux.HandleFunc("POST /local/v1/manager/bench", server.handleLocalManagerBench)
+	mux.HandleFunc("GET /local/v1/manager/loop", server.handleLocalLoop)
+	mux.HandleFunc("POST /local/v1/manager/loop/work", server.handleLocalLoopWork)
+	mux.HandleFunc("POST /local/v1/manager/loop/observe", server.handleLocalLoopObserve)
+	mux.HandleFunc("POST /local/v1/manager/loop/decisions/{id}", server.handleLocalLoopDecision)
+	mux.HandleFunc("POST /local/v1/manager/loop/decisions/{id}/answer", server.handleLocalLoopAnswer)
 	mux.HandleFunc("POST /local/v1/agent-tool", server.handleAgentTool)
 	mux.HandleFunc("/ui-config.json", server.handleAPIProxy)
 	mux.HandleFunc("/api/", server.handleAPIProxy)
@@ -164,6 +182,10 @@ func (s *Server) setPrefs(prefs Prefs) {
 }
 
 func (s *Server) Start(ctx context.Context) error {
+	defer s.Close()
+	if _, err := s.getLoop(); err != nil {
+		return err
+	}
 	httpServer := &http.Server{
 		Addr:              s.opts.Listen,
 		Handler:           s.mux,

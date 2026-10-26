@@ -6,11 +6,14 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	"github.com/spf13/pflag"
 
 	"github.com/hazyforge/anvil-agents/internal/desktop"
+	"github.com/hazyforge/anvil-agents/internal/jev"
+	"github.com/hazyforge/anvil-agents/internal/subjectrouting"
 )
 
 func main() {
@@ -70,6 +73,13 @@ func run(ctx context.Context, args []string) int {
 				}
 			}
 		},
+	}
+
+	opts.SubjectRoutingEnabled = os.Getenv("ANVIL_DESKTOP_SUBJECT_ROUTING") == "1"
+	if opts.SubjectRoutingEnabled {
+		if backend, ok := jev.ClientFromEnv(); ok {
+			opts.SubjectDecisionProvider = subjectrouting.JevProvider{Backend: backend, Model: strings.TrimSpace(os.Getenv("ANVIL_DESKTOP_SUBJECT_MODEL"))}
+		}
 	}
 
 	server, err := desktop.NewServer(opts)

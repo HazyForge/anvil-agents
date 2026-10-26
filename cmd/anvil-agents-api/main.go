@@ -123,19 +123,19 @@ func main() {
 	}
 	// Jev intent routing backend: when the gate is on and TYPESAFE_API_KEY
 	// is set, turns classify through the live System One endpoint. Without
-	// the key no backend attaches and every turn falls back to today's
-	// behavior — never a hard fail. The key comes from the process
+	// the key direct chat keeps its normal path and the subject manager asks
+	// for an explicit choice. The key comes from the process
 	// environment only; the API gains no Secret access for this path.
-	if config.Chat.JevIntentEnabled {
+	if config.Chat.JevIntentEnabled || config.Chat.SubjectRoutingEnabled {
 		if client, ok := jev.ClientFromEnv(); ok {
 			server.SetJevBackend(client)
 			model := strings.TrimSpace(config.Chat.JevModel)
 			if model == "" {
 				model = jev.DefaultModel
 			}
-			log.Info("jev intent classification enabled", "model", model)
+			log.Info("jev classification enabled", "model", model, "subjectRouting", config.Chat.SubjectRoutingEnabled)
 		} else {
-			log.Info("jev intent gate is on but TYPESAFE_API_KEY is not set; chat turns keep today's behavior")
+			log.Info("jev routing enabled without a configured backend; direct chat remains available and subject routing requires an explicit choice")
 		}
 	}
 	if chatStore != nil {

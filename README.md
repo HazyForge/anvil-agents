@@ -2,6 +2,10 @@
 
 **Product site:** [anvil-agents.hazyforge.io](https://anvil-agents.hazyforge.io) · **Docs:** [anvil-agents.hazyforge.io/docs](https://anvil-agents.hazyforge.io/docs)
 
+**[Product and architecture specification](spec/README.md)** — the whole-product
+model, concepts, candidate contracts, scenarios, and source evidence. It covers
+the operator, Console/API, CLI, Desktop, and conversation/coordination services.
+
 Anvil Agents is an open-source Hazy Forge project for durable, distributed
 agent loops on Kubernetes. It turns independent, heavyweight agent work into
 schedulable Jobs, so repository builds, test suites, security analysis,
@@ -19,7 +23,7 @@ Run/Profile/Harness/Skills/Schedule      Kubernetes Job
                  |                            |
                  +------- status/archive <----+
                  |
-                 +------- optional OIDC read API and live SSE logs
+                 +------- optional OIDC API and live SSE logs
 ```
 
 Kubernetes provides scheduling, isolation, and distribution. Explicit
@@ -63,7 +67,8 @@ the certified submission contract.
 
 ## What It Owns
 
-- `AgentRun`: one append-only execution record and one harness Job.
+- `AgentRun`: one append-only execution record; the default runtime creates one
+  harness Job, with separate opt-in InProcess and SubstrateActor paths.
 - `AgentRunProfile`: reusable role, scope, policy, and composition defaults.
 - `AgentHarnessProfile`: reusable backend and Kubernetes execution envelope.
 - `AgentSkillSet`: reusable skills and delegated personas.
@@ -71,23 +76,26 @@ the certified submission contract.
 - `AgentCouncil`: durable workforce inventory and opt-in interaction guidance;
   it does not merge member authority or create runs.
 - `AgentSchedule`: interval and manual run creation across named templates.
+- `AgentChain`: linear, completion-driven sequencing of append-only runs.
 - `AgentExternalTrigger`: signed GitHub webhooks that create or annotate runs
   ([docs/external-triggers.md](docs/external-triggers.md)).
 - `AgentRunControl`: cluster-wide pause and concurrency policy by scope key.
 - `AgentDataVolume` and `VolumeProfile`: explicit durable PVC-backed state.
+- `AgentDataVolumeCopy`: append-only maintenance that copies state to a distinct
+  destination volume.
 - `AgentAuthSession`: operator-driven durable Codex auth reauth/logout sessions.
 - `AdverseSituation`: deduplicated event buffers with optional responders.
 - `AdverseSignal`: immutable, provider-neutral adverse evidence from any app.
-- `anvil-agents-api`: optional OIDC-protected summaries, live SSE logs, and the
-  read-only **Anvil Agents Console** SPA at `/` (see `web/console/`).
+- `anvil-agents-api`: optional OIDC-protected summaries, live events, gated run
+  creation, composition management and chat, plus the **Anvil Agents Console**
+  SPA at `/` (see `web/console/`).
 - `anvil-agentctl`: Kubernetes-authenticated fleet CLI for runs (create/list/
   get/logs/debug), `AgentRunControl` launch gates (`control pause|resume`),
   schedules (`schedule list|suspend|resume|run-now`), durable-home auth, volume
   copy, and in-pod status reporting. Private Primaris `anvilctl` has no
   `agent` subcommand; managers use the Hub HTTP API.
-- `anvil-desktop`: **Anvil Agents Desktop**, a loopback process that signs in
-  to the anvil-agents OIDC API (Anvil Primaris) and talks to cluster agents.
-  Chat and Wrapper are the product; Local harness activation is a second page
+- `anvil-desktop`: **Anvil Agents Desktop**, a loopback host for local harness
+  conversations and manager work, with optional OIDC access to remote agents
   (see `web/desktop/` and [Anvil Agents Desktop](docs/desktop.md)).
 - Collector-neutral Job and Pod labels for external log and telemetry
   pipelines.
@@ -204,13 +212,16 @@ namespaces, narrowly scoped runner identities, admission policy, and Secrets
 created only for agents. `watchNamespaces` narrows the controller cache; it
 does not narrow the chart's ClusterRole.
 
-The OIDC API is a separate read-only workload and is disabled until an issuer,
-audience, and explicit namespace authorization bindings are configured. See
+The OIDC API is a separate workload and is disabled until an issuer,
+audience, and explicit namespace authorization bindings are configured. Run
+creation, composition writes, launch controls, chat, and webhook intake have
+explicit capability gates and authorization boundaries. See
 [Security](docs/security.md) and
 [Live AgentRun API](docs/live-agent-run-stream.md).
 
 ## Documentation
 
+- [Product and architecture specification](spec/README.md)
 - [Blog: Agents as cluster jobs, not chatbots](docs/blog/2026-08-02-agents-as-cluster-jobs-not-chatbots.md)
 - **[Product site and docs](https://anvil-agents.hazyforge.io)** — public marketing site and operator docs
 - [Architecture and multi-harness semantics](docs/architecture.md)
@@ -225,6 +236,10 @@ audience, and explicit namespace authorization bindings are configured. See
 - [Operations, upgrades, and uninstall](docs/operations.md)
 - [PostgreSQL archive modes and retention](docs/archive.md)
 - [Standing chat storage and API](docs/standing-chat.md)
+- [Manager live feedback and runtime decisions — feature design](docs/ManagerLiveFeedback.md)
+- [Central manager, subject vault, and live routing](docs/subject-vault-routing.md)
+- [Local conversation routing and scenario bench](docs/local-manager-routing.md)
+- [Persistent local manager loop and recovery](docs/local-manager-loop.md)
 - [Design roadmap and known alpha boundaries](docs/design-roadmap.md)
 - [AgentRun API reference](docs/agent-run.md)
 - [Chat mailbox contract (interactive purpose)](docs/chat-delivery.md)

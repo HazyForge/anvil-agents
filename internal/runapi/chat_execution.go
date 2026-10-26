@@ -17,6 +17,7 @@ import (
 
 	agentsv1alpha1 "github.com/hazyforge/anvil-agents/api/v1alpha1"
 	"github.com/hazyforge/anvil-agents/internal/chat"
+	"github.com/hazyforge/anvil-agents/internal/jev"
 	"github.com/hazyforge/anvil-agents/internal/standing"
 )
 
@@ -57,6 +58,7 @@ func (server *Server) queueChatTurnInternal(ctx context.Context, ns, id string, 
 	return server.queueChatTurnAttempt(ctx, ns, id, body, deferred, 0)
 }
 func (server *Server) queueChatTurnAttempt(ctx context.Context, ns, id string, body AppendChatMessageRequest, deferred bool, attempt int) (ChatAppendResponse, error) {
+	routed, subjectRouted := ctx.Value(subjectTurnContextKey{}).(subjectTurnContext)
 	thread, err := server.chatStore.GetThread(ctx, ns, id)
 	if err != nil {
 		return ChatAppendResponse{}, err
@@ -73,7 +75,7 @@ func (server *Server) queueChatTurnAttempt(ctx context.Context, ns, id string, b
 	if err = server.validateChatTarget(ctx, ns, thread.ProfileName, chatHarness(thread)); err != nil {
 		return ChatAppendResponse{}, fmt.Errorf("%w: %v", chat.ErrInvalid, err)
 	}
-	if _, err = server.reconcileChatThread(ctx, ns, id); err != nil {
+	if _, err = server.reconcileChatThreadMode(ctx, ns, id, !subjectRouted); err != nil {
 		return ChatAppendResponse{}, err
 	}
 	messages, err := server.chatStore.ListMessages(ctx, ns, id)
@@ -89,10 +91,17 @@ func (server *Server) queueChatTurnAttempt(ctx context.Context, ns, id string, b
 	// execution intent. Gate off, missing TYPESAFE_API_KEY, or any Jev
 	// error falls back to today's behavior — never a hard fail, never a
 	// route on a guess. See docs/jev-intent-routing.md.
-	intent, classified := server.classifyChatIntent(ctx, body.Content, messages)
+	var intent jev.Decision
+	classified := false
+	if !subjectRouted {
+		intent, classified = server.classifyChatIntent(ctx, body.Content, messages)
+	}
 	prompt, err := buildChatPromptWithIntent(thread, messages, body.Content, intent, classified)
 	if err != nil {
 		return ChatAppendResponse{}, err
+	}
+	if subjectRouted {
+		prompt = subjectPrompt(prompt, routed)
 	}
 	if spec, ok := server.standingSessionSpec(ctx, thread); ok && strings.TrimSpace(spec.HarnessKind) != "" {
 		prompt = insertBeforeConversationJSON(prompt, standingTurnContract)
@@ -115,6 +124,19 @@ func (server *Server) queueChatTurnAttempt(ctx context.Context, ns, id string, b
 	if classified {
 		run.Annotations = annotateChatRunWithIntent(run.Annotations, intent, classified)
 	}
+	if owner := chatSubjectOwner(thread); owner != "" {
+		if run.Annotations == nil {
+			run.Annotations = map[string]string{}
+		}
+		run.Annotations[subjectOwnerAnnotation] = owner
+	}
+	if subjectRouted {
+		if run.Annotations == nil {
+			run.Annotations = map[string]string{}
+		}
+		run.Annotations["control.anvil.hazyforge.io/subject-id"] = routed.Subject.ID
+		run.Annotations["control.anvil.hazyforge.io/subject-intent"] = routed.Decision.Intent
+	}
 	// Freeze the validated opaque application key alongside the accepted intent.
 	if application != "" {
 		run.Spec.Scope.ApplicationRef = &agentsv1alpha1.ApplicationReferenceSpec{Name: application}
@@ -134,7 +156,17 @@ func (server *Server) queueChatTurnAttempt(ctx context.Context, ns, id string, b
 	if len(messages) > 0 {
 		expectedSequence = messages[len(messages)-1].Sequence
 	}
-	turn, user, thread, err := server.chatStore.QueueTurn(ctx, chat.Turn{ID: turnID, ExpectedSequence: &expectedSequence, LockKeys: lockKeys, Deferred: deferred, ProfileName: chatExecutionKey(thread), Namespace: ns, ThreadID: id, RequestID: body.RequestID, RunName: runName, RunJSON: raw}, chat.Message{Content: body.Content, Metadata: chatAuthorMetadataWithIntent(thread, deferred, intent, classified)})
+	metadata := chatAuthorMetadataWithIntent(thread, deferred, intent, classified)
+	if subjectRouted {
+		var values map[string]any
+		_ = json.Unmarshal(metadata, &values)
+		if values == nil {
+			values = map[string]any{}
+		}
+		values["subjectId"], values["subjectDecision"] = routed.Subject.ID, routed.Decision
+		metadata, _ = json.Marshal(values)
+	}
+	turn, user, thread, err := server.chatStore.QueueTurn(ctx, chat.Turn{ID: turnID, ExpectedSequence: &expectedSequence, LockKeys: lockKeys, Deferred: deferred, QueueAfterActive: subjectRouted, ProfileName: chatExecutionKey(thread), Namespace: ns, ThreadID: id, RequestID: body.RequestID, RunName: runName, RunJSON: raw}, chat.Message{Content: body.Content, Metadata: metadata})
 	if errors.Is(err, chat.ErrConversationChanged) && attempt < 3 {
 		return server.queueChatTurnAttempt(ctx, ns, id, body, deferred, attempt+1)
 	}
@@ -143,7 +175,7 @@ func (server *Server) queueChatTurnAttempt(ctx context.Context, ns, id string, b
 	}
 	// The outbox is committed before Kubernetes creation. A failed request or
 	// process restart cannot lose accepted work or create a second execution.
-	if err = server.reconcileChatTurn(ctx, &turn); err != nil {
+	if err = server.reconcileChatTurnMode(ctx, &turn, !subjectRouted); err != nil {
 		server.log.Error(err, "chat turn remains queued for recovery", "namespace", ns, "turn", turn.ID)
 	}
 	return ChatAppendResponse{Thread: thread, User: user, Turn: turn}, nil
