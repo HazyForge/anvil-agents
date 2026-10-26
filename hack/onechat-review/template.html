@@ -1,0 +1,387 @@
+<title>One Chat Review</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Michroma&family=Manrope:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: one review column; each turn reads top to bottom as said → saw → decided → did → answered, on a rail. Forge Deck, dark by design. */
+:root {
+  --void: #010605;
+  --plate: #06120f;
+  --plate-2: #0b1a17;
+  --edge: rgba(80, 216, 250, 0.20);
+  --edge-strong: rgba(80, 216, 250, 0.45);
+  --fg: #dcf3ee;
+  --muted: #86a9a1;
+  --faint: #4f6e67;
+  --cyan: #50d8fa;
+  --blue: #3786f7;
+  --mint: #5cf0b0;
+  --amber: #ffc24d;
+  --red: #ff8a80;
+  --local: #8fb8ff;
+  --cloud: #5cf0b0;
+  --display: "Michroma", "Eurostile", "Bank Gothic", system-ui, sans-serif;
+  --body: "Manrope", "Segoe UI", system-ui, sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  --cut: 12px;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+.bubble, .pre, .txt, .last, .why, .err { font-variant-ligatures: none; font-feature-settings: "liga" 0, "calt" 0; }
+body {
+  background: var(--void);
+  color: var(--fg);
+  font: 15px/1.6 var(--body);
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 0 64px;
+  background-image: linear-gradient(rgba(80,216,250,0.035) 1px, transparent 1px), linear-gradient(90deg, rgba(80,216,250,0.035) 1px, transparent 1px);
+  background-size: 48px 48px;
+}
+.wrap { max-width: 1120px; margin: 0 auto; display: grid; gap: 28px; }
+a { color: var(--cyan); }
+h1, h2, h3 { font-family: var(--display); font-weight: 400; letter-spacing: 0.06em; text-wrap: balance; margin: 0; }
+h1 { font-size: clamp(26px, 4.6vw, 40px); text-transform: uppercase; }
+h2 { font-size: clamp(18px, 2.6vw, 22px); text-transform: uppercase; }
+h3 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.14em; color: var(--muted); }
+p { margin: 0; }
+.label { font: 500 11px/1.3 var(--mono); letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); }
+.mono { font-family: var(--mono); font-size: 12.5px; }
+.num { font-variant-numeric: tabular-nums; }
+
+.plate {
+  background: linear-gradient(180deg, var(--plate-2), var(--plate));
+  border: 1px solid var(--edge);
+  clip-path: polygon(var(--cut) 0, 100% 0, 100% calc(100% - var(--cut)), calc(100% - var(--cut)) 100%, 0 100%, 0 var(--cut));
+  padding: 20px;
+}
+
+header.top { padding-top: 40px; display: grid; gap: 16px; }
+.eyebrow { color: var(--cyan); }
+.lede { max-width: 68ch; color: var(--muted); font-size: 16px; }
+.lede strong { color: var(--fg); font-weight: 600; }
+
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
+.stat { display: grid; gap: 4px; padding: 14px 16px; }
+.stat .v { font: 400 24px/1.1 var(--display); color: var(--fg); }
+.stat .v small { font: 500 12px var(--mono); color: var(--muted); }
+
+.how { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; }
+.how .plate { display: grid; gap: 8px; align-content: start; }
+.how p { color: var(--muted); font-size: 14px; }
+.how .k { font: 500 12px var(--mono); color: var(--cyan); }
+
+.approve { border-color: var(--edge-strong); display: grid; gap: 10px; }
+.approve ol { margin: 0; padding-left: 20px; display: grid; gap: 6px; color: var(--muted); }
+.approve ol strong { color: var(--fg); font-weight: 600; }
+
+nav.tabs { display: flex; flex-wrap: wrap; gap: 8px; position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; padding-block: 10px; background: linear-gradient(var(--void) 70%, transparent); }
+nav.tabs button {
+  font: 600 12px var(--body); letter-spacing: 0.06em; text-transform: uppercase;
+  color: var(--muted); background: var(--plate); border: 1px solid var(--edge);
+  padding: 9px 14px; cursor: pointer; display: inline-flex; gap: 8px; align-items: center;
+  clip-path: polygon(8px 0, 100% 0, calc(100% - 8px) 100%, 0 100%);
+  transition: color 160ms cubic-bezier(0.23,1,0.32,1), border-color 160ms cubic-bezier(0.23,1,0.32,1), transform 120ms cubic-bezier(0.23,1,0.32,1);
+}
+nav.tabs button:active { transform: scale(0.96); }
+nav.tabs button[aria-selected="true"] { color: var(--void); background: var(--cyan); border-color: var(--cyan); }
+nav.tabs button:focus-visible, summary:focus-visible { outline: 2px solid var(--amber); outline-offset: 2px; }
+@media (hover: hover) and (pointer: fine) { nav.tabs button:hover { color: var(--fg); border-color: var(--edge-strong); } }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--faint); flex: none; }
+.dot.pass { background: var(--mint); }
+.dot.fail { background: var(--red); }
+
+.scenario { display: grid; gap: 22px; }
+.scenario-head { display: grid; gap: 8px; }
+.scenario-head p { color: var(--muted); max-width: 72ch; }
+.meta-row { display: flex; flex-wrap: wrap; gap: 8px 18px; }
+
+.chip { display: inline-flex; align-items: center; gap: 6px; font: 600 10.5px/1 var(--mono); letter-spacing: 0.1em; text-transform: uppercase; padding: 5px 8px; border: 1px solid currentColor; white-space: nowrap; }
+.chip.local { color: var(--local); }
+.chip.cloud { color: var(--cloud); }
+.chip.state-idle { color: var(--muted); }
+.chip.state-running { color: var(--amber); }
+.chip.state-failed, .chip.bad { color: var(--red); }
+.chip.ok { color: var(--mint); }
+.chip.act { color: var(--cyan); }
+.chip.ask { color: var(--amber); }
+
+.seed { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 12px; }
+.session-card { display: grid; gap: 8px; padding: 14px 16px; min-width: 0; }
+.session-card .t { font-weight: 700; }
+.session-card .row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+
+.turn { display: grid; gap: 0; position: relative; }
+.turn-index { margin-bottom: 10px; }
+.step { display: grid; grid-template-columns: 88px minmax(0, 1fr); gap: 16px; padding-bottom: 18px; position: relative; }
+.step::before { content: ""; position: absolute; left: 43px; top: 26px; bottom: 0; width: 1px; background: var(--edge); }
+.step:last-child::before { display: none; }
+.step > .label { padding-top: 4px; text-align: right; }
+.step > .label::after { content: ""; display: inline-block; width: 7px; height: 7px; margin-left: 8px; background: var(--cyan); transform: rotate(45deg) translateY(-1px); }
+.body { min-width: 0; display: grid; gap: 10px; }
+
+.bubble { padding: 12px 16px; max-width: 72ch; white-space: pre-wrap; overflow-wrap: anywhere; }
+.bubble.you { background: rgba(55,134,247,0.12); border: 1px solid rgba(55,134,247,0.45); }
+.bubble.mgr { background: rgba(92,240,176,0.07); border: 1px solid rgba(92,240,176,0.35); }
+
+.inventory { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 8px; }
+.inv { border: 1px solid var(--edge); background: var(--plate); padding: 10px 12px; display: grid; gap: 6px; min-width: 0; }
+.inv.targeted { border-color: var(--cyan); box-shadow: inset 3px 0 0 var(--cyan); }
+.inv .t { font-weight: 600; font-size: 14px; }
+.inv .row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.inv .last { color: var(--muted); font-size: 13px; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.empty { color: var(--muted); font-size: 14px; }
+
+details { border: 1px solid var(--edge); background: rgba(6,18,15,0.6); }
+details > summary { cursor: pointer; padding: 8px 12px; font: 500 12px var(--mono); color: var(--muted); list-style: none; display: flex; justify-content: space-between; gap: 12px; }
+details > summary::-webkit-details-marker { display: none; }
+details > summary::after { content: "+"; color: var(--cyan); }
+details[open] > summary::after { content: "–"; }
+details .inner { padding: 4px 12px 12px; display: grid; gap: 10px; }
+.msg { display: grid; gap: 2px; }
+.msg .who { font: 500 11px var(--mono); color: var(--faint); text-transform: uppercase; letter-spacing: 0.1em; }
+.msg .txt { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13.5px; }
+
+.decision { display: grid; gap: 10px; }
+.why { max-width: 72ch; }
+.conf { display: flex; align-items: center; gap: 10px; }
+.meter { width: 120px; height: 6px; background: var(--plate-2); border: 1px solid var(--edge); }
+.meter i { display: block; height: 100%; background: var(--cyan); }
+.actions { display: grid; gap: 6px; }
+.action-line { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.check { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; color: var(--muted); font-size: 13px; }
+
+.result { border: 1px solid var(--edge); background: var(--plate); padding: 12px 14px; display: grid; gap: 10px; min-width: 0; }
+.result.failed { border-color: rgba(255,138,128,0.6); }
+.result .head { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between; }
+.kv { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 6px 16px; }
+.kv div { display: grid; gap: 1px; min-width: 0; }
+.kv .v { font: 12.5px var(--mono); overflow-wrap: anywhere; }
+.pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13.5px; max-height: 420px; overflow: auto; }
+.code { display: block; font: 12.5px/1.5 var(--mono); background: rgba(1,6,5,0.7); border: 1px solid var(--edge); padding: 8px 10px; margin-block: 6px; overflow-x: auto; white-space: pre; }
+code { font: 12.5px var(--mono); color: var(--cyan); background: rgba(80,216,250,0.08); padding: 1px 4px; }
+.err { color: var(--red); font: 12.5px var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+
+footer { color: var(--muted); font-size: 13px; display: grid; gap: 6px; }
+
+@media (max-width: 640px) {
+  .step { grid-template-columns: minmax(0, 1fr); gap: 6px; }
+  .step::before { display: none; }
+  .step > .label { text-align: left; }
+}
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+
+<div class="wrap">
+  <header class="top">
+    <span class="label eyebrow">Anvil Agents · one chat for all</span>
+    <h1>One Chat Review</h1>
+    <p class="lede" id="lede"></p>
+    <div class="stats" id="stats"></div>
+  </header>
+
+  <section class="how" aria-label="How one chat works">
+    <div class="plate"><span class="k">YOU → MANAGER</span><h3>One conversation</h3><p>You only talk to the manager. For each message it reads every session's recent history, then answers, reads status, continues a session, starts one, or asks you.</p></div>
+    <div class="plate"><span class="k">LOCAL</span><h3>Harness binaries here</h3><p>Claude Code and Codex run directly on this machine in a project folder. Claude may edit only that folder; Codex runs in a read-only or workspace sandbox.</p></div>
+    <div class="plate"><span class="k">CLOUD</span><h3>Anvil Agents API</h3><p>Cloud sessions are chats on agents.anvil.hazyforge.io, run by the cluster on its own keys. The manager creates threads, sends messages and waits for real replies through the API.</p></div>
+  </section>
+
+  <section class="plate approve" aria-labelledby="approve-h">
+    <h2 id="approve-h">What you're approving</h2>
+    <ol id="approve-list">
+      <li><strong>Routing:</strong> the manager picks the session that already holds the work, and starts new work in the setup whose tags fit, local or cloud.</li>
+      <li><strong>Handoff:</strong> sessions share no memory, so the manager writes self-contained messages and carries one session's result into another.</li>
+      <li><strong>Restraint:</strong> it answers from transcripts when it can, asks only when the target or the authority is unclear, and never publishes or spends on its own.</li>
+      <li><strong>Evidence:</strong> every reply below is the harness's real output, with its receipt and cost. Nothing here is scripted.</li>
+    </ol>
+  </section>
+
+  <nav class="tabs" id="tabs" role="tablist" aria-label="Scenarios"></nav>
+  <main id="scenarios"></main>
+
+  <footer id="foot"></footer>
+</div>
+
+<script id="traces" type="application/json">__TRACES__</script>
+<script>
+(function () {
+  const data = JSON.parse(document.getElementById('traces').textContent);
+  const scenarios = data.scenarios || [];
+  const H = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const money = (n) => (n == null ? '—' : '$' + n.toFixed(n < 1 ? 3 : 2));
+  const int = (n) => (n == null ? '—' : Math.round(n).toLocaleString('en-US'));
+  const secs = (ms) => (ms == null ? '—' : ms < 1000 ? ms + ' ms' : (ms / 1000).toFixed(ms < 10000 ? 1 : 0) + ' s');
+  const harnessName = { claudeCode: 'Claude Code', codex: 'Codex', grokBuild: 'Grok', openCode: 'OpenCode', primeAgent: 'Prime', agy: 'agy' };
+  const hn = (h) => harnessName[h] || h || '—';
+  const clip = (s, n) => { s = String(s || ''); return s.length > n ? s.slice(0, n - 1).trimEnd() + '…' : s; };
+  // Small, safe Markdown: escape first, then code fences, inline code, bold and headings.
+  const inline = (t) => t.replace(/`([^`\n]+)`/g, '<code>$1</code>').replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>').replace(/^#{1,4} (.+)$/gm, '<strong>$1</strong>');
+  const md = (s) => H(s).split(/```[a-zA-Z]*\n?/).map((part, i) => i % 2 ? `<span class="code">${part.replace(/\n$/, '')}</span>` : inline(part)).join('');
+  const plain = (s) => String(s || '').replace(/```[a-zA-Z]*/g, '').replace(/[`*#]/g, '');
+
+  function sumUsage(list) {
+    const t = { cost: 0, costKnown: 0, inTok: 0, outTok: 0, cacheRead: 0, tokKnown: 0, calls: 0 };
+    for (const u of list) {
+      if (!u) continue;
+      t.calls++;
+      if (u.costUsd != null) { t.cost += u.costUsd; t.costKnown++; }
+      if (u.inputTokens != null || u.outputTokens != null) { t.tokKnown++; t.inTok += (u.inputTokens || 0); t.outTok += (u.outputTokens || 0); t.cacheRead += (u.cacheReadInputTokens || 0); }
+    }
+    return t;
+  }
+  function allUsages(sc) {
+    const out = [];
+    for (const a of sc.setup || []) if (a.harnessCalled) out.push(a.usage);
+    for (const t of sc.turns || []) {
+      out.push(t.deciderUsage); out.push(t.composeUsage);
+      for (const a of t.actions || []) if (a.harnessCalled) out.push(a.usage);
+    }
+    return out;
+  }
+  function harnessCalls(sc) {
+    const m = {};
+    const add = (a) => { if (a.harnessCalled) { const k = (a.receipt && a.receipt.cloud ? 'cloud ' : 'local ') + hn(a.harness); m[k] = (m[k] || 0) + 1; } };
+    (sc.setup || []).forEach(add);
+    (sc.turns || []).forEach((t) => (t.actions || []).forEach(add));
+    return m;
+  }
+
+  // Header
+  const turnsTotal = scenarios.reduce((n, s) => n + (s.turns || []).length, 0);
+  const checks = scenarios.flatMap((s) => (s.turns || []).map((t) => t.check).filter(Boolean));
+  const passed = checks.filter((c) => c.pass).length;
+  const usage = sumUsage(scenarios.flatMap(allUsages));
+  const calls = {};
+  scenarios.forEach((s) => Object.entries(harnessCalls(s)).forEach(([k, v]) => (calls[k] = (calls[k] || 0) + v)));
+  const harnessTotal = Object.values(calls).reduce((a, b) => a + b, 0);
+  const ran = data.ranAt ? new Date(data.ranAt) : null;
+  document.getElementById('lede').innerHTML =
+    `<strong>${scenarios.length} scenarios, ${turnsTotal} messages to the manager.</strong> Each scenario starts from real sessions with real history, then sends the manager messages without saying where they should go. ` +
+    `The manager is ${H(data.managerModel || 'Claude')} deciding live; the sessions are real Claude Code and Codex runs on this machine and real cloud chats on production Anvil Agents.` +
+    (ran ? ` Run ${H(ran.toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' }))}.` : '');
+  const stat = (label, value, small) => `<div class="plate stat"><span class="label">${label}</span><span class="v num">${value}${small ? ` <small>${small}</small>` : ''}</span></div>`;
+  document.getElementById('stats').innerHTML =
+    stat('Matched intent', `${passed}/${checks.length}`, 'turns') +
+    stat('Harness runs', int(harnessTotal), Object.entries(calls).map(([k, v]) => `${v} ${k}`).join(' · ')) +
+    stat('Known spend', money(usage.costKnown ? usage.cost : null), usage.costKnown < usage.calls ? `${usage.costKnown} of ${usage.calls} calls report cost` : '') +
+    stat('Tokens', int(usage.inTok + usage.cacheRead), `in · ${int(usage.outTok)} out`);
+
+  // Tabs
+  const tabs = document.getElementById('tabs');
+  const main = document.getElementById('scenarios');
+  scenarios.forEach((sc, i) => {
+    const cs = (sc.turns || []).map((t) => t.check).filter(Boolean);
+    const ok = cs.length && cs.every((c) => c.pass);
+    const b = document.createElement('button');
+    b.type = 'button'; b.setAttribute('role', 'tab'); b.id = 'tab-' + sc.name; b.dataset.name = sc.name;
+    b.innerHTML = `<span class="dot ${cs.length ? (ok ? 'pass' : 'fail') : ''}"></span>${H(sc.title || sc.name)}`;
+    b.addEventListener('click', () => show(sc.name, true));
+    tabs.appendChild(b);
+    const sec = document.createElement('section');
+    sec.className = 'scenario'; sec.id = sc.name; sec.setAttribute('role', 'tabpanel'); sec.setAttribute('aria-labelledby', b.id);
+    sec.innerHTML = renderScenario(sc, i);
+    main.appendChild(sec);
+  });
+  function show(name, push) {
+    for (const b of tabs.children) b.setAttribute('aria-selected', String(b.dataset.name === name));
+    for (const s of main.children) s.hidden = s.id !== name;
+    if (push) { try { history.replaceState(null, '', '#' + name); } catch (e) {} }
+  }
+  const initial = scenarios.find((s) => '#' + s.name === location.hash);
+  if (scenarios.length) show((initial || scenarios[0]).name, false);
+
+  function sessionChips(s) {
+    return `<span class="chip ${H(s.location)}">${H(s.location)}</span><span class="chip act">${H(hn(s.harness))}</span>` +
+      (s.state && s.state !== 'idle' ? `<span class="chip state-${H(s.state)}">${H(s.state)}</span>` : '');
+  }
+  function labelFor(sc, id) {
+    const m = sc.sessions || {};
+    for (const [label, sid] of Object.entries(m)) if (sid === id) return label;
+    return '';
+  }
+  function renderScenario(sc) {
+    const cs = (sc.turns || []).map((t) => t.check).filter(Boolean);
+    const u = sumUsage(allUsages(sc));
+    const dur = sc.startedAt && sc.finishedAt ? new Date(sc.finishedAt) - new Date(sc.startedAt) : null;
+    let html = `<div class="scenario-head"><span class="label">Scenario</span><h2>${H(sc.title || sc.name)}</h2><p>${H(sc.description)}</p>
+      <div class="meta-row mono"><span>${cs.filter((c) => c.pass).length}/${cs.length} turns matched</span><span>${money(u.costKnown ? u.cost : null)} known spend</span><span>${secs(dur)} wall clock</span></div></div>`;
+    if (sc.error) html += `<div class="plate err">Scenario error: ${H(sc.error)}</div>`;
+    if ((sc.setup || []).length) {
+      html += `<div class="scenario-head"><h3>Before the conversation: real prior work</h3></div><div class="seed">`;
+      for (const a of sc.setup) {
+        const label = a.scenarioLabel || labelFor(sc, a.sessionId);
+        html += `<div class="plate session-card"><div class="row">${sessionChips({ location: a.receipt && a.receipt.cloud ? 'cloud' : 'local', harness: a.harness })}<span class="mono">${H(label)}</span></div>
+          <div class="t">${H(a.sessionTitle || (a.action && a.action.title) || label)}</div>
+          <details><summary><span>Asked</span></summary><div class="inner"><div class="pre">${H(a.sentText)}</div></div></details>
+          <details><summary><span>Replied · ${secs(a.durationMs)} · ${money(a.usage && a.usage.costUsd)}</span></summary><div class="inner"><div class="pre">${md(a.reply || a.error)}</div></div></details></div>`;
+      }
+      html += `</div>`;
+    }
+    (sc.turns || []).forEach((t, i) => { html += renderTurn(sc, t, i); });
+    return html;
+  }
+  function renderTurn(sc, t, i) {
+    const targeted = new Set((t.actions || []).map((a) => a.sessionId).filter(Boolean));
+    let h = `<article class="turn plate" aria-label="Message ${i + 1}"><div class="turn-index label">Message ${i + 1} of ${(sc.turns || []).length}</div>`;
+    h += step('You', `<div class="bubble you">${H(t.message)}</div>`);
+    // Saw
+    const inv = t.inventory || [];
+    let saw = inv.length ? `<div class="inventory">` + inv.map((s) => {
+      const recent = (s.transcript || []);
+      const last = recent.length ? recent[recent.length - 1] : null;
+      return `<div class="inv ${targeted.has(s.id) ? 'targeted' : ''}"><div class="row">${sessionChips(s)}</div><div class="t">${H(s.title)}</div>
+        ${last ? `<div class="last"><span class="mono">${H(last.role)}:</span> ${H(clip(plain(last.text), 220))}</div>` : `<div class="last">No messages yet.</div>`}
+        ${recent.length ? `<details><summary><span>${recent.length} recent messages it read</span></summary><div class="inner">${recent.map((m) => `<div class="msg"><span class="who">${H(m.role)}</span><div class="txt">${md(m.text)}</div></div>`).join('')}</div></details>` : ''}</div>`;
+    }).join('') + `</div>` : `<p class="empty">No sessions existed yet.</p>`;
+    saw += `<p class="mono" style="color:var(--muted)">Setups it could start: ${(t.setups || []).map((s) => H(s.id)).join(' · ')}</p>`;
+    h += step('Saw', saw);
+    // Decided
+    const d = t.decision || {};
+    const conf = Math.max(0, Math.min(1, d.confidence || 0));
+    let dec = `<div class="decision"><p class="why">${H(d.reasoning_summary)}</p><div class="actions">` + (d.actions || []).map((a) => {
+      const sess = inv.find((s) => s.id === a.session_id);
+      const tgt = a.type === 'create' ? `new ${H(a.setup_id)}${a.title ? ' · ' + H(a.title) : ''}` : sess ? H(sess.title) : H(a.session_id || '');
+      const cls = a.type === 'ask_user' ? 'ask' : 'act';
+      return `<div class="action-line"><span class="chip ${cls}">${H(a.type.replace('_', ' '))}</span><span>${tgt}</span></div>`;
+    }).join('') + `</div><div class="conf"><span class="label">Confidence</span><span class="meter"><i style="width:${(conf * 100).toFixed(0)}%"></i></span><span class="mono num">${conf.toFixed(2)}</span>
+      <span class="mono" style="color:var(--muted)">· ${H(t.deciderUsage && t.deciderUsage.model)} · ${secs(t.deciderUsage && t.deciderUsage.durationMs)} · ${money(t.deciderUsage && t.deciderUsage.costUsd)}</span></div>`;
+    if ((t.validationErrors || []).length) dec += `<div class="err">Rejected decision: ${H(t.validationErrors.join('; '))}</div>`;
+    if (t.check) dec += `<div class="check"><span class="chip ${t.check.pass ? 'ok' : 'bad'}">${t.check.pass ? 'matched intent' : 'missed intent'}</span>${t.check.pass ? '' : `<span>${H((t.check.notes || []).join(' '))}</span>`}</div>`;
+    dec += `</div>`;
+    h += step('Decided', dec);
+    // Did
+    const exec = (t.actions || []).filter((a) => a.harnessCalled || a.sentText || a.error);
+    const reads = (t.actions || []).filter((a) => a.action && a.action.type === 'read_status' && !a.error);
+    if (exec.length || reads.length) {
+      h += step('Did', reads.map((a) => {
+        const sess = inv.find((s) => s.id === a.sessionId);
+        return `<div class="result"><div class="action-line"><span class="chip act">read status</span><span>Read ${H(sess ? sess.title : 'the session')}'s transcript. Nothing was sent to any harness.</span></div></div>`;
+      }).join('') + exec.map((a) => {
+        const r = a.receipt || {};
+        const loc = r.cloud ? 'cloud' : 'local';
+        const sess = inv.find((s) => s.id === a.sessionId);
+        const title = sess ? sess.title : a.action && a.action.title;
+        let kv = '';
+        if (r.local) kv = kvs([['Binary', r.local.binary], ['Folder', r.local.workdir], ['Native session', r.local.nativeSessionId], ['Exit', r.local.exitCode]]);
+        if (r.cloud) kv = kvs([['API', (r.cloud.baseURL || '').replace(/^https?:\/\//, '') + ' · ' + r.cloud.namespace], ['Thread', r.cloud.threadId], ['Turn', r.cloud.turnId], ['Run', r.cloud.runName]]);
+        const u = a.usage || {};
+        kv += kvs([['Took', secs(a.durationMs)], ['Tokens', u.inputTokens == null ? '—' : `${int((u.inputTokens || 0) + (u.cacheReadInputTokens || 0))} in · ${int(u.outputTokens)} out`], ['Cost', money(u.costUsd)], ['Model', u.model || null]]);
+        return `<div class="result ${a.state === 'failed' ? 'failed' : ''}"><div class="head"><div class="action-line"><span class="chip ${loc}">${loc}</span><span class="chip act">${H(hn(a.harness))}</span><strong>${H(title || '')}</strong></div>${(() => { const st = a.error || a.state === 'failed' ? 'failed' : a.state === 'running' ? 'still running' : 'replied'; return `<span class="chip ${st === 'replied' ? 'ok' : st === 'failed' ? 'bad' : 'state-running'}">${st}</span>`; })()}</div>
+          <details><summary><span>Manager sent</span></summary><div class="inner"><div class="pre">${H(a.sentText)}</div></div></details>
+          <details ${exec.length === 1 ? 'open' : ''}><summary><span>${H(hn(a.harness))} replied</span></summary><div class="inner"><div class="pre">${md(a.reply || '(no reply)')}</div></div></details>
+          ${a.error ? `<div class="err">${H(a.error)}</div>` : ''}<div class="kv">${kv}</div></div>`;
+      }).join(''));
+    }
+    h += step('Answered', `<div class="bubble mgr">${md(t.answer || t.error)}</div><p class="mono" style="color:var(--muted)">compose · ${secs(t.composeUsage && t.composeUsage.durationMs)} · ${money(t.composeUsage && t.composeUsage.costUsd)}</p>`);
+    return h + `</article>`;
+  }
+  function step(label, body) { return `<div class="step"><span class="label">${label}</span><div class="body">${body}</div></div>`; }
+  function kvs(pairs) { return pairs.filter(([, v]) => v != null && v !== '').map(([k, v]) => `<div><span class="label">${H(k)}</span><span class="v">${H(v)}</span></div>`).join(''); }
+
+  document.getElementById('foot').innerHTML =
+    `<p>Cloud turns run in the cluster, and the Anvil Agents API does not report their token usage yet, so cloud costs show as —. Local costs come from Claude Code's own report; Codex reports tokens but not dollars.</p>` +
+    `<p>Not covered yet: the Desktop one-chat UI, two turns in flight at once, and steering a session mid-turn. Source: HazyForge/anvil-agents, branch feat/one-chat-manager.</p>`;
+})();
+</script>

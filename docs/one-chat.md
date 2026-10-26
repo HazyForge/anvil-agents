@@ -233,6 +233,34 @@ actions, any successful action of the expected type and target can match.
 produce a nonzero exit status and preserve the trace. Failed setup/turn execution
 also writes a partial report.
 
+## Review page
+
+[hack/onechat-review](../hack/onechat-review) turns scenario reports into the One
+Chat Review page: for every turn, what the person said, what the manager saw,
+what it decided, what each session did, and the answer, with model, token and
+cost figures where they were reported. The behavior in this document was approved
+from that page.
+
+```sh
+python3 hack/onechat-review/build.py --out /tmp/one-chat-review.html \
+  --model "Claude Sonnet" /tmp/onechat-scenarios/*.json
+```
+
+Pass the aggregate reports (`<out>/<name>.json`, `onechat.scenario/v1`); the
+per-turn traces inside `<name>-state-*` are already included in them. Scenarios
+appear in argument order. `--model` labels the manager model on the page.
+`build.py` embeds the reports at the `__TRACES__` placeholder in
+`template.html`, shortens local work directories to their last two components,
+replaces scratch and home directory prefixes, and escapes `</` so report text
+cannot end the page's script. It does not remove anything else, so review the
+reports before sharing the page: prompts, replies and session transcripts appear
+in full.
+
+`template.html` is an Artifact page body (no `<!doctype>` or `<head>`; the
+Artifact tool adds them when publishing). Publish the generated file as an
+Artifact to share it, or open it directly in a browser to read it locally. It
+loads its fonts from Google Fonts.
+
 ## Trace format
 
 Turns are `<stateDir>/traces/<uuid>.json`, version `onechat.turn/v1`. `say` prints
