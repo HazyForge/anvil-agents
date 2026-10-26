@@ -225,6 +225,7 @@ audience, and explicit namespace authorization bindings are configured. See
 - [Operations, upgrades, and uninstall](docs/operations.md)
 - [PostgreSQL archive modes and retention](docs/archive.md)
 - [Standing chat storage and API](docs/standing-chat.md)
+- [Manager live feedback and runtime decisions — specification](docs/ManagerLiveFeedback.md)
 - [Central manager, subject vault, and live routing](docs/subject-vault-routing.md)
 - [Local conversation routing and scenario bench](docs/local-manager-routing.md)
 - [Persistent local manager loop and recovery](docs/local-manager-loop.md)

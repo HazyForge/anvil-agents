@@ -1,5 +1,9 @@
 # Persistent local manager loop
 
+The [manager specification](ManagerLiveFeedback.md) records product behavior,
+scenarios and proposed next slices. This page describes the implemented local
+loop and its operating contract.
+
 Anvil Agents Desktop owns a persistent loop for local Manager work:
 **detect → ask → act → verify**. It observes native execution and saved Anvil
 conversation state. The classifier interprets messages and answers; the host
