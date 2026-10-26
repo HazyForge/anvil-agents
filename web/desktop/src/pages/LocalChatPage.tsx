@@ -5,6 +5,7 @@ import type { UIConfig } from '../auth/config';
 import type { Snapshot } from '../api/types';
 import { activityFromLog } from '../api/runActivity';
 import { completedLocalReply, LocalChatRequestError, streamLocalChat } from '../api/localChat';
+import { useStickToBottom } from '../components/useStickToBottom';
 
 type Message = {role: 'user' | 'assistant'; content: string};
 type Conversation = {id: string; title: string; name: string; harness: string; workdir: string; messages: Message[]; draft: string; pending?: boolean; lastError?: string; target?: string; wslDistro?: string; connectAnvil?: boolean; remoteNamespace?: string};
@@ -53,7 +54,7 @@ export function LocalChatPage({snapshot, onBusyChange, signedIn = false, config,
   const startedAt = useRef(0);
   const reportedAt = useRef(0);
   const controller = useRef<AbortController | null>(null);
-  const end = useRef<HTMLDivElement>(null);
+  const scroller = useRef<HTMLDivElement>(null);
   const thread = conversations.find(c => c.id === selected) || conversations[0];
   const selectedHarness = creating ? harness : thread?.harness || 'prime';
   const selectedWorkdir = creating ? workdir : thread?.workdir ?? '';
@@ -75,7 +76,7 @@ export function LocalChatPage({snapshot, onBusyChange, signedIn = false, config,
   useEffect(() => () => controller.current?.abort(), []);
   useEffect(() => { onBusyChange?.(busy); return () => onBusyChange?.(false); }, [busy, onBusyChange]);
   useEffect(() => { if (!busy) return; const timer = setInterval(() => setElapsed(Math.floor((Date.now() - startedAt.current) / 1000)), 1000); return () => clearInterval(timer); }, [busy]);
-  useEffect(() => { end.current?.scrollIntoView({block: 'nearest'}); }, [thread?.messages.length, activity.length, busy]);
+  const {unseen, jumpToBottom} = useStickToBottom(scroller, {resetKey: creating ? 'new' : thread?.id ?? '', contentKey: `${thread?.messages.length ?? 0}:${activity.length}:${status}:${busy}`, arrivals: thread?.messages.length ?? 0});
   function update(id: string, transform: (c: Conversation) => Conversation) { setConversations(previous => previous.map(c => c.id === id ? transform(c) : c)); }
   function changeDraft(value: string) { if (thread) update(thread.id, c => ({...c, draft: value})); }
   function createAgent(event: FormEvent) {
@@ -110,6 +111,7 @@ export function LocalChatPage({snapshot, onBusyChange, signedIn = false, config,
       } catch (err) { setError(err instanceof Error ? err.message : String(err)); setStatus(''); setBusy(false); controller.current = null; return; }
     }
     update(id, c => ({...c, messages: [...c.messages, {role: 'user', content}], draft: '', pending: true, lastError: undefined}));
+    jumpToBottom();
     startedAt.current = Date.now(); reportedAt.current = Date.now(); setElapsed(0);
     setBusy(true); setError(''); setActivity([]); setStatus(`Starting ${choices.find(h => h.id === selectedHarness)?.displayName || selectedHarness} on ${location}…`);
     const seen = new Set<string>();
@@ -180,11 +182,11 @@ export function LocalChatPage({snapshot, onBusyChange, signedIn = false, config,
             <p className="remote-chat-caption">Files stay in this folder across turns. Changing folders does not move earlier files. Messages are saved on this device.</p>
           </div>
         </details>
-        <div className="chat-messages" aria-live="polite">
+        <div className="chat-messages" aria-live="polite" ref={scroller}>
           {!thread.messages.length && <div className="agent-empty"><AgentAvatar name={thread.name} identity={thread.id} size="lg"/><h2>What should we work on?</h2><p>Messages with {thread.name} stay together here. Ask a question or give your agent something to do.</p></div>}
           {thread?.messages.map((m, i) => <article key={i} className={`chat-bubble ${m.role === 'user' ? 'chat-bubble-user' : 'chat-bubble-run'}`}><header className="chat-bubble-header"><span className="chat-bubble-role">{m.role === 'user' ? 'You' : thread.name}</span></header><div className="chat-bubble-body"><MarkdownBody content={m.content}/></div></article>)}
           {status && <section className="turn-activity" aria-label="Local agent activity"><div className="turn-activity-heading"><span className="turn-activity-indicator" aria-hidden="true"/><div><p role="status">{status}</p></div>{busy && <span className="turn-activity-elapsed" aria-hidden="true">{elapsed}s</span>}</div><ol className="turn-activity-events">{activity.map((a, i) => <li key={i}>{a}</li>)}</ol>{busy && Date.now() - reportedAt.current > 15000 && <p className="turn-activity-note">No new activity reported recently. Waiting for the next harness update.</p>}</section>}
-          <div ref={end}/>
+          {unseen > 0 && <button type="button" className="chat-jump" onClick={jumpToBottom}>{unseen === 1 ? '1 new message' : `${unseen} new messages`}</button>}
         </div>
         <form className="chat-composer plate" onSubmit={e => void send(e)}><label className="field"><span className="label">Message</span><textarea aria-label="Message" className="textarea chat-composer-input" value={text} onChange={e => changeDraft(e.target.value)} onKeyDown={e => {if(e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {e.preventDefault(); void send();}}} placeholder={`Message ${thread.name}…`}/></label><div className="chat-composer-actions"><span className="agent-compose-hint">Enter to send · Shift+Enter for a new line</span><button className="btn btn-primary" disabled={busy || unconfirmed.length > 0 || targetChanged || !text.trim() || !choices.some(h => h.id === selectedHarness)}>{busy ? 'Working locally…' : 'Send'}</button></div></form>
         </>}

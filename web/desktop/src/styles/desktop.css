@@ -470,6 +470,73 @@ form.agent-settings > .muted { margin: -8px 0 4px; font-size: 14px; }
 .turn-activity-finished { --tone: var(--dim); background: transparent; }
 .turn-activity-finished .turn-activity-indicator { box-shadow: none; animation: none; }
 
+/* Live sync: a header light while change notices flow, a soft entrance for
+   messages that arrive while the conversation is open, a streaming reply
+   with a caret, and a jump back when new messages land out of view. */
+.chat-sync {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 10px;
+  border: 1px solid currentColor;
+  border-radius: var(--radius);
+  font: 700 10.5px var(--font-cap);
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+.chat-sync::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.chat-sync-live { color: var(--mint); border-color: rgba(92, 240, 176, 0.38); background: rgba(92, 240, 176, 0.07); }
+.chat-sync-live::before { box-shadow: 0 0 8px currentColor; animation: forge-pulse 2.4s ease-in-out infinite; }
+.chat-sync-retrying { color: var(--amber); border-color: rgba(255, 194, 77, 0.42); background: rgba(255, 194, 77, 0.07); }
+
+@keyframes chat-enter {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: none; }
+}
+.chat-bubble-enter { animation: chat-enter 240ms var(--ease) both; }
+
+.chat-live-tag { color: var(--mint); font: 700 10px var(--font-cap); letter-spacing: 0.2em; text-transform: uppercase; }
+.chat-live-text { white-space: pre-wrap; }
+.chat-live-caret {
+  display: inline-block;
+  width: 7px;
+  height: 1.1em;
+  margin-left: 3px;
+  vertical-align: text-bottom;
+  background: var(--cyan);
+  box-shadow: 0 0 8px var(--cyan);
+  animation: chat-caret 1s steps(1) infinite;
+}
+@keyframes chat-caret { 50% { opacity: 0; } }
+
+.chat-jump {
+  position: sticky;
+  bottom: 12px;
+  z-index: 2;
+  isolation: isolate;
+  align-self: center;
+  min-height: 34px;
+  padding: 0 18px;
+  border: 0;
+  background: none;
+  color: var(--void);
+  font: 700 11.5px var(--font-cap);
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+.chat-jump::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  transform: skewX(-14deg);
+  border-radius: var(--radius);
+  background: var(--grad);
+  box-shadow: 0 6px 24px rgba(1, 6, 5, 0.6), 0 0 18px rgba(80, 216, 250, 0.45);
+}
+.chat-jump::after { content: " ↓"; }
+
 /* Composer: a plate that lights its edge while you type. */
 .chat-composer {
   --cut: 14px;

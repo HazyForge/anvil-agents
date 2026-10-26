@@ -68,13 +68,20 @@ func (server *Server) registerChatRoutes(mux *http.ServeMux) {
 	// so this route authenticates itself (header bearer or verified bearer
 	// subprotocol) instead of using the shared authenticate middleware.
 	mux.HandleFunc("GET /api/v1/namespaces/{namespace}/chat/threads/{threadID}/stream", server.handleChatThreadStream)
+	// Read-only change notices for the namespace's threads (identifiers
+	// only); clients re-read changed threads through the routes above.
+	mux.Handle("GET /api/v1/namespaces/{namespace}/chat/events", server.authenticate(http.HandlerFunc(server.handleChatEvents)))
 }
 
 func (server *Server) SetChatStore(store chat.Store) {
 	if server == nil {
 		return
 	}
-	server.chatStore = store
+	if store == nil {
+		server.chatStore = nil
+		return
+	}
+	server.chatStore = notifyingChatStore{Store: store, hub: server.chatEvents}
 }
 
 func (server *Server) handleListChatThreads(writer http.ResponseWriter, request *http.Request) {

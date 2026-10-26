@@ -68,6 +68,9 @@ type Server struct {
 	// stream subscribers for the same thread. Process-local, like the guard
 	// above; SSE never subscribes.
 	standingHub *standingTokenHub
+	// chatEvents fans thread change notices out to open chat events
+	// streams. Process-local; the chat store wrapper publishes into it.
+	chatEvents *chatEventHub
 }
 
 func NewServer(config Config, authenticator AccessTokenAuthenticator, runs client.Reader, logs AgentRunLogSource, log logr.Logger) (*Server, error) {
@@ -87,6 +90,7 @@ func NewServer(config Config, authenticator AccessTokenAuthenticator, runs clien
 		limiter:       newStreamLimiter(config.Stream.MaxConnections, config.Stream.MaxConnectionsPerSubject),
 		standingGuard: newStandingTurnGuard(),
 		standingHub:   newStandingTokenHub(),
+		chatEvents:    newChatEventHub(),
 		standingOwner: standing.NewOwnerID(),
 	}
 	if writeClient, ok := runs.(client.Client); ok {

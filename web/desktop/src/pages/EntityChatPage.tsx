@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import type { UIConfig } from '../auth/config';
 import { APIError, backendKindFromComposition, harnessRefFromRunProfile, listRunProfiles, type CompositionDocument } from '../api/client';
 import { ensureRemoteStandingThread, createRemoteThread, getRemoteThread, listRemoteHarnesses, listRemoteThreads, sendRemoteMessage, threadHarness, type RemoteThread, type RemoteThreadDetail, type RemoteTurn } from '../api/remoteChat';
@@ -7,7 +7,8 @@ import { readChatDraft, saveChatDraft, readSelectedChat, saveSelectedChat, readN
 import { RemoteTurnActivity } from '../components/RemoteTurnActivity';
 import { AgentAvatar } from '../components/AgentAvatar';
 import { MarkdownBody } from '../components/MarkdownBody';
-import { ChatAssistantBody } from '../components/ChatAssistantBody';
+import { RemoteMessage } from '../components/RemoteMessage';
+import { useStickToBottom } from '../components/useStickToBottom';
 import { ProjectSwitcher, remoteChatProjects, projectManagers } from '../components/ProjectSwitcher';
 import { preferredStandingChatProfile, shouldRestoreStandingThread } from '../wrapper/chatLanding';
 import { LiveStream } from '../components/LiveStream';
@@ -16,22 +17,17 @@ import { AgentHarnessSwitcher } from '../components/AgentHarnessSwitcher';
 import { ensureAccessToken } from '../auth/oidc';
 import { type PendingChatSend, readPendingSend, rememberPendingSend, clearPendingSend } from '../api/pendingChat';
 import { formatTurnError } from '../wrapper/turn';
-import {
-  mayShowCreateAffordance,
-  suggestCreateAgentInput,
-} from '../wrapper/jevManagerCreate';
-import {
-  mayShowHandoffAffordance,
-  peerHandoffTargetFromMessage,
-  suggestPeerHandoffTarget,
-} from '../wrapper/jevPeerHandoff';
+import { suggestCreateAgentInput } from '../wrapper/jevManagerCreate';
+import { peerHandoffTargetFromMessage, suggestPeerHandoffTarget } from '../wrapper/jevPeerHandoff';
+import { readChatEvents } from '../api/chatEvents';
+import { openChatTokenStream } from '../api/chatThreadStream';
+import { appendLiveToken, eventsRetryDelay, latestSequence, mergeThreadDetail, mergeThreadList, pollDelay, type LiveReply } from '../wrapper/threadSync';
 
 interface Props { token: string; config: UIConfig }
 const agentName = (name: string) => name.replace(/[-_]+/g, ' ').replace(/\bprimaris\b/gi, 'Primaris').replace(/\bagy\b/gi, 'AGY').replace(/\bprime\b/gi, 'Prime').replace(/^./, letter => letter.toUpperCase());
 
 const turnProgress = (turn: RemoteTurn) => ({waiting: 0, queued: 1, running: 2, succeeded: 3, failed: 3})[turn.status];
 const sameTurn = (a: RemoteTurn, b: RemoteTurn) => a.id === b.id || Boolean(a.requestId && a.requestId === b.requestId);
-const latestSequence = (detail: RemoteThreadDetail) => Math.max(0, ...detail.messages.map(message => message.sequence));
 // Reads and accepted POST receipts can arrive out of order. The append-only
 // transcript and monotonic turn states must never move the visible thread back.
 function regresses(next: RemoteThreadDetail, previous: RemoteThreadDetail | null) {
@@ -58,30 +54,8 @@ function retainRecoveredReplies(next: RemoteThreadDetail, previous: RemoteThread
   })};
 }
 
-// Read-only Jev intent caption for a classified user message. The API turn
-// path records jevIntent/jevRawChoice/jevConfidence/jevModel/jevUnclear on
-// the queued user message metadata (see docs/jev-intent-routing.md).
-// Display only: no fulfillment action lives here — create_agent_request
-// still routes to requesting a Wrapper/manager through the existing
-// manager-authorization path. Returns undefined when unclassified.
-function jevIntentCaption(message: {metadata?: unknown}): string | undefined {
-  const meta = message.metadata as Record<string, unknown> | undefined;
-  const intent = typeof meta?.jevIntent === 'string' ? meta.jevIntent.trim() : '';
-  if (!intent) return undefined;
-  const parts = [`Intent: ${intent}`];
-  const raw = typeof meta?.jevRawChoice === 'string' ? (meta.jevRawChoice as string).trim() : '';
-  const unclear = meta?.jevUnclear === true;
-  if (unclear && raw && raw !== intent) parts.push(`(model said ${raw})`);
-  const confidence = typeof meta?.jevConfidence === 'number' ? (meta.jevConfidence as number) : undefined;
-  if (typeof confidence === 'number' && Number.isFinite(confidence)) {
-    parts.push(`${Math.round(confidence * 100)}%`);
-  } else if (unclear) {
-    parts.push('needs clarification');
-  }
-  const model = typeof meta?.jevModel === 'string' ? (meta.jevModel as string).trim() : '';
-  if (model) parts.push(model);
-  return parts.join(' · ');
-}
+type LiveState = 'off' | 'connecting' | 'live' | 'retrying';
+const unfinished = (turn: RemoteTurn) => turn.status === 'waiting' || turn.status === 'queued' || turn.status === 'running';
 
 export function EntityChatPage({token, config}: Props) {
   const [namespace, setNamespace] = useState(() => loadNamespace(config.defaultNamespaces[0] || 'agents'));
@@ -117,14 +91,29 @@ export function EntityChatPage({token, config}: Props) {
   const loadedNamespace = useRef('');
   const pending = useRef<PendingChatSend | null>(null);
   const submitting = useRef(false);
-  const end = useRef<HTMLDivElement>(null);
+  const scroller = useRef<HTMLDivElement>(null);
+  // Live sync: namespace change notices, a coalesced thread read, and live
+  // tokens for standing turns. Refs let long-lived listeners read the
+  // current conversation without restarting.
+  const [live, setLive] = useState<LiveState>('off');
+  const [liveReply, setLiveReply] = useState<LiveReply | null>(null);
+  const refreshThreadRef = useRef<() => void>(() => {});
+  const reconnectEventsRef = useRef<() => void>(() => {});
+  const jobPlaneThreads = useRef(new Set<string>());
+  const knownMessages = useRef<{thread: string; ids: Set<string>} | null>(null);
+  const listsInFlight = useRef(false);
+  const tokenRef = useRef(token);
+  const namespaceRef = useRef(namespace);
+  const threadRef = useRef(threadID);
+  const activeRef = useRef(false);
+  const liveRef = useRef<LiveState>('off');
   const enabled = Boolean(config.chat?.enabled);
   const lastTurn = detail?.turns?.at(-1);
   const latestFailed = !optimistic && lastTurn?.status === 'failed' ? lastTurn : undefined;
   const retryMessage = latestFailed ? detail?.messages.find(message => message.id === latestFailed.userMessageId && message.role === 'user') : undefined;
   const retryPending = Boolean(optimistic && pending.current?.preserveDraft);
   const earlierFailures = detail?.turns?.filter(t => t.status === 'failed' && t.id !== latestFailed?.id) ?? [];
-  const active = detail?.activeTurn ?? detail?.turns?.find(t => t.status === 'waiting' || t.status === 'queued' || t.status === 'running');
+  const active = detail?.activeTurn ?? detail?.turns?.find(unfinished);
   const roster = [...profiles].sort((a, b) => Number(b.metadata.name === 'desktop-assistant') - Number(a.metadata.name === 'desktop-assistant') || a.metadata.name.localeCompare(b.metadata.name));
   const managers = projectManagers(roster, namespace);
   const isManager = managers.some(agent => agent.metadata.name === profile);
@@ -142,6 +131,8 @@ export function EntityChatPage({token, config}: Props) {
   const projects = remoteChatProjects(config.defaultNamespaces, namespace);
   const selectedProject = projects.find(project => project.id === namespace);
   const optimisticVisible = optimistic && !detail?.turns?.some(turn => optimistic.requestId && turn.requestId === optimistic.requestId);
+  tokenRef.current = token; namespaceRef.current = namespace; threadRef.current = threadID;
+  activeRef.current = Boolean(active || optimistic); liveRef.current = live;
 
   useEffect(() => {
     const controller = new AbortController();
@@ -197,15 +188,32 @@ export function EntityChatPage({token, config}: Props) {
     if (!threadID || initializing) return;
     const controller = new AbortController();
     const epoch = navigation.current;
-    let timer: ReturnType<typeof setTimeout>;
+    let timer: ReturnType<typeof setTimeout> | undefined;
     let stopped = false;
+    let inFlight = false;
+    let dirty = false;
+    let failures = 0;
     let pollToken = token;
     let refreshed = false;
+    const schedule = () => {
+      clearTimeout(timer);
+      if (controller.signal.aborted || stopped) return;
+      timer = setTimeout(() => void poll(), pollDelay({
+        active: activeRef.current, live: liveRef.current === 'live',
+        visible: document.visibilityState !== 'hidden', failures,
+      }));
+    };
+    // One read at a time: a change notice during a read marks it dirty and
+    // reads again as soon as the current read lands.
     const poll = async () => {
+      if (controller.signal.aborted || stopped) return;
+      if (inFlight) { dirty = true; return; }
+      inFlight = true; clearTimeout(timer);
+      let failed = false;
       try {
         const next = await getRemoteThread(pollToken, namespace, threadID, controller.signal);
         if (controller.signal.aborted || navigation.current !== epoch) return;
-        setDetail(previous => regresses(next, previous) ? previous : retainRecoveredReplies(next, previous)); applyThreadIdentity(next); setUnavailable(false);
+        setDetail(previous => regresses(next, previous) ? previous : mergeThreadDetail(previous, retainRecoveredReplies(next, previous))); applyThreadIdentity(next); setUnavailable(false);
         const unresolved = readPendingSend(namespace, threadID);
         if (unresolved && next.turns?.some(t => t.requestId === unresolved.id)) {
           clearPendingSend(namespace, threadID); pending.current = null; setError('');
@@ -215,7 +223,8 @@ export function EntityChatPage({token, config}: Props) {
             saveChatDraft(namespace, threadID, ''); return '';
           });
         }
-        setThreads(previous => [next, ...previous.filter(t => t.id !== next.id)]);
+        setThreads(previous => previous[0]?.id === next.id && previous[0].updatedAt === next.updatedAt ? previous : [next, ...previous.filter(t => t.id !== next.id)]);
+        failures = 0;
       } catch (err) {
         if (!controller.signal.aborted && navigation.current === epoch) {
           if (err instanceof APIError && err.status === 401 && !refreshed) {
@@ -227,16 +236,149 @@ export function EntityChatPage({token, config}: Props) {
           if (err instanceof APIError && (err.status === 401 || err.status === 404 || err.status === 403)) stopped = true;
           if (err instanceof APIError && (err.status === 403 || err.status === 404)) { setUnavailable(true); setDetail(null); }
           setError(formatTurnError(err));
+          failed = true;
         }
       } finally {
-        if (!controller.signal.aborted && !stopped) timer = setTimeout(() => void poll(), 2500);
+        inFlight = false;
+        if (failed) failures++;
+        if (!controller.signal.aborted && !stopped) {
+          if (dirty) { dirty = false; void poll(); } else schedule();
+        }
       }
     };
+    refreshThreadRef.current = () => void poll();
     void poll();
-    return () => { controller.abort(); clearTimeout(timer); };
+    return () => { controller.abort(); clearTimeout(timer); refreshThreadRef.current = () => {}; };
   }, [token, namespace, threadID, initializing]);
 
-  useEffect(() => { end.current?.scrollIntoView({block: 'nearest'}); }, [detail?.messages.length, active?.status, optimistic?.content]);
+  // Refresh the agent roster and conversation list when something outside
+  // this view may have changed them (new conversations, a returning window).
+  const refreshLists = useCallback(async (includeProfiles: boolean) => {
+    if (!enabled || listsInFlight.current) return;
+    const ns = namespaceRef.current;
+    listsInFlight.current = true;
+    try {
+      const [fresh, freshProfiles] = await Promise.all([
+        listRemoteThreads(tokenRef.current, ns),
+        includeProfiles ? listRunProfiles(tokenRef.current, ns) : Promise.resolve(null),
+      ]);
+      if (namespaceRef.current !== ns) return;
+      setThreads(previous => mergeThreadList(previous, fresh));
+      if (freshProfiles) setProfiles(previous => JSON.stringify(previous) === JSON.stringify(freshProfiles) ? previous : freshProfiles);
+    } catch {
+      // The next notice, focus, or poll tries again.
+    } finally {
+      listsInFlight.current = false;
+    }
+  }, [enabled]);
+
+  // Namespace change notices: re-read the open thread the moment a peer,
+  // another person, or a finished run writes to it. An API without the
+  // events route answers 404 and the chat keeps its regular polling.
+  useEffect(() => {
+    if (!enabled || !token) return;
+    const controller = new AbortController();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let failures = 0;
+    let connected = false;
+    let streamToken = token;
+    let listsTimer: ReturnType<typeof setTimeout> | undefined;
+    const lists = (includeProfiles = false) => {
+      clearTimeout(listsTimer);
+      listsTimer = setTimeout(() => void refreshLists(includeProfiles), 400);
+    };
+    const changeLive = (next: LiveState) => {
+      const wasLive = liveRef.current === 'live';
+      liveRef.current = next; setLive(next);
+      // Losing live notices shortens the slow idle read right away.
+      if (wasLive && next !== 'live') refreshThreadRef.current();
+    };
+    const connect = async () => {
+      clearTimeout(timer);
+      if (controller.signal.aborted) return;
+      changeLive(failures ? 'retrying' : 'connecting');
+      const startedAt = Date.now();
+      let ready = false;
+      const ended = await readChatEvents(streamToken, namespace, {
+        onReady: () => {
+          ready = true; changeLive('live');
+          // Anything may have changed before this connection was ready.
+          refreshThreadRef.current();
+          if (connected) lists(true);
+          connected = true;
+        },
+        onThread: event => {
+          if (event.threadId === threadRef.current) refreshThreadRef.current();
+          lists(event.reason === 'created');
+        },
+        onResync: () => { refreshThreadRef.current(); lists(true); },
+      }, controller.signal);
+      if (controller.signal.aborted) return;
+      if (ended.kind === 'unsupported' || (ended.kind === 'denied' && streamToken !== token)) { changeLive('off'); return; }
+      if (ended.kind === 'denied' || ended.kind === 'expired') {
+        const access = await ensureAccessToken();
+        if (controller.signal.aborted) return;
+        if (!access) { changeLive('off'); return; }
+        streamToken = access;
+      }
+      // A stream that ends before `ready` or within seconds backs off like a
+      // failure, so a proxy that drops it cannot cause a reconnect storm.
+      if (ended.kind === 'closed' && ready && Date.now() - startedAt > 5_000) failures = 0; else failures++;
+      changeLive(failures ? 'retrying' : 'connecting');
+      timer = setTimeout(() => void connect(), ended.kind === 'closed' ? 250 : eventsRetryDelay(failures));
+    };
+    reconnectEventsRef.current = () => { if (liveRef.current === 'retrying') void connect(); };
+    void connect();
+    return () => {
+      controller.abort(); clearTimeout(timer); clearTimeout(listsTimer);
+      reconnectEventsRef.current = () => {};
+      liveRef.current = 'off'; setLive('off');
+    };
+  }, [token, namespace, enabled, refreshLists]);
+
+  // A returning window, regained focus, or restored network re-reads what
+  // is on screen instead of waiting for the next poll.
+  useEffect(() => {
+    let hiddenAt = 0;
+    const onVisibility = () => {
+      if (document.visibilityState === 'hidden') { hiddenAt = Date.now(); return; }
+      refreshThreadRef.current();
+      if (hiddenAt && Date.now() - hiddenAt > 5_000) void refreshLists(true);
+    };
+    const onFocus = () => refreshThreadRef.current();
+    const onOnline = () => { refreshThreadRef.current(); void refreshLists(true); reconnectEventsRef.current(); };
+    document.addEventListener('visibilitychange', onVisibility);
+    window.addEventListener('focus', onFocus);
+    window.addEventListener('online', onOnline);
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibility);
+      window.removeEventListener('focus', onFocus);
+      window.removeEventListener('online', onOnline);
+    };
+  }, [refreshLists]);
+
+  // Live tokens for a standing turn, batched to one paint per frame. Job
+  // plane threads answer with a snapshot only and are not asked again.
+  const activeTurnId = active?.id;
+  useEffect(() => {
+    setLiveReply(previous => previous && previous.turnId === activeTurnId ? previous : null);
+    if (!threadID || !activeTurnId || jobPlaneThreads.current.has(threadID)) return;
+    let closed = false;
+    let buffered: LiveReply | undefined;
+    let frame = 0;
+    const flush = () => { frame = 0; if (!closed && buffered) setLiveReply(buffered); };
+    const thread = threadID;
+    const handle = openChatTokenStream(tokenRef.current, namespace, thread, {
+      onSnapshot: standing => { if (!standing) { jobPlaneThreads.current.add(thread); handle.close(); } },
+      onToken: token => {
+        if (closed || token.threadId !== thread) return;
+        buffered = appendLiveToken(buffered, token);
+        if (!frame) frame = requestAnimationFrame(flush);
+      },
+      onEnd: reason => { if (!closed && reason === 'terminal') refreshThreadRef.current(); },
+    });
+    return () => { closed = true; cancelAnimationFrame(frame); handle.close(); };
+  }, [namespace, threadID, activeTurnId]);
 
   function applyThreadIdentity(thread: RemoteThread) {
     setProfile(thread.profileName || ''); setHarness(threadHarness(thread));
@@ -311,6 +453,7 @@ export function EntityChatPage({token, config}: Props) {
     const content = (retry?.content ?? draft).trim();
     if (!content || busy || submitting.current || (retryPending && !retry) || active || unavailable || initializing || (!profile && !harness) || !enabled || (coordinate && !peers.length)) return;
     submitting.current = true;
+    jumpToBottom();
     setBusy(true); setError(''); setOptimistic({content}); setSendPhase(threadID ? 'sending' : 'saving');
     let target = threadID;
     try {
@@ -344,6 +487,7 @@ export function EntityChatPage({token, config}: Props) {
           activeTurn: turns.find(turn => ['waiting', 'queued', 'running'].includes(turn.status)),
         };
       });
+      refreshThreadRef.current();
     } catch (err) { setError(formatTurnError(err)); setSendPhase('unconfirmed'); }
     finally { submitting.current = false; setBusy(false); }
   }
@@ -410,6 +554,39 @@ export function EntityChatPage({token, config}: Props) {
     });
   }
 
+  // Rows are memoized; their callbacks stay stable and read the latest
+  // handlers through a ref.
+  const rowHandlers = useRef({fulfillManagerCreate, fulfillPeerHandoff});
+  rowHandlers.current = {fulfillManagerCreate, fulfillPeerHandoff};
+  const onCreateRequest = useCallback((content: string) => rowHandlers.current.fulfillManagerCreate(content), []);
+  const onHandoff = useCallback((content: string) => rowHandlers.current.fulfillPeerHandoff(content), []);
+  const onViewOutput = useCallback((runName: string, outputBackend: string) => { setHistoricalOutput({runName, backend: outputBackend}); setRawActivityOpen(true); }, []);
+  const profileNames = useMemo(() => profiles.map(item => item.metadata.name), [profiles]);
+  const agentLabel = detail?.profileName || 'Agent';
+
+  // Messages present when a conversation opens render still; later arrivals
+  // from the agent or its peers animate in once. The reply that replaces a
+  // live stream does not, so the hand-off is seamless.
+  if (!knownMessages.current || knownMessages.current.thread !== (detail?.id ?? '')) {
+    knownMessages.current = {thread: detail?.id ?? '', ids: new Set(detail?.messages.map(message => message.id) ?? [])};
+  }
+  const knownIds = knownMessages.current.ids;
+  useEffect(() => { detail?.messages.forEach(message => knownIds.add(message.id)); }, [detail, knownIds]);
+  const liveRunName = liveReply ? detail?.turns?.find(turn => turn.id === liveReply.turnId)?.runName : undefined;
+  const replyRunName = (message: {metadata?: unknown}) => (message.metadata as {runName?: string} | undefined)?.runName;
+  const liveVisible = Boolean(liveReply?.text && active?.id === liveReply.turnId
+    && !detail?.messages.some(message => message.role === 'assistant' && liveRunName && replyRunName(message) === liveRunName));
+  const entering = (message: {id: string; role: string; metadata?: unknown}) => !knownIds.has(message.id)
+    && (message.role !== 'user' || Boolean((message.metadata as {authorProfile?: string} | undefined)?.authorProfile))
+    && !(liveRunName && replyRunName(message) === liveRunName);
+
+  const arrivals = (detail?.messages.length ?? 0) + (optimisticVisible ? 1 : 0);
+  const {unseen, jumpToBottom} = useStickToBottom(scroller, {
+    resetKey: `${namespace}/${threadID}`,
+    contentKey: `${arrivals}:${liveReply?.text.length ?? 0}:${active?.id ?? ''}:${active?.status ?? ''}:${detail?.turns?.length ?? 0}:${optimistic?.content ?? ''}`,
+    arrivals,
+  });
+
   return <div className="human-page">
     <div className="page-header"><div><h1 className="page-title">Chat</h1>
       <p className="page-sub">Your agents, their work, and your ongoing conversations. create-agent is a Wrapper/manager skill.</p>
@@ -467,6 +644,8 @@ export function EntityChatPage({token, config}: Props) {
           <div className="agent-chat-identity"><AgentAvatar name={agentName(profile || harness || 'Harness')} identity={`${namespace}/${profile || harness || 'harness'}`} size="lg"/>
             <div>{isManager && <span className="agent-role-badge">Project manager</span>}<h2 className="agent-name" title={profile || harness}>{profile || harness ? agentName(profile || harness) : 'Chat with a harness'}</h2><p className="agent-meta">{initializing ? 'Opening your conversation…' : profile ? (standingIDs[profile] === threadID ? 'Standing conversation' : 'Saved conversation') : 'Choose a remote harness below'}</p>{isManager && <p className="agent-manager-description">Coordinates work, schedules, and agent instructions for {selectedProject?.name || 'this project'}.</p>}</div>
           </div>
+          {live === 'live' ? <span className="chat-sync chat-sync-live" title="New messages and replies appear as they happen">Live</span>
+            : live === 'retrying' ? <span className="chat-sync chat-sync-retrying" title="Updates are still checked regularly while live updates reconnect">Reconnecting…</span> : null}
         </header>
         <details className="agent-settings" id="conversation-details" key={threadID || 'new'} open={!threadID && !profile}>
           <summary>Conversation details</summary>
@@ -481,85 +660,30 @@ export function EntityChatPage({token, config}: Props) {
           {selectedProfile && <AgentHarnessSwitcher token={token} namespace={namespace} profileName={profile} profile={selectedProfile} harnesses={harnesses} writeEnabled={Boolean(config.composition?.writeEnabled)} disabled={busy || initializing} threadHarness={threadID ? harness : ''} onUpdated={(doc) => setProfiles(previous => previous.map(item => item.metadata.name === doc.metadata.name ? doc : item))}/>}
           {threadID && <button type="button" className="btn btn-ghost" disabled={busy} onClick={() => newChat()}>Start a separate conversation</button>}
         </details>
-        <div className="chat-messages" aria-live="polite">
+        <div className="chat-messages" aria-live="polite" ref={scroller}>
           {!detail?.messages.length && !optimistic && <div className="agent-empty">
             <AgentAvatar name={agentName(profile || harness || 'Agent')} identity={`${namespace}/${profile || harness || 'harness'}`} size="lg"/>
             <h3>{unavailable ? 'Conversation unavailable' : initializing || (threadID && !detail) ? 'Opening conversation…' : profile ? `Talk with ${agentName(profile)}` : 'Chat with a harness'}</h3>
             <p>{unavailable ? 'Your draft is preserved. Select the agent to try again.' : isManager ? 'Plan work, review what your agents are doing, or ask for changes to their schedules and instructions.' : profile ? 'Your messages and replies stay here as you work together.' : 'Choose a harness in Conversation details to begin.'}</p>
           </div>}
-          {detail?.messages.map(message => {
-            if (message.role === 'system') {
-              const metadata = message.metadata as {kind?: string; backend?: string; runName?: string} | undefined;
-              if (metadata?.kind !== 'legacy_output_unavailable' || !['hermesAgent', 'openClaw'].includes(metadata.backend || '')) return null;
-              return <aside key={message.id} className="remote-chat-caption" aria-label="Earlier reply unavailable"><strong>Earlier reply unavailable</strong><p>{metadata.backend === 'openClaw' ? 'This older answer could not be recovered from its runner output yet. Your message is saved. The answer will be saved permanently when recovery succeeds.' : 'An older Hermes runner did not separate its final answer from internal output. The original message has been preserved. Reasoning and original output can be inspected in the runner output while its logs are retained.'}</p>{metadata.runName && /^[a-z0-9]([a-z0-9.-]{0,251}[a-z0-9])?$/.test(metadata.runName) && <button type="button" className="btn btn-ghost" onClick={() => {setHistoricalOutput({runName: metadata.runName!, backend: metadata.backend!}); setRawActivityOpen(true);}}>View original runner output</button>}</aside>;
-            }
-            const jevCaption = jevIntentCaption(message);
-            // Manager-only affordance: a classified, non-unclear
-            // create_agent_request user message carries
-            // jevNeedsManagerCreate=true. Wrapper/manager principals get a
-            // "Requested create" receipt that prefills the existing
-            // CreateAgentPanel; peers keep the caption only (never a
-            // create button). Authority still lives in
-            // isCreateAgentPrincipal + executeCreateAgent.
-            const showCreateAffordance =
-              message.role === 'user' && mayShowCreateAffordance(message, createPrincipal);
-            // Handoff affordance: a classified, non-unclear peer_handoff
-            // user message carries jevNeedsPeerHandoff=true, or any
-            // message carries an equivalent existing-peer requestPeer
-            // STATUS_JSON hint. Wrapper/manager principals get a handoff
-            // receipt that opens the named peer's standing conversation
-            // (existing coordination only); peers keep the caption only
-            // (never a handoff button that could create). Handoff never
-            // creates a teammate.
-            const showHandoffAffordance =
-              (message.role === 'user' || message.role === 'assistant') &&
-              mayShowHandoffAffordance(message, createPrincipal);
-            const handoffTarget = showHandoffAffordance
-              ? (peerHandoffTargetFromMessage(message)?.peerProfileName?.trim() ||
-                suggestPeerHandoffTarget(message.content, profiles.map(item => item.metadata.name)))
-              : null;
-            return <article key={message.id} className={`chat-bubble ${message.role === 'user' ? 'chat-bubble-user' : 'chat-bubble-run'}`}>
-            <header className="chat-bubble-header"><span className="chat-bubble-role">{message.role === 'user' ? ((message.metadata as {authorProfile?: string} | undefined)?.authorProfile || 'You') : message.role === 'tool' ? 'Coordination' : detail.profileName || 'Agent'}</span></header>
-            {message.role === 'assistant' ? <ChatAssistantBody content={message.content}/> : <div className="chat-bubble-body"><MarkdownBody content={message.content}/></div>}
-            {jevCaption && <p className="remote-chat-caption">{jevCaption}</p>}
-            {showCreateAffordance && (
-              <div className="remote-chat-caption" role="note" aria-label="Requested agent create">
-                <span>Requested create — needs a manager to fulfill.</span>{' '}
-                <button
-                  type="button"
-                  className="btn btn-ghost"
-                  onClick={() => fulfillManagerCreate(message.content)}
-                >
-                  Review in create form
-                </button>
-              </div>
-            )}
-            {showHandoffAffordance && (
-              <div className="remote-chat-caption" role="note" aria-label="Requested peer handoff">
-                <span>Handoff requested — coordinate with an existing peer{handoffTarget ? ` (${handoffTarget})` : ''}. Never creates a teammate.</span>{' '}
-                <button
-                  type="button"
-                  className="btn btn-ghost"
-                  onClick={() => fulfillPeerHandoff(message.content)}
-                >
-                  {handoffTarget ? `Open ${handoffTarget} conversation` : 'Review coordination'}
-                </button>
-              </div>
-            )}
-          </article>;
-          })}
+          {detail?.messages.map(message => <RemoteMessage key={message.id} message={message} agentLabel={agentLabel} createPrincipal={createPrincipal} profileNames={profileNames}
+            entering={entering(message)} onCreateRequest={onCreateRequest} onHandoff={onHandoff} onViewOutput={onViewOutput}/>)}
           {optimisticVisible && <article className="chat-bubble chat-bubble-user" aria-label="Your pending message">
             <header className="chat-bubble-header"><span className="chat-bubble-role">You</span></header>
             <div className="chat-bubble-body"><MarkdownBody content={optimistic.content}/></div>
           </article>}
           {optimistic && <div className="remote-turn-status" role="status">{busy ? (sendPhase === 'saving' ? 'Saving conversation…' : 'Sending message…') : 'Message not confirmed. Retry to check delivery.'}{retryPending && !busy && <button type="button" className="btn btn-ghost" disabled={Boolean(active) || unavailable || initializing} onClick={() => {if (pending.current) void submit(undefined, {content: pending.current.content});}}>Check retry delivery</button>}</div>}
+          {liveVisible && liveReply && <article className="chat-bubble chat-bubble-run chat-bubble-live" aria-busy="true" aria-label={`${agentLabel} is replying`}>
+            <header className="chat-bubble-header"><span className="chat-bubble-role">{agentLabel}</span><span className="chat-live-tag">Replying</span></header>
+            <div className="chat-bubble-body chat-live-text">{liveReply.gaps ? '… ' : ''}{liveReply.text}<span className="chat-live-caret" aria-hidden="true"/></div>
+          </article>}
           <RemoteTurnActivity token={token} namespace={namespace} turn={active ?? (optimistic ? undefined : detail?.turns?.at(-1))} recoveryPending={detail?.recoveryPending} agentLabel={detail?.profileName || profile || harness}/>
 
           {detail?.turns?.flatMap(t => t.delegates ?? []).map(delivery => <div className="remote-turn-status" key={delivery.turnId}>{delivery.status === 'succeeded' ? `${delivery.profileName} replied.` : delivery.status === 'running' ? `${delivery.profileName} is working.` : delivery.status === 'failed' ? `${delivery.profileName} could not finish.` : `Message saved for ${delivery.profileName}.`} <button className="btn btn-ghost" disabled={busy} onClick={() => {const thread = threads.find(t => t.id === delivery.threadId); openThread(thread ?? {id: delivery.threadId, namespace, profileName: delivery.profileName, mode: 'persona', title: delivery.profileName, createdAt: '', updatedAt: '', createdBy: ''});}}>Open peer conversation</button></div>)}
           {latestFailed && <div className="banner banner-error"><span>Turn failed: {latestFailed.error || latestFailed.runName}</span>{retryMessage && <button type="button" className="btn btn-ghost" disabled={busy || Boolean(active) || unavailable || initializing || !enabled} onClick={() => void submit(undefined, {content: retryMessage.content, forceNew: true})}>Retry last message</button>}</div>}
           {(active ?? lastTurn)?.attempts?.length ? <details className="remote-chat-caption"><summary>Earlier startup attempts ({(active ?? lastTurn)!.attempts!.length})</summary>{(active ?? lastTurn)!.attempts!.map(attempt => <p key={attempt.runName}>{attempt.error} <button type="button" className="btn btn-ghost" onClick={() => {setHistoricalOutput({runName: attempt.runName, backend}); setRawActivityOpen(true);}}>View attempt output</button></p>)}</details> : null}
           {earlierFailures.length > 0 && <details className="remote-chat-caption"><summary>Earlier failed turns ({earlierFailures.length})</summary>{earlierFailures.map(t => <p key={t.id}>Turn failed: {t.error || t.runName}</p>)}</details>}
-          <div ref={end}/>
+          {unseen > 0 && <button type="button" className="chat-jump" onClick={jumpToBottom}>{unseen === 1 ? '1 new message' : `${unseen} new messages`}</button>}
         </div>
         <form className="chat-composer plate" onSubmit={e => void submit(e)}>
           <label className="field"><span className="label">Message</span><textarea className="textarea chat-composer-input" rows={3} aria-label="Message" value={draft} disabled={busy || !enabled || initializing} onChange={e => changeDraft(e.target.value)} onKeyDown={e => {if(e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {e.preventDefault(); void submit();}}} placeholder="Message this agent…"/></label>

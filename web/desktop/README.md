@@ -96,14 +96,19 @@ turn did not deliver. `GET /local/v1/snapshot`
 reports `chatLatencyJsonlEnabled: true/false` (the absolute path is never
 leaked to the SPA). Both paths are fire-and-forget and never break chat.
 
-Desktop Chat Send prefers the standing WebSocket live turn
-(`openChatThreadStream` + live `token` frames, settled from the durable
-thread record) and falls back to the existing POST path with the same
-idempotency key when the stream is unavailable, the thread stays on the Job
-plane, or OIDC denies the call. See
+Desktop Chat stays current without a manual refresh. It subscribes to
+`GET /api/v1/namespaces/{ns}/chat/events` (identifiers only) and re-reads a
+thread as soon as a peer, another person, or a finished run changes it; window
+focus, a returning tab, and a restored network re-read too. Standing turns
+stream live `token` frames over the thread WebSocket (`openChatTokenStream`,
+same-origin through the host proxy) until the durable reply replaces them.
+Reads stay the source of truth: an API without the events route keeps the 2.5s
+poll, and idle threads with live events keep a 20s safety-net read. The host
+lifts its 30s/6m request deadlines for these streams; the API's
+`stream.maxDuration` bounds them. Contract test (no cluster):
+`node hack/desktop-chat-live-events.browser-test.mjs` after `npm run build`.
+The standing WebSocket send path and its fake-transport gate are described in
 [`docs/standing-inprocess-harness.md`](../../docs/standing-inprocess-harness.md)
-("Desktop chat e2e over the standing WebSocket") for the e2e run steps and
-the fake-transport CI gate
 (`node --experimental-strip-types --test hack/desktop-standing-chat-stream.mjs`).
 
 ## Local API
