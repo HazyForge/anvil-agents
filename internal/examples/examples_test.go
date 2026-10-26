@@ -20,6 +20,12 @@ func TestExampleManifestsParseAndIdentifyObjects(t *testing.T) {
 			if err != nil {
 				return err
 			}
+			// examples/onechat holds one chat CLI configs and scenarios, not
+			// Kubernetes manifests; TestOneChatExampleConfigsLoad in
+			// internal/onechat pins their shape.
+			if entry.IsDir() && strings.HasSuffix(path, "examples/onechat") {
+				return filepath.SkipDir
+			}
 			if entry.IsDir() || strings.HasSuffix(path, "-values.yaml") || (!strings.HasSuffix(path, ".yaml") && !strings.HasSuffix(path, ".yml")) {
 				return nil
 			}

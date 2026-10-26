@@ -1,0 +1,38 @@
+# Paths are resolved from the CLI's working directory. Run from the repo root.
+stateDir: /tmp/anvil-onechat
+manager:
+  model: sonnet
+cloud:
+  baseURL: http://127.0.0.1:8080
+  namespaces: [agents]
+  tokenCommand: [hack/simulator.sh, token]
+local:
+  workdirRoots: ["."]
+  timeout: 10m
+setups:
+  - id: local-claude
+    location: local
+    harness: claudeCode
+    permissionMode: acceptEdits
+    tags: [code, local-files, interactive]
+    notes: Continue local implementation work in its existing folder.
+  - id: local-codex
+    location: local
+    harness: codex
+    sandbox: read-only
+    tags: [code, review, local-files]
+    notes: Review local code without changing files; use a workspace-write setup for implementation.
+  - id: cloud-grok
+    location: cloud
+    harness: grokBuild
+    namespace: agents
+    profile: cloud-grok
+    tags: [research, cloud]
+    notes: Research and longer tasks that should run in the cloud.
+  - id: cloud-codex
+    location: cloud
+    harness: codex
+    namespace: agents
+    profile: cloud-codex
+    tags: [code, cloud]
+    notes: Work in the environment configured by the cloud profile.

@@ -65,6 +65,7 @@ while IFS= read -r manifest; do
 done < <(find "${root_dir}/config/samples" "${root_dir}/examples" \
 	-type f -name '*.yaml' \
 	! -path "${root_dir}/examples/judge-kind/*" \
+	! -path "${root_dir}/examples/onechat/*" \
 	! -name '*-values.yaml' ! -name 'zitadel-values.yaml' | sort)
 
 helm --kube-context "${kube_context}" uninstall anvil-agents --namespace anvil-agents-system >/dev/null

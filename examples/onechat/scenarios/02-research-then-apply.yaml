@@ -1,0 +1,21 @@
+name: research-then-apply
+title: Research in the cloud, apply locally
+description: >
+  Only the local invoice session exists. The person asks for research that
+  needs no files, then asks for the result to be applied to the code. The
+  manager should start cloud research, then hand its conclusion to the local
+  session.
+workspaces:
+  invoice-cli: {fixture: examples/onechat/fixtures/invoice-cli}
+setup:
+  - session: {label: invoice, setup: local-claude, title: Invoice CLI, workspace: invoice-cli}
+    send:
+      - Read the code and summarise in three bullets what this tool does today. Do not change anything.
+turns:
+  - say: >
+      Research how invoicing tools usually round money: half-up versus banker's
+      rounding, and storing cents as integers versus decimals. Give me a short
+      recommendation for a small Go CLI. No code yet.
+    expect: {action: create, setup: cloud-agy}
+  - say: Good. Apply that recommendation to the invoice tool and update the tests.
+    expect: {action: send, session: invoice}
