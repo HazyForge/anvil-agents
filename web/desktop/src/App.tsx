@@ -10,6 +10,8 @@ import { AuthCallbackPage } from "./pages/AuthCallbackPage";
 import { EntityChatPage } from "./pages/EntityChatPage";
 import { HarnessesPage } from "./pages/HarnessesPage";
 import { LocalChatPage } from "./pages/LocalChatPage";
+import { LocalManagerPage } from "./pages/LocalManagerPage";
+import { LocalScenarioBench } from "./pages/LocalScenarioBench";
 import { ManagerPage } from "./pages/ManagerPage";
 import { WrapperPage } from "./pages/WrapperPage";
 import { DesktopIcon } from "./components/AgentAvatar";
@@ -177,7 +179,7 @@ export default function App() {
   </>;
 
   return (
-    <div className={`desktop-shell ${location.pathname === "/chat" ? "desktop-shell-chat" : ""}${location.pathname === '/manager' ? ' desktop-shell-manager' : ''}`}>
+    <div className={`desktop-shell ${location.pathname === "/chat" ? "desktop-shell-chat" : ""}${location.pathname === '/manager' || location.pathname.startsWith('/local-manager') ? ' desktop-shell-manager' : ''}`}>
       <div className="titlebar">
         <span className="desktop-brand-mark"><DesktopIcon kind="forge"/></span>
         <div className="titlebar-title">{snapshot?.productTitle ?? PRODUCT_TITLE}</div>
@@ -211,10 +213,11 @@ export default function App() {
         </div>
       </div>
       <nav className="rail" aria-label="Primary">
+        <NavLink to="/local-manager" aria-disabled={localChatBusy} onClick={event => {if(localChatBusy) event.preventDefault();}} className={({isActive}) => isActive ? 'rail-link active' : 'rail-link'}><DesktopIcon kind="project"/>Local Manager</NavLink>
         {signedIn && config?.chat?.enabled && <NavLink to="/manager" aria-disabled={localChatBusy} onClick={event => { if (localChatBusy) event.preventDefault(); }} className={({ isActive }) => isActive ? 'rail-link active' : 'rail-link'}>
           <DesktopIcon kind="project"/>Manager
         </NavLink>}
-        <NavLink to="/chat" className={({ isActive }) => (isActive ? "rail-link active" : "rail-link")}>
+        <NavLink to="/chat" aria-disabled={localChatBusy} onClick={event => {if(localChatBusy) event.preventDefault();}} className={({ isActive }) => (isActive ? "rail-link active" : "rail-link")}>
           <DesktopIcon kind="chat"/>Chat
         </NavLink>
         <NavLink to="/wrapper" aria-disabled={localChatBusy} onClick={e => {if(localChatBusy) e.preventDefault();}} className={({ isActive }) => (isActive ? "rail-link active" : "rail-link")}>
@@ -232,6 +235,8 @@ export default function App() {
           <Route path="/callback" element={<AuthCallbackPage onAuthenticated={handleAuthenticated} />} />
           <Route path="/chat" element={chat} />
           <Route path="/manager" element={manager}/>
+          <Route path="/local-manager" element={snapshot ? <LocalManagerPage snapshot={snapshot} onBusyChange={setLocalChatBusy} signedIn={signedIn} config={config} getAccessToken={freshLocalAccessToken}/> : <div className="empty">Loading local conversations…</div>}/>
+          <Route path="/local-manager/scenarios" element={<LocalScenarioBench/>}/>
           <Route
             path="/wrapper"
             element={
@@ -252,7 +257,7 @@ export default function App() {
               )
             }
           />
-          <Route path="/" element={snapshot && (!snapshot.prefs.apiOrigin || config || configError) ? <Navigate to={managerReady && chatLocation === 'remote' ? '/manager' : '/chat'} replace/> : <div className="empty">Loading Anvil Agents Desktop…</div>} />
+          <Route path="/" element={snapshot && (!snapshot.prefs.apiOrigin || config || configError) ? <Navigate to={managerReady && chatLocation === 'remote' ? '/manager' : snapshot.localManager?.enabled ? '/local-manager' : '/chat'} replace/> : <div className="empty">Loading Anvil Agents Desktop…</div>} />
           <Route path="*" element={<Navigate to="/chat" replace />} />
         </Routes>
       </main>

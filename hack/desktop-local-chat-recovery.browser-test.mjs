@@ -56,7 +56,7 @@ try {
   await ack().click();await send.click();await ack().waitFor();
   assert.equal(await send.isDisabled(),true);assert.equal(posts.length,1);
   await page.reload();await ack().waitFor();assert.equal(posts.length,1);
-  await ack().click();distro='Debian';await page.reload();
+  await ack().click();await page.waitForFunction(()=>JSON.parse(localStorage.getItem('anvil-agents-desktop.local-chat.v1')).every(c=>!c.pending));distro='Debian';await page.reload();
   const bind=page.getByRole('button',{name:'Use this folder on WSL · Debian',exact:true});
   await bind.waitFor();
   await page.getByRole('textbox',{name:'Message',exact:true}).fill('Continue in the checked folder');

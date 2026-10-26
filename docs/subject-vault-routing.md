@@ -1,5 +1,9 @@
 # Central manager and subject vault
 
+This page describes the remote, authenticated manager. The
+[Local Manager and scenario bench](local-manager-routing.md) use the Desktop's
+Anvil-owned conversation inventory and existing native harness adapters.
+
 Anvil Agents Desktop's **Manager** accepts a conversation that moves between
 projects, questions, preferences, and ongoing work. Before dispatch, it selects
 an owned subject and an intent. Its live activity panel shows the actual API

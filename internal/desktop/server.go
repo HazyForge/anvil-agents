@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/hazyforge/anvil-agents/internal/desktop/uifs"
+	"github.com/hazyforge/anvil-agents/internal/subjectrouting"
 )
 
 const (
@@ -39,10 +40,14 @@ type Options struct {
 	// chat-latency reports. Empty falls back to ANVIL_CHAT_LATENCY_JSONL
 	// on the host process. Relative/empty values disable the sink.
 	ChatLatencyJSONL string
-	Discoverer       Discoverer
-	HTTPClient       *http.Client
-	Transport        http.RoundTripper
-	OnListen         func(addr string)
+	// SubjectRoutingEnabled opts into local manager classification. The provider
+	// stays in the loopback host; its credentials are never returned to the UI.
+	SubjectRoutingEnabled   bool
+	SubjectDecisionProvider subjectrouting.Provider
+	Discoverer              Discoverer
+	HTTPClient              *http.Client
+	Transport               http.RoundTripper
+	OnListen                func(addr string)
 }
 
 type issuerCache struct {
@@ -122,6 +127,9 @@ func NewServer(opts Options) (*Server, error) {
 	mux.HandleFunc("POST /local/v1/prefs", server.handlePrefs)
 	mux.HandleFunc("POST /local/v1/delegate", server.handleDelegate)
 	mux.HandleFunc("POST /local/v1/chat/stream", server.handleChatStream)
+	mux.HandleFunc("POST /local/v1/manager/route", server.handleLocalManagerRoute)
+	mux.HandleFunc("GET /local/v1/manager/bench", server.handleLocalManagerScenarios)
+	mux.HandleFunc("POST /local/v1/manager/bench", server.handleLocalManagerBench)
 	mux.HandleFunc("POST /local/v1/agent-tool", server.handleAgentTool)
 	mux.HandleFunc("/ui-config.json", server.handleAPIProxy)
 	mux.HandleFunc("/api/", server.handleAPIProxy)

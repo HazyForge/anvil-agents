@@ -1148,3 +1148,32 @@ form.agent-settings h2 { margin: 0; font-size: 18px; }
   font-family: var(--font-mono);
   font-size: 0.78rem;
 }
+
+.local-manager-availability { margin: 0; padding: .6rem 2rem; border-bottom: 1px solid var(--border); color: var(--amber); font-size: .8rem; }
+.local-new-settings { position: relative; font-size: .8rem; color: var(--text-dim); }
+.local-new-settings summary { cursor: pointer; padding: .6rem; }
+.local-new-settings[open] { width: 20rem; }
+.local-new-settings label { margin: .6rem 0; }
+.local-new-settings p { max-width: 20rem; font-size: .73rem; }
+.local-route-json { margin: .7rem 0; font-size: .75rem; color: var(--text-dim); }
+.local-route-json summary { cursor: pointer; }
+.local-route-json pre { max-height: 22rem; overflow: auto; padding: .75rem; background: var(--bg-void); font-size: .7rem; white-space: pre-wrap; overflow-wrap: anywhere; }
+.local-route-feedback { padding: .8rem 0; border-top: 1px solid var(--border); font-size: .78rem; color: var(--text-dim); }
+.local-route-feedback form { display: grid; gap: .75rem; }
+.local-route-feedback label { display: grid; gap: .3rem; }
+.local-saved-message { border-bottom: 1px solid var(--border); padding: .7rem 0; font-size: .8rem; overflow-wrap: anywhere; }
+.local-bench-page { min-height: calc(100dvh - 3.2rem); }
+.local-bench-controls { padding: 1rem 2rem; border-bottom: 1px solid var(--border); }
+.local-bench-controls label { display: flex; align-items: center; gap: .75rem; }
+.local-bench-layout { display: grid; grid-template-columns: 19rem minmax(0,1fr); }
+.local-bench-catalog { padding: 1rem 1.5rem; border-right: 1px solid var(--border); }
+.local-bench-catalog section { margin-bottom: 1.5rem; padding-bottom: 1rem; border-bottom: 1px solid var(--border); }
+.local-bench-catalog h2 { font-size: 1rem; font-weight: 500; }
+.local-bench-catalog p { color: var(--text-dim); font-size: .82rem; }
+.local-bench-results { padding: 1rem 2rem; min-width: 0; }
+.local-bench-turn { margin: 1rem 0 2rem; padding: 1.2rem; background: var(--bg-panel); border: 1px solid var(--border); border-radius: 9px; }
+.local-bench-turn h3 { font-size: 1rem; font-weight: 500; }
+.local-bench-turn table { width: 100%; border-collapse: collapse; font-size: .8rem; overflow-wrap: anywhere; }
+.local-bench-turn th, .local-bench-turn td { padding: .5rem; text-align: left; border-bottom: 1px solid var(--border); }
+.local-bench-turn th { color: var(--text-dim); font-weight: 500; }
+@media (max-width: 760px) { .local-bench-layout { display: flex; flex-direction: column; } .local-bench-catalog { max-height: 20rem; overflow: auto; border-right: 0; border-bottom: 1px solid var(--border); } .local-bench-results, .local-bench-controls { padding: 1rem; } .local-new-settings[open] { width: 100%; } .local-bench-turn { padding: .7rem; } }

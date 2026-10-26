@@ -64,6 +64,10 @@ func (s *Server) handleChatStream(writer http.ResponseWriter, request *http.Requ
 	var body struct {
 		DelegateRequest
 		RemoteNamespace string `json:"remoteNamespace,omitempty"`
+		ExpectedRuntime *struct {
+			Target    string `json:"target"`
+			WSLDistro string `json:"wslDistro,omitempty"`
+		} `json:"expectedRuntime,omitempty"`
 	}
 	if json.Unmarshal(raw, &body) != nil || strings.TrimSpace(body.Prompt) == "" || len(body.Prompt) > maxPromptBytes {
 		writeError(writer, http.StatusBadRequest, "invalid_body", "local chat requires a harness and a prompt of at most 64KiB")
@@ -74,6 +78,10 @@ func (s *Server) handleChatStream(writer http.ResponseWriter, request *http.Requ
 	tool, target, err := s.resolveDelegate(ctx, body.Harness)
 	if err != nil {
 		writeError(writer, http.StatusBadRequest, "invalid_harness", "the selected local harness is unavailable")
+		return
+	}
+	if expected := body.ExpectedRuntime; expected != nil && (expected.Target != target.Mode || expected.WSLDistro != target.Distro) {
+		writeError(writer, http.StatusConflict, "runtime_changed", "the local runtime changed; review this conversation's runtime before sending")
 		return
 	}
 	tool = tool.forLocalChat()

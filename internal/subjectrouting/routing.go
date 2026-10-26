@@ -45,18 +45,30 @@ var (
 )
 
 type Candidate struct {
-	ID      string   `json:"id"`
-	Label   string   `json:"label"`
-	Summary string   `json:"summary"`
-	Kind    string   `json:"kind"`
-	Aliases []string `json:"aliases,omitempty"`
+	ID         string   `json:"id"`
+	Label      string   `json:"label"`
+	Summary    string   `json:"summary"`
+	Kind       string   `json:"kind"`
+	Aliases    []string `json:"aliases,omitempty"`
+	AgeSeconds *float64 `json:"ageSeconds,omitempty"`
+}
+
+// RecentMessage is bounded manager context, never a full harness transcript.
+// SubjectID records the previously resolved destination rather than guessing it
+// from assistant prose. Ages are observations, not a probability multiplier.
+type RecentMessage struct {
+	Role       string   `json:"role"`
+	Content    string   `json:"content"`
+	SubjectID  string   `json:"subjectId,omitempty"`
+	AgeSeconds *float64 `json:"ageSeconds,omitempty"`
 }
 
 type Input struct {
 	Content string `json:"content"`
 	// Candidates must already be authorized for the current owner and namespace,
 	// ordered most recently touched first. The provider cannot discover subjects.
-	Candidates []Candidate `json:"candidates"`
+	Candidates []Candidate     `json:"candidates"`
+	Recent     []RecentMessage `json:"recent,omitempty"`
 }
 
 // Decision keeps the validated model judgments separate from the action allowed
@@ -68,7 +80,7 @@ type Decision struct {
 	Intent               string             `json:"intent"`
 	IntentConfidence     float64            `json:"intentConfidence"`
 	IntentProbabilities  map[string]float64 `json:"intentProbabilities"`
-	Model                string             `json:"model"`
+	Model                string             `json:"model,omitempty"`
 	Outcome              string             `json:"outcome"`
 	Reason               string             `json:"reason"`
 }
@@ -95,6 +107,9 @@ func Prepare(input Input) (Input, error) {
 			return Input{}, ErrInvalidInput
 		}
 		seen[candidate.ID] = true
+		if !validAge(candidate.AgeSeconds) {
+			return Input{}, ErrInvalidInput
+		}
 		candidate.Label = Label(candidate.Label)
 		candidate.Summary = Summary(candidate.Summary)
 		candidate.Kind = bounded(Redact(candidate.Kind), 40)
@@ -113,7 +128,25 @@ func Prepare(input Input) (Input, error) {
 		candidate.Aliases = aliases
 		prepared.Candidates = append(prepared.Candidates, candidate)
 	}
+	recent := input.Recent
+	if len(recent) > 6 {
+		recent = recent[len(recent)-6:]
+	}
+	for _, message := range recent {
+		if (message.Role != "user" && message.Role != "assistant") || !utf8.ValidString(message.Content) || !validAge(message.AgeSeconds) || (message.SubjectID != "" && !safeIdentifier.MatchString(message.SubjectID)) {
+			return Input{}, ErrInvalidInput
+		}
+		message.Content = bounded(Redact(message.Content), 1000)
+		if !seen[message.SubjectID] {
+			message.SubjectID = ""
+		}
+		prepared.Recent = append(prepared.Recent, message)
+	}
 	return prepared, nil
+}
+
+func validAge(age *float64) bool {
+	return age == nil || (!math.IsNaN(*age) && !math.IsInf(*age, 0) && *age >= 0)
 }
 
 // Route enforces the same output policy for any provider. Provider errors are

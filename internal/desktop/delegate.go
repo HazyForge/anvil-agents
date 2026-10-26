@@ -226,7 +226,7 @@ func delegateEnv(env []string) []string {
 			continue
 		}
 		switch upper {
-		case "AUTHORIZATION", "ACCESS_TOKEN", "ID_TOKEN", "REFRESH_TOKEN", "OIDC_TOKEN", "BEARER_TOKEN", "KUBECONFIG", "WSLENV":
+		case "AUTHORIZATION", "ACCESS_TOKEN", "ID_TOKEN", "REFRESH_TOKEN", "OIDC_TOKEN", "BEARER_TOKEN", "KUBECONFIG", "WSLENV", "TYPESAFE_API_KEY":
 			continue
 		}
 		if strings.Contains(upper, "TOKEN") && (strings.Contains(upper, "OIDC") || strings.Contains(upper, "ANVIL") || strings.Contains(upper, "ACCESS")) {

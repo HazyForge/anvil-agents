@@ -129,6 +129,10 @@ func TestJevRequestBatchesBoundedRedactedSubjectState(t *testing.T) {
 	const fakeJWT = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJmaXh0dXJlIn0.signature"
 	const fakePassword = "secret database pass"
 	input := Input{Content: "Please check irrigation. api_key=" + fakeKey + "\nAuthorization: Basic ZmFrZTpwYXNzd29yZA==\n" + fakeJWT + "\n" + strings.Repeat("茄", MaxContentRunes+100)}
+	ageSeconds := 35.0
+	for i := 0; i < 8; i++ {
+		input.Recent = append(input.Recent, RecentMessage{Role: "user", Content: "Continue this work, password=private-context " + strings.Repeat("c", 1200), SubjectID: "a", AgeSeconds: &ageSeconds})
+	}
 	for i := 0; i < MaxCandidates+2; i++ {
 		input.Candidates = append(input.Candidates, Candidate{ID: string(rune('a' + i)), Label: "Database password=private-value", Summary: "password=\"" + fakePassword + "\" " + strings.Repeat("a", MaxSummaryRunes+50), Kind: "project"})
 	}
@@ -137,8 +141,9 @@ func TestJevRequestBatchesBoundedRedactedSubjectState(t *testing.T) {
 		calls++
 		var request struct {
 			State struct {
-				Message  string      `json:"message"`
-				Subjects []Candidate `json:"subjects"`
+				Message  string          `json:"message"`
+				Subjects []Candidate     `json:"subjects"`
+				Recent   []RecentMessage `json:"recent"`
 			} `json:"state"`
 			Model     string `json:"model"`
 			Questions map[string]struct {
@@ -152,7 +157,7 @@ func TestJevRequestBatchesBoundedRedactedSubjectState(t *testing.T) {
 			return
 		}
 		encoded, _ := json.Marshal(request)
-		for _, secret := range []string{fakeKey, fakeJWT, fakePassword, "private-value", "ZmFrZTpwYXNzd29yZA=="} {
+		for _, secret := range []string{fakeKey, fakeJWT, fakePassword, "private-value", "private-context", "ZmFrZTpwYXNzd29yZA=="} {
 			if strings.Contains(string(encoded), secret) {
 				t.Errorf("request contains unredacted fixture credential %q", secret)
 			}
@@ -162,6 +167,14 @@ func TestJevRequestBatchesBoundedRedactedSubjectState(t *testing.T) {
 		}
 		if len(request.State.Subjects) != MaxCandidates || utf8.RuneCountInString(request.State.Message) > MaxContentRunes {
 			t.Error("state is not bounded")
+		}
+		if len(request.State.Recent) != 6 {
+			t.Error("recent context is not bounded")
+		}
+		for _, message := range request.State.Recent {
+			if message.SubjectID != "a" || message.AgeSeconds == nil || *message.AgeSeconds != 35 || utf8.RuneCountInString(message.Content) > 1000 {
+				t.Error("temporal context contract lost")
+			}
 		}
 		for _, candidate := range request.State.Subjects {
 			if utf8.RuneCountInString(candidate.Summary) > MaxSummaryRunes {

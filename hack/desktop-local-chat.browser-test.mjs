@@ -40,10 +40,10 @@ try {
  await page.locator('details.agent-settings summary').click();
  await page.getByRole('combobox',{name:'Local harness'}).waitFor();
  assert.equal(await page.getByRole('combobox',{name:'Local harness'}).inputValue(),'prime');
- await page.getByRole('textbox',{name:'Message',exact:true}).fill('Write and verify a plan');
+ await page.getByRole('textbox',{name:'Message',exact:true}).pressSequentially('Write and verify a plan');
  await page.getByRole('button',{name:'Send',exact:true}).click();
  await page.getByRole('region',{name:'Local agent activity'}).getByText(/Python|ipython/i).first().waitFor();
- assert.equal(posts.length,1);assert.equal(posts[0].harness,'prime');
+ assert.equal(posts.length,1);assert.equal(posts[0].harness,'prime');assert.equal(posts[0].prompt,'Write and verify a plan');
  assert.equal(await page.getByRole('button',{name:'Primaris',exact:true}).isDisabled(),true);
  assert.equal((await page.locator('body').innerText()).includes('PRIVATE_'),false);
  finish();await page.getByText('Fixture verified result',{exact:true}).waitFor();
