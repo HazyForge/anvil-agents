@@ -1,0 +1,17 @@
+name: cross-harness-review
+title: Codex reviews Claude's work
+description: >
+  Claude Code has just changed the invoice tool. The person asks for an
+  independent review by Codex, then asks Claude to fix what Codex found. The
+  manager has to carry the work between two harnesses that share no memory.
+workspaces:
+  invoice-cli: {fixture: examples/onechat/fixtures/invoice-cli}
+setup:
+  - session: {label: invoice, setup: local-claude, title: Invoice CLI, workspace: invoice-cli}
+    send:
+      - Add a Discount field (a percentage from 0 to 100) to Invoice and apply it in Total(). Keep it simple and run go test ./....
+turns:
+  - say: Have Codex review what Claude just changed in the invoice tool. Read only, list concrete bugs or risky edge cases.
+    expect: {action: create, setup: local-codex-review}
+  - say: Fix the most important thing Codex found.
+    expect: {action: send, session: invoice}

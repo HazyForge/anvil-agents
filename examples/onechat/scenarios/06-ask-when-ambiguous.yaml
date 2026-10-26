@@ -1,0 +1,22 @@
+name: ask-when-ambiguous
+title: Ask when it could be either
+description: >
+  Two local Claude Code sessions each just added a command-line option: --json
+  to the invoice tool and --fahrenheit to the weather script. "Add tests for
+  the new option" could mean either, so the manager should ask, then act on
+  the two-word answer.
+workspaces:
+  invoice-cli: {fixture: examples/onechat/fixtures/invoice-cli}
+  weather-report: {fixture: examples/onechat/fixtures/weather-report}
+setup:
+  - session: {label: invoice, setup: local-claude, title: Invoice CLI, workspace: invoice-cli}
+    send:
+      - Add a --json option to the invoice tool that prints the invoice as JSON. Keep the current text output as the default. Do not add tests yet.
+  - session: {label: weather, setup: local-claude, title: Weather report script, workspace: weather-report}
+    send:
+      - Add a --fahrenheit option to weather.py that prints the summary in Fahrenheit. Keep the existing output as the default. Do not add tests yet.
+turns:
+  - say: add tests for the new option
+    expect: {action: ask_user}
+  - say: the weather one
+    expect: {action: send, session: weather}

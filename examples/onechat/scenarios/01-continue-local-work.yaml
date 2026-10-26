@@ -1,0 +1,21 @@
+name: continue-local-work
+title: Continue the right session
+description: >
+  Two sessions already exist: Claude Code working on a Go invoice tool on this
+  machine, and a cloud agy chat that researched a Lisbon trip. The person
+  asks for a code change without naming either, then asks a question the
+  cloud chat already answered.
+workspaces:
+  invoice-cli: {fixture: examples/onechat/fixtures/invoice-cli}
+setup:
+  - session: {label: invoice, setup: local-claude, title: Invoice CLI, workspace: invoice-cli}
+    send:
+      - Add a Total() method to Invoice that sums quantity times unit price over its lines, with a table test. Run go test ./... and tell me the result.
+  - session: {label: lisbon, setup: cloud-agy, title: Lisbon trip research}
+    send:
+      - I'm staying in Lisbon for a week in May. Suggest three neighbourhoods to stay in, one line each, and say which is best for nightlife.
+turns:
+  - say: add a --json flag to the invoice tool that prints the invoice and its total as JSON
+    expect: {action: send, session: invoice}
+  - say: which neighbourhood was best for nightlife again?
+    expect: {action: answer}

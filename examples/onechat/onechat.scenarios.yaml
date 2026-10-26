@@ -1,0 +1,43 @@
+# Scenario runs: local sessions may only work in the scenario workspaces.
+stateDir: ~/.config/onechat
+manager:
+  model: sonnet
+cloud:
+  baseURL: https://agents.anvil.hazyforge.io
+  namespaces: [anvilhub]
+  sessionFile: ~/.config/onechat/cloud-session.json
+  login:
+    port: 1738
+local:
+  workdirRoots: []
+  timeout: 10m
+# Cloud setups: only desktop-agy answers today. Grok (desktop-standing-assistant)
+# is unpaid, OpenCode (desktop-assistant) returns empty replies from its free
+# model, and the DeepSeek observer is missing its credentials Secret.
+setups:
+  - id: local-claude
+    location: local
+    harness: claudeCode
+    permissionMode: acceptEdits
+    allowedTools: ["Read", "Grep", "Glob", "Bash(go test:*)", "Bash(go build:*)", "Bash(go vet:*)", "Bash(gofmt:*)", "Bash(python3 -m unittest:*)", "Bash(python3 weather.py:*)", "Bash(go run:*)"]
+    tags: [implementation, refactor, tests, this-machine]
+    notes: "edits files only inside its project folder; can run go and python tests"
+  - id: local-codex-review
+    location: local
+    harness: codex
+    sandbox: read-only
+    tags: [review, audit, second-opinion]
+    notes: "read-only sandbox; reads the project folder and reports, never edits"
+  - id: local-codex-write
+    location: local
+    harness: codex
+    sandbox: workspace-write
+    tags: [implementation, quick-fix]
+    notes: "can edit files inside its project folder"
+  - id: cloud-agy
+    location: cloud
+    harness: agy
+    namespace: anvilhub
+    profile: desktop-agy
+    tags: [research, writing, quick-answers, background]
+    notes: "agy in a production cluster pod, plan mode (read-only); cannot touch files on this machine; about 45s per turn"

@@ -1,0 +1,28 @@
+name: which-one
+title: Status and inference
+description: >
+  Three sessions exist: two local Claude Code sessions on different projects
+  and one cloud chat drafting release notes. The person asks for an overview,
+  then gives instructions that name no session. Only one project gained an
+  option, so the manager should work out the target from the transcripts
+  instead of asking.
+workspaces:
+  invoice-cli: {fixture: examples/onechat/fixtures/invoice-cli}
+  weather-report: {fixture: examples/onechat/fixtures/weather-report}
+setup:
+  - session: {label: invoice, setup: local-claude, title: Invoice CLI, workspace: invoice-cli}
+    send:
+      - Add a Total() method to Invoice with a test and run go test ./....
+  - session: {label: weather, setup: local-claude, title: Weather report script, workspace: weather-report}
+    send:
+      - Add a --fahrenheit option to weather.py that prints the summary in Fahrenheit. Keep the existing output as the default.
+  - session: {label: notes, setup: cloud-agy, title: Release notes draft}
+    send:
+      - Draft three short release-note bullets for version 0.14.2 of a CLI that added JSON output, fixed a rounding bug and sped up startup.
+turns:
+  - say: how's everything going?
+    expect: {action: answer}
+  - say: add tests for the new option
+    expect: {action: send, session: weather}
+  - say: and make the invoice tool print its total too
+    expect: {action: send, session: invoice}
