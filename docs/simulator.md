@@ -69,6 +69,9 @@ expected outcome.
 `platform-council`, a durable agent home, two schedules that keep launching
 work (`security-sweep` every 15 minutes, `repo-upkeep` every 10), a paused
 application (`legacy-billing`) and a concurrency cap for `hazy-trade`.
+Launch controls authorize by application, so `hack/simulator.sh` grants the
+operator controls on every application the seed names (its `applications`
+list; `hack/simulator_test.sh` fails when one is missing).
 
 `examples/simulator/seed/runs.yaml`: one wave of nine runs covering every
 outcome, including one held by the pause. `up` starts a wave only when the
@@ -87,7 +90,10 @@ node hack/simulator-screenshots.mjs   # sign in and capture the main console vie
 ```
 
 `ANVIL_AGENTS_SIM_SPEED=0.2 hack/simulator.sh up` makes every pause five times
-shorter. `ANVIL_AGENTS_SIM_SKIP_BUILD=1` reuses images and binaries. State,
+shorter. `ANVIL_AGENTS_SIM_SKIP_BUILD=1` reuses images and binaries.
+`ANVIL_AGENTS_SIM_CONSOLE_DIR=<dist>` serves another console build, such as a
+branch's `web/console/dist`; run `hack/simulator.sh stop` first so `up`
+restarts the API with it. State,
 logs, the kubeconfig and the issuer key live in `.sim/` (git-ignored); the
 user's own kubeconfig is not modified.
 

@@ -66,5 +66,14 @@ while IFS= read -r scenario; do
 	}
 done < <(grep -ho 'sim-scenario: [a-z0-9-]*' "${root_dir}"/examples/simulator/seed/*.yaml | awk '{print $2}' | sort -u)
 
+# Every application a seed file names must be in the launch-controls binding.
+applications_line="$(grep '^applications=(' "${root_dir}/hack/simulator.sh")"
+while IFS= read -r application; do
+	[[ " ${applications_line} " == *[\(\ ]"${application}"[\)\ ]* ]] || {
+		echo "seed application ${application} is missing from applications in hack/simulator.sh" >&2
+		exit 1
+	}
+done < <(grep -h -A1 'applicationRef:' "${root_dir}"/examples/simulator/seed/*.yaml | awk '$1 == "name:" {print $2}' | sort -u)
+
 bash -n "${root_dir}/hack/simulator.sh"
 echo "simulator checks passed"
