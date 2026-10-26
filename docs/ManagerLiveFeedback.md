@@ -1,6 +1,11 @@
 # Anvil manager live feedback and runtime decisions
 
-Status: first spec draft, 2026-10-26. Subject routing, the local persistent loop,
+This is a supporting feature design for the
+[Anvil Agents product specification](../spec/README.md). The whole-product
+contract covers execution, composition, authority, storage, interfaces, and
+coordination; this document develops the manager experience in detail.
+
+Status: first feature draft, 2026-10-26. Subject routing, the local persistent loop,
 and their live UI are implemented on `codex/subject-vault-routing`, through
 `d10b48e`, in [PR #317](https://github.com/HazyForge/anvil-agents/pull/317).
 That is source and local verification status; this work has not been merged,
