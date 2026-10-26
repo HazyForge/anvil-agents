@@ -64,7 +64,7 @@ func runCommandEnv(ctx context.Context, dir, binary string, args []string, promp
 	}
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, binary, args...)
+	cmd := exec.CommandContext(ctx, binary, args...) // #nosec G204 -- binary is the claude or codex CLI, or the operator's own configured tokenCommand; argv is a separate slice and no shell runs
 	cmd.Dir, cmd.Env, cmd.Stdin = dir, env, strings.NewReader(prompt)
 	cmd.WaitDelay = time.Second
 	out, stderr := &cappedBuffer{limit: outputLimit}, &cappedBuffer{limit: 32 << 10}

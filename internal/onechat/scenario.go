@@ -247,40 +247,55 @@ func copyFixture(source, dest string) error {
 	if rel, e := filepath.Rel(root, dest); e == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 		return fmt.Errorf("workspace destination cannot be inside its fixture")
 	}
-	return filepath.WalkDir(root, func(path string, entry fs.DirEntry, walkErr error) error {
+	// Root-scoped handles: a fixture entry swapped for a symlink mid-copy
+	// cannot read outside the fixture or write outside the workspace.
+	src, err := os.OpenRoot(root)
+	if err != nil {
+		return fmt.Errorf("fixture: %w", err)
+	}
+	defer src.Close()
+	if err := os.MkdirAll(dest, 0o700); err != nil {
+		return err
+	}
+	dst, err := os.OpenRoot(dest)
+	if err != nil {
+		return err
+	}
+	defer dst.Close()
+	return fs.WalkDir(src.FS(), ".", func(rel string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}
-		rel, err := filepath.Rel(root, path)
-		if err != nil {
-			return err
-		}
-		if entry.Type()&os.ModeSymlink != 0 {
+		if entry.Type()&fs.ModeSymlink != 0 {
 			return fmt.Errorf("fixtures cannot contain symlinks")
 		}
+		name := filepath.FromSlash(rel)
 		if entry.IsDir() {
 			if entry.Name() == ".git" {
-				return filepath.SkipDir
+				return fs.SkipDir
 			}
-			return os.MkdirAll(filepath.Join(dest, rel), 0o700)
+			return dst.MkdirAll(name, 0o700)
 		}
 		if !entry.Type().IsRegular() {
 			return fmt.Errorf("fixture contains a non-regular file")
 		}
-		in, err := os.Open(path)
+		in, err := src.Open(name)
 		if err != nil {
 			return err
 		}
 		defer in.Close()
-		info, err := entry.Info()
+		info, err := in.Stat()
 		if err != nil {
 			return err
+		}
+		if !info.Mode().IsRegular() {
+			return fmt.Errorf("fixture contains a non-regular file")
 		}
 		mode := os.FileMode(0o600)
 		if info.Mode()&0o111 != 0 {
 			mode = 0o700
 		}
-		out, err := os.OpenFile(filepath.Join(dest, rel), os.O_CREATE|os.O_EXCL|os.O_WRONLY, mode)
+		out, err := dst.OpenFile(name, os.O_CREATE|os.O_EXCL|os.O_WRONLY, mode)
 		if err != nil {
 			return err
 		}

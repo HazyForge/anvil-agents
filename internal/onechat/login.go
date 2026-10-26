@@ -265,7 +265,7 @@ func saveCloudSession(path string, session CloudSession) error {
 	if err := os.MkdirAll(parent, 0o700); err != nil {
 		return fmt.Errorf("cannot create private cloud session directory")
 	}
-	if err := os.Chmod(parent, 0o700); err != nil {
+	if err := os.Chmod(parent, 0o700); err != nil { // #nosec G302 -- a directory needs the owner execute bit; 0700 keeps it private
 		return fmt.Errorf("cannot secure cloud session directory")
 	}
 	if err := writeJSON(path, session); err != nil {
