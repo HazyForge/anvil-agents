@@ -235,6 +235,11 @@ export function ManagerPage({ token, config }: { token: string; config: UIConfig
       setError('This message is larger than 64 KiB. Shorten it before sending.');
       return;
     }
+    const previousRequest = requests.find(request => request.id === message.requestId);
+    const recoveringPossibleAcceptance = Boolean(previousRequest && (
+      previousRequest.status === 'routing' || previousRequest.turnId || previousRequest.result?.turn ||
+      requestThread(previousRequest) || eventsOf(previousRequest).some(event => event.step === 'dispatch')
+    ));
     sending.current = true; setBusy(true); setError('');
     const currentEpoch = epoch.current;
     const controller = new AbortController(); sendController.current = controller;
@@ -275,10 +280,10 @@ export function ManagerPage({ token, config }: { token: string; config: UIConfig
     } catch (cause) {
       if (currentEpoch === epoch.current && !controller.signal.aborted) {
         setError(errorText(cause));
-        // APIError is raised only before opening SSE. A definite 4xx rejection
-        // did not accept this submission; retain the editable draft. Lost or
-        // truncated streams remain unconfirmed and recover with the same ID.
-        if (cause instanceof APIError && cause.status >= 400 && cause.status < 500) {
+        // A fresh pre-stream 4xx did not accept this submission. During recovery,
+        // it says nothing about an earlier submission whose receipt was lost;
+        // keep that request unconfirmed and retain its ID and target.
+        if (cause instanceof APIError && cause.status >= 400 && cause.status < 500 && !recoveringPossibleAcceptance) {
           setRequests(previous => previous.map(request => request.id === message.requestId ? {
             ...request, status: 'failed', admissionRejected: true,
             result: { requestId: request.id, status: 'failed', events: request.events, error: errorText(cause) },

@@ -55,6 +55,7 @@ const server = createServer(async (req,res) => {
       const body=await readJSON(req);posts.push(body);
       if(Buffer.byteLength(body.content)>65536) return json(res,{error:{code:'invalid_body',message:'This message is larger than 64 KiB. Shorten it before sending.'}},400);
       if(body.content==='Rejected before admission.') return json(res,{error:{code:'invalid_target',message:'Choose an available agent before sending.'}},400);
+      if(body.content==='Recover this routing connection.' && posts.filter(post=>post.requestId===body.requestId).length===2) return json(res,{error:{code:'unauthorized',message:'Sign in to recover the original message.'}},401);
       const record=receipts.get(body.requestId)||{id:body.requestId,content:body.content,profileName:body.profileName,status:'routing',events:[],createdAt:stamp()};
       receipts.set(body.requestId,record);record.status='routing';record.events=[];
       res.writeHead(200,{'Content-Type':'text/event-stream','Cache-Control':'no-cache','Connection':'keep-alive'});
@@ -123,12 +124,15 @@ try {
   await page.getByRole('button',{name:'Recover this message',exact:true}).waitFor();
   assert.equal(await page.getByRole('button',{name:'Send ↗',exact:true}).isDisabled(),true,'unknown acceptance cannot produce a new request');
   await page.getByRole('button',{name:'Recover this message',exact:true}).click();
+  await page.getByRole('alert').filter({hasText:'Sign in to recover the original message.'}).waitFor();
+  assert.equal(await page.getByRole('button',{name:'Send ↗',exact:true}).isDisabled(),true,'authentication rejection during recovery does not prove the original request was rejected');
+  await page.getByRole('button',{name:'Recover this message',exact:true}).click();
   await page.getByText('Handed off',{exact:true}).last().waitFor();
-  assert.equal(posts[3].requestId,posts[4].requestId);assert.equal(receipts.size,3);
+  assert.equal(posts[3].requestId,posts[4].requestId);assert.equal(posts[3].requestId,posts[5].requestId);assert.equal(receipts.size,3);
   await page.getByLabel('Message the manager').fill('Recover accepted receipt.');await page.getByRole('button',{name:'Send ↗',exact:true}).click();
   await page.getByRole('button',{name:'Recover this message',exact:true}).waitFor();assert.equal(await page.getByRole('button',{name:'Send ↗',exact:true}).isDisabled(),true,'an accepted turn with failed receipt persistence still requires recovery');
   await page.getByRole('button',{name:'Recover this message',exact:true}).click();await page.getByText('Handed off',{exact:true}).last().waitFor();
-  assert.equal(posts[5].requestId,posts[6].requestId);assert.equal(threads.get(subjects[0].threadId).turns.filter(turn=>turn.requestId===posts[5].requestId).length,1);
+  assert.equal(posts[6].requestId,posts[7].requestId);assert.equal(threads.get(subjects[0].threadId).turns.filter(turn=>turn.requestId===posts[6].requestId).length,1);
   await page.reload();await page.getByText('I found the research notebook and its last open question.',{exact:true}).waitFor();
   assert.equal(await page.locator('.manager-message').count(),4,'history survives browser reload');
   await page.getByLabel('Message the manager').fill('Rejected before admission.');await page.getByRole('button',{name:'Send ↗',exact:true}).click();
@@ -158,6 +162,6 @@ try {
   assert.equal(await page.locator('.manager-message').count(),0,'workspace switch clears prior transcript');
   await page.setViewportSize({width:720,height:1000});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>window.innerWidth),false,'narrow layout must not overflow horizontally');
   enabled=false;await page.reload();await page.getByRole('heading',{name:'Subject routing is not enabled here yet.'}).waitFor();
-  assert.equal(posts.length,10);assert.deepEqual(errors,[]);
-  console.log(JSON.stringify({passed:true,requests:receipts.size,posts:posts.length,screenshot,checks:['UTF-8 size prevalidation','incremental SSE before decision','explicit clarification reuses request','interrupted stream requires recovery','accepted turn receipt recovery','HTTP rejection remains editable','history reload','background subject completion','composer stays visible','subject update and merge','roster denial preserves vault','workspace isolation','narrow viewport','disabled gate']}));
+  assert.equal(posts.length,11);assert.deepEqual(errors,[]);
+  console.log(JSON.stringify({passed:true,requests:receipts.size,posts:posts.length,screenshot,checks:['UTF-8 size prevalidation','incremental SSE before decision','explicit clarification reuses request','interrupted stream requires recovery','recovery authentication preserves lock','accepted turn receipt recovery','HTTP rejection remains editable','history reload','background subject completion','composer stays visible','subject update and merge','roster denial preserves vault','workspace isolation','narrow viewport','disabled gate']}));
 } finally {decisionRelease();await browser.close();await new Promise(resolve=>server.close(resolve));}
