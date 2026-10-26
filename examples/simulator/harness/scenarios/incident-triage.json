@@ -1,0 +1,72 @@
+{
+ "summary": "Long-running incident triage across logs and the cluster.",
+ "steps": [
+  {
+   "t": 2,
+   "think": "Starting from the alert: worker restarts and quote timeouts"
+  },
+  {
+   "t": 2,
+   "report": {
+    "type": "progress",
+    "stage": "scope",
+    "summary": "Alert: hazy-trade-worker restarts + quote timeouts since 16:40"
+   }
+  },
+  {
+   "t": 3,
+   "work": {
+    "pool": "ops",
+    "seconds": 240
+   }
+  },
+  {
+   "t": 2,
+   "report": {
+    "type": "progress",
+    "stage": "correlate",
+    "summary": "Timeouts are Coinbase-only; other venues healthy"
+   }
+  },
+  {
+   "t": 4,
+   "say": "Every timeout is against one venue, and restarts follow bursts of retries. Checking whether the retry budget exhausts memory."
+  },
+  {
+   "t": 3,
+   "work": {
+    "pool": "ops",
+    "seconds": 300
+   }
+  },
+  {
+   "t": 2,
+   "report": {
+    "type": "progress",
+    "stage": "hypothesis",
+    "summary": "Retry queue grows without bound during venue outages (OOMKilled x2)"
+   }
+  },
+  {
+   "t": 3,
+   "work": {
+    "pool": "rust",
+    "seconds": 240
+   }
+  },
+  {
+   "t": 2,
+   "report": {
+    "type": "decision",
+    "classification": "incident",
+    "action": "mitigate",
+    "summary": "Venue outage → unbounded retry queue → worker OOM. Mitigation: cap retries per venue (PR next).",
+    "residualRisk": "Root cause on the venue side is unconfirmed."
+   }
+  },
+  {
+   "t": 1,
+   "exit": 0
+  }
+ ]
+}

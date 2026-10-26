@@ -1,0 +1,549 @@
+# Anvil Agents simulator: the reusable library every simulated run composes.
+# Everything here is credential-free. The four "harnesses" share one image
+# (examples/simulator/harness) and differ only in the log style SIM_PERSONA
+# selects; no model, repository or external cluster is contacted.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: agents
+  labels:
+    anvil-agents-simulator: "true"
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: hazy-trade-agents
+  labels:
+    anvil-agents-simulator: "true"
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: agent-runner
+  namespace: agents
+automountServiceAccountToken: false
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: agent-runner
+  namespace: hazy-trade-agents
+automountServiceAccountToken: false
+---
+apiVersion: control.anvil.hazyforge.io/v1alpha1
+kind: VolumeProfile
+metadata:
+  name: agent-home
+  namespace: agents
+spec:
+  description: Durable home for a long-lived agent's memory and session state.
+  volumes:
+    - name: home
+      purpose: agent-home
+      mountPath: /var/lib/anvil-agent
+      size:
+        request: 64Mi
+      accessModes:
+        - ReadWriteOnce
+---
+apiVersion: control.anvil.hazyforge.io/v1alpha1
+kind: AgentDataVolume
+metadata:
+  name: release-steward-home
+  namespace: agents
+spec:
+  agentName: release-steward
+  backend: custom
+  profileRef:
+    name: agent-home
+  profileVolumeName: home
+  applicationRef:
+    name: anvil-primaris
+---
+apiVersion: control.anvil.hazyforge.io/v1alpha1
+kind: AgentHarnessProfile
+metadata:
+  name: codex-sim
+  namespace: agents
+spec:
+  description: Simulated Codex harness. Scripted work in Codex's log style; no model calls.
+  backend:
+    kind: custom
+    image: anvil-agents-sim-harness:dev
+    imagePullPolicy: Never
+  execution:
+    serviceAccountName: agent-runner
+    timeoutSeconds: 3600
+    extraEnv:
+      - name: SIM_PERSONA
+        value: codex
+    resources:
+      requests:
+        cpu: 10m
+        memory: 24Mi
+      limits:
+        cpu: 200m
+        memory: 96Mi
+---
+apiVersion: control.anvil.hazyforge.io/v1alpha1
+kind: AgentHarnessProfile
+metadata:
+  name: hermes-sim
+  namespace: agents
+spec:
+  description: Simulated Hermes Agent harness; no model calls.
+  backend:
+    kind: custom
+    image: anvil-agents-sim-harness:dev
+    imagePullPolicy: Never
+  execution:
+    serviceAccountName: agent-runner
+    timeoutSeconds: 3600
+    extraEnv:
+      - name: SIM_PERSONA
+        value: hermes
+    resources:
+      requests:
+        cpu: 10m
+        memory: 24Mi
+      limits:
+        cpu: 200m
+        memory: 96Mi
+---
+apiVersion: control.anvil.hazyforge.io/v1alpha1
+kind: AgentHarnessProfile
+metadata:
+  name: hermes-home-sim
+  namespace: agents
+spec:
+  description: Simulated Hermes Agent with a durable home volume for the release steward; no model calls.
+  backend:
+    kind: custom
+    image: anvil-agents-sim-harness:dev
+    imagePullPolicy: Never
+  execution:
+    serviceAccountName: agent-runner
+    timeoutSeconds: 3600
+    dataVolumeRefs:
+      - name: release-steward-home
+    extraEnv:
+      - name: SIM_PERSONA
+        value: hermes
+    resources:
+      requests:
+        cpu: 10m
+        memory: 24Mi
+      limits:
+        cpu: 200m
+        memory: 96Mi
+---
+apiVersion: control.anvil.hazyforge.io/v1alpha1
+kind: AgentHarnessProfile
+metadata:
+  name: opencode-sim
+  namespace: agents
+spec:
+  description: Simulated OpenCode harness; no model calls.
+  backend:
+    kind: custom
+    image: anvil-agents-sim-harness:dev
+    imagePullPolicy: Never
+  execution:
+    serviceAccountName: agent-runner
+    timeoutSeconds: 3600
+    extraEnv:
+      - name: SIM_PERSONA
+        value: opencode
+    resources:
+      requests:
+        cpu: 10m
+        memory: 24Mi
+      limits:
+        cpu: 200m
+        memory: 96Mi
+---
+apiVersion: control.anvil.hazyforge.io/v1alpha1
+kind: AgentHarnessProfile
+metadata:
+  name: pi-sim
+  namespace: agents
+spec:
+  description: Simulated Pi harness for quick, small tasks; no model calls.
+  backend:
+    kind: custom
+    image: anvil-agents-sim-harness:dev
+    imagePullPolicy: Never
+  execution:
+    serviceAccountName: agent-runner
+    timeoutSeconds: 1800
+    extraEnv:
+      - name: SIM_PERSONA
+        value: pi
+    resources:
+      requests:
+        cpu: 10m
+        memory: 24Mi
+      limits:
+        cpu: 200m
+        memory: 96Mi
+---
+apiVersion: control.anvil.hazyforge.io/v1alpha1
+kind: AgentSkillSet
+metadata:
+  name: review-checklist
+  namespace: agents
+spec:
+  description: How to review a pull request and report findings.
+  skills:
+    - name: evidence-first-review
+      content: Run the touched crate's tests before commenting. Every finding cites a file and line.
+    - name: bounded-comments
+      content: At most five findings per review, ordered by severity.
+---
+apiVersion: control.anvil.hazyforge.io/v1alpha1
+kind: AgentSkillSet
+metadata:
+  name: release-checklist
+  namespace: agents
+spec:
+  description: Checks before proposing any production release.
+  skills:
+    - name: target-readiness
+      content: Confirm every target is Ready and report relaxed policy before planning.
+    - name: rollout-safety
+      content: Check rollout strategy, pinned volumes and cordoned nodes before a promotion.
+---
+apiVersion: control.anvil.hazyforge.io/v1alpha1
+kind: AgentSkillSet
+metadata:
+  name: security-baseline
+  namespace: agents
+spec:
+  description: Scanning scope and when to stop for a human.
+  skills:
+    - name: fixable-high-stops
+      content: A fixable HIGH or CRITICAL finding stops the run and asks a human before any change.
+---
+apiVersion: control.anvil.hazyforge.io/v1alpha1
+kind: AgentSkillSet
+metadata:
+  name: docs-style
+  namespace: agents
+spec:
+  description: House style for operator documentation.
+  skills:
+    - name: plain-words
+      content: Short sentences, real commands, no marketing language.
+---
+apiVersion: control.anvil.hazyforge.io/v1alpha1
+kind: AgentToolSet
+metadata:
+  name: github-readonly
+  namespace: agents
+spec:
+  description: Read access to pull requests and checks (simulated).
+  tools:
+    - name: gh
+      verifyCommand: ["/bin/sh", "-c", "true"]
+---
+apiVersion: control.anvil.hazyforge.io/v1alpha1
+kind: AgentToolSet
+metadata:
+  name: cluster-readonly
+  namespace: agents
+spec:
+  description: Read-only cluster, logs and Argo CD views (simulated).
+  tools:
+    - name: kubectl
+      verifyCommand: ["/bin/sh", "-c", "true"]
+    - name: logcli
+      verifyCommand: ["/bin/sh", "-c", "true"]
+---
+apiVersion: control.anvil.hazyforge.io/v1alpha1
+kind: AgentToolSet
+metadata:
+  name: scanners
+  namespace: agents
+spec:
+  description: Image, config and secret scanners (simulated).
+  tools:
+    - name: trivy
+      verifyCommand: ["/bin/sh", "-c", "true"]
+    - name: gitleaks
+      verifyCommand: ["/bin/sh", "-c", "true"]
+---
+apiVersion: control.anvil.hazyforge.io/v1alpha1
+kind: AgentRunProfile
+metadata:
+  name: pr-reviewer
+  namespace: agents
+spec:
+  description: Reviews pull requests and leaves evidence-backed findings.
+  scope:
+    summary: Read the diff, run the touched tests, comment.
+  harnessProfileRef:
+    name: codex-sim
+  skillSets:
+    refs:
+      - name: review-checklist
+  toolSets:
+    refs:
+      - name: github-readonly
+  harness:
+    intent: observe
+    systemPrompt: Review the pull request named in the task and report findings.
+---
+apiVersion: control.anvil.hazyforge.io/v1alpha1
+kind: AgentRunProfile
+metadata:
+  name: test-doctor
+  namespace: agents
+spec:
+  description: Finds flaky tests, proves the cause and proposes a fix.
+  scope:
+    summary: Reproduce, fix, verify, open a pull request.
+  harnessProfileRef:
+    name: codex-sim
+  skillSets:
+    refs:
+      - name: review-checklist
+  toolSets:
+    refs:
+      - name: github-readonly
+  harness:
+    intent: proposeChange
+    systemPrompt: Reproduce the failure before changing any code.
+---
+apiVersion: control.anvil.hazyforge.io/v1alpha1
+kind: AgentRunProfile
+metadata:
+  name: release-steward
+  namespace: agents
+spec:
+  description: Plans Anvil Primaris releases and checks they are safe to apply.
+  scope:
+    summary: Plan, never apply, production releases.
+  harnessProfileRef:
+    name: hermes-home-sim
+  skillSets:
+    refs:
+      - name: release-checklist
+  toolSets:
+    refs:
+      - name: cluster-readonly
+  harness:
+    intent: observe
+    systemPrompt: Produce a release plan and its risks. Do not apply it.
+---
+apiVersion: control.anvil.hazyforge.io/v1alpha1
+kind: AgentRunProfile
+metadata:
+  name: security-auditor
+  namespace: agents
+spec:
+  description: Scans images and charts; stops for a human on fixable HIGH findings.
+  scope:
+    summary: Scan, report, ask before changing anything.
+  harnessProfileRef:
+    name: opencode-sim
+  skillSets:
+    refs:
+      - name: security-baseline
+  toolSets:
+    refs:
+      - name: scanners
+  harness:
+    intent: observe
+    systemPrompt: Scan the named application and report only evidence-backed findings.
+---
+apiVersion: control.anvil.hazyforge.io/v1alpha1
+kind: AgentRunProfile
+metadata:
+  name: incident-responder
+  namespace: agents
+spec:
+  description: Triages production alerts across logs, metrics and the cluster.
+  scope:
+    summary: Correlate, find the cause, propose a mitigation.
+  harnessProfileRef:
+    name: codex-sim
+  toolSets:
+    refs:
+      - name: cluster-readonly
+  harness:
+    intent: fixTransient
+    systemPrompt: Find the cause of the alert before proposing any change.
+---
+apiVersion: control.anvil.hazyforge.io/v1alpha1
+kind: AgentRunProfile
+metadata:
+  name: docs-gardener
+  namespace: agents
+spec:
+  description: Keeps operator docs in step with the code.
+  scope:
+    summary: Small doc fixes only.
+  harnessProfileRef:
+    name: pi-sim
+  skillSets:
+    refs:
+      - name: docs-style
+  harness:
+    intent: proposeChange
+    systemPrompt: Fix stale documentation with the smallest change.
+---
+apiVersion: control.anvil.hazyforge.io/v1alpha1
+kind: AgentRunProfile
+metadata:
+  name: migration-runner
+  namespace: agents
+spec:
+  description: Runs long batch migrations one namespace at a time.
+  scope:
+    summary: Batch work with progress reports.
+  harnessProfileRef:
+    name: hermes-sim
+  toolSets:
+    refs:
+      - name: cluster-readonly
+  harness:
+    intent: cleanup
+    systemPrompt: Report progress after every batch.
+---
+apiVersion: control.anvil.hazyforge.io/v1alpha1
+kind: AgentCouncil
+metadata:
+  name: platform-council
+  namespace: agents
+spec:
+  description: The platform team's standing workforce.
+  members:
+    - role: reviewer
+      profileRef:
+        name: pr-reviewer
+    - role: release
+      profileRef:
+        name: release-steward
+    - role: security
+      profileRef:
+        name: security-auditor
+    - role: on-call
+      profileRef:
+        name: incident-responder
+  councilPrompt: |
+    Members share findings through reports, not by acting for each other.
+    Release and security decisions always end with a human.
+---
+apiVersion: control.anvil.hazyforge.io/v1alpha1
+kind: AgentSchedule
+metadata:
+  name: security-sweep
+  namespace: agents
+spec:
+  intervalSeconds: 900
+  initialDelaySeconds: 240
+  concurrencyPolicy: Forbid
+  applicationRef:
+    name: hazy-social
+  runTemplate:
+    purpose: scheduledHealthCheck
+    profileRef:
+      name: security-auditor
+    prompt: |
+      Scan the deployed Hazy Social images and chart.
+      sim-scenario: security-sweep
+---
+apiVersion: control.anvil.hazyforge.io/v1alpha1
+kind: AgentSchedule
+metadata:
+  name: repo-upkeep
+  namespace: agents
+spec:
+  intervalSeconds: 600
+  initialDelaySeconds: 120
+  concurrencyPolicy: Allow
+  maxConcurrentRuns: 2
+  applicationRef:
+    name: anvil-agents
+  templateSelectionPolicy: Sequential
+  runTemplates:
+    - name: docs
+      template:
+        purpose: scheduledHealthCheck
+        profileRef:
+          name: docs-gardener
+        prompt: |
+          Find docs that describe commands which no longer exist.
+          sim-scenario: docs-refresh
+    - name: flaky
+      template:
+        purpose: scheduledHealthCheck
+        profileRef:
+          name: test-doctor
+        prompt: |
+          Hunt the flakiest test from last night's CI.
+          sim-scenario: flaky-test-hunt
+---
+# Shows a paused application on the Controls page: runs for legacy-billing
+# are admitted but held until an operator resumes it.
+apiVersion: control.anvil.hazyforge.io/v1alpha1
+kind: AgentRunControl
+metadata:
+  name: pause-legacy-billing
+spec:
+  applicationRef:
+    name: legacy-billing
+  launchPolicy: Paused
+  reason: Simulated maintenance window for the billing cut-over.
+---
+# Lets several bots work on one application at once.
+apiVersion: control.anvil.hazyforge.io/v1alpha1
+kind: AgentRunControl
+metadata:
+  name: hazy-trade-concurrency
+spec:
+  applicationRef:
+    name: hazy-trade
+  launchPolicy: Allowed
+  maxConcurrentRuns: 4
+  reason: Simulator - parallel review, incident and build lanes.
+---
+apiVersion: control.anvil.hazyforge.io/v1alpha1
+kind: AgentHarnessProfile
+metadata:
+  name: codex-sim
+  namespace: hazy-trade-agents
+spec:
+  description: Simulated Codex harness for the trading team; no model calls.
+  backend:
+    kind: custom
+    image: anvil-agents-sim-harness:dev
+    imagePullPolicy: Never
+  execution:
+    serviceAccountName: agent-runner
+    timeoutSeconds: 3600
+    extraEnv:
+      - name: SIM_PERSONA
+        value: codex
+    resources:
+      requests:
+        cpu: 10m
+        memory: 24Mi
+      limits:
+        cpu: 200m
+        memory: 96Mi
+---
+apiVersion: control.anvil.hazyforge.io/v1alpha1
+kind: AgentRunProfile
+metadata:
+  name: strategy-reviewer
+  namespace: hazy-trade-agents
+spec:
+  description: Reviews trading strategy changes before they reach paper trading.
+  scope:
+    summary: Read, test and comment on strategy pull requests.
+  harnessProfileRef:
+    name: codex-sim
+  harness:
+    intent: observe
+    systemPrompt: Review the strategy change and its backtest evidence.

@@ -1,0 +1,83 @@
+{
+ "summary": "A long batch job that keeps one bot busy for about half an hour.",
+ "steps": [
+  {
+   "t": 2,
+   "think": "Migrating chart values to the new archive schema, one namespace at a time"
+  },
+  {
+   "t": 2,
+   "report": {
+    "type": "progress",
+    "stage": "batch-1",
+    "summary": "Namespaces 1–12 of 48"
+   }
+  },
+  {
+   "t": 3,
+   "work": {
+    "pool": "go",
+    "seconds": 420
+   }
+  },
+  {
+   "t": 2,
+   "report": {
+    "type": "progress",
+    "stage": "batch-2",
+    "summary": "Namespaces 13–24 of 48"
+   }
+  },
+  {
+   "t": 3,
+   "work": {
+    "pool": "ops",
+    "seconds": 420
+   }
+  },
+  {
+   "t": 2,
+   "report": {
+    "type": "progress",
+    "stage": "batch-3",
+    "summary": "Namespaces 25–36 of 48"
+   }
+  },
+  {
+   "t": 3,
+   "work": {
+    "pool": "go",
+    "seconds": 420
+   }
+  },
+  {
+   "t": 2,
+   "report": {
+    "type": "progress",
+    "stage": "batch-4",
+    "summary": "Namespaces 37–48 of 48"
+   }
+  },
+  {
+   "t": 3,
+   "work": {
+    "pool": "ops",
+    "seconds": 420
+   }
+  },
+  {
+   "t": 2,
+   "report": {
+    "type": "decision",
+    "classification": "migration",
+    "action": "complete",
+    "summary": "Migrated 48 namespaces to the archive v2 schema.",
+    "residualRisk": "none"
+   }
+  },
+  {
+   "t": 1,
+   "exit": 0
+  }
+ ]
+}

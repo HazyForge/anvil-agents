@@ -53,6 +53,9 @@ kubectl --context "${kube_context}" create namespace agents --dry-run=client --o
 	kubectl --context "${kube_context}" apply --filename=- >/dev/null
 kubectl --context "${kube_context}" create namespace anvilhub --dry-run=client --output=yaml | \
 	kubectl --context "${kube_context}" apply --filename=- >/dev/null
+# examples/simulator also seeds a second team namespace.
+kubectl --context "${kube_context}" create namespace hazy-trade-agents --dry-run=client --output=yaml | \
+	kubectl --context "${kube_context}" apply --filename=- >/dev/null
 while IFS= read -r manifest; do
 	if grep -Eq '^[[:space:]]+generateName:' "${manifest}"; then
 		kubectl --context "${kube_context}" create --dry-run=server --filename "${manifest}" >/dev/null

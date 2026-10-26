@@ -218,6 +218,7 @@ audience, and explicit namespace authorization bindings are configured. See
 - [Distributed heavy workloads across machines](docs/distributed-workloads.md)
 - [Composable profiles, harnesses, skill sets, tool sets, councils, and overrides](docs/composition.md)
 - [Getting started](docs/getting-started.md)
+- [Local simulator with pre-seeded agents](docs/simulator.md)
 - [Harness contract and adapter matrix](docs/harnesses.md)
 - [Knowledge bases, tools, and external services](docs/integrating-knowledge-and-tools.md)
 - [AgentRun stdout, Alloy, and OpenTelemetry integration](docs/observability.md)
