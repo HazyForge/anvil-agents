@@ -1,0 +1,70 @@
+# The previous turn ended with the manager asking which project should get a
+# review. The person's next message may answer it, ignore it, or change topic.
+suite: asked
+state: asked
+world: workbench
+seed:
+  history+:
+    - {role: user, ago: 2m, text: "have codex review the latest changes"}
+    - {role: assistant, ago: 2m, text: "Which one should Codex review: 1) Invoice CLI (Total method) or 2) Weather report (--fahrenheit)?"}
+cases:
+  - name: the-weather-one
+    moves: [short-answer]
+    voice: [terse]
+    say: the weather one
+    expect:
+      intent: decide
+      actions: [create, send]
+      does: [{anyOf: [{action: create, setup: local-codex-review, mentions: [weather]}, {action: send, session: weather, mentions: [review]}]}]
+      notSessions: [invoice]
+
+  - name: numbered-answer
+    moves: [short-answer]
+    say: "2"
+    expect:
+      intent: decide
+      actions: [create, send]
+      does: [{anyOf: [{action: create, setup: local-codex-review, mentions: [weather]}, {action: send, session: weather, mentions: [review]}]}]
+
+  - name: both
+    moves: [short-answer, multi-ask]
+    say: both
+    expect:
+      intent: decide
+      actions: [create, send]
+      does:
+        - {anyOf: [{action: create, setup: local-codex-review, mentions: [invoice]}, {action: send, session: invoice, mentions: [review]}]}
+        - {anyOf: [{action: create, setup: local-codex-review, mentions: [weather]}, {action: send, session: weather, mentions: [review]}]}
+
+  - name: answer-with-an-instruction
+    moves: [short-answer, scope-add]
+    say: invoice, and tell it to look hard at rounding
+    expect:
+      intent: decide
+      actions: [create, send]
+      does: [{anyOf: [{action: create, setup: local-codex-review, mentions: [rounding]}, {action: send, session: invoice, mentions: [rounding]}]}]
+      notSessions: [weather]
+
+  - name: ignore-the-question
+    moves: [pivot, status]
+    say: nvm, hows lisbon going
+    expect:
+      intent: status
+      actions: [answer, read_status]
+      not: [create, send]
+
+  - name: keep-going-does-not-answer
+    moves: [continue]
+    voice: [terse]
+    say: keep going
+    note: '"keep going" does not pick between the two; ask again, briefly.'
+    expect:
+      actions: [ask_user, answer]
+      not: [create, send]
+
+  - name: pick-by-description
+    moves: [short-answer, complete-last]
+    say: the one with the flag
+    expect:
+      intent: decide
+      does: [{anyOf: [{action: create, setup: local-codex-review, mentions: [weather]}, {action: send, session: weather, mentions: [review]}]}]

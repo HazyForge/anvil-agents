@@ -188,6 +188,12 @@ retry or recovery command yet.
 
 ## Scenarios and expectations
 
+These six live scenarios run real harnesses on fixture repositories. The wider
+corpus lives in [one chat scenarios](one-chat-scenarios.md): about a hundred
+decide cases and a set of flows, written in the owner's voice, covering every
+state one chat can be in against every kind of message. It is seeded without
+harness runs, so it is cheap to repeat.
+
 ```sh
 go build -buildvcs=false -o /tmp/onechat ./cmd/onechat
 /tmp/onechat --config examples/onechat/onechat.prod.yaml login

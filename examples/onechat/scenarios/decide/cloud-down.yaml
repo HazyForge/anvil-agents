@@ -1,0 +1,30 @@
+# The cloud backend cannot be reached (the sign-in expired). Local sessions
+# still work and should not be blocked by the cloud.
+suite: cloud-down
+state: cloud-down
+world: workbench
+seed:
+  cloud: {error: "cloud sign-in expired; run onechat login"}
+cases:
+  - name: local-work-continues
+    moves: [kickoff]
+    say: add the csv flag to the invoice tool
+    gap: a failed cloud inventory stops the whole turn, local work included
+    expect:
+      actions: [send]
+      does: [{action: send, session: invoice, mentions: [csv]}]
+
+  - name: cloud-question-says-why
+    moves: [recall]
+    say: hows lisbon
+    expect:
+      actions: [answer]
+
+  - name: new-cloud-research-while-down
+    moves: [kickoff]
+    say: research the cheapest pitr postgres
+    gap: a failed cloud inventory stops the whole turn, local work included
+    note: Starting cloud work cannot succeed; say so, or offer to do it locally.
+    expect:
+      actions: [answer, ask_user, create]
+      notSetups: [cloud-agy]

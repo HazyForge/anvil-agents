@@ -1,0 +1,98 @@
+# The invoice session is in the middle of work the manager sent it three
+# minutes ago. The manager is idle, so the person's message starts a new turn,
+# but the invoice session cannot take more work until it finishes.
+suite: session-running
+state: session-running
+world: workbench
+seed:
+  sessions:
+    - label: invoice
+      state: running
+      updatedAgo: 3m
+      transcript+:
+        - {role: user, ago: 3m, text: "Add a --json flag that prints the invoice and its total as JSON. Add a test and run go test ./..."}
+  history+:
+    - {role: user, ago: 3m, text: "add a --json flag to the invoice tool"}
+    - {role: assistant, ago: 3m, text: "Sent it to Invoice CLI; it is working on it now."}
+cases:
+  - name: how-is-it-going
+    moves: [status]
+    voice: [space-question]
+    say: how is it going ?
+    expect:
+      intent: status
+      actions: [read_status, answer]
+      not: [send, create]
+
+  - name: are-you-in-a-loop
+    moves: [impatience]
+    say: are you in a loop ?
+    expect:
+      intent: status
+      actions: [read_status, answer]
+      not: [send, create]
+
+  - name: phone-check-in
+    moves: [status]
+    from: ios
+    say: did the json thing finish yet ?
+    expect:
+      intent: status
+      actions: [read_status, answer]
+      not: [send, create]
+
+  - name: add-scope-to-the-running-work
+    moves: [scope-add]
+    voice: [lowercase]
+    say: also make the json pretty printed
+    note: >-
+      Today the manager can only say the session is busy; sending now fails validation.
+      The durable behavior is to hold the addition and send it when the run ends.
+    gap: follow-ups for a running session cannot be queued until it finishes
+    expect:
+      intent: amend_running
+      does: [{action: send, session: invoice, mentions: [pretty]}]
+
+  - name: stop-the-running-work
+    moves: [stop]
+    say: stop that, its the wrong approach
+    gap: there is no action that stops a session's running work
+    expect:
+      intent: stop
+      does: [{action: stop, session: invoice}]
+
+  - name: change-of-plan-mid-run
+    moves: [pivot, self-correct]
+    say: actually forget json, do csv instead
+    gap: changing a running session's task needs stop, then send
+    expect:
+      intent: amend_running
+      does:
+        - {action: stop, session: invoice}
+        - {action: send, session: invoice, mentions: [csv]}
+
+  - name: other-project-meanwhile
+    moves: [kickoff]
+    say: meanwhile add a --kelvin option to the weather script
+    expect:
+      intent: amend_running
+      actions: [send]
+      does: [{action: send, session: weather, mentions: [kelvin]}]
+      notSessions: [invoice]
+
+  - name: recall-elsewhere-while-busy
+    moves: [recall]
+    say: which lisbon neighbourhood had the best food again ?
+    expect:
+      intent: question
+      actions: [answer, read_status, send]
+      notSessions: [invoice]
+
+  - name: status-honest-about-running
+    moves: [status]
+    say: so is the invoice tool done ?
+    note: The answer must not claim the --json work finished; the session is still running.
+    expect:
+      intent: status
+      actions: [read_status, answer]
+      not: [send, create]

@@ -1,0 +1,66 @@
+# The manager asked for authority before touching production, or a session
+# asked the person to do something by hand. The reply grants, limits or
+# reports.
+suite: asked-authority
+state: asked
+world: workbench
+seed:
+  sessions:
+    - label: weather
+      transcript+:
+        - {role: user, ago: 6m, text: "Fetch today's forecast from the OpenWeather API as well."}
+        - {role: assistant, ago: 5m, text: "I need OPENWEATHER_API_KEY in .env before I can call the API. Add it and tell me."}
+  history+:
+    - {role: user, ago: 6m, text: "make the weather script pull today's forecast too"}
+    - {role: assistant, ago: 5m, text: "Weather report needs an OPENWEATHER_API_KEY in .env before it can call the API. Add it and tell me."}
+    - {role: user, ago: 3m, text: "and deploy the site"}
+    - {role: assistant, ago: 3m, text: "Deploying Forge site redesign touches production. Go ahead?"}
+cases:
+  - name: go-ahead
+    moves: [continue, authority]
+    say: go ahead
+    expect:
+      intent: decide
+      actions: [send]
+      does: [{action: send, session: site, mentions: [deploy]}]
+
+  - name: limit-the-grant
+    moves: [authority, self-correct]
+    say: ok but only staging for now
+    expect:
+      intent: decide
+      actions: [send]
+      does: [{action: send, session: site, mentions: [staging]}]
+
+  - name: refuse
+    moves: [authority]
+    say: no not yet, i want to look at it in the app first
+    expect:
+      intent: decide
+      actions: [answer, send]
+      notSessions: [invoice, weather, homelab, lisbon, market, mech]
+
+  - name: reported-the-key
+    moves: [report-action]
+    voice: [terse]
+    say: ok i set the key
+    expect:
+      intent: amend_running
+      actions: [send]
+      does: [{action: send, session: weather, mentions: [key]}]
+
+  - name: reported-with-detail
+    moves: [report-action]
+    say: i put it in .env, the key is in there now
+    expect:
+      actions: [send]
+      does: [{action: send, session: weather}]
+
+  - name: typo-approval
+    moves: [continue]
+    voice: [typo]
+    say: yoi do it
+    note: The most recent question is the production deploy.
+    expect:
+      actions: [send]
+      does: [{action: send, session: site, mentions: [deploy]}]

@@ -1,0 +1,120 @@
+# Quick follow-ups. A quarter of the owner's messages arrive within two
+# minutes of the previous one and edit it: "i meant", "for codex I mean",
+# "also", "actually". Each step's scripted outcome keeps the next step's
+# context fixed, whatever the manager decided before.
+suite: conversation
+state: idle
+world: workbench
+cases:
+  - name: reversal-wins
+    moves: [self-correct]
+    steps:
+      - say: make the site hero less fancy, tone the shader down
+        expect: {actions: [send], does: [{action: send, session: site}]}
+        after:
+          answer: Sent it to Forge site redesign; it toned the hero shader down.
+          sessions:
+            - label: site
+              transcript+:
+                - {role: user, text: "Tone the hero shader down: less glow, slower motion."}
+                - {role: assistant, text: "Toned it down: glow halved, drift slowed."}
+      - say: I meant I do want it to be fancy. more glow not less
+        expect:
+          intent: amend_running
+          actions: [send]
+          does: [{action: send, session: site, mentions: [glow]}]
+
+  - name: complete-the-last-message
+    moves: [complete-last]
+    steps:
+      - say: run a review on the latest changes
+        expect: {actions: [ask_user, create, send]}
+        after:
+          answer: "Which project should get the review: Invoice CLI or Weather report?"
+      - say: for the weather one I mean
+        expect:
+          intent: decide
+          does: [{anyOf: [{action: create, setup: local-codex-review, mentions: [weather]}, {action: send, session: weather, mentions: [review]}]}]
+
+  - name: scope-grows-turn-by-turn
+    moves: [scope-add, ship]
+    steps:
+      - say: add a --discount flag to the invoice tool
+        expect: {actions: [send], does: [{action: send, session: invoice, mentions: [discount]}]}
+        after:
+          answer: Sent it to Invoice CLI. --discount is in with a test.
+          sessions:
+            - label: invoice
+              transcript+:
+                - {role: user, text: "Add a --discount flag with a test."}
+                - {role: assistant, text: "Added --discount (cents) with a test; go test ./... passes."}
+      - say: also show the discount line in the output
+        expect: {actions: [send], does: [{action: send, session: invoice, mentions: [discount]}]}
+        after:
+          answer: Sent it to Invoice CLI; the output now has a Discount line.
+      - say: and get it into master when its done
+        expect: {actions: [send], does: [{action: send, session: invoice, mentions: [master]}]}
+
+  - name: vague-then-specific
+    moves: [pivot, kickoff]
+    steps:
+      - say: can we work on the site
+        expect: {actions: [ask_user, answer, read_status]}
+        after:
+          answer: Sure. What should change on the site?
+      - say: actually I want the footer links to open in a new tab
+        expect: {actions: [send], does: [{action: send, session: site, mentions: [tab]}]}
+
+  - name: status-then-which-one
+    moves: [status, complete-last]
+    steps:
+      - say: is it done ?
+        expect: {actions: [answer, read_status]}
+        after:
+          answer: Invoice CLI finished Total() two hours ago, and Weather report added --fahrenheit fifty minutes ago.
+      - say: for codex I mean
+        note: Weather report is the Codex session.
+        expect:
+          intent: status
+          actions: [answer, read_status]
+          does: [{anyOf: [{action: answer}, {action: read_status, session: weather}]}]
+
+  - name: change-of-mind-cancels-the-ask
+    moves: [push-back, self-correct]
+    steps:
+      - say: tell the price research to use polling instead, simpler
+        expect: {actions: [send, answer]}
+        after:
+          answer: Sent it to Token price feed research; it reworked the plan around 2 s polling.
+      - say: hmm actually no websocket is fine, forget it
+        expect:
+          actions: [answer, send]
+          not: [create]
+          notSessions: [invoice, weather, site, homelab, lisbon, mech]
+
+  - name: quoted-question-with-the-answer
+    moves: [paste, short-answer]
+    seed:
+      sessions:
+        - label: weather
+          transcript+:
+            - {role: user, ago: 5m, text: "Add a weekly average to the summary."}
+            - {role: assistant, ago: 4m, text: "Which CSV column holds the temperature: temp or temp_c?"}
+      history+:
+        - {role: user, ago: 5m, text: "add a weekly average to the weather summary"}
+        - {role: assistant, ago: 4m, text: "Weather report asks: which CSV column holds the temperature, temp or temp_c?"}
+    say: "> which CSV column holds the temperature, temp or temp_c? temp_c"
+    expect:
+      intent: decide
+      actions: [send]
+      does: [{action: send, session: weather, mentions: [temp_c]}]
+
+  - name: noise-then-the-real-ask
+    moves: [noise, kickoff]
+    steps:
+      - say: yeah so I told him the car is in the shop till friday
+        expect: {actions: [answer, ask_user]}
+        after:
+          answer: Was that meant for me?
+      - say: sorry that wasnt for you. add a total line to the weather summary
+        expect: {actions: [send], does: [{action: send, session: weather, mentions: [total]}]}

@@ -1,0 +1,68 @@
+# A long day in one chat. The manager sees only the last ten history messages
+# (merged history is ordered by time) and each session's last six transcript
+# messages, so older context must come from the session that holds it.
+suite: long-history
+state: long-history
+world: workbench
+seed:
+  sessions:
+    - label: site
+      updatedAgo: 20m
+      transcript+:
+        - {role: user, ago: 7h, text: "On phones without WebGL2, swap the hero shader for the static gradient fallback."}
+        - {role: assistant, ago: 7h, text: "Done: the gradient fallback kicks in when WebGL2 is missing or the battery saver is on."}
+        - {role: user, ago: 20m, text: "Tighten the footer spacing."}
+        - {role: assistant, ago: 20m, text: "Footer spacing tightened to the 8px scale."}
+    - label: invoice
+      transcript+:
+        - {role: user, ago: 5h, text: "Make the header say INVOICE in capitals."}
+        - {role: assistant, ago: 5h, text: "The header now reads INVOICE."}
+  history+:
+    - {role: user, ago: 7h, text: "use the gradient instead of the shader on phones that cant do webgl2"}
+    - {role: assistant, ago: 7h, text: "Sent it to Forge site redesign; the gradient fallback is in."}
+    - {role: user, ago: 6h, text: "how many hp do striders have"}
+    - {role: assistant, ago: 6h, text: "From Mech game balance notes: 320 HP, range 9."}
+    - {role: user, ago: 5h, text: "make the invoice header say INVOICE in caps"}
+    - {role: assistant, ago: 5h, text: "Sent it to Invoice CLI; the header now reads INVOICE."}
+    - {role: user, ago: 3h, text: "what was the vpn finding again"}
+    - {role: assistant, ago: 3h, text: "From Homelab cluster audit: the VPN admin UI is reachable from the whole LAN."}
+    - {role: user, ago: 90m, text: "lisbon in may, is it hot"}
+    - {role: assistant, ago: 90m, text: "Lisbon trip research says May is mild, around 22°C in the day."}
+    - {role: user, ago: 40m, text: "tighten up the footer spacing on the site"}
+    - {role: assistant, ago: 40m, text: "Sent it to Forge site redesign."}
+    - {role: user, ago: 20m, text: "is the footer done"}
+    - {role: assistant, ago: 20m, text: "Yes: footer spacing is on the 8px scale."}
+cases:
+  - name: recall-old-decision-through-the-session
+    moves: [recall, kickoff]
+    say: remember the gradient fallback for phones ? do the same for the about page
+    expect:
+      actions: [send]
+      does: [{action: send, session: site, mentions: [gradient]}]
+
+  - name: recall-that-left-the-window
+    moves: [recall]
+    voice: [space-question]
+    say: what was the backup thing from the audit again ?
+    note: The history window no longer has it, but the audit transcript does.
+    expect:
+      intent: question
+      actions: [answer, read_status]
+      does: [{anyOf: [{action: answer, mentions: [backup]}, {action: read_status, session: homelab}]}]
+
+  - name: same-as-earlier
+    moves: [kickoff, recall]
+    say: do the caps thing for the footer of the invoice too, like earlier
+    expect:
+      actions: [send]
+      does: [{action: send, session: invoice}]
+      notSessions: [site]
+
+  - name: where-were-we
+    moves: [status]
+    voice: [terse]
+    say: ok so where were we
+    expect:
+      intent: status
+      actions: [answer, read_status]
+      not: [send, create]

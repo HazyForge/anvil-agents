@@ -1,0 +1,88 @@
+# A person with several projects going at once, the way one chat is really
+# used: two local code projects, a site redesign, a read-only infrastructure
+# audit, and three cloud sessions for research and design. Every decide suite
+# starts from this world and changes only what its state needs.
+world: workbench
+config: ../../onechat.scenarios.yaml
+sessions:
+  - label: invoice
+    location: local
+    setup: local-claude
+    title: Invoice CLI
+    summary: Go CLI that prints invoices; Total() added with table tests
+    state: idle
+    workdir: ~/code/invoice-cli
+    updatedAgo: 2h
+    transcript:
+      - {role: user, ago: 2h, text: "Add a Total() method to Invoice that sums quantity times unit price over its lines, with a table test. Run go test ./... and tell me the result."}
+      - {role: assistant, ago: 2h, text: "Added Invoice.Total() (cents, int64) summing quantity × unit price. The table test covers no lines, one line and several lines. go test ./... passes."}
+  - label: weather
+    location: local
+    setup: local-codex-write
+    title: Weather report
+    summary: Python script that summarizes weather CSVs; --fahrenheit flag added
+    state: idle
+    workdir: ~/code/weather-report
+    updatedAgo: 50m
+    transcript:
+      - {role: user, ago: 55m, text: "Add a --fahrenheit option to weather.py that prints the summary in Fahrenheit. Keep Celsius as the default."}
+      - {role: assistant, ago: 50m, text: "Added --fahrenheit. Default output is unchanged; the README documents the flag. No tests yet."}
+  - label: site
+    location: local
+    setup: local-claude
+    title: Forge site redesign
+    summary: Marketing site redesign with a WebGL shader hero; waiting on final hero copy
+    state: idle
+    workdir: ~/code/forge-site
+    updatedAgo: 1d
+    transcript:
+      - {role: user, ago: 1d, text: "Redesign the landing page around the shader hero from the shaders library. Keep it fast on phones."}
+      - {role: assistant, ago: 1d, text: "The hero shader runs behind the headline; phones without WebGL2 get a static gradient fallback. Lighthouse mobile 91. I need the final hero copy."}
+  - label: homelab
+    location: local
+    setup: local-codex-review
+    title: Homelab cluster audit
+    summary: Read-only audit of the homelab cluster manifests
+    state: idle
+    workdir: ~/code/homelab
+    updatedAgo: 3d
+    transcript:
+      - {role: user, ago: 3d, text: "Review the homelab manifests for anything risky. Do not change files."}
+      - {role: assistant, ago: 3d, text: "Three findings: etcd backups are not encrypted, the VPN admin UI is reachable from the whole LAN, and the ingress image uses an unpinned latest tag."}
+  - label: lisbon
+    location: cloud
+    setup: cloud-agy
+    title: Lisbon trip research
+    summary: Neighbourhoods for a week in May
+    state: idle
+    updatedAgo: 6h
+    transcript:
+      - {role: user, ago: 6h, text: "I'm staying in Lisbon for a week in May. Suggest three neighbourhoods to stay in, one line each, and say which is best for nightlife."}
+      - {role: assistant, ago: 6h, text: "Alfama: old, quiet, views. Bairro Alto: bars and late nights. Príncipe Real: calm, gardens, good food. Best for nightlife: Bairro Alto."}
+  - label: market
+    location: cloud
+    setup: cloud-agy
+    title: Token price feed research
+    summary: Fastest way to get live prices for a Solana token
+    state: idle
+    updatedAgo: 4h
+    transcript:
+      - {role: user, ago: 4h, text: "What is the fastest way to get live market data for a Solana token so a bot can react to price moves?"}
+      - {role: assistant, ago: 4h, text: "Subscribe to a websocket price feed from an RPC provider that streams account changes; keep a 2 s polling fallback for gaps. Polling alone adds 1–3 s of latency."}
+  - label: mech
+    location: cloud
+    setup: cloud-agy
+    title: Mech game balance notes
+    summary: Unit balance for the mech strategy game
+    state: idle
+    updatedAgo: 2d
+    transcript:
+      - {role: user, ago: 2d, text: "Striders should outrange the minions but lose to flyers. Propose numbers."}
+      - {role: assistant, ago: 2d, text: "Striders: range 9 (minions 7), 320 HP, flyers deal 1.5× to them. Flyers: 140 HP, cannot hit ground armor."}
+history:
+  - {role: user, ago: 4h, text: "whats the fastest way to get price data for a solana token"}
+  - {role: assistant, ago: 4h, text: "I started Token price feed research in the cloud: a websocket feed with a polling fallback."}
+  - {role: user, ago: 2h, text: "add a Total method to the invoice tool and run the tests"}
+  - {role: assistant, ago: 2h, text: "Sent it to Invoice CLI. It added Invoice.Total() with a table test, and go test passes."}
+  - {role: user, ago: 50m, text: "add a fahrenheit option to the weather script"}
+  - {role: assistant, ago: 50m, text: "Sent it to Weather report. --fahrenheit is in; Celsius stays the default. No tests yet."}

@@ -1,0 +1,5 @@
+# No sessions and no history: the first message one chat ever gets.
+world: empty
+config: ../../onechat.scenarios.yaml
+sessions: []
+history: []
