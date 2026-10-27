@@ -16,6 +16,12 @@ That file pins controller + six runner digests and sets `crds.install: true` so
 Helm applies the full CRD set (AgentRun, composition kinds, AgentAuthSession,
 …) with keep/prune-safe annotations.
 
+A `runnerImages` entry set to `""` is a retired runner. The full-lock pin
+(`hack/pin-deploy-values-from-lock.sh`) and single-component pins keep it
+empty, and the controller holds a matching AgentRun as `NeedsHuman`. Primaris
+retired `grokBuild` this way on 2026-10-27. Release builds still publish the
+`grok-build` image for other installations.
+
 ## Prerequisites
 
 - Docker with Buildx (logged into `ghcr.io` for push)

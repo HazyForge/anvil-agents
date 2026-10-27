@@ -1,4 +1,4 @@
-# Warm pool matching desktop-standing-grok execution.substrate.pool=warm.
+# Warm pool for SubstrateActor harnesses with execution.substrate.pool=warm.
 # Worker pods are created by atecontroller from this spec; helm pin patches
 # do not apply here, so nodeSelector is inlined.
 #

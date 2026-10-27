@@ -268,6 +268,12 @@ pin_component_ref() {
 	yaml_key="$(deploy_yaml_key_for_component "${component}")"
 	[[ -f "${values_file}" ]] || { echo "values file missing: ${values_file}" >&2; exit 2; }
 	[[ "${immutable_ref}" == *@sha256:* ]] || { echo "not digest-pinned: ${immutable_ref}" >&2; exit 2; }
+	# An explicitly empty runner image is retired in this overlay; keep it empty.
+	if [[ "${component}" != "controller" ]] &&
+		grep -Eq "^  ${yaml_key}:[[:space:]]*(\"\"|'')[[:space:]]*(#.*)?$" "${values_file}"; then
+		printf 'Skipped %s: runnerImages.%s is retired (empty) in %s\n' "${component}" "${yaml_key}" "${values_file}"
+		return 0
+	fi
 
 	local tmp
 	tmp="$(mktemp "${values_file}.tmp.XXXXXX")"

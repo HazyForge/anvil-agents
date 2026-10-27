@@ -12,8 +12,9 @@ local:
   workdirRoots: []
   timeout: 10m
 # Cloud setups: only desktop-agy answers today. Grok (desktop-standing-assistant)
-# is unpaid, OpenCode (desktop-assistant) returns empty replies from its free
-# model, and the DeepSeek observer is missing its credentials Secret.
+# was retired from Primaris on 2026-10-27 because it is unpaid, OpenCode
+# (desktop-assistant) returns empty replies from its free model, and the
+# DeepSeek observer is missing its credentials Secret.
 setups:
   - id: local-claude
     location: local
