@@ -70,6 +70,7 @@ type Action struct {
 }
 
 type Decision struct {
+	Intent           string          `json:"intent"`
 	ReasoningSummary string          `json:"reasoning_summary"`
 	Confidence       float64         `json:"confidence"`
 	Actions          []Action        `json:"actions"`

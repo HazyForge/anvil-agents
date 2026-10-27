@@ -118,9 +118,9 @@ esac
 }
 
 func TestOneChatManagerPromptBytes(t *testing.T) {
-	// The user supplied this draft with an explicit byte-preservation contract.
+	// The user supplied the draft and intent addition with a byte-preservation contract.
 	// codex-runs is ignored and is not available in a clean checkout.
-	if fmt.Sprintf("%x", sha256.Sum256([]byte(ManagerInstructions))) != "aaa801d4f1bb202ed177bf787e31aaa352320b6ef1d2ad51ec2494ca675b6558" {
+	if fmt.Sprintf("%x", sha256.Sum256([]byte(ManagerInstructions))) != "8942a015b44421e8ce0ddf0f468ebe3ead99720861683d7bb223d6e5e3967278" {
 		t.Fatal("embedded manager draft changed")
 	}
 }

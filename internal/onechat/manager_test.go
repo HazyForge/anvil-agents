@@ -41,6 +41,8 @@ func TestOneChatDecisionValidation(t *testing.T) {
 		want     string
 	}{
 		{"send", base(send), ""},
+		{"unknown intent", Decision{Intent: "delegate", Confidence: 0.8, ReasoningSummary: "Continue.", Actions: []Action{send}}, "unknown intent"},
+		{"known intent", Decision{Intent: "amend_running", Confidence: 0.8, ReasoningSummary: "Continue.", Actions: []Action{send}}, ""},
 		{"local create", base(create), ""},
 		{"status running", base(Action{Type: "read_status", SessionID: "busy"}), ""},
 		{"answer with status", base(Action{Type: "answer", Text: "hello"}, Action{Type: "read_status", SessionID: "idle"}), ""},

@@ -378,11 +378,7 @@ func (m *Manager) TurnObserved(ctx context.Context, text string, observe func(Ev
 		return trace, fmt.Errorf("a onechat turn is already running")
 	}
 	defer m.mu.Unlock()
-	id, _ := ctx.Value(turnIDKey{}).(uuid.UUID)
-	if id == uuid.Nil {
-		id = uuid.New()
-	}
-	trace = TurnTrace{Version: "onechat.turn/v1", ID: id.String(), At: time.Now().UTC(), Message: m.redact(text), Inventory: []Session{}, Actions: []ActionResult{}, ValidationErrors: []string{}, Setups: m.Config.Setups, Totals: Totals{HarnessCalls: map[string]int{}}}
+	trace = m.newTurnTrace(ctx, text)
 	trace.TracePath = filepath.Join(m.Config.StateDir, "traces", trace.ID+".json")
 	defer func() {
 		defer m.refreshHistorySnapshot()
@@ -414,6 +410,82 @@ func (m *Manager) TurnObserved(ctx context.Context, text string, observe func(Ev
 			turnErr = errors.New(m.redact(turnErr.Error()))
 		}
 	}()
+	if err := m.decide(ctx, &trace, observe); err != nil {
+		return trace, err
+	}
+
+	for i, a := range trace.Decision.Actions {
+		s, _ := m.session(a.SessionID)
+		if a.Type == "create" {
+			setup, _ := m.setup(a.SetupID)
+			s.Title, s.Harness, s.Location = a.Title, setup.Harness, setup.Location
+		}
+		m.emit(observe, "action.started", map[string]any{"index": i, "action": a, "sessionId": a.SessionID, "sessionTitle": s.Title, "harness": s.Harness, "location": s.Location})
+		trace.Actions = append(trace.Actions, m.execute(ctx, a))
+		m.emit(observe, "action.finished", map[string]any{"index": i, "result": trace.Actions[len(trace.Actions)-1]})
+	}
+	compose := ComposeInput{Message: trace.Message, Decision: trace.Decision, Outcomes: trace.Actions}
+	if err := m.sanitize(&compose); err != nil {
+		return trace, err
+	}
+	trace.Totals.ManagerCalls++
+	var err error
+	trace.Answer, trace.ComposeUsage, err = m.Decider.Compose(ctx, compose)
+	if len(trace.ValidationErrors) > 0 {
+		trace.Answer = trace.Decision.Actions[0].Text
+	}
+	if err != nil {
+		if len(trace.ValidationErrors) == 0 {
+			trace.Answer = "I could not compose an answer. Actual outcomes:"
+			for _, r := range trace.Actions {
+				trace.Answer += "\n" + r.Action.Type + ": "
+				if r.Error != "" {
+					trace.Answer += r.Error
+				} else {
+					trace.Answer += r.Reply
+				}
+			}
+		}
+		return trace, err
+	}
+	return trace, nil
+}
+
+// DecideTurn uses the same inventory, history and validation as a full turn,
+// without executing actions, composing an answer or writing state and traces.
+func (m *Manager) DecideTurn(ctx context.Context, text string) (trace TurnTrace, turnErr error) {
+	if !m.mu.TryLock() {
+		return trace, fmt.Errorf("a onechat turn is already running")
+	}
+	defer m.mu.Unlock()
+	trace = m.newTurnTrace(ctx, text)
+	defer func() {
+		addUsage(&trace.Totals, trace.DeciderUsage)
+		if turnErr != nil {
+			trace.Error = m.redact(turnErr.Error())
+		}
+		if err := m.sanitize(&trace); err != nil {
+			turnErr = errors.Join(turnErr, err)
+		}
+		if turnErr != nil {
+			turnErr = errors.New(m.redact(turnErr.Error()))
+		}
+	}()
+	turnErr = m.decide(ctx, &trace, nil)
+	return trace, turnErr
+}
+
+func (m *Manager) newTurnTrace(ctx context.Context, text string) TurnTrace {
+	id, _ := ctx.Value(turnIDKey{}).(uuid.UUID)
+	if id == uuid.Nil {
+		id = uuid.New()
+	}
+	return TurnTrace{Version: "onechat.turn/v1", ID: id.String(), At: time.Now().UTC(), Message: m.redact(text), Inventory: []Session{}, Actions: []ActionResult{}, ValidationErrors: []string{}, Setups: m.Config.Setups, Totals: Totals{HarnessCalls: map[string]int{}}}
+}
+
+// The caller holds the turn lock. Both turn modes must validate the same model
+// input and keep the same fallback when the proposed actions cannot run.
+func (m *Manager) decide(ctx context.Context, trace *TurnTrace, observe func(Event)) error {
 	var err error
 	trace.Inventory, err = m.inventory(ctx)
 	inventoryBody := map[string]any{"sessions": inventoryEventSessions(trace.Inventory)}
@@ -423,7 +495,7 @@ func (m *Manager) TurnObserved(ctx context.Context, text string, observe func(Ev
 	m.emit(observe, "turn.inventory", inventoryBody)
 	if err != nil {
 		trace.Answer = "I could not read the session inventory, so I have not sent any work."
-		return trace, err
+		return err
 	}
 	trace.History = append([]Message{}, m.state.History...)
 	if len(trace.History) > 10 {
@@ -431,7 +503,7 @@ func (m *Manager) TurnObserved(ctx context.Context, text string, observe func(Ev
 	}
 	input := DecideInput{Instructions: ManagerInstructions, Setups: trace.Setups, Inventory: trace.Inventory, History: trace.History, Message: trace.Message}
 	if err := m.sanitize(&input); err != nil {
-		return trace, err
+		return err
 	}
 	trace.Setups, trace.Inventory, trace.History = input.Setups, input.Inventory, input.History
 	trace.Totals.ManagerCalls++
@@ -455,38 +527,5 @@ func (m *Manager) TurnObserved(ctx context.Context, text string, observe func(Ev
 		trace.Decision = Decision{ReasoningSummary: "The proposed decision failed validation; no session work was sent.", Confidence: 0, Actions: []Action{{Type: "ask_user", Text: question}}}
 	}
 	m.emit(observe, "turn.decided", map[string]any{"decision": trace.Decision, "validationErrors": trace.ValidationErrors})
-	for i, a := range trace.Decision.Actions {
-		s, _ := m.session(a.SessionID)
-		if a.Type == "create" {
-			setup, _ := m.setup(a.SetupID)
-			s.Title, s.Harness, s.Location = a.Title, setup.Harness, setup.Location
-		}
-		m.emit(observe, "action.started", map[string]any{"index": i, "action": a, "sessionId": a.SessionID, "sessionTitle": s.Title, "harness": s.Harness, "location": s.Location})
-		trace.Actions = append(trace.Actions, m.execute(ctx, a))
-		m.emit(observe, "action.finished", map[string]any{"index": i, "result": trace.Actions[len(trace.Actions)-1]})
-	}
-	compose := ComposeInput{Message: trace.Message, Decision: trace.Decision, Outcomes: trace.Actions}
-	if err := m.sanitize(&compose); err != nil {
-		return trace, err
-	}
-	trace.Totals.ManagerCalls++
-	trace.Answer, trace.ComposeUsage, err = m.Decider.Compose(ctx, compose)
-	if len(trace.ValidationErrors) > 0 {
-		trace.Answer = trace.Decision.Actions[0].Text
-	}
-	if err != nil {
-		if len(trace.ValidationErrors) == 0 {
-			trace.Answer = "I could not compose an answer. Actual outcomes:"
-			for _, r := range trace.Actions {
-				trace.Answer += "\n" + r.Action.Type + ": "
-				if r.Error != "" {
-					trace.Answer += r.Error
-				} else {
-					trace.Answer += r.Reply
-				}
-			}
-		}
-		return trace, err
-	}
-	return trace, nil
+	return nil
 }

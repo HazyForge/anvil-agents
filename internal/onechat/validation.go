@@ -8,6 +8,11 @@ import (
 
 func ValidateDecision(d Decision, setups []Setup, sessions []Session, roots []string) []string {
 	problems := []string{}
+	switch d.Intent {
+	case "", "question", "amend_running", "new_work", "status", "decide", "unclear", "stop", "chatter", "preference":
+	default:
+		problems = append(problems, "unknown intent")
+	}
 	if len(d.Actions) < 1 || len(d.Actions) > 3 {
 		problems = append(problems, "a decision needs one to three actions")
 	}

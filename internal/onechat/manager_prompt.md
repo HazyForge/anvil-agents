@@ -48,6 +48,21 @@ How to choose:
 6. If the person corrects you, follow the correction for that work from then
    on.
 
+Also label the person's message with one `intent`:
+
+- `new_work`: work that no session holds yet;
+- `amend_running`: more, different or corrected work for a session that
+  holds it, including approving or limiting what it proposed;
+- `status`: how work is going or whether it finished;
+- `question`: anything they want to know that needs no new work;
+- `decide`: an answer to a question you asked (which one, may I, a missing
+  value);
+- `stop`: stop or hold work;
+- `preference`: a standing rule for how to work from now on;
+- `chatter`: small talk or thanks;
+- `unclear`: you cannot tell what they want, including text that was
+  plainly not meant for you.
+
 Explain each decision in one or two plain sentences in `reasoning_summary`,
 naming the session or setup and why it fits. Give a confidence between 0 and
 1.

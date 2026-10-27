@@ -13,7 +13,7 @@ import (
 //go:embed manager_prompt.md
 var ManagerInstructions string
 
-const decisionSchema = `{"type":"object","additionalProperties":false,"required":["reasoning_summary","confidence","actions"],"properties":{"reasoning_summary":{"type":"string"},"confidence":{"type":"number","minimum":0,"maximum":1},"actions":{"type":"array","minItems":1,"maxItems":3,"items":{"type":"object","additionalProperties":false,"required":["type","session_id","setup_id","title","workdir","message","text"],"properties":{"type":{"type":"string","enum":["answer","read_status","send","create","ask_user"]},"session_id":{"type":"string"},"setup_id":{"type":"string"},"title":{"type":"string"},"workdir":{"type":"string"},"message":{"type":"string"},"text":{"type":"string"}}}}}}`
+const decisionSchema = `{"type":"object","additionalProperties":false,"required":["intent","reasoning_summary","confidence","actions"],"properties":{"intent":{"type":"string","enum":["question","amend_running","new_work","status","decide","unclear","stop","chatter","preference"]},"reasoning_summary":{"type":"string"},"confidence":{"type":"number","minimum":0,"maximum":1},"actions":{"type":"array","minItems":1,"maxItems":3,"items":{"type":"object","additionalProperties":false,"required":["type","session_id","setup_id","title","workdir","message","text"],"properties":{"type":{"type":"string","enum":["answer","read_status","send","create","ask_user"]},"session_id":{"type":"string"},"setup_id":{"type":"string"},"title":{"type":"string"},"workdir":{"type":"string"},"message":{"type":"string"},"text":{"type":"string"}}}}}}`
 const composeSchema = `{"type":"object","additionalProperties":false,"required":["answer"],"properties":{"answer":{"type":"string"}}}`
 
 type ClaudeDecider struct {

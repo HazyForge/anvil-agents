@@ -1,0 +1,382 @@
+<title>One Chat Scenario Review</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow:wght@600;700&family=JetBrains+Mono:wght@400;500&family=Manrope:wght@400;500;600&family=Michroma&display=swap">
+<style>
+/* Forge Deck review board: a void with a grid; one coverage deck (states × moves) on top, then each case as a chamfered plate holding the person's message and the manager's call. */
+:root {
+  --void: #010605;
+  --fill: #07171d;
+  --fill-deep: #030c0f;
+  --edge: #1d4a57;
+  --ice: #e9fdff;
+  --paper: #cfe6ee;
+  --muted: #86a7b3;
+  --dim: #5d7e8a;
+  --blue: #3786f7;
+  --cyan: #50d8fa;
+  --mint: #5cf0b0;
+  --amber: #ffc24d;
+  --red: #ff8a80;
+  --font-display: "Michroma", "Eurostile", "Arial Black", sans-serif;
+  --font-label: "Barlow", "Arial Narrow", "Helvetica Neue", sans-serif;
+  --font-body: "Manrope", "Segoe UI", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  --cut: 14px;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body {
+  background:
+    radial-gradient(60rem 30rem at 100% -10%, rgba(55, 134, 247, 0.16), transparent 60%),
+    radial-gradient(40rem 24rem at -10% 110%, rgba(80, 216, 250, 0.08), transparent 60%),
+    linear-gradient(rgba(80, 216, 250, 0.045) 1px, transparent 1px) 0 0 / 48px 48px,
+    linear-gradient(90deg, rgba(80, 216, 250, 0.045) 1px, transparent 1px) 0 0 / 48px 48px,
+    var(--void);
+  background-attachment: fixed;
+  color: var(--paper);
+  font: 400 15px/1.55 var(--font-body);
+}
+.wrap {
+  max-width: 1240px;
+  margin: 0 auto;
+  padding-block: 28px 64px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  display: grid;
+  gap: 22px;
+}
+.label, .chip, .btn, th, .eyebrow {
+  font-family: var(--font-label);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+}
+h1 {
+  font: 400 clamp(22px, 3.4vw, 34px)/1.15 var(--font-display);
+  color: var(--ice);
+  margin: 0;
+  text-wrap: balance;
+  letter-spacing: 0.02em;
+}
+h2 { font: 400 15px/1.3 var(--font-display); color: var(--ice); margin: 0; letter-spacing: 0.04em; }
+.eyebrow { color: var(--cyan); font-size: 12px; }
+.meta { color: var(--muted); font: 400 12.5px/1.6 var(--font-mono); display: flex; flex-wrap: wrap; gap: 6px 18px; }
+.lede { max-width: 72ch; margin: 0; color: var(--paper); }
+
+/* Chamfered plate: gradient edge under a dark fill. */
+.plate { position: relative; isolation: isolate; padding: 18px 20px; }
+.plate::before, .plate::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  clip-path: polygon(var(--cut) 0, 100% 0, 100% calc(100% - var(--cut)), calc(100% - var(--cut)) 100%, 0 100%, 0 var(--cut));
+  z-index: -2;
+}
+.plate::before { background: linear-gradient(135deg, var(--cyan), var(--edge) 22%, rgba(29, 74, 87, 0.5) 50%, var(--edge) 78%, var(--blue)); }
+.plate::after { inset: 1px; background: linear-gradient(180deg, var(--fill), var(--fill-deep)); z-index: -1; }
+.plate.warn::before { background: linear-gradient(135deg, var(--amber), rgba(255, 194, 77, 0.25) 30%, rgba(255, 194, 77, 0.12) 70%, var(--amber)); }
+.plate.bad::before { background: linear-gradient(135deg, var(--red), rgba(255, 138, 128, 0.25) 30%, rgba(255, 138, 128, 0.12) 70%, var(--red)); }
+
+.figures { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
+.figure { display: grid; gap: 2px; }
+.figure b { font: 400 30px/1.1 var(--font-display); color: var(--ice); font-variant-numeric: tabular-nums; }
+.figure .label { font-size: 11.5px; color: var(--muted); }
+.figure.pass b { color: var(--mint); }
+.figure.fail b { color: var(--red); }
+.figure.gap b { color: var(--amber); }
+
+/* Coverage deck */
+.deck-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 8px 16px; margin-bottom: 12px; }
+.legend { display: flex; flex-wrap: wrap; gap: 10px 16px; color: var(--muted); font-size: 12.5px; }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.scroll { overflow-x: auto; }
+table.grid { border-collapse: separate; border-spacing: 3px; font-size: 12px; }
+table.grid th { font-size: 10.5px; color: var(--muted); font-weight: 700; padding: 2px 4px; white-space: nowrap; }
+table.grid thead th { writing-mode: vertical-rl; transform: rotate(180deg); text-align: left; height: 112px; vertical-align: bottom; }
+table.grid tbody th { text-align: right; padding-right: 8px; }
+.cell { width: 24px; height: 24px; border: 0; padding: 0; cursor: pointer; clip-path: polygon(5px 0, 100% 0, 100% calc(100% - 5px), calc(100% - 5px) 100%, 0 100%, 0 5px); font: 500 10px/24px var(--font-mono); color: var(--void); }
+.cell.empty { background: rgba(134, 167, 179, 0.08); cursor: default; }
+.cell.pass { background: var(--mint); }
+.cell.fail { background: var(--red); }
+.cell.mixed { background: linear-gradient(135deg, var(--mint) 50%, var(--red) 50%); }
+.cell.gap { background: var(--amber); }
+.cell.selected { outline: 2px solid var(--ice); outline-offset: 1px; }
+.cell:focus-visible, .btn:focus-visible, input:focus-visible, select:focus-visible, summary:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; }
+.swatch { width: 12px; height: 12px; display: inline-block; clip-path: polygon(3px 0, 100% 0, 100% calc(100% - 3px), calc(100% - 3px) 100%, 0 100%, 0 3px); }
+
+/* Filters */
+.filters { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+.filters input, .filters select {
+  background: var(--fill-deep);
+  color: var(--ice);
+  border: 1px solid var(--edge);
+  border-radius: 3px;
+  padding: 8px 10px;
+  font: 500 13px var(--font-body);
+  min-width: 0;
+}
+.filters input { flex: 1 1 220px; }
+.btn {
+  border: 0;
+  border-radius: 3px;
+  padding: 8px 14px;
+  font-size: 12px;
+  cursor: pointer;
+  transform: skewX(-14deg);
+  background: rgba(80, 216, 250, 0.08);
+  color: var(--paper);
+  box-shadow: inset 0 0 0 1px var(--edge);
+}
+.btn > span { display: inline-block; transform: skewX(14deg); }
+.btn.on { background: linear-gradient(90deg, var(--blue), var(--cyan)); color: var(--void); box-shadow: 0 0 18px rgba(80, 216, 250, 0.25); }
+.count { color: var(--muted); font: 400 12.5px var(--font-mono); }
+
+/* Cases */
+.cases { display: grid; gap: 14px; }
+.case { display: grid; gap: 12px; }
+.case-head { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; justify-content: space-between; }
+.case-title { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; min-width: 0; }
+.case-title h3 { margin: 0; font: 600 15px/1.3 var(--font-body); color: var(--ice); overflow-wrap: anywhere; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip { font-size: 10.5px; padding: 3px 8px 2px; border-radius: 3px; background: rgba(80, 216, 250, 0.08); color: var(--muted); box-shadow: inset 0 0 0 1px rgba(80, 216, 250, 0.18); white-space: nowrap; }
+.chip.state { color: var(--cyan); }
+.chip.status-pass { color: var(--void); background: var(--mint); box-shadow: none; }
+.chip.status-fail { color: var(--void); background: var(--red); box-shadow: none; }
+.chip.status-flaky { color: var(--void); background: linear-gradient(90deg, var(--mint), var(--red)); box-shadow: none; }
+.chip.status-gap { color: var(--void); background: var(--amber); box-shadow: none; }
+.chip.status-gap-closed { color: var(--void); background: linear-gradient(90deg, var(--amber), var(--mint)); box-shadow: none; }
+.step { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr); gap: 14px; }
+@media (max-width: 760px) { .step { grid-template-columns: minmax(0, 1fr); } }
+.said { display: grid; gap: 8px; align-content: start; }
+.bubble {
+  background: rgba(55, 134, 247, 0.12);
+  box-shadow: inset 0 0 0 1px rgba(55, 134, 247, 0.35);
+  color: var(--ice);
+  padding: 10px 12px;
+  border-radius: 3px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font: 500 15px/1.5 var(--font-body);
+}
+.who { font-size: 11px; color: var(--muted); }
+.note { color: var(--muted); font-size: 13px; margin: 0; }
+.gapnote { color: var(--amber); font-size: 13px; margin: 0; }
+.rules { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; font-size: 13px; }
+.rules li { display: grid; grid-template-columns: 18px minmax(0, 1fr); gap: 6px; }
+.rules .ok { color: var(--mint); }
+.rules .no { color: var(--red); }
+.rules .why { color: var(--muted); display: block; font-size: 12.5px; }
+.call { display: grid; gap: 8px; align-content: start; min-width: 0; }
+.reading { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: baseline; }
+.reasoning { margin: 0; color: var(--paper); }
+.actions { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.action { display: grid; gap: 4px; padding: 8px 10px; background: rgba(1, 6, 5, 0.55); border-left: 2px solid var(--cyan); }
+.action .label { font-size: 11px; color: var(--cyan); }
+.action p { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13.5px; }
+.validation { color: var(--amber); font-size: 13px; margin: 0; }
+details.raw summary { cursor: pointer; color: var(--muted); font-size: 12.5px; }
+details.raw pre { margin: 6px 0 0; padding: 8px 10px; background: rgba(1, 6, 5, 0.6); color: var(--paper); font: 400 12px/1.5 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 280px; overflow: auto; }
+.mono { font-family: var(--font-mono); font-size: 12.5px; color: var(--muted); }
+.empty-state { color: var(--muted); text-align: center; padding: 28px 0; }
+.foot { color: var(--dim); font-size: 12.5px; max-width: 80ch; }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+</style>
+
+<div class="wrap">
+  <header class="plate" style="display:grid;gap:10px">
+    <span class="eyebrow">One chat · decide tier</span>
+    <h1>One Chat Scenario Review</h1>
+    <p class="lede" id="lede">Every message here is written the way the owner types to agents. Each case shows the message, the state one chat was in, what a good manager should do, and what the manager actually decided.</p>
+    <div class="meta" id="meta"></div>
+  </header>
+
+  <section class="figures" id="figures" aria-label="Run totals"></section>
+
+  <section class="plate" aria-labelledby="deck-title">
+    <div class="deck-head">
+      <h2 id="deck-title">Coverage: states × moves</h2>
+      <div class="legend">
+        <span><i class="swatch" style="background:var(--mint)"></i>all pass</span>
+        <span><i class="swatch" style="background:var(--red)"></i>failing</span>
+        <span><i class="swatch" style="background:linear-gradient(135deg,var(--mint) 50%,var(--red) 50%)"></i>mixed</span>
+        <span><i class="swatch" style="background:var(--amber)"></i>gap only</span>
+        <span><i class="swatch" style="background:rgba(134,167,179,.2)"></i>no case yet</span>
+      </div>
+    </div>
+    <div class="scroll"><table class="grid" id="grid"></table></div>
+  </section>
+
+  <section class="filters" aria-label="Filter cases">
+    <label class="label" for="q" style="font-size:11px;color:var(--muted)">Find</label>
+    <input id="q" type="search" placeholder="message, case or session">
+    <div id="status-filter" class="filters" role="group" aria-label="Status"></div>
+    <span class="count" id="count"></span>
+  </section>
+
+  <section class="cases" id="cases" aria-live="polite"></section>
+
+  <p class="foot">Messages are synthetic and written in the owner's style; the analysis of their real chats stays on their machine. Decisions come from the real manager prompt and model, judged after validation, which is what one chat would actually do. Nothing was executed.</p>
+</div>
+
+<script id="data" type="application/json">__DATA__</script>
+<script>
+(() => {
+  const DATA = JSON.parse(document.getElementById('data').textContent);
+  const $ = (id) => document.getElementById(id);
+  const el = (tag, props = {}, ...kids) => {
+    const node = document.createElement(tag);
+    for (const [key, value] of Object.entries(props)) {
+      if (value === undefined || value === null || value === false) continue;
+      if (key === 'class') node.className = value;
+      else if (key === 'text') node.textContent = value;
+      else if (key.startsWith('on')) node.addEventListener(key.slice(2), value);
+      else node.setAttribute(key, value);
+    }
+    for (const kid of kids.flat()) if (kid !== null && kid !== undefined && kid !== false) node.append(kid instanceof Node ? kid : document.createTextNode(String(kid)));
+    return node;
+  };
+  const STATUS_WORDS = {pass: 'Pass', fail: 'Fail', flaky: 'Flaky', gap: 'Gap', 'gap-closed': 'Gap closed'};
+  const ACTION_WORDS = {send: 'Sent to', create: 'Started', read_status: 'Checked', answer: 'Answered', ask_user: 'Asked you', stop: 'Stopped'};
+  const INTENT_WORDS = {new_work: 'new work', amend_running: 'more for a session', status: 'status', question: 'question', decide: 'your answer', stop: 'stop', preference: 'a rule', chatter: 'chat', unclear: 'unclear'};
+
+  const meta = DATA.meta || {};
+  $('meta').append(
+    ...[
+      meta.ranAt && `ran ${new Date(meta.ranAt).toLocaleString()}`,
+      meta.model && `manager ${meta.model}`,
+      meta.repeat > 1 && `each case ×${meta.repeat}`,
+      typeof meta.costUSD === 'number' && `cost $${meta.costUSD.toFixed(2)}`,
+      meta.durationSeconds && `${Math.round(meta.durationSeconds / 60)} min`,
+    ].filter(Boolean).map((text) => el('span', {text})),
+  );
+
+  const counts = {pass: 0, fail: 0, flaky: 0, gap: 0, 'gap-closed': 0};
+  for (const c of DATA.cases) counts[c.status] = (counts[c.status] || 0) + 1;
+  const figure = (cls, n, label) => el('div', {class: `plate figure ${cls}`}, el('b', {text: n}), el('span', {class: 'label', text: label}));
+  $('figures').append(
+    figure('', DATA.cases.length, 'cases'),
+    figure('pass', counts.pass, 'pass'),
+    figure('fail', counts.fail + counts.flaky, counts.flaky ? `fail (${counts.flaky} flaky)` : 'fail'),
+    figure('gap', counts.gap, 'known gaps'),
+    figure('pass', counts['gap-closed'], 'gaps now closed'),
+  );
+
+  // Coverage grid.
+  const byCell = new Map();
+  for (const c of DATA.cases) for (const move of c.moves) {
+    const key = `${c.state}|${move}`;
+    if (!byCell.has(key)) byCell.set(key, []);
+    byCell.get(key).push(c);
+  }
+  let cellFilter = null;
+  const grid = $('grid');
+  const head = el('tr', {}, el('th', {}));
+  for (const move of DATA.moves) head.append(el('th', {scope: 'col', text: move}));
+  grid.append(el('thead', {}, head));
+  const body = el('tbody');
+  for (const state of DATA.states) {
+    const row = el('tr', {}, el('th', {scope: 'row', text: state}));
+    for (const move of DATA.moves) {
+      const list = byCell.get(`${state}|${move}`) || [];
+      const real = list.filter((c) => c.status !== 'gap' && c.status !== 'gap-closed');
+      const failing = real.filter((c) => c.status === 'fail' || c.status === 'flaky').length;
+      const cls = !list.length ? 'empty' : !real.length ? 'gap' : !failing ? 'pass' : failing === real.length ? 'fail' : 'mixed';
+      const label = list.length ? `${state} × ${move}: ${list.length} case${list.length === 1 ? '' : 's'}, ${failing} failing` : `${state} × ${move}: no case`;
+      const cell = el('button', {class: `cell ${cls}`, type: 'button', 'aria-label': label, title: label, text: list.length > 1 ? list.length : ''});
+      if (list.length) cell.addEventListener('click', () => {
+        const key = `${state}|${move}`;
+        cellFilter = cellFilter === key ? null : key;
+        grid.querySelectorAll('.cell.selected').forEach((n) => n.classList.remove('selected'));
+        if (cellFilter) cell.classList.add('selected');
+        render();
+      });
+      else cell.disabled = true;
+      row.append(el('td', {}, cell));
+    }
+    body.append(row);
+  }
+  grid.append(body);
+
+  // Status filter, failures first by default.
+  let statusFilter = counts.fail + counts.flaky ? 'fail' : 'all';
+  const statusGroup = $('status-filter');
+  const statusOptions = [['all', 'All'], ['fail', 'Failing'], ['pass', 'Passing'], ['gap', 'Gaps']];
+  const drawStatus = () => {
+    statusGroup.replaceChildren(...statusOptions.map(([value, text]) => el('button', {
+      type: 'button',
+      class: `btn${statusFilter === value ? ' on' : ''}`,
+      'aria-pressed': String(statusFilter === value),
+      onclick: () => { statusFilter = value; drawStatus(); render(); },
+    }, el('span', {text}))));
+  };
+  drawStatus();
+  $('q').addEventListener('input', render);
+
+  const matchesStatus = (c) => statusFilter === 'all'
+    || (statusFilter === 'fail' && (c.status === 'fail' || c.status === 'flaky'))
+    || (statusFilter === 'pass' && c.status === 'pass')
+    || (statusFilter === 'gap' && (c.status === 'gap' || c.status === 'gap-closed'));
+  const haystack = (c) => [c.id, c.note, c.gap, ...c.steps.flatMap((s) => [s.say, s.decision?.reasoning, ...(s.decision?.actions || []).flatMap((a) => [a.target, a.text])])].join(' ').toLowerCase();
+
+  function renderStep(step, index, total) {
+    const said = el('div', {class: 'said'},
+      el('span', {class: 'who label', text: `${total > 1 ? `Step ${index + 1} · ` : ''}You${step.from === 'ios' ? ' · iPhone' : ''}`}),
+      el('div', {class: 'bubble', text: step.say}),
+      step.note && el('p', {class: 'note', text: step.note}),
+      step.expect?.length && el('ul', {class: 'rules', 'aria-label': 'What a good call does'}, step.expect.map((rule) => el('li', {},
+        el('span', {class: rule.pass ? 'ok' : 'no', 'aria-label': rule.pass ? 'met' : 'missed', text: rule.pass ? '✓' : '✗'}),
+        el('span', {}, rule.text, rule.reason && !rule.pass && el('span', {class: 'why', text: rule.reason})),
+      ))),
+    );
+    const d = step.decision || {};
+    const call = el('div', {class: 'call'},
+      el('div', {class: 'reading'},
+        el('span', {class: 'label', style: 'font-size:11px;color:var(--cyan)', text: 'Manager'}),
+        d.intent && el('span', {class: 'chip', text: `read as ${INTENT_WORDS[d.intent] || d.intent}`}),
+        typeof d.confidence === 'number' && el('span', {class: 'mono', text: `confidence ${d.confidence.toFixed(2)}`}),
+      ),
+      d.reasoning && el('p', {class: 'reasoning', text: d.reasoning}),
+      (step.validation || []).length > 0 && el('p', {class: 'validation', text: `Validation refused its first idea: ${step.validation.join('; ')}`}),
+      el('ul', {class: 'actions'}, (d.actions || []).map((a) => el('li', {class: 'action'},
+        el('span', {class: 'label', text: `${ACTION_WORDS[a.type] || a.type}${a.target ? ` ${a.target}` : ''}`}),
+        a.text && el('p', {text: a.text}),
+      ))),
+      step.raw && el('details', {class: 'raw'}, el('summary', {text: 'What it first proposed'}), el('pre', {text: JSON.stringify(step.raw, null, 2)})),
+      step.error && el('p', {class: 'validation', text: step.error}),
+    );
+    return el('div', {class: 'step'}, said, call);
+  }
+
+  function renderCase(c) {
+    const cls = c.status === 'fail' || c.status === 'flaky' ? ' bad' : c.status === 'gap' ? ' warn' : '';
+    return el('article', {class: `plate case${cls}`, id: c.id.replace(/[^a-z0-9-]/gi, '-')},
+      el('div', {class: 'case-head'},
+        el('div', {class: 'case-title'},
+          el('span', {class: `chip status-${c.status}`, text: STATUS_WORDS[c.status] + (c.runs > 1 ? ` ${Math.round(c.passRate * 100)}%` : '')}),
+          el('h3', {text: c.name.replace(/-/g, ' ')}),
+        ),
+        el('div', {class: 'chips'},
+          el('span', {class: 'chip state', text: c.state}),
+          c.moves.map((m) => el('span', {class: 'chip', text: m})),
+          (c.voice || []).map((v) => el('span', {class: 'chip', text: v})),
+        ),
+      ),
+      c.gap && el('p', {class: 'gapnote', text: `Known gap: ${c.gap}`}),
+      c.note && el('p', {class: 'note', text: c.note}),
+      c.steps.map((s, i) => renderStep(s, i, c.steps.length)),
+    );
+  }
+
+  function render() {
+    const q = $('q').value.trim().toLowerCase();
+    const list = DATA.cases.filter((c) => matchesStatus(c)
+      && (!cellFilter || c.moves.some((m) => `${c.state}|${m}` === cellFilter))
+      && (!q || haystack(c).includes(q)));
+    $('count').textContent = `${list.length} of ${DATA.cases.length}`;
+    $('cases').replaceChildren(...(list.length ? list.map(renderCase) : [el('p', {class: 'empty-state', text: 'No case matches. Clear the search or pick another status.'})]));
+  }
+  render();
+})();
+</script>
