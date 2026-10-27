@@ -30,6 +30,9 @@ func main() {
 }
 
 func run(ctx context.Context, args []string) error {
+	if len(args) > 0 && args[0] == "hook" {
+		return runHook(ctx, args[1:])
+	}
 	flags := flag.NewFlagSet("onechat", flag.ContinueOnError)
 	configPath := flags.String("config", "", "configuration file (default ~/.config/onechat/onechat.yaml)")
 	if err := flags.Parse(args); err != nil {
@@ -37,11 +40,17 @@ func run(ctx context.Context, args []string) error {
 	}
 	args = flags.Args()
 	if len(args) == 0 {
-		return fmt.Errorf("usage: onechat [--config FILE] login | sessions | say TEXT | serve [--listen ADDR] | daemon run|start|stop|status|logs|bootstrap|proxy | scenario run FILE --out DIR")
+		return fmt.Errorf("usage: onechat [--config FILE] login | sessions | agents | queue --session ID --message TEXT | stop --session ID | say TEXT | serve [--listen ADDR] | daemon run|start|stop|status|logs|bootstrap|proxy | scenario run FILE --out DIR")
+	}
+	if args[0] == "hook" {
+		return runHook(ctx, args[1:])
 	}
 	path, err := cliConfigPath(*configPath)
 	if err != nil {
 		return err
+	}
+	if args[0] == "agents" || args[0] == "queue" || args[0] == "stop" {
+		return runSessionCommand(ctx, path, args[0], args[1:])
 	}
 	if args[0] == "daemon" {
 		return runDaemon(ctx, path, args[1:])

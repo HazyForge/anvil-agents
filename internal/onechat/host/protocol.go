@@ -171,6 +171,10 @@ func (c *client) handle(req request) (any, *protocolError) {
 		h.mu.Lock()
 		defer h.mu.Unlock()
 		return h.statusLocked(), nil
+	case "session.list":
+		return map[string]any{"sessions": h.manager.SessionStates()}, nil
+	case "session.stop", "session.queue", "session.hook", "session.hook.ack":
+		return c.sessionOperation(req)
 	case "sessions.list":
 		var body struct {
 			Refresh bool `json:"refresh"`
@@ -209,13 +213,11 @@ func (c *client) handle(req request) (any, *protocolError) {
 		if err := decodeBody(req.Body, &body); err != nil {
 			return nil, err
 		}
-		h.mu.Lock()
-		defer h.mu.Unlock()
-		if h.turn == nil || h.turn.TurnID != strings.ToLower(body.TurnID) {
-			return nil, &protocolError{"not_found", "that turn is not running"}
+		if err := h.cancelTurn(body.TurnID); err != nil {
+			return nil, err
 		}
-		h.turn.cancel()
 		return map[string]any{}, nil
+
 	case "trace.get":
 		var body struct {
 			TurnID string `json:"turnId"`
@@ -246,7 +248,7 @@ func (c *client) handle(req request) (any, *protocolError) {
 		if err != nil {
 			return nil, err
 		}
-		return map[string]any{"messages": h.manager.History(limit), "turns": turns}, nil
+		return map[string]any{"messages": h.manager.History(limit), "turns": turns, "followups": h.manager.Followups(limit)}, nil
 	default:
 		return nil, invalid("unknown operation")
 	}
@@ -352,7 +354,7 @@ func (h *Host) history(limit int) ([]turnSummary, *protocolError) {
 			break
 		}
 		trace, err := h.trace(file.id)
-		if err != nil {
+		if err != nil || trace.Kind == "followup" {
 			continue
 		}
 		out = append(out, turnSummary{trace.ID, trace.At, trace.Message, trace.Answer, trace.Error, len(trace.Actions), trace.Totals})

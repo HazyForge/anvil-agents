@@ -48,6 +48,7 @@ type Host struct {
 	mu          sync.Mutex
 	clients     map[*client]struct{}
 	turn        *runningTurn
+	pending     []*runningTurn
 	finished    []completedTurn
 	refreshDone chan struct{}
 	closing     bool
@@ -139,6 +140,21 @@ func Start(ctx context.Context, opts Options) (*Host, error) {
 	hostCtx, cancel := context.WithCancel(ctx)
 	name, _ := os.Hostname()
 	h := &Host{manager: opts.Manager, dir: dir, info: info, token: token, name: name, ctx: hostCtx, done: make(chan struct{}), clients: make(map[*client]struct{})}
+	binary, err := os.Executable()
+	if err == nil {
+		err = h.manager.StartWorkers(hostCtx, onechat.WorkerOptions{Binary: binary, Observe: func(event onechat.Event) {
+			h.mu.Lock()
+			defer h.mu.Unlock()
+			h.eventLocked(event.Name, event.At, event.Body, false)
+		}})
+	}
+	if err != nil {
+		cancel()
+		_ = listener.Close()
+		h.manager.WaitWorkers()
+		return nil, err
+	}
+
 	server := &http.Server{Handler: http.HandlerFunc(h.handleHTTP), ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 30 * time.Second, MaxHeaderBytes: 16 << 10, BaseContext: func(net.Listener) context.Context { return hostCtx }}
 	go func() {
 		<-hostCtx.Done()
@@ -160,6 +176,7 @@ func Start(ctx context.Context, opts Options) (*Host, error) {
 		_ = control.Close()
 		controlErr := <-controlDone
 		h.workers.Wait()
+		h.manager.WaitWorkers()
 		if !errors.Is(err, http.ErrServerClosed) {
 			h.err = err
 		}

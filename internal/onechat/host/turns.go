@@ -60,6 +60,12 @@ func (h *Host) eventLocked(name string, at time.Time, body any, inTurn bool) {
 	h.broadcastLocked(raw)
 }
 
+type turnAdmission struct {
+	TurnID   string `json:"turnId"`
+	Queued   bool   `json:"queued"`
+	Position int    `json:"position"`
+}
+
 func (h *Host) startTurn(text, requestID string, by clientInfo) (any, *protocolError) {
 	if len(text) > 64<<10 {
 		return nil, &protocolError{"too_large", "turn text exceeds 64 KiB"}
@@ -74,43 +80,82 @@ func (h *Host) startTurn(text, requestID string, by clientInfo) (any, *protocolE
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if h.turn != nil && h.turn.RequestID == requestID {
-		return map[string]string{"turnId": h.turn.TurnID}, nil
+		return turnAdmission{TurnID: h.turn.TurnID}, nil
+	}
+	for i, turn := range h.pending {
+		if turn.RequestID == requestID {
+			return turnAdmission{turn.TurnID, true, i + 1}, nil
+		}
 	}
 	for _, finished := range h.finished {
 		if finished.requestID == requestID {
-			return map[string]string{"turnId": finished.turnID}, nil
+			return turnAdmission{TurnID: finished.turnID}, nil
 		}
-	}
-	if h.turn != nil {
-		return nil, &protocolError{"busy", "onechat is busy; wait for idle status before starting another turn"}
 	}
 	if h.closing {
 		return nil, &protocolError{"internal", "onechat is stopping; reconnect after it restarts"}
 	}
-	id := uuid.New()
-	ctx, cancel := context.WithCancel(onechat.WithTurnID(h.ctx, id))
-	h.turn = &runningTurn{TurnID: id.String(), Text: text, StartedAt: time.Now().UTC(), RequestID: requestID, By: by, Events: []json.RawMessage{}, cancel: cancel}
-	h.eventLocked("status", time.Now().UTC(), h.statusLocked(), false)
-	h.eventLocked("turn.started", time.Now().UTC(), map[string]any{"turnId": id.String(), "text": text, "requestId": requestID, "by": by}, true)
-	h.workers.Add(1)
-	go h.runTurn(ctx, text, h.refreshDone)
-	return map[string]string{"turnId": id.String()}, nil
+	turn := &runningTurn{TurnID: uuid.NewString(), Text: text, RequestID: requestID, By: by, Events: []json.RawMessage{}}
+	if h.turn != nil {
+		h.pending = append(h.pending, turn)
+		position := len(h.pending)
+		h.eventLocked("turn.queued", time.Now().UTC(), map[string]any{"turnId": turn.TurnID, "position": position}, false)
+		return turnAdmission{turn.TurnID, true, position}, nil
+	}
+	h.beginTurnLocked(turn)
+	return turnAdmission{TurnID: turn.TurnID}, nil
 }
 
-func (h *Host) runTurn(ctx context.Context, text string, refreshDone <-chan struct{}) {
-	defer h.workers.Done()
-	// A turn takes priority over new refreshes, but an existing refresh must
-	// release the manager before the turn reads its own inventory.
-	if refreshDone != nil {
-		select {
-		case <-refreshDone:
-		case <-ctx.Done():
-		}
+func (h *Host) beginTurnLocked(turn *runningTurn) {
+	id := uuid.MustParse(turn.TurnID)
+	ctx, cancel := context.WithCancel(onechat.WithTurnID(h.ctx, id))
+	turn.StartedAt, turn.cancel = time.Now().UTC(), cancel
+	h.turn = turn
+	h.eventLocked("status", time.Now().UTC(), h.statusLocked(), false)
+	h.eventLocked("turn.started", time.Now().UTC(), map[string]any{"turnId": turn.TurnID, "text": turn.Text, "requestId": turn.RequestID, "by": turn.By}, true)
+	h.workers.Add(1)
+	go h.runTurn(ctx, turn)
+}
+
+func (h *Host) rememberTurnLocked(turn *runningTurn) {
+	h.finished = append(h.finished, completedTurn{turn.RequestID, turn.TurnID})
+	if len(h.finished) > 100 {
+		h.finished = h.finished[len(h.finished)-100:]
 	}
+}
+
+func (h *Host) queuePositionsLocked() {
+	for i, turn := range h.pending {
+		h.eventLocked("turn.queued", time.Now().UTC(), map[string]any{"turnId": turn.TurnID, "position": i + 1}, false)
+	}
+}
+
+func (h *Host) cancelTurn(id string) *protocolError {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.turn != nil && h.turn.TurnID == strings.ToLower(id) {
+		h.turn.cancel()
+		return nil
+	}
+	for i, turn := range h.pending {
+		if turn.TurnID != strings.ToLower(id) {
+			continue
+		}
+		h.pending = append(h.pending[:i], h.pending[i+1:]...)
+		h.rememberTurnLocked(turn)
+		h.eventLocked("turn.finished", time.Now().UTC(), map[string]any{"turnId": turn.TurnID, "error": context.Canceled.Error(), "answer": "", "totals": onechat.Totals{}}, false)
+		h.queuePositionsLocked()
+		return nil
+	}
+	return &protocolError{"not_found", "that turn is not running or queued"}
+}
+
+func (h *Host) runTurn(ctx context.Context, turn *runningTurn) {
+	defer h.workers.Done()
 	var trace onechat.TurnTrace
 	err := ctx.Err()
 	if err == nil {
-		trace, err = h.manager.TurnObserved(ctx, text, func(event onechat.Event) {
+		trace, err = h.manager.TurnObserved(ctx, turn.Text, func(event onechat.Event) {
 			h.mu.Lock()
 			defer h.mu.Unlock()
 			h.eventLocked(event.Name, event.At, event.Body, true)
@@ -125,14 +170,25 @@ func (h *Host) runTurn(ctx context.Context, text string, refreshDone <-chan stru
 	if ctx.Err() != nil {
 		failure = ctx.Err().Error()
 	}
-	h.eventLocked("turn.finished", time.Now().UTC(), map[string]any{"turnId": h.turn.TurnID, "error": failure, "answer": trace.Answer, "totals": trace.Totals}, true)
+	h.eventLocked("turn.finished", time.Now().UTC(), map[string]any{"turnId": turn.TurnID, "error": failure, "answer": trace.Answer, "totals": trace.Totals}, true)
 	sessions, _ := h.manager.LastInventory()
 	h.eventLocked("sessions.changed", time.Now().UTC(), map[string]any{"sessions": withoutTranscripts(sessions)}, false)
-	h.finished = append(h.finished, completedTurn{h.turn.RequestID, h.turn.TurnID})
-	if len(h.finished) > 100 {
-		h.finished = h.finished[len(h.finished)-100:]
-	}
-	h.turn.cancel()
+	h.rememberTurnLocked(turn)
+	turn.cancel()
 	h.turn = nil
-	h.eventLocked("status", time.Now().UTC(), h.statusLocked(), false)
+	if h.closing || h.ctx.Err() != nil {
+		for _, queued := range h.pending {
+			h.rememberTurnLocked(queued)
+			h.eventLocked("turn.finished", time.Now().UTC(), map[string]any{"turnId": queued.TurnID, "error": "onechat stopped before this turn was dispatched", "answer": "", "totals": onechat.Totals{}}, false)
+		}
+		h.pending = nil
+	}
+	if len(h.pending) > 0 {
+		next := h.pending[0]
+		h.pending = h.pending[1:]
+		h.beginTurnLocked(next)
+		h.queuePositionsLocked()
+	} else {
+		h.eventLocked("status", time.Now().UTC(), h.statusLocked(), false)
+	}
 }

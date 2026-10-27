@@ -3,6 +3,7 @@ package onechat
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"regexp"
 	"strings"
@@ -173,6 +174,9 @@ func (b *LocalBackend) Send(ctx context.Context, setup Setup, session Session, p
 		result.Usage.DurationMS = result.DurationMS
 		if err != nil {
 			result.Error = err.Error()
+			if errors.Is(err, context.Canceled) {
+				result.State = "interrupted"
+			}
 		}
 	}()
 	if err = localSettings(&setup); err != nil {
@@ -211,6 +215,16 @@ func (b *LocalBackend) Send(ctx context.Context, setup Setup, session Session, p
 	}
 	r.Binary = binary
 	args := localRecipes[setup.Harness](setup, session)
+	if hooks, observed := ctx.Value(runHooksKey{}).(RunHooks); observed {
+		if setup.Harness == "claudeCode" {
+			settings, settingsErr := claudeHookSettings(hooks)
+			if settingsErr != nil {
+				return result, settingsErr
+			}
+			args = append(args, "--settings", settings)
+		}
+		ctx = context.WithValue(ctx, localCommandKey{}, localCommand{hooks: hooks, codex: setup.Harness == "codex"})
+	}
 	result.HarnessCalled = true
 	raw, code, runErr := runCommand(ctx, session.Workdir, binary, args, prompt, b.Timeout)
 	r.ExitCode = code

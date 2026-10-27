@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"strings"
@@ -31,6 +32,19 @@ func (b *cappedBuffer) Write(p []byte) (int, error) {
 }
 
 func (b *cappedBuffer) String() string { return b.buf.String() }
+func (b *cappedBuffer) Overflow() bool { return b.overflow }
+
+type commandOutput interface {
+	io.Writer
+	String() string
+	Overflow() bool
+}
+
+type localCommandKey struct{}
+type localCommand struct {
+	hooks RunHooks
+	codex bool
+}
 
 // childEnv mirrors standing.processChildEnv; recipes and standing behavior stay
 // untouched. Provider CLI auth homes remain available, API bearer material does not.
@@ -67,9 +81,24 @@ func runCommandEnv(ctx context.Context, dir, binary string, args []string, promp
 	cmd := exec.CommandContext(ctx, binary, args...) // #nosec G204 -- binary is the claude or codex CLI, or the operator's own configured tokenCommand; argv is a separate slice and no shell runs
 	cmd.Dir, cmd.Env, cmd.Stdin = dir, env, strings.NewReader(prompt)
 	cmd.WaitDelay = time.Second
-	out, stderr := &cappedBuffer{limit: outputLimit}, &cappedBuffer{limit: 32 << 10}
+	configureCommandProcess(cmd)
+	local, _ := ctx.Value(localCommandKey{}).(localCommand)
+	var out commandOutput = &cappedBuffer{limit: outputLimit}
+	if local.codex {
+		out = &codexStream{hooks: local.hooks}
+	}
+	stderr := &cappedBuffer{limit: 32 << 10}
 	cmd.Stdout, cmd.Stderr = out, stderr
-	err := cmd.Run()
+	err := cmd.Start()
+	if err == nil {
+		if local.hooks.Started != nil {
+			local.hooks.Started(cmd.Process.Pid)
+		}
+		err = cmd.Wait()
+	}
+	if stream, ok := out.(*codexStream); ok {
+		stream.finish()
+	}
 	var code *int
 	if cmd.ProcessState != nil {
 		n := cmd.ProcessState.ExitCode()
@@ -78,7 +107,7 @@ func runCommandEnv(ctx context.Context, dir, binary string, args []string, promp
 	if ctx.Err() != nil {
 		return out.String(), code, ctx.Err()
 	}
-	if out.overflow {
+	if out.Overflow() {
 		return "", code, fmt.Errorf("harness output exceeds %d bytes", outputLimit)
 	}
 	if err != nil {

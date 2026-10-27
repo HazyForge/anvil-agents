@@ -386,10 +386,12 @@ func Login(ctx context.Context, config Config, out io.Writer) error {
 }
 
 type fileTokens struct {
-	path    string
-	client  *http.Client
-	session CloudSession
-	secrets []string
+	mu        sync.RWMutex
+	refreshMu sync.Mutex
+	path      string
+	client    *http.Client
+	session   CloudSession
+	secrets   []string
 }
 
 func newFileTokens(path string, client *http.Client) (*fileTokens, error) {
@@ -441,21 +443,26 @@ func (f *fileTokens) remember() {
 }
 
 func (f *fileTokens) Token(ctx context.Context, force bool) (string, error) {
-	if !force && time.Until(f.session.ExpiresAt) > 2*time.Minute {
-		return f.session.AccessToken, nil
+	f.refreshMu.Lock()
+	defer f.refreshMu.Unlock()
+	f.mu.RLock()
+	session := f.session
+	f.mu.RUnlock()
+	if !force && time.Until(session.ExpiresAt) > 2*time.Minute {
+		return session.AccessToken, nil
 	}
-	if f.session.RefreshToken == "" {
+	if session.RefreshToken == "" {
 		return "", fmt.Errorf("cloud session cannot refresh; run `onechat login`")
 	}
-	provider, err := discoverOIDC(ctx, f.client, f.session.Issuer)
+	provider, err := discoverOIDC(ctx, f.client, session.Issuer)
 	if err != nil {
 		return "", err
 	}
-	tokens, err := exchangeToken(ctx, f.client, provider.Endpoint().TokenURL, url.Values{"grant_type": {"refresh_token"}, "refresh_token": {f.session.RefreshToken}, "client_id": {f.session.ClientID}})
+	tokens, err := exchangeToken(ctx, f.client, provider.Endpoint().TokenURL, url.Values{"grant_type": {"refresh_token"}, "refresh_token": {session.RefreshToken}, "client_id": {session.ClientID}})
 	if err != nil {
 		return "", fmt.Errorf("cloud session refresh failed; run `onechat login`")
 	}
-	next := f.session
+	next := session
 	next.AccessToken = tokens.AccessToken
 	if tokens.RefreshToken != "" {
 		next.RefreshToken = tokens.RefreshToken
@@ -464,8 +471,10 @@ func (f *fileTokens) Token(ctx context.Context, force bool) (string, error) {
 	next.ExpiresAt = time.Now().UTC().Add(time.Duration(seconds) * time.Second)
 	// Remember rotated credentials even if disk persistence fails, so they cannot
 	// appear in an error or trace if a later backend response echoes them.
+	f.mu.Lock()
 	f.session = next
 	f.remember()
+	f.mu.Unlock()
 	if err := saveCloudSession(f.path, next); err != nil {
 		return "", err
 	}
@@ -473,6 +482,8 @@ func (f *fileTokens) Token(ctx context.Context, force bool) (string, error) {
 }
 
 func (f *fileTokens) Redact(text string) string {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
 	for _, token := range f.secrets {
 		text = strings.ReplaceAll(text, token, "[REDACTED]")
 	}

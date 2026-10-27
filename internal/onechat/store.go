@@ -9,9 +9,13 @@ import (
 )
 
 type State struct {
-	Sessions      []Session         `json:"sessions"`
-	History       []Message         `json:"history"`
-	CloudBindings map[string]string `json:"cloudBindings"`
+	CloudSessions    []Session                `json:"cloudSessions,omitempty"`
+	Workers          map[string]*WorkerRecord `json:"workers,omitempty"`
+	Followups        []Followup               `json:"followups,omitempty"`
+	PendingFollowups []TurnTrace              `json:"pendingFollowups,omitempty"`
+	Sessions         []Session                `json:"sessions"`
+	History          []Message                `json:"history"`
+	CloudBindings    map[string]string        `json:"cloudBindings"`
 }
 
 func loadState(dir string) (State, error) {
@@ -28,6 +32,9 @@ func loadState(dir string) (State, error) {
 	}
 	if s.CloudBindings == nil {
 		s.CloudBindings = map[string]string{}
+	}
+	if s.Workers == nil {
+		s.Workers = map[string]*WorkerRecord{}
 	}
 	return s, nil
 }

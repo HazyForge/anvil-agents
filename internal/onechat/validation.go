@@ -6,10 +6,34 @@ import (
 	"strings"
 )
 
+// NormalizeDecision clears fields an action cannot use before validation, so
+// a harmless slip (a workdir or setup on a send) does not discard the whole
+// turn. A send, read or stop always runs in its session's own folder and setup;
+// only a local create takes a workdir. The raw decision stays in the trace.
+func NormalizeDecision(d *Decision, setups []Setup) {
+	location := map[string]string{}
+	for _, s := range setups {
+		location[s.ID] = s.Location
+	}
+	for i := range d.Actions {
+		a := &d.Actions[i]
+		switch a.Type {
+		case "create":
+			if location[a.SetupID] != "local" {
+				a.Workdir = ""
+			}
+		case "send", "read_status", "stop":
+			a.Workdir, a.SetupID = "", ""
+		default:
+			a.Workdir = ""
+		}
+	}
+}
+
 func ValidateDecision(d Decision, setups []Setup, sessions []Session, roots []string) []string {
 	problems := []string{}
-	if len(d.Actions) < 1 || len(d.Actions) > 3 {
-		problems = append(problems, "a decision needs one to three actions")
+	if len(d.Actions) < 1 || len(d.Actions) > 4 {
+		problems = append(problems, "a decision needs one to four actions")
 	}
 	if math.IsNaN(d.Confidence) || math.IsInf(d.Confidence, 0) || d.Confidence < 0 || d.Confidence > 1 {
 		problems = append(problems, "confidence must be between zero and one")
@@ -24,7 +48,6 @@ func ValidateDecision(d Decision, setups []Setup, sessions []Session, roots []st
 	for _, s := range sessions {
 		cm[s.ID] = s
 	}
-	hasText, hasSend := false, false
 	sent := map[string]bool{}
 	for i, a := range d.Actions {
 		bad := func(message string) { problems = append(problems, fmt.Sprintf("action %d: %s", i+1, message)) }
@@ -40,20 +63,16 @@ func ValidateDecision(d Decision, setups []Setup, sessions []Session, roots []st
 		}
 		switch a.Type {
 		case "answer", "ask_user":
-			hasText = true
 			if strings.TrimSpace(a.Text) == "" {
 				bad("text is required")
 			}
-		case "read_status", "send":
+		case "read_status", "send", "stop":
 			if a.SessionID == "" {
 				bad("session_id is required")
 			}
 			if s, ok := cm[a.SessionID]; ok {
 				if a.SetupID != "" && a.SetupID != s.SetupID {
 					bad("setup does not match the session")
-				}
-				if a.Type == "send" && s.State == "running" {
-					bad("cannot send to a running session")
 				}
 				if a.Type == "send" {
 					if _, exists := sm[s.SetupID]; !exists {
@@ -62,7 +81,6 @@ func ValidateDecision(d Decision, setups []Setup, sessions []Session, roots []st
 				}
 			}
 			if a.Type == "send" {
-				hasSend = true
 				if strings.TrimSpace(a.Message) == "" {
 					bad("message is required")
 				}
@@ -72,7 +90,6 @@ func ValidateDecision(d Decision, setups []Setup, sessions []Session, roots []st
 				sent[a.SessionID] = true
 			}
 		case "create":
-			hasSend = true
 			if a.SessionID != "" {
 				bad("create cannot name an existing session")
 			}
@@ -98,8 +115,17 @@ func ValidateDecision(d Decision, setups []Setup, sessions []Session, roots []st
 			bad("workdir is only for local create")
 		}
 	}
-	if hasText && hasSend {
-		problems = append(problems, "answer/ask_user cannot be mixed with send/create")
+	// A message can cover several subjects: work for one session, an answer
+	// about another, a question about a third. One question per turn keeps
+	// the person's reply unambiguous.
+	asks := 0
+	for _, a := range d.Actions {
+		if a.Type == "ask_user" {
+			asks++
+		}
+	}
+	if asks > 1 {
+		problems = append(problems, "ask at most one question per turn")
 	}
 	return problems
 }

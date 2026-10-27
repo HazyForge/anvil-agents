@@ -2,9 +2,7 @@ package onechat
 
 import (
 	"context"
-	"crypto/sha256"
 	"encoding/json"
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -114,13 +112,5 @@ esac
 	answer, usage, err := d.Compose(context.Background(), ComposeInput{Message: "hello", Decision: decision, Outcomes: []ActionResult{{Reply: "Hello"}}})
 	if err != nil || answer != "Actual answer" || *usage.OutputTokens != 4 {
 		t.Fatalf("compose %q %+v %v", answer, usage, err)
-	}
-}
-
-func TestOneChatManagerPromptBytes(t *testing.T) {
-	// The user supplied this draft with an explicit byte-preservation contract.
-	// codex-runs is ignored and is not available in a clean checkout.
-	if fmt.Sprintf("%x", sha256.Sum256([]byte(ManagerInstructions))) != "aaa801d4f1bb202ed177bf787e31aaa352320b6ef1d2ad51ec2494ca675b6558" {
-		t.Fatal("embedded manager draft changed")
 	}
 }

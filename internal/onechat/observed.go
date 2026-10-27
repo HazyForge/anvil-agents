@@ -57,13 +57,18 @@ func inventoryEventSessions(sessions []Session) []map[string]string {
 func cloneSessions(sessions []Session) []Session {
 	out := append([]Session{}, sessions...)
 	for i := range out {
+		if sessions[i].RunningSince != nil {
+			at := *sessions[i].RunningSince
+			out[i].RunningSince = &at
+		}
 		out[i].Transcript = append([]Message{}, sessions[i].Transcript...)
 	}
 	return out
 }
 
-// Called while the turn mutex is held. Readers only see immutable, sanitized
-// copies, including full transcripts rather than the bounded model inventory.
+// Called while state is serialized by the turn mutex or daemon state mutex.
+// Readers only see immutable, sanitized copies, including full transcripts
+// rather than the bounded model inventory.
 func (m *Manager) refreshInventorySnapshot(at time.Time) {
 	sessions := cloneSessions(m.state.Sessions)
 	for _, s := range m.cloudSessions {

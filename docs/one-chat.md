@@ -87,10 +87,11 @@ The entire bounded inventory, including transcripts, is retained in TurnTrace.
 | `create` | Create a session for a setup, then send its first message. |
 | `ask_user` | Ask for a missing target, intent or authority. |
 
-Decisions contain one to three actions, a short reasoning summary and confidence
-from zero to one. References must exist. `answer`/`ask_user` cannot mix with
-`send`/`create`. Sends to running sessions and duplicate sends in a decision are
-rejected. Local creates need an existing directory under `local.workdirRoots`;
+Decisions contain one to four actions, a short reasoning summary and confidence
+from zero to one. References must exist. One message can cover several subjects,
+so a decision may mix work for one session with an answer about another and at
+most one question; the reply covers each subject in order, question last.
+Duplicate sends in a decision are rejected. Local creates need an existing directory under `local.workdirRoots`;
 symlinks are resolved first. Existing local sessions are checked again before
 sending. Changing a session's setup harness/location cannot redirect its resume.
 
