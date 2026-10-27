@@ -35,6 +35,7 @@ func TestChatLatencyUnsetIsNoOp204(t *testing.T) {
 	}
 	body := strings.NewReader(`{"waitingMs":2,"firstTokenMs":40,"source":"desktop-chat"}`)
 	req := httptest.NewRequest(http.MethodPost, "/local/v1/chat-latency", body)
+	req.Host = server.ListenAddr()
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	server.Handler().ServeHTTP(rec, req)
@@ -43,6 +44,7 @@ func TestChatLatencyUnsetIsNoOp204(t *testing.T) {
 	}
 
 	req = httptest.NewRequest(http.MethodGet, "/local/v1/snapshot", nil)
+	req.Host = server.ListenAddr()
 	rec = httptest.NewRecorder()
 	server.Handler().ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
@@ -70,6 +72,7 @@ func TestChatLatencySetAbsoluteAppendsOneLine(t *testing.T) {
 
 	body := strings.NewReader(`{"waitingMs":2,"firstTokenMs":40,"runningMs":42,"replyReadyMs":210,"source":"desktop-chat"}`)
 	req := httptest.NewRequest(http.MethodPost, "/local/v1/chat-latency", body)
+	req.Host = server.ListenAddr()
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	server.Handler().ServeHTTP(rec, req)
@@ -102,6 +105,7 @@ func TestChatLatencySetAbsoluteAppendsOneLine(t *testing.T) {
 	// Second turn appends a second line; missing ts is stamped by the host.
 	body = strings.NewReader(`{"failedMs":99}`)
 	req = httptest.NewRequest(http.MethodPost, "/local/v1/chat-latency", body)
+	req.Host = server.ListenAddr()
 	rec = httptest.NewRecorder()
 	server.Handler().ServeHTTP(rec, req)
 	if rec.Code != http.StatusNoContent {
@@ -130,6 +134,7 @@ func TestChatLatencySetAbsoluteAppendsOneLine(t *testing.T) {
 	}
 
 	req = httptest.NewRequest(http.MethodGet, "/local/v1/snapshot", nil)
+	req.Host = server.ListenAddr()
 	rec = httptest.NewRecorder()
 	server.Handler().ServeHTTP(rec, req)
 	var snap Snapshot
@@ -159,6 +164,7 @@ func TestChatLatencyRelativeEnvIgnored(t *testing.T) {
 	}
 	body := strings.NewReader(`{"waitingMs":1}`)
 	req := httptest.NewRequest(http.MethodPost, "/local/v1/chat-latency", body)
+	req.Host = server.ListenAddr()
 	rec := httptest.NewRecorder()
 	server.Handler().ServeHTTP(rec, req)
 	if rec.Code != http.StatusNoContent {
@@ -183,6 +189,7 @@ func TestChatLatencyBadBody400(t *testing.T) {
 	server := newChatLatencyTestServer(t, sink)
 	for _, body := range []string{"", "not-json{", "[1,2]", `"waitingMs"`, "42"} {
 		req := httptest.NewRequest(http.MethodPost, "/local/v1/chat-latency", strings.NewReader(body))
+		req.Host = server.ListenAddr()
 		req.Header.Set("Content-Type", "application/json")
 		rec := httptest.NewRecorder()
 		server.Handler().ServeHTTP(rec, req)

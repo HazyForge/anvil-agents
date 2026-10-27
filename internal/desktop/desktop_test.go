@@ -165,6 +165,7 @@ func TestSnapshotAndPrefsHTTP(t *testing.T) {
 	}
 
 	req := httptest.NewRequest(http.MethodGet, "/local/v1/snapshot", nil)
+	req.Host = server.ListenAddr()
 	rec := httptest.NewRecorder()
 	server.Handler().ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
@@ -195,6 +196,7 @@ func TestSnapshotAndPrefsHTTP(t *testing.T) {
 
 	body := strings.NewReader(`{"apiOrigin":"` + upstream.URL + `"}`)
 	req = httptest.NewRequest(http.MethodPost, "/local/v1/prefs", body)
+	req.Host = server.ListenAddr()
 	req.Header.Set("Content-Type", "application/json")
 	rec = httptest.NewRecorder()
 	server.Handler().ServeHTTP(rec, req)
@@ -406,6 +408,7 @@ cat >/dev/null
 
 	body := strings.NewReader(`{"harness":"codex","prompt":"hello desktop","timeoutSeconds":15}`)
 	req := httptest.NewRequest(http.MethodPost, "/local/v1/delegate", body)
+	req.Host = server.ListenAddr()
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	server.Handler().ServeHTTP(rec, req)
@@ -428,6 +431,7 @@ cat >/dev/null
 
 	body = strings.NewReader(`{"harness":"grok","prompt":"from-file"}`)
 	req = httptest.NewRequest(http.MethodPost, "/local/v1/delegate", body)
+	req.Host = server.ListenAddr()
 	rec = httptest.NewRecorder()
 	server.Handler().ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
@@ -442,6 +446,7 @@ cat >/dev/null
 
 	body = strings.NewReader(`{"harness":"agy","prompt":"hello-agy"}`)
 	req = httptest.NewRequest(http.MethodPost, "/local/v1/delegate", body)
+	req.Host = server.ListenAddr()
 	rec = httptest.NewRecorder()
 	server.Handler().ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
@@ -456,6 +461,7 @@ cat >/dev/null
 
 	body = strings.NewReader(`{"harness":"kubectl","prompt":"nope"}`)
 	req = httptest.NewRequest(http.MethodPost, "/local/v1/delegate", body)
+	req.Host = server.ListenAddr()
 	rec = httptest.NewRecorder()
 	server.Handler().ServeHTTP(rec, req)
 	if rec.Code != http.StatusBadRequest {

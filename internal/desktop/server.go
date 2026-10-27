@@ -126,7 +126,7 @@ func NewServer(opts Options) (*Server, error) {
 	mux.HandleFunc("/ui-config.json", server.handleAPIProxy)
 	mux.HandleFunc("/api/", server.handleAPIProxy)
 	mux.HandleFunc("/", server.handleUI)
-	server.mux = server.securityHeaders(rejectTokenQuery(mux))
+	server.mux = server.securityHeaders(server.localRequestGuard(rejectTokenQuery(mux)))
 	return server, nil
 }
 
