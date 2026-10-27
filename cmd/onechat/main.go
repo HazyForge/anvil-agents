@@ -3,11 +3,11 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"runtime/debug"
 	"strings"
 	"syscall"
@@ -20,6 +20,10 @@ func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 	if err := run(ctx, os.Args[1:]); err != nil {
+		var status *exitStatus
+		if errors.As(err, &status) {
+			os.Exit(status.code)
+		}
 		fmt.Fprintln(os.Stderr, "onechat:", err)
 		os.Exit(1)
 	}
@@ -27,15 +31,25 @@ func main() {
 
 func run(ctx context.Context, args []string) error {
 	flags := flag.NewFlagSet("onechat", flag.ContinueOnError)
-	configPath := flags.String("config", "onechat.yaml", "configuration file")
+	configPath := flags.String("config", "", "configuration file (default ~/.config/onechat/onechat.yaml)")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
 	args = flags.Args()
 	if len(args) == 0 {
-		return fmt.Errorf("usage: onechat --config FILE login | sessions | say TEXT | serve [--listen ADDR] | scenario run FILE --out DIR")
+		return fmt.Errorf("usage: onechat [--config FILE] login | sessions | say TEXT | serve [--listen ADDR] | daemon run|start|stop|status|logs|bootstrap|proxy | scenario run FILE --out DIR")
 	}
-	config, err := onechat.LoadConfig(*configPath)
+	path, err := cliConfigPath(*configPath)
+	if err != nil {
+		return err
+	}
+	if args[0] == "daemon" {
+		return runDaemon(ctx, path, args[1:])
+	}
+	if args[0] == "serve" {
+		return runDaemon(ctx, path, append([]string{"run"}, args[1:]...))
+	}
+	config, err := loadCLIConfig(path)
 	if err != nil {
 		return err
 	}
@@ -66,29 +80,6 @@ func run(ctx context.Context, args []string) error {
 			fmt.Println("Trace:", report.TracePath)
 		}
 		return err
-	}
-	if args[0] == "serve" {
-		serveFlags := flag.NewFlagSet("onechat serve", flag.ContinueOnError)
-		listen := serveFlags.String("listen", host.DefaultListen, "loopback IP and port")
-		if err := serveFlags.Parse(args[1:]); err != nil {
-			return err
-		}
-		if serveFlags.NArg() != 0 {
-			return fmt.Errorf("usage: onechat --config FILE serve [--listen ADDR]")
-		}
-		server, err := host.Start(ctx, host.Options{
-			StateDir: config.StateDir, Listen: *listen, Version: buildVersion(),
-			OpenManager: func(ctx context.Context) (*onechat.Manager, error) { return onechat.Open(ctx, config) },
-		})
-		if err != nil {
-			return err
-		}
-		info := server.Info()
-		fmt.Println("Listen:", info.Listen)
-		fmt.Println("Host:", info.HostID)
-		fmt.Println("Discovery:", filepath.Join(config.StateDir, "host.json"))
-		fmt.Println("Token file:", filepath.Join(config.StateDir, "host-token"))
-		return server.Wait()
 	}
 	if args[0] != "sessions" && args[0] != "say" {
 		return fmt.Errorf("unknown command %q", args[0])

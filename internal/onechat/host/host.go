@@ -1,4 +1,4 @@
-// Package host owns a manager and its state for loopback protocol v1 clients.
+// Package host owns a manager and its state for local protocol v1 clients.
 package host
 
 import (
@@ -113,6 +113,16 @@ func Start(ctx context.Context, opts Options) (*Host, error) {
 	if err != nil {
 		return nil, fmt.Errorf("listen for onechat: %w", err)
 	}
+	control, err := listenControl(dir)
+	if err != nil {
+		_ = listener.Close()
+		return nil, err
+	}
+	defer func() {
+		if !started {
+			_ = control.Close()
+		}
+	}()
 	token, err := hostToken(dir)
 	if err != nil {
 		listener.Close()
@@ -132,27 +142,29 @@ func Start(ctx context.Context, opts Options) (*Host, error) {
 	server := &http.Server{Handler: http.HandlerFunc(h.handleHTTP), ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 30 * time.Second, MaxHeaderBytes: 16 << 10, BaseContext: func(net.Listener) context.Context { return hostCtx }}
 	go func() {
 		<-hostCtx.Done()
-		h.mu.Lock()
-		h.closing = true
-		for c := range h.clients {
-			c.close()
-		}
-		h.mu.Unlock()
+		h.closeClients()
+		_ = control.Close()
 		_ = server.Close()
 	}()
 	started = true
+	controlDone := make(chan error, 1)
+	go func() {
+		err := h.serveControl(control)
+		cancel()
+		controlDone <- err
+	}()
 	go func() {
 		err := server.Serve(listener)
 		cancel()
-		h.mu.Lock()
-		h.closing = true
-		for c := range h.clients {
-			c.close()
-		}
-		h.mu.Unlock()
+		h.closeClients()
+		_ = control.Close()
+		controlErr := <-controlDone
 		h.workers.Wait()
 		if !errors.Is(err, http.ErrServerClosed) {
 			h.err = err
+		}
+		if !errors.Is(controlErr, net.ErrClosed) {
+			h.err = errors.Join(h.err, controlErr)
 		}
 		stopped := time.Now().UTC()
 		stoppedInfo := info
@@ -167,6 +179,15 @@ func Start(ctx context.Context, opts Options) (*Host, error) {
 		opts.Logger.Printf("onechat listening at %s, host %s", info.Listen, info.HostID)
 	}
 	return h, nil
+}
+
+func (h *Host) closeClients() {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.closing = true
+	for c := range h.clients {
+		c.close()
+	}
 }
 
 func Serve(ctx context.Context, opts Options) error {
@@ -219,18 +240,7 @@ func (h *Host) handleHTTP(w http.ResponseWriter, r *http.Request) {
 		httpError(w, 400, "invalid", err.Error())
 		return
 	}
-	c := &client{host: h, conn: conn, out: make(chan []byte, queueSize), done: make(chan struct{})}
-	h.mu.Lock()
-	if h.closing {
-		h.mu.Unlock()
-		c.close()
-		return
-	}
-	h.clients[c] = struct{}{}
-	h.workers.Add(2)
-	h.mu.Unlock()
-	go c.writeLoop()
-	go c.readLoop()
+	h.acceptClient(conn)
 }
 
 func writeHTTP(w http.ResponseWriter, status int, body any) {

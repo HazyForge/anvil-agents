@@ -32,6 +32,8 @@ type Options struct {
 	APIOrigin        string
 	ConfigDir        string
 	OnechatStateDir  string
+	OnechatConfig    string
+	OnechatBin       string
 	OIDCClientID     string
 	OIDCRedirectPath string
 	HarnessTarget    string
@@ -60,6 +62,7 @@ type Server struct {
 	mu                sync.Mutex
 	prefs             Prefs
 	issuer            issuerCache
+	onechat           onechatBinaryCache
 	httpClient        *http.Client
 	mux               http.Handler
 	// chatLatencyPath is the resolved absolute JSONL sink ("" = disabled).
@@ -79,6 +82,10 @@ func NewServer(opts Options) (*Server, error) {
 		return nil, err
 	}
 	opts.OnechatStateDir = onechatDir
+	opts.OnechatConfig, err = resolveOnechatPath(opts.OnechatConfig)
+	if err != nil {
+		return nil, err
+	}
 	prefs, err := loadPrefs(opts.ConfigDir)
 	if err != nil {
 		return nil, err
@@ -130,6 +137,7 @@ func NewServer(opts Options) (*Server, error) {
 	mux.HandleFunc("POST /local/v1/chat/stream", server.handleChatStream)
 	mux.HandleFunc("POST /local/v1/agent-tool", server.handleAgentTool)
 	mux.HandleFunc("GET /local/v1/onechat/status", server.handleOnechatStatus)
+	mux.HandleFunc("POST /local/v1/onechat/start", server.handleOnechatStart)
 	mux.HandleFunc("GET /local/v1/onechat/connect", server.handleOnechatConnect)
 	mux.HandleFunc("/ui-config.json", server.handleAPIProxy)
 	mux.HandleFunc("/api/", server.handleAPIProxy)

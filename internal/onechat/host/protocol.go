@@ -14,7 +14,6 @@ import (
 	"unicode/utf8"
 
 	"github.com/hazyforge/anvil-agents/internal/onechat"
-	"github.com/hazyforge/anvil-agents/internal/standing"
 )
 
 type clientInfo struct {
@@ -36,7 +35,7 @@ func invalid(message string) *protocolError { return &protocolError{"invalid", m
 
 type client struct {
 	host  *Host
-	conn  *standing.Conn
+	conn  transport
 	out   chan []byte
 	done  chan struct{}
 	once  sync.Once

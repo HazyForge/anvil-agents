@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 )
 
 // wsGUID is the fixed RFC 6455 handshake GUID.
@@ -129,6 +130,23 @@ func (c *Conn) Close() error {
 	frame = append(frame, payload...)
 	_, _ = c.conn.Write(frame)
 	return c.conn.Close()
+}
+
+// CloseWithReason sends a bounded UTF-8 close reason and closes the transport.
+// Callers may Abort concurrently when a slow peer prevents prompt cleanup.
+func (c *Conn) CloseWithReason(code uint16, reason string) error {
+	reason = strings.ToValidUTF8(reason, "")
+	for len(reason) > 123 {
+		_, size := utf8.DecodeLastRuneInString(reason)
+		reason = reason[:len(reason)-size]
+	}
+	payload := append([]byte{byte(code >> 8), byte(code)}, []byte(reason)...)
+	err := c.writeControl(wsOpClose, payload)
+	closeErr := c.conn.Close()
+	if err != nil {
+		return err
+	}
+	return closeErr
 }
 
 // WriteText sends one unmasked text message carrying a JSON event with the
