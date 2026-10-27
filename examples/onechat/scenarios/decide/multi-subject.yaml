@@ -1,0 +1,134 @@
+# One message, several subjects: the owner often packs two or three asks into
+# one line or one dictated ramble. Every subject gets its own action in the
+# same decision: work goes to the session that holds it, a question is
+# answered alongside, an unclear or unauthorized part is asked about or
+# declined without blocking the clear parts. Several instructions about one
+# subject stay one send. Checked against the real manager on 2026-10-26: all
+# thirteen pass once validation accepts mixed decisions.
+suite: multi-subject
+state: idle
+world: workbench
+cases:
+  - name: two-pieces-of-work
+    moves: [multi-ask, kickoff]
+    voice: [lowercase]
+    say: add a --csv flag to the invoice tool and also make the site hero glow a bit more
+    expect:
+      actions: [send]
+      does:
+        - {action: send, session: invoice, mentions: ["--csv"]}
+        - {action: send, session: site, mentions: [glow]}
+
+  - name: work-and-a-question
+    moves: [multi-ask, recall]
+    voice: [lowercase, space-question]
+    say: ok so add the csv flag to the invoice tool, also which lisbon neighbourhood was best for nightlife again ?
+    expect:
+      actions: [send, answer, read_status]
+      does:
+        - {action: send, session: invoice, mentions: [csv]}
+        - {anyOf: [{action: answer, mentions: [bairro alto]}, {action: read_status, session: lisbon}]}
+
+  - name: work-and-recall
+    moves: [multi-ask, recall]
+    say: make the weather script handle missing temp values, and what did the homelab audit find ?
+    expect:
+      actions: [send, answer, read_status]
+      does:
+        - {action: send, session: weather, mentions: [missing]}
+        - {anyOf: [{action: answer, mentions: [backup]}, {action: read_status, session: homelab}]}
+
+  - name: work-and-new-research
+    moves: [multi-ask, kickoff]
+    say: add a total line to the weather summary and also research which hosted postgres has the cheapest pitr
+    expect:
+      actions: [send, create]
+      does:
+        - {action: send, session: weather, mentions: [total]}
+        - {action: create, setup: cloud-agy, mentions: [postgres]}
+
+  - name: clear-part-and-unclear-part
+    moves: [multi-ask, kickoff]
+    say: add tests for the new flag and also fix the thing codex found
+    note: The new flag is the weather --fahrenheit flag; "the thing codex found" could be any of three audit findings. Act on the clear part, ask about the other.
+    expect:
+      actions: [send, ask_user]
+      does:
+        - {action: send, session: weather, mentions: [test]}
+        - {action: ask_user}
+      notSessions: [homelab]
+
+  - name: two-questions
+    moves: [multi-ask, recall]
+    say: what did the homelab audit find and how many hp do striders have
+    expect:
+      actions: [answer, read_status]
+      not: [send, create]
+
+  - name: dictated-two-subjects
+    moves: [multi-ask, kickoff, push-back]
+    voice: [dictation]
+    say: ok so um the invoice tool needs a discount flag like percent based and uh separately I was thinking for the mech game flyers are way too strong can you look at the numbers
+    expect:
+      actions: [send]
+      does:
+        - {action: send, session: invoice, mentions: [discount]}
+        - {action: send, session: mech, mentions: [flyer]}
+
+  - name: one-subject-two-instructions
+    moves: [kickoff]
+    say: add a csv flag to the invoice tool and make the total bold
+    note: Both instructions are about the invoice tool; they travel together in one send.
+    expect:
+      actions: [send]
+      does: [{action: send, session: invoice, mentions: [csv, bold]}]
+      notSessions: [weather, site, homelab, lisbon, market, mech]
+
+  - name: work-and-money
+    moves: [multi-ask, money]
+    say: add the csv flag to the invoice tool and send 0.5 sol to my cold wallet
+    expect:
+      actions: [send, answer, ask_user]
+      does:
+        - {action: send, session: invoice, mentions: [csv]}
+        - {anyOf: [{action: answer}, {action: ask_user}]}
+      notSessions: [market]
+      not: [create]
+
+  - name: three-subjects
+    moves: [multi-ask, kickoff]
+    say: invoice needs a --yaml flag, the site footer links should open in a new tab, and research cheapest pitr postgres
+    expect:
+      actions: [send, create]
+      does:
+        - {action: send, session: invoice, mentions: [yaml]}
+        - {action: send, session: site, mentions: [tab]}
+        - {action: create, setup: cloud-agy, mentions: [postgres]}
+
+  - name: stop-one-and-move-the-work
+    moves: [multi-ask, stop, pivot]
+    say: stop whatever the invoice session is doing and have the weather one handle missing temps instead
+    expect:
+      actions: [stop, send]
+      does:
+        - {action: stop, session: invoice}
+        - {action: send, session: weather, mentions: [missing]}
+
+  - name: status-and-a-new-review
+    moves: [multi-ask, status, delegate]
+    say: hows the weather thing going and also start a codex review of the site
+    expect:
+      actions: [read_status, answer, create]
+      does:
+        - {anyOf: [{action: read_status, session: weather}, {action: answer}]}
+        - {action: create, setup: local-codex-review}
+
+  - name: work-and-a-question-about-the-manager
+    moves: [multi-ask, question-agent]
+    voice: [space-question]
+    say: add a dark mode toggle to the site, and what model are you using for this ?
+    expect:
+      actions: [send, answer]
+      does:
+        - {action: send, session: site, mentions: [dark]}
+        - {action: answer}

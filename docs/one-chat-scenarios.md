@@ -58,7 +58,8 @@ usually takes is in the suites.
 `complete-last`, `self-correct`, `scope-add`, `gate`, `pivot`, `stop`,
 `push-back`, `question-agent`, `report-action`, `set-rule`, `delegate`,
 `authority`, `money`, `short-answer`, `paste`, `noise`, `chatter`,
-`life-admin`, `multi-ask`.
+`life-admin`, `multi-ask`. One message often covers several subjects; the
+`multi-subject` suite checks that each gets its own action in one decision.
 
 **Intents**: the manager's reading of the message. It is the subject routing
 design's set plus `stop`, `chatter` and `preference`.
@@ -142,7 +143,7 @@ cases:
   to a running session, say), the effective decision is the manager's
   fallback question, and the report shows both.
 - `intent` is checked when the decision carries one.
-- `stop` is a future action. A case may expect it only with `gap` set.
+- `stop` ends a session's current run; the daemon has had it since round D2.
 
 **Gaps**
 

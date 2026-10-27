@@ -45,10 +45,7 @@ cases:
     moves: [scope-add]
     voice: [lowercase]
     say: also make the json pretty printed
-    note: >-
-      Today the manager can only say the session is busy; sending now fails validation.
-      The durable behavior is to hold the addition and send it when the run ends.
-    gap: follow-ups for a running session cannot be queued until it finishes
+    note: The addition queues behind the running work; Claude sessions get it mid-run through a hook.
     expect:
       intent: amend_running
       does: [{action: send, session: invoice, mentions: [pretty]}]
@@ -56,7 +53,6 @@ cases:
   - name: stop-the-running-work
     moves: [stop]
     say: stop that, its the wrong approach
-    gap: there is no action that stops a session's running work
     expect:
       intent: stop
       does: [{action: stop, session: invoice}]
@@ -64,7 +60,6 @@ cases:
   - name: change-of-plan-mid-run
     moves: [pivot, self-correct]
     say: actually forget json, do csv instead
-    gap: changing a running session's task needs stop, then send
     expect:
       intent: amend_running
       does:
