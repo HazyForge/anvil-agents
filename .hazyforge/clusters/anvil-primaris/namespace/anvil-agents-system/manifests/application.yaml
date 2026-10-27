@@ -46,10 +46,6 @@ spec:
       source: {repository: primary, path: .}
       artifactNamespace: ghcr.io/hazyforge/anvil-agent-run-opencode
     - <<: *component
-      name: grok-build-runner
-      source: {repository: primary, path: .}
-      artifactNamespace: ghcr.io/hazyforge/anvil-agent-run-grok-build
-    - <<: *component
       name: hermes-runner
       source: {repository: primary, path: .}
       artifactNamespace: ghcr.io/hazyforge/anvil-agent-run-hermes

@@ -18,9 +18,8 @@ ApplicationSet applies). It is files only until an operator:
 Apply this overlay only after that image is live. Bounded
 `acp-spike-smoke-005` bind+generate succeeded; Primaris GitOps may set
 `substrate.actorsEnabled=true` and `substrate.generateOnActor=true` for
-`generateActorClasses: [acp-spike]` only. Desktop standing grok stays on API
-`ProcessBackend` (`actorClass: standing-chat` is not in the generate
-allowlist).
+`generateActorClasses: [acp-spike]` only. The Desktop standing Grok chat and
+its `standing-chat` ActorTemplate were retired with Grok Build on 2026-10-27.
 
 ## What this pins
 
@@ -32,7 +31,7 @@ allowlist).
 | Auth | `jwt` (ATE default). Issuer: in-cluster kube SA `https://kubernetes.default.svc.cluster.local` **after** the Talos CP patch. Audience: `api.ate-system.svc` |
 | Node | `kubernetes.io/hostname=anvil-primaris-worker-hel1-1` on every workload **and** WorkerPool pods |
 | Storage | `observability-local` on rustfs + valkey PVCs (hel1-1 has no `hcloud-volumes` CSI topology) |
-| Fleet | `ActorTemplate/standing-chat` + `ActorTemplate/acp-spike` + `WorkerPool/warm` in `anvilhub` and `hazy-trade` |
+| Fleet | `ActorTemplate/acp-spike` + `WorkerPool/warm` in `anvilhub` and `hazy-trade` |
 | Anvil client | Get/Create/Resume/Suspend/Pause; generate-on-actor is ACP/HTTP through atenet after Resume, opted in per actorClass |
 
 Valkey stays at **6 replicas** because the 0.0.8 init Job hardcodes pods
@@ -80,8 +79,10 @@ controller already has ConfigMap get). Projected token:
 `substrate.token.projected=true` audience `api.ate-system.svc`. Leave
 `substrate.actorsEnabled=false` and `substrate.generateOnActor=false` until
 an `acp-spike` smoke bind+generate succeeds. Fleet includes
-`ActorTemplate/acp-spike` (ACP echo) and `standing-chat` (Desktop stays on
-ProcessBackend).
+`ActorTemplate/acp-spike` (ACP echo). The `standing-chat` ActorTemplate in
+`anvilhub` and `hazy-trade` predates the 2026-10-27 Grok retirement. It
+pinned the Grok Build runner image, and re-applying this fleet does not delete
+it. Remove those two live objects explicitly.
 
 `hack/render-ate-constrained.sh` also emits
 `ClusterRoleBinding/oidc-discovery-unauthenticated` (kube default role

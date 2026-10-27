@@ -20,7 +20,8 @@ Options:
 
 The script updates only the top-level controller image reference and the eight
 runnerImages entries. It is intended for the repo-local first-party deployment
-overlay, not arbitrary Helm values.
+overlay, not arbitrary Helm values. A runnerImages entry set explicitly to ""
+is a retired runner: the script keeps it empty instead of pinning it.
 EOF
 }
 
@@ -125,6 +126,14 @@ in_image && /^  reference:/ {
 	print
 	next
 }
+# An explicitly empty runner image is retired in this overlay; keep it empty.
+in_runners && /^  [A-Za-z]+:[[:space:]]*(""|\047\047)[[:space:]]*(#.*)?$/ {
+	key = $1
+	sub(/:$/, "", key)
+	retired[key] = 1
+	print
+	next
+}
 in_runners && /^  codex:/ {
 	print "  codex: " codex
 	found_codex = 1
@@ -172,6 +181,14 @@ in_runners && /^[^[:space:]]/ {
 	print
 }
 END {
+	if (retired["codex"]) found_codex = 1
+	if (retired["openCode"]) found_opencode = 1
+	if (retired["hermesAgent"]) found_hermes = 1
+	if (retired["openClaw"]) found_openclaw = 1
+	if (retired["grokBuild"]) found_grokbuild = 1
+	if (retired["piAgent"]) found_pi = 1
+	if (retired["agy"]) found_agy = 1
+	if (retired["primeAgent"]) found_prime = 1
 	if (!found_controller || !found_codex || !found_opencode || !found_hermes || !found_openclaw || !found_grokbuild || !found_pi || !found_agy || !found_prime) {
 		exit 3
 	}

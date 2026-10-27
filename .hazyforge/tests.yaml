@@ -30,7 +30,6 @@ suites:
         - controller
         - codex-runner
         - opencode-runner
-        - grok-build-runner
         - hermes-runner
         - openclaw-runner
         - pi-runner

@@ -154,9 +154,9 @@ The production example
 Claude (with a test-command allowlist), local Codex review and write, and cloud
 agy (`desktop-agy`, plan mode) in namespace `anvilhub`. The other production
 chat profiles did not answer when this was written: Grok
-(`desktop-standing-assistant`) is unpaid, OpenCode (`desktop-assistant`)
-returned empty replies from its free model, and the DeepSeek observer is
-missing its credentials Secret. `desktop-agy` keeps one durable home, so it
+(`desktop-standing-assistant`) is unpaid and was retired from Primaris on
+2026-10-27, OpenCode (`desktop-assistant`) returned empty replies from its
+free model, and the DeepSeek observer is missing its credentials Secret. `desktop-agy` keeps one durable home, so it
 takes one turn at a time: a concurrent turn gets HTTP 409. Setup notes are
 routing preferences, not measurements.
 

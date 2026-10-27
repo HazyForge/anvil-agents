@@ -1,7 +1,7 @@
 # ActorTemplate name acp-spike is the generate-on-actor allowlist class.
 # This image speaks ACP-over-HTTP on :80 (initialize, session/new,
-# session/prompt echo). Desktop standing-chat stays on ActorTemplate
-# standing-chat (Job grok-build placeholder) and ProcessBackend.
+# session/prompt echo). The standing-chat ActorTemplate, which only carried
+# the Grok Build runner image as a placeholder, was retired on 2026-10-27.
 #
 # Images must be digest-pinned (@). python:3.12-alpine linux/amd64 from
 # 2026-09-17; runs as root so it can bind :80 (atenet ExtProc rewrites
