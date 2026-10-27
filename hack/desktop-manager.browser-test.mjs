@@ -28,7 +28,7 @@ const sessions = [
 ];
 const pastTurn = {turnId: '11111111-1111-4111-8111-111111111111', at: '2026-10-26T20:00:00Z', message: 'which neighbourhood was best for nightlife?', answer: 'Bairro Alto is best for nightlife.', actionCount: 1};
 const pastTrace = {id: pastTurn.turnId, at: pastTurn.at, message: pastTurn.message, inventory: sessions,
-  decision: {reasoning_summary: 'The Lisbon research already answered this.', actions: [{type: 'read_status', session_id: 'cloud-lisbon'}]},
+  decision: {intent: 'question', reasoning_summary: 'The Lisbon research already answered this.', actions: [{type: 'read_status', session_id: 'cloud-lisbon'}]},
   actions: [{action: {type: 'read_status', session_id: 'cloud-lisbon'}, sessionId: 'cloud-lisbon', reply: '{"title":"Lisbon trip research"}', state: 'idle', harness: 'agy'}],
   answer: pastTurn.answer};
 const history = [pastTurn];
@@ -166,6 +166,7 @@ try {
   await page.getByText('Lisbon trip research', {exact: true}).waitFor();
   await page.getByText(/What the manager did/).click();
   await page.getByText('Decided: The Lisbon research already answered this.').waitFor();
+  await page.getByText('· read as question').waitFor();
   assert.ok(requests.some(request => request.op === 'trace.get' && request.body.turnId === pastTurn.turnId));
 
   // A live turn shows each step, then becomes part of the conversation once.

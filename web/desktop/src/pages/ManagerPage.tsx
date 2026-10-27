@@ -6,7 +6,7 @@ import {
   fetchOnechatHostStatus, OnechatClient, OnechatError,
   type OnechatEvent, type OnechatHello, type OnechatHostStatus, type OnechatSession, type OnechatTurnSummary,
 } from '../api/onechat';
-import { actionLabel, applyTurnEvent, stopReason, turnFromStatus, turnFromTrace, type TurnView } from '../wrapper/onechatTurn';
+import { actionLabel, applyTurnEvent, intentLabel, stopReason, turnFromStatus, turnFromTrace, type TurnView } from '../wrapper/onechatTurn';
 import { eventsRetryDelay } from '../wrapper/threadSync';
 
 type Link = 'checking' | 'unconfigured' | 'stopped' | 'connecting' | 'live' | 'retrying';
@@ -290,7 +290,7 @@ function RunningTurn({turn, elapsed}: {turn: TurnView; elapsed: number}) {
 function TurnSteps({turn}: {turn: TurnView}) {
   return <ol className="manager-steps">
     {turn.sessionCount !== undefined && <li className="manager-step"><span className="manager-step-mark done" aria-hidden="true"/>Looked at {turn.sessionCount} {turn.sessionCount === 1 ? 'session' : 'sessions'}</li>}
-    {turn.decision && <li className="manager-step"><span className="manager-step-mark done" aria-hidden="true"/><span>Decided{turn.decision.reasoning_summary ? `: ${turn.decision.reasoning_summary}` : ''}</span></li>}
+    {turn.decision && <li className="manager-step"><span className="manager-step-mark done" aria-hidden="true"/><span>Decided{turn.decision.reasoning_summary ? `: ${turn.decision.reasoning_summary}` : ''}{intentLabel(turn.decision.intent) && <span className="manager-step-meta"> · read as {intentLabel(turn.decision.intent).toLowerCase()}</span>}</span></li>}
     {turn.validationErrors.length > 0 && <li className="manager-step failed"><span className="manager-step-mark failed" aria-hidden="true"/>Could not route safely: {turn.validationErrors.join('; ')}</li>}
     {turn.actions.map(item => <li key={item.index} className={`manager-step ${item.status}`}>
       <span className={`manager-step-mark ${item.status}`} aria-hidden="true"/>

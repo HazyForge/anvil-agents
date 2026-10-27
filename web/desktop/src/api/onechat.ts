@@ -36,7 +36,7 @@ export type OnechatAction = {
   text?: string;
 };
 
-export type OnechatDecision = {reasoning_summary?: string; confidence?: number; actions?: OnechatAction[]};
+export type OnechatDecision = {intent?: string; reasoning_summary?: string; confidence?: number; actions?: OnechatAction[]};
 
 export type OnechatActionResult = {
   action: OnechatAction;

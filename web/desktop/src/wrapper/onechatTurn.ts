@@ -116,6 +116,23 @@ export function stopReason(error: string): string {
   return `Stopped: ${error}`;
 }
 
+const intentLabels: Record<string, string> = {
+  new_work: 'New work',
+  amend_running: 'More for a session',
+  status: 'Status',
+  question: 'Question',
+  decide: 'Your answer',
+  stop: 'Stop',
+  preference: 'A rule',
+  chatter: 'Chat',
+  unclear: 'Unclear',
+};
+
+/** How the manager read the message, in words; empty when it gave no intent. */
+export function intentLabel(intent?: string): string {
+  return intent ? intentLabels[intent] ?? intent : '';
+}
+
 /** Plain-language label for an action, from the person's side of the screen. */
 export function actionLabel(item: Pick<TurnActionView, 'action' | 'sessionTitle'>): string {
   const target = item.sessionTitle || item.action.title || item.action.session_id || item.action.setup_id || 'a session';

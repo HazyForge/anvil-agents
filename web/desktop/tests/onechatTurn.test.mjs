@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {actionLabel, applyTurnEvent, stopReason, turnFromStatus, turnFromTrace} from '../src/wrapper/onechatTurn.ts';
+import {actionLabel, applyTurnEvent, intentLabel, stopReason, turnFromStatus, turnFromTrace} from '../src/wrapper/onechatTurn.ts';
 
 const event = (name, seq, body = {}, turnId = 't1') => ({type: 'event', event: name, turnId, seq, at: `2026-10-26T23:00:0${seq}Z`, body});
 
@@ -67,6 +67,14 @@ test('action labels speak about the work, not the protocol', () => {
   assert.equal(actionLabel({action: {type: 'send'}, sessionTitle: 'Invoice CLI'}), 'Sent work to Invoice CLI');
   assert.equal(actionLabel({action: {type: 'create', title: 'Lisbon research'}}), 'Started Lisbon research');
   assert.equal(actionLabel({action: {type: 'ask_user'}}), 'Asked you a question');
+});
+
+test('intent labels read like the person would say them', () => {
+  assert.equal(intentLabel('amend_running'), 'More for a session');
+  assert.equal(intentLabel('decide'), 'Your answer');
+  assert.equal(intentLabel(''), '');
+  assert.equal(intentLabel(undefined), '');
+  assert.equal(intentLabel('something_new'), 'something_new');
 });
 
 test('a saved trace becomes the same view, with session titles from its inventory', () => {
