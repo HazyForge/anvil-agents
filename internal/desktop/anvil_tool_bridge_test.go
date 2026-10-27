@@ -44,6 +44,7 @@ func bridgeSessionFixture(t *testing.T, s *Server, ctx context.Context, namespac
 func callBridge(t *testing.T, s *Server, capability, body string) *httptest.ResponseRecorder {
 	t.Helper()
 	request := httptest.NewRequest(http.MethodPost, "http://localhost:1738/local/v1/agent-tool", strings.NewReader(body))
+	request.Host = s.ListenAddr()
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set(agentToolCapabilityHeader, capability)
 	response := httptest.NewRecorder()
@@ -208,6 +209,7 @@ printf '{"type":"message_end","message":{"role":"assistant","content":[{"type":"
 	s.setPrefs(prefs)
 	body := `{"harness":"prime","prompt":"hello","remoteNamespace":"anvilhub"}`
 	request := httptest.NewRequest(http.MethodPost, "http://localhost:1738/local/v1/chat/stream", strings.NewReader(body))
+	request.Host = s.ListenAddr()
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("Authorization", "Bearer OIDC-NEVER-IN-CHILD")
 	response := httptest.NewRecorder()
