@@ -1,0 +1,38 @@
+# The weather session has been marked running for two days: its process died
+# or the machine restarted mid-run. Nothing will ever finish it.
+suite: stale-running
+state: stale-running
+world: workbench
+seed:
+  sessions:
+    - label: weather
+      state: running
+      updatedAgo: 2d
+      transcript+:
+        - {role: user, ago: 2d, text: "Add a --station flag that filters the CSV to one weather station."}
+  history+:
+    - {role: user, ago: 2d, text: "add a station filter to the weather script"}
+    - {role: assistant, ago: 2d, text: "Sent it to Weather report; it is working on it."}
+cases:
+  - name: its-been-forever
+    moves: [impatience, status]
+    say: whats going on with the weather thing its been forever
+    note: Two days with no reply means the run is stuck; the answer should say that, not "still working".
+    expect:
+      intent: status
+      actions: [answer, read_status]
+      not: [send, create]
+
+  - name: just-restart-it
+    moves: [continue]
+    say: just restart it
+    gap: there is no action that resets a stuck session so it can take work again
+    expect:
+      does: [{action: send, session: weather, mentions: [station]}]
+
+  - name: work-around-it
+    moves: [pivot]
+    say: ok start a fresh one on the weather repo for the station filter then
+    expect:
+      actions: [create]
+      does: [{action: create, anyOf: [{setup: local-claude}, {setup: local-codex-write}], mentions: [station]}]

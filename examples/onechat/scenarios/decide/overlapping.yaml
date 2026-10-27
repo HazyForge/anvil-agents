@@ -1,0 +1,78 @@
+# Two sessions touch the same projects: an old Codex session on the invoice
+# tool from three weeks ago, and a Codex review of the site next to the
+# Claude session building it. Both code projects gained a flag recently.
+suite: overlapping
+state: overlapping
+world: workbench
+seed:
+  sessions:
+    - label: invoice
+      updatedAgo: 1d
+      transcript+:
+        - {role: user, ago: 1d, text: "Add a --json flag that prints the invoice and total as JSON."}
+        - {role: assistant, ago: 1d, text: "Added --json with a test; go test ./... passes."}
+    - label: invoice-old
+      location: local
+      setup: local-codex-write
+      title: Invoice CLI (first draft)
+      summary: First draft of the invoice tool, superseded
+      state: idle
+      workdir: ~/code/invoice-cli
+      updatedAgo: 21d
+      transcript:
+        - {role: user, ago: 21d, text: "Scaffold a Go CLI that reads invoice lines from a CSV."}
+        - {role: assistant, ago: 21d, text: "Scaffolded cmd/invoice with a CSV reader and a README."}
+    - label: site-review
+      location: local
+      setup: local-codex-review
+      title: Forge site review
+      summary: Read-only review of the site redesign
+      state: idle
+      workdir: ~/code/forge-site
+      updatedAgo: 5h
+      transcript:
+        - {role: user, ago: 5h, text: "Review the landing page redesign for accessibility and performance. Do not edit."}
+        - {role: assistant, ago: 5h, text: "Two issues: the hero text has 3.1:1 contrast over the shader, and the shader keeps rendering when the tab is hidden."}
+cases:
+  - name: newest-session-wins
+    moves: [kickoff]
+    say: add a --yaml flag to the invoice tool too
+    expect:
+      actions: [send]
+      does: [{action: send, session: invoice, mentions: [yaml]}]
+      notSessions: [invoice-old]
+
+  - name: which-flag
+    moves: [push-back]
+    voice: [terse]
+    say: the flag doesnt work
+    note: Both code projects got a flag recently; the weather one is the most recent. Asking is right, and so is picking the most recent.
+    expect:
+      actions: [ask_user, read_status, send]
+      does: [{anyOf: [{action: ask_user}, {action: send, session: weather}, {action: read_status, session: weather}]}]
+      notSessions: [invoice-old, site, site-review]
+
+  - name: what-did-the-review-say
+    moves: [recall]
+    say: what did codex say about the site
+    expect:
+      intent: question
+      actions: [answer, read_status]
+      does: [{anyOf: [{action: answer, mentions: [contrast]}, {action: read_status, session: site-review}]}]
+
+  - name: fix-what-the-review-found
+    moves: [kickoff]
+    say: ok fix what the review found
+    note: The fixes belong to the session that builds the site, with the findings in the handoff.
+    expect:
+      actions: [send]
+      does: [{action: send, session: site, mentions: [contrast]}]
+      notSessions: [site-review]
+
+  - name: by-harness-name
+    moves: [kickoff, complete-last]
+    say: have the codex one on the invoice tool add a readme section for the flags
+    note: The person named the old Codex session; following an explicit choice beats recency.
+    expect:
+      actions: [send, ask_user]
+      does: [{anyOf: [{action: send, session: invoice-old}, {action: ask_user}]}]

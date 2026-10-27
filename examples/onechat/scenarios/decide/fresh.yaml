@@ -1,0 +1,43 @@
+# The first messages one chat ever gets: no sessions, no history.
+suite: fresh
+state: fresh
+world: empty
+cases:
+  - name: hey
+    moves: [chatter]
+    voice: [terse]
+    say: hey
+    expect:
+      intent: chatter
+      actions: [answer]
+
+  - name: what-do-i-have
+    moves: [status]
+    voice: [space-question]
+    say: what sessions do i have ?
+    expect:
+      intent: status
+      actions: [answer]
+
+  - name: work-on-a-project-it-cannot-see
+    moves: [kickoff]
+    say: add a --json flag to the invoice tool
+    note: No session knows where the invoice tool lives; ask for the folder instead of guessing one.
+    expect:
+      actions: [ask_user]
+
+  - name: new-project-with-a-folder
+    moves: [kickoff]
+    gap: create only accepts a folder that already exists; a new project folder under a work root should be made for it
+    say: set me up a new go project for a habit tracker under ~/code/habits
+    expect:
+      intent: new_work
+      actions: [create]
+      does: [{action: create, anyOf: [{setup: local-claude}, {setup: local-codex-write}], mentions: [habit]}]
+
+  - name: research-first-thing
+    moves: [kickoff]
+    say: whats the best open source object detection that runs on a 4080
+    expect:
+      actions: [create, answer]
+      does: [{anyOf: [{action: create, setup: cloud-agy}, {action: answer}]}]

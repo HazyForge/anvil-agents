@@ -1,0 +1,47 @@
+# The person cancelled the last turn while the invoice session was working.
+# The session may have changed files before it stopped. It is seeded as
+# `interrupted`, the state a cancel should leave behind; today a cancelled
+# local run stays marked running (see flows/cancel-leaves-session-sendable).
+suite: cancelled
+state: cancelled
+world: workbench
+seed:
+  sessions:
+    - label: invoice
+      state: interrupted
+      updatedAgo: 1m
+      transcript+:
+        - {role: user, ago: 4m, text: "Refactor the line formatting into its own function and add a --currency flag."}
+        - {role: assistant, ago: 1m, text: "(interrupted: the person cancelled this run)"}
+  history+:
+    - {role: user, ago: 4m, text: "refactor the formatting and add a currency flag"}
+    - {role: assistant, ago: 1m, text: "Cancelled. Invoice CLI was partway through; it may have changed files."}
+cases:
+  - name: continue-where-it-left-off
+    moves: [continue]
+    say: ok continue where you left off
+    expect:
+      actions: [send]
+      does: [{action: send, session: invoice}]
+
+  - name: undo-it
+    moves: [self-correct]
+    say: undo whatever it did
+    expect:
+      actions: [send]
+      does: [{action: send, session: invoice, mentions: [undo]}]
+
+  - name: only-the-flag
+    moves: [self-correct, gate]
+    say: forget the refactor just add the currency flag
+    expect:
+      actions: [send]
+      does: [{action: send, session: invoice, mentions: [currency]}]
+
+  - name: what-did-it-touch
+    moves: [status]
+    say: what did it change before i stopped it ?
+    expect:
+      intent: status
+      actions: [answer, read_status, send]
+      notSessions: [weather, site, homelab, lisbon, market, mech]

@@ -1,0 +1,58 @@
+# The last turn did not work: the cloud research session refused a second
+# turn (HTTP 409, one turn at a time) and a local Codex run timed out.
+suite: failed
+state: failed
+world: workbench
+seed:
+  sessions:
+    - label: weather
+      state: failed
+      updatedAgo: 12m
+      transcript+:
+        - {role: user, ago: 22m, text: "Parse every CSV in data/ and add a weekly summary table."}
+        - {role: assistant, ago: 12m, text: "(no reply: the local run timed out after 10m)"}
+  history+:
+    - {role: user, ago: 22m, text: "add a weekly summary table to the weather script"}
+    - {role: assistant, ago: 12m, text: "Weather report timed out after 10 minutes without a reply, so I can't say what it changed."}
+    - {role: user, ago: 6m, text: "ask the token research which providers have free websocket tiers"}
+    - {role: assistant, ago: 6m, text: "Token price feed research was busy with another turn (HTTP 409), so nothing was sent. Try again in a minute."}
+cases:
+  - name: try-again
+    moves: [continue]
+    voice: [terse]
+    say: try again
+    note: The most recent failure is the cloud research question.
+    expect:
+      actions: [send]
+      does: [{action: send, session: market, mentions: [websocket]}]
+
+  - name: what-happened
+    moves: [status]
+    voice: [space-question]
+    say: ok what happened ?
+    expect:
+      intent: status
+      actions: [answer, read_status]
+      not: [send, create]
+
+  - name: do-it-locally-instead
+    moves: [pivot]
+    say: do it locally instead then
+    expect:
+      actions: [create]
+      does: [{action: create, anyOf: [{setup: local-claude}, {setup: local-codex-write}, {setup: local-codex-review}], mentions: [websocket]}]
+
+  - name: retry-the-timed-out-run-smaller
+    moves: [continue, self-correct]
+    say: ok for the weather thing try again but just the csv parsing part, skip the table
+    expect:
+      actions: [send]
+      does: [{action: send, session: weather, mentions: [csv]}]
+
+  - name: what-did-it-change
+    moves: [status, recall]
+    say: did the weather run change anything before it died ?
+    expect:
+      intent: status
+      actions: [answer, read_status, send]
+      notSessions: [invoice, site, homelab, lisbon, market, mech]

@@ -1,0 +1,145 @@
+# Mechanics: what the one chat host does when a person acts at any moment of
+# a turn. A scripted manager and scripted sessions make every flow
+# deterministic and free, so these run in CI. Flows marked `gap` describe the
+# target behavior; they are reported, not failed, until the gap closes.
+world: workbench
+script:
+  - when: add a --discount flag to the invoice tool
+    decide: {actions: [{type: send, session: invoice, message: "Add a --discount flag (cents) with a test."}]}
+    answer: Invoice CLI added --discount with a test.
+  - when: also add tests for a discount bigger than the total
+    decide: {actions: [{type: send, session: invoice, message: "Test a discount larger than the total."}]}
+    answer: Invoice CLI added the test.
+  - when: how is it going ?
+    decide: {actions: [{type: read_status, session: invoice}]}
+    answer: Invoice CLI is still working on --discount.
+  - when: stop
+    decide: {actions: [{type: answer, text: "Stopped."}]}
+    answer: Stopped.
+  - when: hows lisbon
+    decide: {actions: [{type: read_status, session: lisbon}]}
+    answer: Lisbon trip research is idle; Bairro Alto is best for nightlife.
+backends:
+  invoice: {delay: 3s, reply: "Added --discount; go test ./... passes."}
+  lisbon: {delay: 0s, reply: ""}
+flows:
+  - flow: one-turn-happy-path
+    state: idle
+    moves: [kickoff]
+    steps:
+      - {client: desktop, start: add a --discount flag to the invoice tool, expect: {ok: true}}
+      - {waitFor: turn.finished}
+      - expect:
+          events: [status, turn.started, turn.inventory, turn.decided, action.started, action.finished, turn.answered, turn.finished, sessions.changed, status]
+          finalStatus: idle
+
+  - flow: second-client-sees-everything
+    state: idle
+    moves: [status]
+    steps:
+      - {connect: ios}
+      - {client: desktop, start: add a --discount flag to the invoice tool}
+      - {waitFor: turn.finished, client: ios}
+      - expect: {client: ios, eventsInclude: [turn.started, action.started, turn.finished], by: desktop}
+
+  - flow: retry-with-the-same-request-id
+    state: idle
+    moves: [continue]
+    steps:
+      - {client: desktop, start: add a --discount flag to the invoice tool, requestId: 6b0f6c1e-9a52-4c39-9a3b-0f6ad1b2c3d4}
+      - {client: desktop, start: add a --discount flag to the invoice tool, requestId: 6b0f6c1e-9a52-4c39-9a3b-0f6ad1b2c3d4, expect: {sameTurn: true}}
+      - {waitFor: turn.finished}
+      - expect: {turns: 1}
+
+  - flow: reconnect-mid-turn
+    state: mid-turn
+    moves: [status]
+    steps:
+      - {client: desktop, start: add a --discount flag to the invoice tool}
+      - {waitFor: action.started}
+      - {disconnect: desktop}
+      - {connect: desktop, expect: {helloState: busy, helloEventsInclude: [turn.started, turn.decided, action.started]}}
+      - {waitFor: turn.finished}
+
+  - flow: cancel-mid-action
+    state: mid-turn
+    moves: [stop]
+    steps:
+      - {client: desktop, start: add a --discount flag to the invoice tool}
+      - {waitFor: action.started}
+      - {client: desktop, cancel: current, expect: {ok: true}}
+      - {waitFor: turn.finished, expect: {error: context canceled}}
+      - expect: {finalStatus: idle}
+
+  - flow: cancel-leaves-session-sendable
+    state: cancelled
+    moves: [stop, continue]
+    gap: a cancelled local run stays marked running, so the session refuses the next message
+    steps:
+      - {client: desktop, start: add a --discount flag to the invoice tool}
+      - {waitFor: action.started}
+      - {client: desktop, cancel: current}
+      - {waitFor: turn.finished}
+      - expect: {sessionState: {invoice: interrupted}}
+
+  - flow: message-while-busy-is-queued
+    state: mid-turn
+    moves: [scope-add]
+    gap: a message sent during a turn is refused with busy instead of queued
+    steps:
+      - {client: desktop, start: add a --discount flag to the invoice tool}
+      - {waitFor: action.started}
+      - {client: ios, start: also add tests for a discount bigger than the total, expect: {ok: true, queued: true}}
+      - {waitFor: turn.finished}
+      - {waitFor: turn.started, expect: {text: also add tests for a discount bigger than the total}}
+      - {waitFor: turn.finished}
+      - expect: {turns: 2, finalStatus: idle}
+
+  - flow: stop-message-interrupts
+    state: mid-turn
+    moves: [stop]
+    gap: a stop message during a turn waits behind the turn instead of cancelling it
+    steps:
+      - {client: desktop, start: add a --discount flag to the invoice tool}
+      - {waitFor: action.started}
+      - {client: ios, start: stop, expect: {ok: true}}
+      - {waitFor: turn.finished, expect: {error: context canceled}}
+      - expect: {finalStatus: idle, maxSeconds: 2}
+
+  - flow: status-question-answered-live
+    state: mid-turn
+    moves: [status]
+    gap: a status question during a turn waits for the turn instead of being answered from live state
+    steps:
+      - {client: desktop, start: add a --discount flag to the invoice tool}
+      - {waitFor: action.started}
+      - {client: ios, start: "how is it going ?", expect: {ok: true}}
+      - {waitFor: turn.answered, expect: {mentions: [working], maxSeconds: 2}}
+      - {waitFor: turn.finished}
+
+  - flow: refresh-does-not-block-the-first-message
+    state: idle
+    moves: [kickoff]
+    steps:
+      - {client: desktop, sessions: {refresh: true}, async: true, inventoryDelay: 2s}
+      - {client: desktop, start: add a --discount flag to the invoice tool, expect: {ok: true}}
+      - {waitFor: turn.finished}
+
+  - flow: cloud-down-local-still-works
+    state: cloud-down
+    moves: [kickoff]
+    gap: a failed cloud inventory stops the whole turn, local work included
+    cloud: {error: cloud sign-in expired}
+    steps:
+      - {client: desktop, start: add a --discount flag to the invoice tool}
+      - {waitFor: turn.finished, expect: {error: ""}}
+      - expect: {actionsRun: [send]}
+
+  - flow: slow-phone-does-not-stall-desktop
+    state: mid-turn
+    moves: [status]
+    steps:
+      - {connect: ios, stopReading: true}
+      - {client: desktop, start: add a --discount flag to the invoice tool}
+      - {waitFor: turn.finished}
+      - expect: {client: ios, disconnected: true, finalStatus: idle}

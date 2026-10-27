@@ -1,0 +1,81 @@
+# Messages typed while the previous turn was still running. With queueing,
+# such a message is decided right after that turn ends, so each case seeds
+# the finished turn and checks how the queued message is read against it.
+# The flow suites cover the mechanics (queueing, stop, live status).
+suite: mid-turn
+state: mid-turn
+world: workbench
+seed:
+  sessions:
+    - label: invoice
+      updatedAgo: 1m
+      transcript+:
+        - {role: user, ago: 3m, text: "Add a --discount flag: a fixed amount in cents subtracted from the total. Add a test and run go test ./..."}
+        - {role: assistant, ago: 1m, text: "Added --discount (cents) with a test; go test ./... passes."}
+  history+:
+    - {role: user, ago: 3m, text: "add a --discount flag to the invoice tool"}
+    - {role: assistant, ago: 1m, text: "Sent it to Invoice CLI. --discount takes a fixed amount in cents; the test passes."}
+cases:
+  - name: also-add-tests-for-edge-cases
+    moves: [scope-add]
+    sentDuring: add a --discount flag to the invoice tool
+    say: also test a discount bigger than the total
+    expect:
+      intent: amend_running
+      actions: [send]
+      does: [{action: send, session: invoice, mentions: [discount]}]
+
+  - name: wait-no-percent
+    moves: [self-correct, stop]
+    sentDuring: add a --discount flag to the invoice tool
+    voice: [lowercase]
+    say: wait no, use a percent not a fixed amount
+    expect:
+      intent: amend_running
+      actions: [send]
+      does: [{action: send, session: invoice, mentions: [percent]}]
+
+  - name: hold-the-commit
+    moves: [gate, stop]
+    sentDuring: add a --discount flag to the invoice tool
+    say: Hold the commit. I want to look at it in the app first.
+    expect:
+      actions: [send, answer]
+      notSessions: [weather, site, homelab, lisbon, market, mech]
+
+  - name: stop-after-the-fact
+    moves: [stop]
+    sentDuring: add a --discount flag to the invoice tool
+    voice: [terse]
+    say: stop
+    note: The work already finished; say what was done rather than pretending to stop it.
+    expect:
+      intent: stop
+      actions: [answer]
+
+  - name: status-after-the-fact
+    moves: [status]
+    sentDuring: add a --discount flag to the invoice tool
+    voice: [space-question]
+    say: is it done ?
+    expect:
+      intent: status
+      actions: [answer, read_status]
+      not: [send, create]
+
+  - name: reported-own-action-meanwhile
+    moves: [report-action]
+    sentDuring: add a --discount flag to the invoice tool
+    say: ok i merged the other PR on the invoice repo, pull first
+    expect:
+      actions: [send]
+      does: [{action: send, session: invoice, mentions: [pull]}]
+
+  - name: unrelated-ask-meanwhile
+    moves: [pivot, kickoff]
+    sentDuring: add a --discount flag to the invoice tool
+    say: In the meantime, how about we look at the mech balance, flyers feel too strong
+    expect:
+      actions: [send, answer]
+      does: [{anyOf: [{action: send, session: mech}, {action: answer}]}]
+      notSessions: [invoice]
