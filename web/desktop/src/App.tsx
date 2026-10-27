@@ -10,6 +10,7 @@ import { AuthCallbackPage } from "./pages/AuthCallbackPage";
 import { EntityChatPage } from "./pages/EntityChatPage";
 import { HarnessesPage } from "./pages/HarnessesPage";
 import { LocalChatPage } from "./pages/LocalChatPage";
+import { ManagerPage } from "./pages/ManagerPage";
 import { WrapperPage } from "./pages/WrapperPage";
 import { DesktopIcon, HazyForgeMark } from "./components/AgentAvatar";
 import { PRODUCT_TITLE } from "./product";
@@ -181,7 +182,7 @@ export default function App() {
   </>;
 
   return (
-    <div className={`desktop-shell ${location.pathname === "/chat" ? "desktop-shell-chat" : ""}`}>
+    <div className={`desktop-shell ${location.pathname === "/chat" || location.pathname === "/manager" ? "desktop-shell-chat" : ""}`}>
       <aside className="sidebar">
         <div className="brand-lockup" title={snapshot?.productTitle ?? PRODUCT_TITLE}>
           <HazyForgeMark/>
@@ -190,6 +191,9 @@ export default function App() {
         <nav className="rail" aria-label="Primary">
           <NavLink to="/chat" className={({ isActive }) => (isActive ? "rail-link active" : "rail-link")}>
             <DesktopIcon kind="chat"/><span className="rail-label">Chat</span>
+          </NavLink>
+          <NavLink to="/manager" aria-disabled={localChatBusy} onClick={e => {if(localChatBusy) e.preventDefault();}} className={({ isActive }) => (isActive ? "rail-link active" : "rail-link")}>
+            <DesktopIcon kind="manager"/><span className="rail-label">Manager</span>
           </NavLink>
           <NavLink to="/wrapper" aria-disabled={localChatBusy} onClick={e => {if(localChatBusy) e.preventDefault();}} className={({ isActive }) => (isActive ? "rail-link active" : "rail-link")}>
             <DesktopIcon kind="activity"/><span className="rail-label">Activity</span>
@@ -238,6 +242,7 @@ export default function App() {
           <Route path="/auth/callback" element={<AuthCallbackPage onAuthenticated={handleAuthenticated} />} />
           <Route path="/callback" element={<AuthCallbackPage onAuthenticated={handleAuthenticated} />} />
           <Route path="/chat" element={chat} />
+          <Route path="/manager" element={<ManagerPage />} />
           <Route
             path="/wrapper"
             element={

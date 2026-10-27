@@ -579,6 +579,30 @@ form.agent-settings .agent-compose-hint { margin: 0; }
 .remote-run-details[open] { max-height: 40vh; overflow-y: auto; }
 .remote-run-details[open] > :not(summary) { margin-top: 12px; }
 
+/* ── Manager (one chat) ─────────────────────────────────────────────── */
+
+.manager-stale { padding: 0 10px 6px; }
+.manager-session { cursor: default; }
+.manager-session .led { margin-left: auto; }
+.manager-rail .manager-steps { margin: 12px 0 0 3px; }
+.manager-detail { margin-top: 4px; }
+.manager-detail .manager-steps { margin-top: 10px; }
+.manager-steps { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; color: var(--muted); font-size: 13.5px; }
+.manager-step { display: grid; grid-template-columns: 14px minmax(0, 1fr); gap: 10px; align-items: start; line-height: 1.5; }
+.manager-step-copy { display: grid; gap: 6px; min-width: 0; }
+.manager-step-meta { color: var(--dim); font: 500 12px var(--font-mono); }
+.manager-step-mark { width: 8px; height: 8px; margin-top: 6px; border-radius: 50%; background: var(--line-strong); }
+.manager-step-mark.done { background: var(--cyan); }
+.manager-step-mark.running { background: var(--mint); box-shadow: 0 0 8px var(--mint); animation: forge-pulse 1.6s ease-in-out infinite; }
+.manager-step-mark.failed { background: var(--red); }
+.manager-step.failed { color: #ffd5d0; }
+.manager-step-error { margin: 0; color: var(--red); font-size: 13px; }
+.manager-reply > summary { color: var(--cyan); font: 600 11px var(--font-cap); letter-spacing: 0.16em; text-transform: uppercase; cursor: pointer; }
+.manager-reply > .chat-bubble-body { margin-top: 8px; padding: 10px 12px; border-left: 2px solid var(--line-strong); background: rgba(80, 216, 250, 0.03); font-size: 14px; }
+.manager-offline { align-items: flex-start; }
+.manager-offline .desktop-icon { width: 40px; height: 40px; color: var(--cyan); filter: drop-shadow(0 0 12px rgba(80, 216, 250, 0.5)); }
+.manager-offline .hint { align-self: stretch; }
+
 /* ── Harnesses ────────────────────────────────────────────────────────── */
 
 .runtime-card { margin-bottom: 4px; }
