@@ -22,8 +22,12 @@ type Manager struct {
 	state         State
 	cloudSessions map[string]Session
 	// A non-nil scope admits only scenario-created threads, before reading history.
-	cloudScope map[string]bool
-	mu         sync.Mutex
+	cloudScope    map[string]bool
+	mu            sync.Mutex
+	snapshotMu    sync.RWMutex
+	lastInventory []Session
+	inventoryAt   time.Time
+	history       []Message
 }
 
 func Open(ctx context.Context, config Config) (*Manager, error) {
@@ -52,7 +56,10 @@ func NewManager(config Config, decider Decider, local, cloud Backend) (*Manager,
 	if err != nil {
 		return nil, err
 	}
-	return &Manager{Config: config, Decider: decider, Local: local, Cloud: cloud, state: state, cloudSessions: map[string]Session{}}, nil
+	m := &Manager{Config: config, Decider: decider, Local: local, Cloud: cloud, state: state, cloudSessions: map[string]Session{}}
+	m.refreshInventorySnapshot(time.Time{})
+	m.refreshHistorySnapshot()
+	return m, nil
 }
 
 func (m *Manager) redact(text string) string {
@@ -164,6 +171,7 @@ func (m *Manager) inventory(ctx context.Context) ([]Session, error) {
 	if err := m.sanitize(&out); err != nil {
 		return nil, err
 	}
+	m.refreshInventorySnapshot(time.Now().UTC())
 	return out, nil
 }
 
@@ -206,6 +214,7 @@ func (m *Manager) execute(ctx context.Context, a Action) (result ActionResult) {
 	start := time.Now()
 	result = ActionResult{Action: a, SessionID: a.SessionID, SentText: a.Message, State: "idle"}
 	defer func() { result.DurationMS = time.Since(start).Milliseconds() }()
+	defer func() { m.refreshInventorySnapshot(time.Now().UTC()) }()
 	if a.Type == "answer" || a.Type == "ask_user" {
 		result.Reply = a.Text
 		return
@@ -358,14 +367,25 @@ func (m *Manager) execute(ctx context.Context, a Action) (result ActionResult) {
 	return result
 }
 
-func (m *Manager) Turn(ctx context.Context, text string) (trace TurnTrace, turnErr error) {
+func (m *Manager) Turn(ctx context.Context, text string) (TurnTrace, error) {
+	return m.TurnObserved(ctx, text, nil)
+}
+
+// TurnObserved calls observe synchronously from the turn goroutine. The observer
+// must not block: clients should enqueue events and disconnect slow readers.
+func (m *Manager) TurnObserved(ctx context.Context, text string, observe func(Event)) (trace TurnTrace, turnErr error) {
 	if !m.mu.TryLock() {
 		return trace, fmt.Errorf("a onechat turn is already running")
 	}
 	defer m.mu.Unlock()
-	trace = TurnTrace{Version: "onechat.turn/v1", ID: uuid.NewString(), At: time.Now().UTC(), Message: m.redact(text), Inventory: []Session{}, Actions: []ActionResult{}, ValidationErrors: []string{}, Setups: m.Config.Setups, Totals: Totals{HarnessCalls: map[string]int{}}}
+	id, _ := ctx.Value(turnIDKey{}).(uuid.UUID)
+	if id == uuid.Nil {
+		id = uuid.New()
+	}
+	trace = TurnTrace{Version: "onechat.turn/v1", ID: id.String(), At: time.Now().UTC(), Message: m.redact(text), Inventory: []Session{}, Actions: []ActionResult{}, ValidationErrors: []string{}, Setups: m.Config.Setups, Totals: Totals{HarnessCalls: map[string]int{}}}
 	trace.TracePath = filepath.Join(m.Config.StateDir, "traces", trace.ID+".json")
 	defer func() {
+		defer m.refreshHistorySnapshot()
 		if turnErr != nil {
 			trace.Error = m.redact(turnErr.Error())
 		}
@@ -378,6 +398,7 @@ func (m *Manager) Turn(ctx context.Context, text string) (trace TurnTrace, turnE
 			}
 		}
 		m.state.History = append(m.state.History, Message{Role: "user", Text: trace.Message, At: trace.At}, Message{Role: "assistant", Text: trace.Answer, At: time.Now().UTC()})
+		m.emit(observe, "turn.answered", map[string]any{"answer": trace.Answer})
 		if err := m.sanitize(&trace); err != nil {
 			turnErr = errors.Join(turnErr, err)
 			return
@@ -395,6 +416,11 @@ func (m *Manager) Turn(ctx context.Context, text string) (trace TurnTrace, turnE
 	}()
 	var err error
 	trace.Inventory, err = m.inventory(ctx)
+	inventoryBody := map[string]any{"sessions": inventoryEventSessions(trace.Inventory)}
+	if err != nil {
+		inventoryBody["error"] = err.Error()
+	}
+	m.emit(observe, "turn.inventory", inventoryBody)
 	if err != nil {
 		trace.Answer = "I could not read the session inventory, so I have not sent any work."
 		return trace, err
@@ -428,8 +454,16 @@ func (m *Manager) Turn(ctx context.Context, text string) (trace TurnTrace, turnE
 		question := "I could not safely route this turn: " + strings.Join(trace.ValidationErrors, "; ") + ". Which session or setup and workdir should I use?"
 		trace.Decision = Decision{ReasoningSummary: "The proposed decision failed validation; no session work was sent.", Confidence: 0, Actions: []Action{{Type: "ask_user", Text: question}}}
 	}
-	for _, a := range trace.Decision.Actions {
+	m.emit(observe, "turn.decided", map[string]any{"decision": trace.Decision, "validationErrors": trace.ValidationErrors})
+	for i, a := range trace.Decision.Actions {
+		s, _ := m.session(a.SessionID)
+		if a.Type == "create" {
+			setup, _ := m.setup(a.SetupID)
+			s.Title, s.Harness, s.Location = a.Title, setup.Harness, setup.Location
+		}
+		m.emit(observe, "action.started", map[string]any{"index": i, "action": a, "sessionId": a.SessionID, "sessionTitle": s.Title, "harness": s.Harness, "location": s.Location})
 		trace.Actions = append(trace.Actions, m.execute(ctx, a))
+		m.emit(observe, "action.finished", map[string]any{"index": i, "result": trace.Actions[len(trace.Actions)-1]})
 	}
 	compose := ComposeInput{Message: trace.Message, Decision: trace.Decision, Outcomes: trace.Actions}
 	if err := m.sanitize(&compose); err != nil {

@@ -31,6 +31,7 @@ type Options struct {
 	UIDir            string
 	APIOrigin        string
 	ConfigDir        string
+	OnechatStateDir  string
 	OIDCClientID     string
 	OIDCRedirectPath string
 	HarnessTarget    string
@@ -73,6 +74,11 @@ func NewServer(opts Options) (*Server, error) {
 	if err := requireLoopback(opts.Listen); err != nil {
 		return nil, err
 	}
+	onechatDir, err := resolveOnechatStateDir(opts.OnechatStateDir)
+	if err != nil {
+		return nil, err
+	}
+	opts.OnechatStateDir = onechatDir
 	prefs, err := loadPrefs(opts.ConfigDir)
 	if err != nil {
 		return nil, err
@@ -123,6 +129,8 @@ func NewServer(opts Options) (*Server, error) {
 	mux.HandleFunc("POST /local/v1/delegate", server.handleDelegate)
 	mux.HandleFunc("POST /local/v1/chat/stream", server.handleChatStream)
 	mux.HandleFunc("POST /local/v1/agent-tool", server.handleAgentTool)
+	mux.HandleFunc("GET /local/v1/onechat/status", server.handleOnechatStatus)
+	mux.HandleFunc("GET /local/v1/onechat/connect", server.handleOnechatConnect)
 	mux.HandleFunc("/ui-config.json", server.handleAPIProxy)
 	mux.HandleFunc("/api/", server.handleAPIProxy)
 	mux.HandleFunc("/", server.handleUI)

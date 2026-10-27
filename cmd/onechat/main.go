@@ -7,10 +7,13 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"path/filepath"
+	"runtime/debug"
 	"strings"
 	"syscall"
 
 	"github.com/hazyforge/anvil-agents/internal/onechat"
+	"github.com/hazyforge/anvil-agents/internal/onechat/host"
 )
 
 func main() {
@@ -30,7 +33,7 @@ func run(ctx context.Context, args []string) error {
 	}
 	args = flags.Args()
 	if len(args) == 0 {
-		return fmt.Errorf("usage: onechat --config FILE login | sessions | say TEXT | scenario run FILE --out DIR")
+		return fmt.Errorf("usage: onechat --config FILE login | sessions | say TEXT | serve [--listen ADDR] | scenario run FILE --out DIR")
 	}
 	config, err := onechat.LoadConfig(*configPath)
 	if err != nil {
@@ -64,6 +67,29 @@ func run(ctx context.Context, args []string) error {
 		}
 		return err
 	}
+	if args[0] == "serve" {
+		serveFlags := flag.NewFlagSet("onechat serve", flag.ContinueOnError)
+		listen := serveFlags.String("listen", host.DefaultListen, "loopback IP and port")
+		if err := serveFlags.Parse(args[1:]); err != nil {
+			return err
+		}
+		if serveFlags.NArg() != 0 {
+			return fmt.Errorf("usage: onechat --config FILE serve [--listen ADDR]")
+		}
+		server, err := host.Start(ctx, host.Options{
+			StateDir: config.StateDir, Listen: *listen, Version: buildVersion(),
+			OpenManager: func(ctx context.Context) (*onechat.Manager, error) { return onechat.Open(ctx, config) },
+		})
+		if err != nil {
+			return err
+		}
+		info := server.Info()
+		fmt.Println("Listen:", info.Listen)
+		fmt.Println("Host:", info.HostID)
+		fmt.Println("Discovery:", filepath.Join(config.StateDir, "host.json"))
+		fmt.Println("Token file:", filepath.Join(config.StateDir, "host-token"))
+		return server.Wait()
+	}
 	if args[0] != "sessions" && args[0] != "say" {
 		return fmt.Errorf("unknown command %q", args[0])
 	}
@@ -73,6 +99,11 @@ func run(ctx context.Context, args []string) error {
 	if args[0] == "say" && (len(args) < 2 || strings.TrimSpace(strings.Join(args[1:], " ")) == "") {
 		return fmt.Errorf("say requires a message")
 	}
+	lock, err := host.LockState(config.StateDir)
+	if err != nil {
+		return err
+	}
+	defer lock.Close()
 	manager, err := onechat.Open(ctx, config)
 	if err != nil {
 		return err
@@ -92,4 +123,11 @@ func run(ctx context.Context, args []string) error {
 		fmt.Println("Trace:", trace.TracePath)
 	}
 	return err
+}
+
+func buildVersion() string {
+	if info, ok := debug.ReadBuildInfo(); ok && info.Main.Version != "" {
+		return info.Main.Version
+	}
+	return "devel"
 }

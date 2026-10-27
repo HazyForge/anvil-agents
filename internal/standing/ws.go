@@ -115,6 +115,10 @@ type Conn struct {
 	writeMu sync.Mutex
 }
 
+// Abort closes the transport immediately, including a blocked writer. Hosts use
+// this when a client's bounded queue fills or the server is shutting down.
+func (c *Conn) Abort() error { return c.conn.Close() }
+
 // Close sends a normal-closure frame best-effort and closes the connection.
 func (c *Conn) Close() error {
 	c.writeMu.Lock()

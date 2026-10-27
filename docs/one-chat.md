@@ -3,8 +3,10 @@
 `onechat` is a CLI and Go package for a single conversation with a model-backed
 manager. It sees your sessions and recent replies, chooses an action, executes
 it, then composes an answer from actual outcomes. Every turn produces a private
-JSON trace for review. This is separate from Desktop and does not change the
-controller, standing recipes, or chat API.
+JSON trace for review. `onechat serve` makes the same manager available to
+Anvil Agents Desktop's Manager view, and later to the Anvil iPhone app; see
+[One chat from Desktop and iPhone](one-chat-remote.md). One chat does not change
+the controller, standing recipes, or chat API.
 
 ## Sessions, setups and permissions
 
@@ -292,20 +294,25 @@ accounting. Access/refresh credentials appear only in the private session file.
 
 ## Remaining boundaries and verification
 
-Desktop UI wiring, concurrent turns/processes sharing a state or credentials file,
-and steering a running turn are not implemented. Use one CLI process at a time
-per state/session file. Production sign-in is implemented; actual production
+Desktop reaches the manager through `onechat serve`, which owns the state
+directory while it runs; `say` and `sessions` refuse to run against it then.
+Steering a running turn and reaching the host from outside this machine (the
+phase 2 relay) are not implemented. Use one CLI process at a time per
+state/session file. Production sign-in is implemented; actual production
 acceptance still requires an operator-run login and live scenarios.
 
 Offline tests use fake executable scripts, signed fixture ID tokens, a custom
-RoundTripper and callback `httptest.NewRecorder` handlers. They never open a
-listener or invoke real models. Verification commands run one at a time:
+RoundTripper and callback `httptest.NewRecorder` handlers. They never invoke
+real models; only the host and Desktop bridge tests open listeners, on loopback
+ephemeral ports. Verification commands run one at a time:
 
 ```sh
 free -m
 GOFLAGS=-buildvcs=false go test ./internal/onechat/... -run '^TestOneChat' -count=1
 GOFLAGS=-buildvcs=false go test ./internal/runapi/... -run '^TestOneChatNativeReply' -count=1
-GOFLAGS=-buildvcs=false go vet ./internal/onechat/... ./cmd/onechat/...
+GOFLAGS=-buildvcs=false go test -race -p 1 ./internal/onechat/host/... -count=1
+GOFLAGS=-buildvcs=false go test -p 1 ./internal/desktop/... -run '^(TestLocalRequestGuard|TestOnechat)' -count=1
+GOFLAGS=-buildvcs=false go vet ./internal/onechat/... ./cmd/onechat/... ./internal/desktop/...
 GOFLAGS=-buildvcs=false go build -o /tmp/onechat ./cmd/onechat
 gofmt -l internal/onechat cmd/onechat
 GOFLAGS=-buildvcs=false go test ./internal/onechat/... -run '^TestOneChat(Login|LocalRecipes)' -count=1 -v

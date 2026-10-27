@@ -28,6 +28,7 @@ func run(ctx context.Context, args []string) int {
 	uiDir := flags.String("ui-dir", "", "Directory of built web/desktop assets. Defaults to the embedded stub.")
 	apiOrigin := flags.String("api-origin", desktop.DefaultAPIOrigin, "anvil-agents OIDC API origin (http or https). Defaults to Anvil Primaris. Not a kube-apiserver.")
 	configDir := flags.String("config-dir", "", "Directory for desktop prefs. Defaults to the user config dir.")
+	onechatStateDir := flags.String("onechat-state-dir", "", "One chat state directory. Defaults to $ANVIL_ONECHAT_STATE_DIR or ~/.config/onechat.")
 	pathDirs := flags.String("path", "", "PATH-formatted directories to search for harness CLIs. When set, only these directories are searched.")
 	oidcClientID := flags.String("oidc-client-id", "", "Override the PKCE client id. Empty uses desktop.oidcClientId from ui-config (Native), else the API oidc.clientId (Console). Kind tests pass anvil-agents-desktop.")
 	oidcRedirectPath := flags.String("oidc-redirect-path", "", "Override OIDC redirect path (default /auth/callback). Kind desktop client uses /callback.")
@@ -37,7 +38,7 @@ func run(ctx context.Context, args []string) int {
 	openWindow := flags.Bool("open", false, "Open a Chrome --app window on the loopback UI.")
 	snapshotOnly := flags.Bool("snapshot", false, "Print the local harness and API snapshot as JSON and exit.")
 	flags.Usage = func() {
-		fmt.Fprintln(os.Stderr, "Usage: anvil-desktop [--listen 127.0.0.1:1738] [--ui-dir PATH] [--api-origin URL] [--config-dir PATH] [--path PATH] [--harness-target native|wsl] [--wsl-distro NAME] [--oidc-client-id ID] [--oidc-redirect-path /callback] [--open]")
+		fmt.Fprintln(os.Stderr, "Usage: anvil-desktop [--listen 127.0.0.1:1738] [--ui-dir PATH] [--api-origin URL] [--config-dir PATH] [--onechat-state-dir PATH] [--path PATH] [--harness-target native|wsl] [--wsl-distro NAME] [--oidc-client-id ID] [--oidc-redirect-path /callback] [--open]")
 		fmt.Fprintln(os.Stderr, "       anvil-desktop --snapshot")
 		flags.PrintDefaults()
 	}
@@ -48,12 +49,16 @@ func run(ctx context.Context, args []string) int {
 		fmt.Fprintf(os.Stderr, "error: %s\n", err)
 		return 2
 	}
+	if flags.Changed("onechat-state-dir") && *onechatStateDir == "" {
+		*onechatStateDir = "~/.config/onechat"
+	}
 
 	opts := desktop.Options{
 		Listen:           *listen,
 		UIDir:            *uiDir,
 		APIOrigin:        *apiOrigin,
 		ConfigDir:        *configDir,
+		OnechatStateDir:  *onechatStateDir,
 		OIDCClientID:     *oidcClientID,
 		OIDCRedirectPath: *oidcRedirectPath,
 		HarnessTarget:    *harnessTarget,
