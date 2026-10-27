@@ -74,8 +74,25 @@ export type OnechatHello = {protocol: number; host: {id: string; name: string; v
 
 export type OnechatTurnSummary = {turnId: string; at: string; message: string; answer: string; error?: string; actionCount: number};
 
-/** What the Desktop host knows about the one chat host on this machine. */
-export type OnechatHostStatus = {configured: boolean; running: boolean; listen?: string; hostId?: string; version?: string; message?: string};
+/** A session's live state from the daemon (session.state / session.activity events, session.list). */
+export type OnechatLiveState = {sessionId: string; state: string; since?: string; activity?: string; queued?: number};
+
+/** A message the manager posts on its own when a session's work lands (chat.message, kind followup). */
+export type OnechatFollowup = {id: string; at: string; sessionId?: string; turnId?: string; text: string};
+
+/** What Desktop knows about the one chat daemon: on this machine, or inside WSL when Desktop runs on Windows. */
+export type OnechatHostStatus = {
+  mode?: 'native' | 'wsl';
+  distro?: string;
+  installed?: boolean;
+  configured: boolean;
+  running: boolean;
+  managedBy?: 'systemd' | 'process' | 'none';
+  listen?: string;
+  hostId?: string;
+  version?: string;
+  message?: string;
+};
 
 export class OnechatError extends Error {
   readonly code: string;
@@ -90,6 +107,14 @@ export async function fetchOnechatHostStatus(signal?: AbortSignal): Promise<Onec
   const response = await fetch('/local/v1/onechat/status', {cache: 'no-store', signal});
   if (!response.ok) throw new OnechatError(`http_${response.status}`, `Desktop could not check the one chat host (HTTP ${response.status}).`);
   return response.json() as Promise<OnechatHostStatus>;
+}
+
+/** Start the daemon (through WSL when Desktop runs on Windows) and return its status. */
+export async function startOnechatHost(): Promise<OnechatHostStatus> {
+  const response = await fetch('/local/v1/onechat/start', {method: 'POST', cache: 'no-store'});
+  const body = await response.json().catch(() => ({})) as OnechatHostStatus & {error?: string};
+  if (!response.ok) throw new OnechatError(body.error || `http_${response.status}`, body.message || `Desktop could not start the manager (HTTP ${response.status}).`);
+  return body;
 }
 
 type Pending = {resolve: (body: Record<string, unknown>) => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout>};

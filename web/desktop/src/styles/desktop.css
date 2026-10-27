@@ -600,6 +600,13 @@ form.agent-settings .agent-compose-hint { margin: 0; }
 .manager-reply > summary { color: var(--cyan); font: 600 11px var(--font-cap); letter-spacing: 0.16em; text-transform: uppercase; cursor: pointer; }
 .manager-reply > .chat-bubble-body { margin-top: 8px; padding: 10px 12px; border-left: 2px solid var(--line-strong); background: rgba(80, 216, 250, 0.03); font-size: 14px; }
 .manager-offline { align-items: flex-start; }
+.manager-session.is-working .agent-avatar { box-shadow: 0 0 0 1px var(--cyan); }
+.manager-session-activity { display: block; color: var(--dim); font: 400 11.5px/1.4 var(--font-mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+.manager-session-stop { margin-left: auto; padding: 4px 10px; font-size: 11px; }
+.manager-followup .chat-bubble-role { color: var(--mint); }
+.manager-offline-actions { display: flex; flex-wrap: wrap; gap: 10px; }
+.manager-offline-error { color: var(--amber); }
+.manager-offline code { font-family: var(--font-mono); font-size: 0.92em; color: var(--ice); }
 .manager-offline .desktop-icon { width: 40px; height: 40px; color: var(--cyan); filter: drop-shadow(0 0 12px rgba(80, 216, 250, 0.5)); }
 .manager-offline .hint { align-self: stretch; }
 
