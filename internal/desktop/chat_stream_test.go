@@ -133,19 +133,24 @@ printf '{"type":"message_end","message":{"role":"assistant","content":[]}}\n'
 
 func TestChatStreamRequestBoundary(t *testing.T) {
 	s := streamTestServer(t, t.TempDir(), t.TempDir(), HarnessTargetNative)
+	localHost := s.ListenAddr()
 	for _, tc := range []struct{ name, host, origin, site, content string }{
-		{"other origin", "127.0.0.1:1738", "https://evil.invalid", "", "application/json"},
-		{"other port", "127.0.0.1:1738", "http://127.0.0.1:1234", "", "application/json"},
+		{"other origin", localHost, "https://evil.invalid", "", "application/json"},
+		{"other port", localHost, "http://127.0.0.1:1234", "", "application/json"},
 		{"rebound host", "evil.invalid:1738", "http://evil.invalid:1738", "", "application/json"},
-		{"null origin", "127.0.0.1:1738", "null", "", "application/json"},
-		{"cross site", "127.0.0.1:1738", "", "cross-site", "application/json"},
-		{"same site", "127.0.0.1:1738", "", "same-site", "application/json"},
-		{"form", "127.0.0.1:1738", "", "", "text/plain"},
+		{"null origin", localHost, "null", "", "application/json"},
+		{"cross site", localHost, "", "cross-site", "application/json"},
+		{"same site", localHost, "", "same-site", "application/json"},
+		{"form", localHost, "", "", "text/plain"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			req := httptest.NewRequest(http.MethodPost, "http://"+tc.host+"/local/v1/chat/stream", strings.NewReader(`{"harness":"prime","prompt":"hello"}`))
-			req.Header.Set("Origin", tc.origin)
-			req.Header.Set("Sec-Fetch-Site", tc.site)
+			if tc.origin != "" {
+				req.Header.Set("Origin", tc.origin)
+			}
+			if tc.site != "" {
+				req.Header.Set("Sec-Fetch-Site", tc.site)
+			}
 			req.Header.Set("Content-Type", tc.content)
 			rec := httptest.NewRecorder()
 			s.Handler().ServeHTTP(rec, req)

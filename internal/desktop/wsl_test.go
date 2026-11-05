@@ -186,6 +186,7 @@ cat "$file"
 
 	body := strings.NewReader(`{"harness":"codex","prompt":"hello wsl","timeoutSeconds":15}`)
 	req := httptest.NewRequest(http.MethodPost, "/local/v1/delegate", body)
+	req.Host = server.ListenAddr()
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	server.Handler().ServeHTTP(rec, req)
@@ -208,6 +209,7 @@ cat "$file"
 
 	body = strings.NewReader(`{"harness":"grok","prompt":"from-wsl-file"}`)
 	req = httptest.NewRequest(http.MethodPost, "/local/v1/delegate", body)
+	req.Host = server.ListenAddr()
 	rec = httptest.NewRecorder()
 	server.Handler().ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
@@ -243,6 +245,7 @@ func TestPrefsHarnessTargetValidation(t *testing.T) {
 		t.Fatal(err)
 	}
 	req := httptest.NewRequest(http.MethodPost, "/local/v1/prefs", strings.NewReader(`{"harnessTarget":"powershell"}`))
+	req.Host = server.ListenAddr()
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	server.Handler().ServeHTTP(rec, req)
@@ -251,6 +254,7 @@ func TestPrefsHarnessTargetValidation(t *testing.T) {
 	}
 
 	req = httptest.NewRequest(http.MethodPost, "/local/v1/prefs", strings.NewReader(`{"harnessTarget":"wsl","wslDistro":"Ubuntu-24.04"}`))
+	req.Host = server.ListenAddr()
 	req.Header.Set("Content-Type", "application/json")
 	rec = httptest.NewRecorder()
 	server.Handler().ServeHTTP(rec, req)

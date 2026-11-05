@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -18,6 +19,8 @@ import (
 )
 
 type CloudBackend struct {
+	tokenMu       sync.RWMutex
+	refreshMu     sync.Mutex
 	Config        CloudConfig
 	Client        *http.Client
 	Timeout       time.Duration
@@ -67,6 +70,8 @@ func NewCloudBackend(ctx context.Context, config CloudConfig, timeout time.Durat
 }
 
 func (b *CloudBackend) refresh(ctx context.Context, force bool) error {
+	b.refreshMu.Lock()
+	defer b.refreshMu.Unlock()
 	var token string
 	var err error
 	if b.sessionTokens != nil {
@@ -84,6 +89,8 @@ func (b *CloudBackend) refresh(ctx context.Context, force bool) error {
 	if token == "" || strings.ContainsAny(token, "\r\n\t ") {
 		return fmt.Errorf("cloud token command must return one nonempty bearer token")
 	}
+	b.tokenMu.Lock()
+	defer b.tokenMu.Unlock()
 	if token != b.token {
 		b.secrets = append(b.secrets, token)
 	}
@@ -97,6 +104,8 @@ func (b *CloudBackend) Redact(s string) string {
 	if b.sessionTokens != nil {
 		s = b.sessionTokens.Redact(s)
 	}
+	b.tokenMu.RLock()
+	defer b.tokenMu.RUnlock()
 	for _, token := range b.secrets {
 		s = strings.ReplaceAll(s, token, "[REDACTED]")
 	}
@@ -122,7 +131,10 @@ func (b *CloudBackend) request(ctx context.Context, method, path string, body, d
 		if err != nil {
 			return 0, fmt.Errorf("invalid cloud request URL")
 		}
-		req.Header.Set("Authorization", "Bearer "+b.token)
+		b.tokenMu.RLock()
+		token := b.token
+		b.tokenMu.RUnlock()
+		req.Header.Set("Authorization", "Bearer "+token)
 		if body != nil {
 			req.Header.Set("Content-Type", "application/json")
 		}

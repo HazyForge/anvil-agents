@@ -22,29 +22,39 @@ type Setup struct {
 }
 
 type Message struct {
-	Role string    `json:"role"`
-	Text string    `json:"text"`
-	At   time.Time `json:"at"`
+	ID        string    `json:"id,omitempty"`
+	Kind      string    `json:"kind,omitempty"`
+	SessionID string    `json:"sessionId,omitempty"`
+	TurnID    string    `json:"turnId,omitempty"`
+	Role      string    `json:"role"`
+	Text      string    `json:"text"`
+	At        time.Time `json:"at"`
 }
 
 type Session struct {
-	ID              string    `json:"id"`
-	Location        string    `json:"location"`
-	SetupID         string    `json:"setupId"`
-	Harness         string    `json:"harness"`
-	Title           string    `json:"title"`
-	Summary         string    `json:"summary"`
-	State           string    `json:"state"`
-	CreatedAt       time.Time `json:"createdAt"`
-	UpdatedAt       time.Time `json:"updatedAt"`
-	Workdir         string    `json:"workdir,omitempty"`
-	NativeSessionID string    `json:"nativeSessionId,omitempty"`
-	Sandbox         string    `json:"sandbox,omitempty"`
-	Transcript      []Message `json:"transcript"`
-	BaseURL         string    `json:"baseURL,omitempty"`
-	Namespace       string    `json:"namespace,omitempty"`
-	ThreadID        string    `json:"threadId,omitempty"`
-	Profile         string    `json:"profile,omitempty"`
+	RunningSince    *time.Time `json:"runningSince,omitempty"`
+	Since           time.Time  `json:"since,omitempty"`
+	Activity        string     `json:"activity,omitempty"`
+	LastActivity    time.Time  `json:"lastActivity,omitempty"`
+	Queued          int        `json:"queued"`
+	TranscriptPath  string     `json:"transcriptPath,omitempty"`
+	ID              string     `json:"id"`
+	Location        string     `json:"location"`
+	SetupID         string     `json:"setupId"`
+	Harness         string     `json:"harness"`
+	Title           string     `json:"title"`
+	Summary         string     `json:"summary"`
+	State           string     `json:"state"`
+	CreatedAt       time.Time  `json:"createdAt"`
+	UpdatedAt       time.Time  `json:"updatedAt"`
+	Workdir         string     `json:"workdir,omitempty"`
+	NativeSessionID string     `json:"nativeSessionId,omitempty"`
+	Sandbox         string     `json:"sandbox,omitempty"`
+	Transcript      []Message  `json:"transcript"`
+	BaseURL         string     `json:"baseURL,omitempty"`
+	Namespace       string     `json:"namespace,omitempty"`
+	ThreadID        string     `json:"threadId,omitempty"`
+	Profile         string     `json:"profile,omitempty"`
 }
 
 // Pointer counts distinguish reported zero from unknown. Cached token counts are
@@ -149,24 +159,28 @@ type Check struct {
 }
 
 type TurnTrace struct {
-	Version          string         `json:"version"`
-	ID               string         `json:"id"`
-	At               time.Time      `json:"at"`
-	Message          string         `json:"message"`
-	Inventory        []Session      `json:"inventory"`
-	History          []Message      `json:"history"`
-	Setups           []Setup        `json:"setups"`
-	RawDecision      any            `json:"rawDecision"`
-	Decision         Decision       `json:"decision"`
-	ValidationErrors []string       `json:"validationErrors"`
-	DeciderUsage     Usage          `json:"deciderUsage"`
-	ComposeUsage     Usage          `json:"composeUsage"`
-	Actions          []ActionResult `json:"actions"`
-	Answer           string         `json:"answer"`
-	Totals           Totals         `json:"totals"`
-	Error            string         `json:"error"`
-	Check            *Check         `json:"check,omitempty"`
-	TracePath        string         `json:"tracePath"`
+	Kind             string          `json:"kind,omitempty"`
+	ParentTurnID     string          `json:"parentTurnId,omitempty"`
+	SessionID        string          `json:"sessionId,omitempty"`
+	Messages         []QueuedMessage `json:"messages,omitempty"`
+	Version          string          `json:"version"`
+	ID               string          `json:"id"`
+	At               time.Time       `json:"at"`
+	Message          string          `json:"message"`
+	Inventory        []Session       `json:"inventory"`
+	History          []Message       `json:"history"`
+	Setups           []Setup         `json:"setups"`
+	RawDecision      any             `json:"rawDecision"`
+	Decision         Decision        `json:"decision"`
+	ValidationErrors []string        `json:"validationErrors"`
+	DeciderUsage     Usage           `json:"deciderUsage"`
+	ComposeUsage     Usage           `json:"composeUsage"`
+	Actions          []ActionResult  `json:"actions"`
+	Answer           string          `json:"answer"`
+	Totals           Totals          `json:"totals"`
+	Error            string          `json:"error"`
+	Check            *Check          `json:"check,omitempty"`
+	TracePath        string          `json:"tracePath"`
 }
 
 // Backend returns execution evidence even when an operation fails.

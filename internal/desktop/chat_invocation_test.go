@@ -55,6 +55,7 @@ func TestLocalChatNativeJSONInvocation(t *testing.T) {
 				s := streamTestServer(t, binDir, t.TempDir(), target)
 				body, _ := json.Marshal(DelegateRequest{Harness: tc.id, Prompt: "private prompt", Workdir: t.TempDir()})
 				req := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:1738/local/v1/chat/stream", bytes.NewReader(body))
+				req.Host = s.ListenAddr()
 				req.Header.Set("Content-Type", "application/json")
 				rec := httptest.NewRecorder()
 				s.Handler().ServeHTTP(rec, req)

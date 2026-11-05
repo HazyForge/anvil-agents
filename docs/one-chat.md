@@ -3,8 +3,10 @@
 `onechat` is a CLI and Go package for a single conversation with a model-backed
 manager. It sees your sessions and recent replies, chooses an action, executes
 it, then composes an answer from actual outcomes. Every turn produces a private
-JSON trace for review. This is separate from Desktop and does not change the
-controller, standing recipes, or chat API.
+JSON trace for review. `onechat serve` makes the same manager available to
+Anvil Agents Desktop's Manager view, and later to the Anvil iPhone app; see
+[One chat from Desktop and iPhone](one-chat-remote.md). One chat does not change
+the controller, standing recipes, or chat API.
 
 ## Sessions, setups and permissions
 
@@ -85,10 +87,11 @@ The entire bounded inventory, including transcripts, is retained in TurnTrace.
 | `create` | Create a session for a setup, then send its first message. |
 | `ask_user` | Ask for a missing target, intent or authority. |
 
-Decisions contain one to three actions, a short reasoning summary and confidence
-from zero to one. References must exist. `answer`/`ask_user` cannot mix with
-`send`/`create`. Sends to running sessions and duplicate sends in a decision are
-rejected. Local creates need an existing directory under `local.workdirRoots`;
+Decisions contain one to four actions, a short reasoning summary and confidence
+from zero to one. References must exist. One message can cover several subjects,
+so a decision may mix work for one session with an answer about another and at
+most one question; the reply covers each subject in order, question last.
+Duplicate sends in a decision are rejected. Local creates need an existing directory under `local.workdirRoots`;
 symlinks are resolved first. Existing local sessions are checked again before
 sending. Changing a session's setup harness/location cannot redirect its resume.
 
@@ -292,20 +295,25 @@ accounting. Access/refresh credentials appear only in the private session file.
 
 ## Remaining boundaries and verification
 
-Desktop UI wiring, concurrent turns/processes sharing a state or credentials file,
-and steering a running turn are not implemented. Use one CLI process at a time
-per state/session file. Production sign-in is implemented; actual production
+Desktop reaches the manager through `onechat serve`, which owns the state
+directory while it runs; `say` and `sessions` refuse to run against it then.
+Steering a running turn and reaching the host from outside this machine (the
+phase 2 relay) are not implemented. Use one CLI process at a time per
+state/session file. Production sign-in is implemented; actual production
 acceptance still requires an operator-run login and live scenarios.
 
 Offline tests use fake executable scripts, signed fixture ID tokens, a custom
-RoundTripper and callback `httptest.NewRecorder` handlers. They never open a
-listener or invoke real models. Verification commands run one at a time:
+RoundTripper and callback `httptest.NewRecorder` handlers. They never invoke
+real models; only the host and Desktop bridge tests open listeners, on loopback
+ephemeral ports. Verification commands run one at a time:
 
 ```sh
 free -m
 GOFLAGS=-buildvcs=false go test ./internal/onechat/... -run '^TestOneChat' -count=1
 GOFLAGS=-buildvcs=false go test ./internal/runapi/... -run '^TestOneChatNativeReply' -count=1
-GOFLAGS=-buildvcs=false go vet ./internal/onechat/... ./cmd/onechat/...
+GOFLAGS=-buildvcs=false go test -race -p 1 ./internal/onechat/host/... -count=1
+GOFLAGS=-buildvcs=false go test -p 1 ./internal/desktop/... -run '^(TestLocalRequestGuard|TestOnechat)' -count=1
+GOFLAGS=-buildvcs=false go vet ./internal/onechat/... ./cmd/onechat/... ./internal/desktop/...
 GOFLAGS=-buildvcs=false go build -o /tmp/onechat ./cmd/onechat
 gofmt -l internal/onechat cmd/onechat
 GOFLAGS=-buildvcs=false go test ./internal/onechat/... -run '^TestOneChat(Login|LocalRecipes)' -count=1 -v

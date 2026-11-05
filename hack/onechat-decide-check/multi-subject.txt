@@ -1,0 +1,25 @@
+add a --csv flag to the invoice tool and also make the site hero glow a bit more
+---
+ok so add the csv flag to the invoice tool, also which lisbon neighbourhood was best for nightlife again ?
+---
+make the weather script handle missing temp values, and what did the homelab audit find ?
+---
+add a total line to the weather summary and also research which hosted postgres has the cheapest pitr
+---
+add tests for the new flag and also fix the thing codex found
+---
+what did the homelab audit find and how many hp do striders have
+---
+ok so um the invoice tool needs a discount flag like percent based and uh separately I was thinking for the mech game flyers are way too strong can you look at the numbers
+---
+add a csv flag to the invoice tool and make the total bold
+---
+add the csv flag to the invoice tool and send 0.5 sol to my cold wallet
+---
+invoice needs a --yaml flag, the site footer links should open in a new tab, and research cheapest pitr postgres
+---
+stop whatever the invoice session is doing and have the weather one handle missing temps instead
+---
+hows the weather thing going and also start a codex review of the site
+---
+add a dark mode toggle to the site, and what model are you using for this ?

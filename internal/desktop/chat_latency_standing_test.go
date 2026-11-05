@@ -23,6 +23,7 @@ func TestChatLatencyStandingFieldsPersisted(t *testing.T) {
 		`"replyReadyMs":210,"source":"desktop-chat","threadId":"thread-1",` +
 		`"sessionId":"standing-thread-1","path":"standing"}`)
 	req := httptest.NewRequest(http.MethodPost, "/local/v1/chat-latency", body)
+	req.Host = server.ListenAddr()
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	server.Handler().ServeHTTP(rec, req)
@@ -56,6 +57,7 @@ func TestChatLatencyStandingFieldsPersisted(t *testing.T) {
 	// A failed Job-plane turn records the error tag with no session.
 	body = strings.NewReader(`{"failedMs":99,"source":"desktop-chat","threadId":"thread-2","path":"job","error":"open stream failed: unauthorized"}`)
 	req = httptest.NewRequest(http.MethodPost, "/local/v1/chat-latency", body)
+	req.Host = server.ListenAddr()
 	req.Header.Set("Content-Type", "application/json")
 	rec = httptest.NewRecorder()
 	server.Handler().ServeHTTP(rec, req)

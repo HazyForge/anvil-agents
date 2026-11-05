@@ -3,36 +3,62 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
 	"os/signal"
+	"runtime/debug"
 	"strings"
 	"syscall"
 
 	"github.com/hazyforge/anvil-agents/internal/onechat"
+	"github.com/hazyforge/anvil-agents/internal/onechat/host"
 )
 
 func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 	if err := run(ctx, os.Args[1:]); err != nil {
+		var status *exitStatus
+		if errors.As(err, &status) {
+			os.Exit(status.code)
+		}
 		fmt.Fprintln(os.Stderr, "onechat:", err)
 		os.Exit(1)
 	}
 }
 
 func run(ctx context.Context, args []string) error {
+	if len(args) > 0 && args[0] == "hook" {
+		return runHook(ctx, args[1:])
+	}
 	flags := flag.NewFlagSet("onechat", flag.ContinueOnError)
-	configPath := flags.String("config", "onechat.yaml", "configuration file")
+	configPath := flags.String("config", "", "configuration file (default ~/.config/onechat/onechat.yaml)")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
 	args = flags.Args()
 	if len(args) == 0 {
-		return fmt.Errorf("usage: onechat --config FILE login | sessions | say TEXT | scenario run FILE --out DIR")
+		return fmt.Errorf("usage: onechat [--config FILE] login | sessions | agents | queue --session ID --message TEXT | stop --session ID | say TEXT | serve [--listen ADDR] | daemon run|start|stop|status|logs|bootstrap|proxy | scenario run FILE --out DIR")
 	}
-	config, err := onechat.LoadConfig(*configPath)
+	if args[0] == "hook" {
+		return runHook(ctx, args[1:])
+	}
+	path, err := cliConfigPath(*configPath)
+	if err != nil {
+		return err
+	}
+	if args[0] == "agents" || args[0] == "queue" || args[0] == "stop" {
+		return runSessionCommand(ctx, path, args[0], args[1:])
+	}
+	if args[0] == "daemon" {
+		return runDaemon(ctx, path, args[1:])
+	}
+	if args[0] == "serve" {
+		return runDaemon(ctx, path, append([]string{"run"}, args[1:]...))
+	}
+	config, err := loadCLIConfig(path)
 	if err != nil {
 		return err
 	}
@@ -73,6 +99,11 @@ func run(ctx context.Context, args []string) error {
 	if args[0] == "say" && (len(args) < 2 || strings.TrimSpace(strings.Join(args[1:], " ")) == "") {
 		return fmt.Errorf("say requires a message")
 	}
+	lock, err := host.LockState(config.StateDir)
+	if err != nil {
+		return err
+	}
+	defer lock.Close()
 	manager, err := onechat.Open(ctx, config)
 	if err != nil {
 		return err
@@ -92,4 +123,11 @@ func run(ctx context.Context, args []string) error {
 		fmt.Println("Trace:", trace.TracePath)
 	}
 	return err
+}
+
+func buildVersion() string {
+	if info, ok := debug.ReadBuildInfo(); ok && info.Main.Version != "" {
+		return info.Main.Version
+	}
+	return "devel"
 }
