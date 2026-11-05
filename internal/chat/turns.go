@@ -18,7 +18,20 @@ var ErrRequestConflict = errors.New("request ID already used with different cont
 
 // Turn is a durable outbox entry. RunJSON freezes the accepted execution intent;
 // an API restart retries the same Kubernetes name rather than creating new work.
+// Coordination tracks one bounded request/reply journey separately from the
+// originating execution receipt. It lives in the existing durable JSON outbox.
+type Coordination struct {
+	RetryCount   int    `json:"retryCount,omitempty"`
+	Status       string `json:"status"`
+	ResumeTurnID string `json:"resumeTurnId,omitempty"`
+}
+
 type Turn struct {
+	Dispatch         *Dispatch       `json:"dispatch,omitempty"`
+	Coordination     *Coordination   `json:"coordination,omitempty"`
+	ParentTurnID     string          `json:"parentTurnId,omitempty"`
+	ParentThreadID   string          `json:"parentThreadId,omitempty"`
+	Resumption       bool            `json:"resumption,omitempty"`
 	ExpectedSequence *int64          `json:"-"`
 	LockKeys         []string        `json:"-"`
 	Deferred         bool            `json:"-"`
@@ -147,6 +160,17 @@ func (s *PostgresStore) QueueTurn(ctx context.Context, t Turn, m Message) (Turn,
 	if !errors.Is(err, pgx.ErrNoRows) {
 		return Turn{}, Message{}, Thread{}, err
 	}
+	parent, err := lockCoordinationParent(ctx, tx, t)
+	if err != nil {
+		return Turn{}, Message{}, Thread{}, err
+	}
+	var coordinating bool
+	if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM anvil_agents_chat.turns WHERE namespace=$1 AND thread_id=$2 AND payload->'coordination'->>'status' IN ('waiting','resuming') AND id<>$3)`, t.Namespace, t.ThreadID, t.ParentTurnID).Scan(&coordinating); err != nil {
+		return Turn{}, Message{}, Thread{}, err
+	}
+	if coordinating {
+		return Turn{}, Message{}, Thread{}, ErrTurnActive
+	}
 	var active bool
 	if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM anvil_agents_chat.turns WHERE namespace=$1 AND ((thread_id=$2 AND status IN ('waiting','queued','running')) OR ($4=false AND (payload->>'profileName'=$3 OR payload->'lockKeys' ?| $5) AND status IN ('queued','running'))))`, t.Namespace, t.ThreadID, t.ProfileName, t.Deferred, t.LockKeys).Scan(&active); err != nil {
 		return Turn{}, Message{}, Thread{}, err
@@ -174,6 +198,12 @@ func (s *PostgresStore) QueueTurn(ctx context.Context, t Turn, m Message) (Turn,
 	_, err = tx.Exec(ctx, `INSERT INTO anvil_agents_chat.turns(id,thread_id,namespace,request_id,status,payload) VALUES($1,$2,$3,$4,$5,$6)`, t.ID, t.ThreadID, t.Namespace, t.RequestID, t.Status, raw)
 	if err != nil {
 		return Turn{}, Message{}, Thread{}, err
+	}
+	if t.Resumption {
+		parent.Coordination = &Coordination{Status: "resuming", ResumeTurnID: t.ID}
+		if err = writeCoordination(ctx, tx, parent); err != nil {
+			return Turn{}, Message{}, Thread{}, err
+		}
 	}
 	if err = tx.Commit(ctx); err != nil {
 		return Turn{}, Message{}, Thread{}, err
@@ -214,7 +244,7 @@ func (s *PostgresStore) ListTurns(ctx context.Context, namespace, id string) ([]
 	return readTurns(rows)
 }
 func (s *PostgresStore) PendingTurns(ctx context.Context, limit int) ([]Turn, error) {
-	rows, err := s.pool.Query(ctx, `SELECT payload FROM anvil_agents_chat.turns WHERE status IN ('waiting','queued','running') ORDER BY CASE WHEN status='waiting' THEN 1 ELSE 0 END, created_at LIMIT $1`, limit)
+	rows, err := s.pool.Query(ctx, `SELECT payload FROM anvil_agents_chat.turns WHERE status IN ('waiting','queued','running') OR payload->'coordination'->>'status'='waiting' ORDER BY CASE WHEN status='waiting' THEN 1 ELSE 0 END, created_at LIMIT $1`, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -260,8 +290,20 @@ func (s *PostgresStore) CompleteTurn(ctx context.Context, t Turn, m Message) err
 	if !Active(old) {
 		return nil
 	}
+	if old.Dispatch != nil && old.Dispatch.State == "creating" {
+		return ErrDispatchPending
+	}
 	if !sameTurnAttempt(old, t) {
 		return ErrRequestConflict
+	}
+	parent, err := lockCompletionParent(ctx, tx, old)
+	if err != nil {
+		return err
+	}
+	if parent.Coordination != nil && parent.Coordination.Status == "cancelled" {
+		t.Status = "cancelled"
+		t.Error = "Coordination cancelled"
+		m = Message{Role: RoleSystem, Content: "Coordination cancelled", Metadata: json.RawMessage(`{"kind":"coordination_cancelled"}`)}
 	}
 	if _, err = insertTurnMessage(ctx, tx, thread, m); err != nil {
 		return err
@@ -269,6 +311,17 @@ func (s *PostgresStore) CompleteTurn(ctx context.Context, t Turn, m Message) err
 	old.Status = t.Status
 	old.Error = t.Error
 	old.Delegates = t.Delegates
+	old.Coordination = t.Coordination
+	if old.Resumption && parent.Coordination != nil && parent.Coordination.Status != "cancelled" {
+		state := "done"
+		if t.Status != "succeeded" {
+			state = "failed"
+		}
+		parent.Coordination = &Coordination{Status: state, ResumeTurnID: old.ID, RetryCount: old.RetryCount}
+		if err = writeCoordination(ctx, tx, parent); err != nil {
+			return err
+		}
+	}
 	raw, err = encodeTurn(old)
 	if err != nil {
 		return err
@@ -303,6 +356,15 @@ func (s *MemoryStore) QueueTurn(_ context.Context, t Turn, m Message) (Turn, Mes
 			}
 		}
 	}
+	parent, err := memoryCoordinationParent(s, t)
+	if err != nil {
+		return Turn{}, Message{}, Thread{}, err
+	}
+	for _, old := range s.turns {
+		if old.Namespace == t.Namespace && old.ThreadID == t.ThreadID && CoordinationPending(old) && old.ID != t.ParentTurnID {
+			return Turn{}, Message{}, Thread{}, ErrTurnActive
+		}
+	}
 	for _, old := range s.turns {
 		if old.Namespace == t.Namespace && ((old.ThreadID == t.ThreadID && Active(old)) || (!t.Deferred && sharedTurnResource(old, t) && Active(old) && old.Status != "waiting")) {
 			return Turn{}, Message{}, Thread{}, ErrTurnActive
@@ -314,6 +376,10 @@ func (s *MemoryStore) QueueTurn(_ context.Context, t Turn, m Message) (Turn, Mes
 	m.Sequence = int64(len(s.messages[key]) + 1)
 	s.messages[key] = append(s.messages[key], m)
 	s.turns[t.ID] = t
+	if t.Resumption {
+		parent.Coordination = &Coordination{Status: "resuming", ResumeTurnID: t.ID}
+		s.turns[parent.ID] = parent
+	}
 	thread.UpdatedAt = t.CreatedAt
 	if thread.Title == DefaultThreadTitle {
 		thread.Title = titleFromContent(m.Content)
@@ -330,7 +396,7 @@ func (s *MemoryStore) ListTurns(_ context.Context, namespace, id string) ([]Turn
 	out := []Turn{}
 	for _, t := range s.turns {
 		if t.Namespace == namespace && t.ThreadID == id {
-			out = append(out, t)
+			out = append(out, cloneTurn(t))
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.Before(out[j].CreatedAt) })
@@ -341,8 +407,8 @@ func (s *MemoryStore) PendingTurns(_ context.Context, limit int) ([]Turn, error)
 	defer s.mu.Unlock()
 	out := []Turn{}
 	for _, t := range s.turns {
-		if Active(t) {
-			out = append(out, t)
+		if Active(t) || (t.Coordination != nil && t.Coordination.Status == "waiting") {
+			out = append(out, cloneTurn(t))
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.Before(out[j].CreatedAt) })
@@ -361,16 +427,27 @@ func (s *MemoryStore) CompleteTurn(_ context.Context, t Turn, m Message) error {
 	if !Active(old) {
 		return nil
 	}
+	if old.Dispatch != nil && old.Dispatch.State == "creating" {
+		return ErrDispatchPending
+	}
 	if !sameTurnAttempt(old, t) {
 		return ErrRequestConflict
 	}
 	if Active(t) {
 		return ErrInvalid
 	}
+	parent, err := memoryCompletionParent(s, old)
+	if err != nil {
+		return err
+	}
+	if parent.Coordination != nil && parent.Coordination.Status == "cancelled" {
+		t.Status = "cancelled"
+		t.Error = "Coordination cancelled"
+		m = Message{Role: RoleSystem, Content: "Coordination cancelled", Metadata: json.RawMessage(`{"kind":"coordination_cancelled"}`)}
+	}
 	key := s.threadKey(t.Namespace, t.ThreadID)
 	m.ThreadID = t.ThreadID
 	m.Sequence = int64(len(s.messages[key]) + 1)
-	var err error
 	m, err = NormalizeMessage(m, time.Now().UTC())
 	if err != nil {
 		return err
@@ -379,7 +456,16 @@ func (s *MemoryStore) CompleteTurn(_ context.Context, t Turn, m Message) error {
 	old.Status = t.Status
 	old.Error = t.Error
 	old.Delegates = t.Delegates
-	s.turns[t.ID] = old
+	old.Coordination = t.Coordination
+	s.turns[t.ID] = cloneTurn(old)
+	if old.Resumption && parent.Coordination != nil && parent.Coordination.Status != "cancelled" {
+		state := "done"
+		if t.Status != "succeeded" {
+			state = "failed"
+		}
+		parent.Coordination = &Coordination{Status: state, ResumeTurnID: old.ID, RetryCount: old.RetryCount}
+		s.turns[parent.ID] = parent
+	}
 	return nil
 }
 

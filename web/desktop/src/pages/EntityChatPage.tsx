@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import type { UIConfig } from '../auth/config';
 import { APIError, backendKindFromComposition, harnessRefFromRunProfile, listRunProfiles, type CompositionDocument } from '../api/client';
-import { ensureRemoteStandingThread, createRemoteThread, getRemoteThread, listRemoteHarnesses, listRemoteThreads, sendRemoteMessage, threadHarness, type RemoteThread, type RemoteThreadDetail, type RemoteTurn } from '../api/remoteChat';
+import { retryRemoteSynthesis, cancelRemoteCoordination, ensureRemoteStandingThread, createRemoteThread, getRemoteThread, listRemoteHarnesses, listRemoteThreads, sendRemoteMessage, threadHarness, type RemoteThread, type RemoteThreadDetail, type RemoteTurn } from '../api/remoteChat';
 import { loadNamespace, saveNamespace } from '../state/namespace';
 import { readChatDraft, saveChatDraft, readSelectedChat, saveSelectedChat, readNewChatConfig, saveNewChatConfig, type NewChatConfig } from '../state/chatWorkspace';
 import { RemoteTurnActivity } from '../components/RemoteTurnActivity';
@@ -26,7 +26,8 @@ import { appendLiveToken, eventsRetryDelay, latestSequence, mergeThreadDetail, m
 interface Props { token: string; config: UIConfig }
 const agentName = (name: string) => name.replace(/[-_]+/g, ' ').replace(/\bprimaris\b/gi, 'Primaris').replace(/\bagy\b/gi, 'AGY').replace(/\bprime\b/gi, 'Prime').replace(/^./, letter => letter.toUpperCase());
 
-const turnProgress = (turn: RemoteTurn) => ({waiting: 0, queued: 1, running: 2, succeeded: 3, failed: 3})[turn.status];
+const turnProgress = (turn: RemoteTurn) => ({waiting: 0, queued: 1, running: 2, succeeded: 3, failed: 3, cancelled: 3})[turn.status];
+const coordinationProgress = (turn: RemoteTurn) => ({waiting: 0, resuming: 1, done: 2, failed: 2, cancelled: 2})[turn.coordination?.status ?? 'waiting'];
 const sameTurn = (a: RemoteTurn, b: RemoteTurn) => a.id === b.id || Boolean(a.requestId && a.requestId === b.requestId);
 // Reads and accepted POST receipts can arrive out of order. The append-only
 // transcript and monotonic turn states must never move the visible thread back.
@@ -37,7 +38,8 @@ function regresses(next: RemoteThreadDetail, previous: RemoteThreadDetail | null
   if (previous.activeTurn && !nextTurns.some(turn => sameTurn(turn, previous.activeTurn!))) return true;
   return [...(previous.turns ?? []), ...(previous.activeTurn ? [previous.activeTurn] : [])].some(before =>
     nextTurns.some(after => sameTurn(before, after) && ((after.retryCount ?? 0) < (before.retryCount ?? 0) ||
-      ((after.retryCount ?? 0) === (before.retryCount ?? 0) && turnProgress(after) < turnProgress(before)))));
+      ((after.retryCount ?? 0) === (before.retryCount ?? 0) && turnProgress(after) < turnProgress(before)) ||
+      (before.coordination && (!after.coordination || (after.coordination.retryCount ?? 0) < (before.coordination.retryCount ?? 0) || ((after.coordination.retryCount ?? 0) === (before.coordination.retryCount ?? 0) && coordinationProgress(after) < coordinationProgress(before)))))));
 }
 
 // A delayed pre-repair response must not remove a verified answer already read.
@@ -110,9 +112,11 @@ export function EntityChatPage({token, config}: Props) {
   const enabled = Boolean(config.chat?.enabled);
   const lastTurn = detail?.turns?.at(-1);
   const latestFailed = !optimistic && lastTurn?.status === 'failed' ? lastTurn : undefined;
-  const retryMessage = latestFailed ? detail?.messages.find(message => message.id === latestFailed.userMessageId && message.role === 'user') : undefined;
+  const retryMessage = latestFailed ? detail?.messages.find(message => message.id === latestFailed.userMessageId && message.role === 'user' && (message.metadata as {authorKind?: string} | undefined)?.authorKind !== 'agent_results') : undefined;
+  const failedSynthesis = latestFailed?.resumption && latestFailed.parentTurnId && (latestFailed.retryCount ?? 0) < 2 ? latestFailed : undefined;
   const retryPending = Boolean(optimistic && pending.current?.preserveDraft);
   const earlierFailures = detail?.turns?.filter(t => t.status === 'failed' && t.id !== latestFailed?.id) ?? [];
+  const coordinating = detail?.turns?.find(t => t.coordination?.status === 'waiting' || t.coordination?.status === 'resuming');
   const active = detail?.activeTurn ?? detail?.turns?.find(unfinished);
   const roster = [...profiles].sort((a, b) => Number(b.metadata.name === 'desktop-assistant') - Number(a.metadata.name === 'desktop-assistant') || a.metadata.name.localeCompare(b.metadata.name));
   const managers = projectManagers(roster, namespace);
@@ -132,7 +136,7 @@ export function EntityChatPage({token, config}: Props) {
   const selectedProject = projects.find(project => project.id === namespace);
   const optimisticVisible = optimistic && !detail?.turns?.some(turn => optimistic.requestId && turn.requestId === optimistic.requestId);
   tokenRef.current = token; namespaceRef.current = namespace; threadRef.current = threadID;
-  activeRef.current = Boolean(active || optimistic); liveRef.current = live;
+  activeRef.current = Boolean(active || coordinating || optimistic); liveRef.current = live;
 
   useEffect(() => {
     const controller = new AbortController();
@@ -451,7 +455,7 @@ export function EntityChatPage({token, config}: Props) {
   async function submit(event?: FormEvent, retry?: {content: string; forceNew?: boolean}) {
     event?.preventDefault();
     const content = (retry?.content ?? draft).trim();
-    if (!content || busy || submitting.current || (retryPending && !retry) || active || unavailable || initializing || (!profile && !harness) || !enabled || (coordinate && !peers.length)) return;
+    if (!content || busy || submitting.current || (retryPending && !retry) || active || coordinating || unavailable || initializing || (!profile && !harness) || !enabled || (coordinate && !peers.length)) return;
     submitting.current = true;
     jumpToBottom();
     setBusy(true); setError(''); setOptimistic({content}); setSendPhase(threadID ? 'sending' : 'saving');
@@ -460,7 +464,7 @@ export function EntityChatPage({token, config}: Props) {
       if (!target) {
         const thread = await createRemoteThread(token, namespace, {
           profileName: profile || undefined, harnessProfileName: harness || undefined, mode,
-          metadata: coordinate ? {coordination: {enabled: true, allowedProfiles: peers}} : undefined,
+          metadata: coordinate ? {coordination: {enabled: true, allowedProfiles: peers, returnReplies: true}} : undefined,
           title: `${mode === 'fleet' ? 'Manager · ' : ''}${profile || harness}`,
         });
         target = thread.id; setThreadID(target); saveSelectedChat(namespace, target);
@@ -489,6 +493,17 @@ export function EntityChatPage({token, config}: Props) {
       });
       refreshThreadRef.current();
     } catch (err) { setError(formatTurnError(err)); setSendPhase('unconfirmed'); }
+    finally { submitting.current = false; setBusy(false); }
+  }
+
+  async function retryFinalAnswer(turn: RemoteTurn) {
+    if (!threadID || busy || submitting.current || active || coordinating || !enabled) return;
+    submitting.current = true; setBusy(true); setError('');
+    try {
+      await retryRemoteSynthesis(token, namespace, threadID, turn.id, turn.retryCount ?? 0);
+      const next = await getRemoteThread(token, namespace, threadID);
+      setDetail(previous => regresses(next, previous) ? previous : retainRecoveredReplies(next, previous));
+    } catch (err) { setError(formatTurnError(err)); }
     finally { submitting.current = false; setBusy(false); }
   }
 
@@ -666,8 +681,13 @@ export function EntityChatPage({token, config}: Props) {
             <h3>{unavailable ? 'Conversation unavailable' : initializing || (threadID && !detail) ? 'Opening conversation…' : profile ? `Talk with ${agentName(profile)}` : 'Chat with a harness'}</h3>
             <p>{unavailable ? 'Your draft is preserved. Select the agent to try again.' : isManager ? 'Plan work, review what your agents are doing, or ask for changes to their schedules and instructions.' : profile ? 'Your messages and replies stay here as you work together.' : 'Choose a harness in Conversation details to begin.'}</p>
           </div>}
-          {detail?.messages.map(message => <RemoteMessage key={message.id} message={message} agentLabel={agentLabel} createPrincipal={createPrincipal} profileNames={profileNames}
-            entering={entering(message)} onCreateRequest={onCreateRequest} onHandoff={onHandoff} onViewOutput={onViewOutput}/>)}
+          {detail?.messages.map(message => {
+            if ((message.metadata as {authorKind?: string} | undefined)?.authorKind === 'agent_results') {
+              return <aside className="remote-chat-caption" key={message.id}>Peer results received for the agent’s final answer.</aside>;
+            }
+            return <RemoteMessage key={message.id} message={message} agentLabel={agentLabel} createPrincipal={createPrincipal} profileNames={profileNames}
+              entering={entering(message)} onCreateRequest={onCreateRequest} onHandoff={onHandoff} onViewOutput={onViewOutput}/>;
+          })}
           {optimisticVisible && <article className="chat-bubble chat-bubble-user" aria-label="Your pending message">
             <header className="chat-bubble-header"><span className="chat-bubble-role">You</span></header>
             <div className="chat-bubble-body"><MarkdownBody content={optimistic.content}/></div>
@@ -679,15 +699,16 @@ export function EntityChatPage({token, config}: Props) {
           </article>}
           <RemoteTurnActivity token={token} namespace={namespace} turn={active ?? (optimistic ? undefined : detail?.turns?.at(-1))} recoveryPending={detail?.recoveryPending} agentLabel={detail?.profileName || profile || harness}/>
 
-          {detail?.turns?.flatMap(t => t.delegates ?? []).map(delivery => <div className="remote-turn-status" key={delivery.turnId}>{delivery.status === 'succeeded' ? `${delivery.profileName} replied.` : delivery.status === 'running' ? `${delivery.profileName} is working.` : delivery.status === 'failed' ? `${delivery.profileName} could not finish.` : `Message saved for ${delivery.profileName}.`} <button className="btn btn-ghost" disabled={busy} onClick={() => {const thread = threads.find(t => t.id === delivery.threadId); openThread(thread ?? {id: delivery.threadId, namespace, profileName: delivery.profileName, mode: 'persona', title: delivery.profileName, createdAt: '', updatedAt: '', createdBy: ''});}}>Open peer conversation</button></div>)}
-          {latestFailed && <div className="banner banner-error"><span>Turn failed: {latestFailed.error || latestFailed.runName}</span>{retryMessage && <button type="button" className="btn btn-ghost" disabled={busy || Boolean(active) || unavailable || initializing || !enabled} onClick={() => void submit(undefined, {content: retryMessage.content, forceNew: true})}>Retry last message</button>}</div>}
+          {detail?.turns?.filter(t => t.coordination).map(t => <div className="remote-turn-status" key={`coordination-${t.id}`} role="status"><span>{t.coordination?.status === 'waiting' ? 'Waiting for peer replies. The agent will answer here automatically.' : t.coordination?.status === 'resuming' ? 'Peer results received. The agent is preparing the final answer.' : t.coordination?.status === 'cancelled' ? 'Coordination cancelled.' : t.coordination?.status === 'failed' ? 'The agent could not complete the final answer.' : 'Coordination complete.'}</span>{(t.coordination?.status === 'waiting' || t.coordination?.status === 'resuming') && <button className="btn btn-ghost" disabled={busy} onClick={() => {setBusy(true); void cancelRemoteCoordination(token, namespace, detail!.id, t.id).then(() => getRemoteThread(token, namespace, detail!.id)).then(next => setDetail(previous => regresses(next, previous) ? previous : next)).catch(err => setError(formatTurnError(err))).finally(() => setBusy(false));}}>Stop coordination</button>}</div>)}
+          {detail?.turns?.flatMap(t => t.delegates ?? []).map(delivery => <div className="remote-turn-status" key={delivery.turnId}>{delivery.status === 'succeeded' ? `${delivery.profileName} replied.` : delivery.status === 'running' ? `${delivery.profileName} is working.` : delivery.status === 'cancelled' ? `${delivery.profileName} coordination cancelled.` : delivery.status === 'failed' ? `${delivery.profileName} could not finish.` : `Message saved for ${delivery.profileName}.`} <button className="btn btn-ghost" disabled={busy} onClick={() => {const thread = threads.find(t => t.id === delivery.threadId); openThread(thread ?? {id: delivery.threadId, namespace, profileName: delivery.profileName, mode: 'persona', title: delivery.profileName, createdAt: '', updatedAt: '', createdBy: ''});}}>Open peer conversation</button></div>)}
+          {latestFailed && <div className="banner banner-error"><span>Turn failed: {latestFailed.error || latestFailed.runName}</span>{retryMessage && <button type="button" className="btn btn-ghost" disabled={busy || Boolean(active) || unavailable || initializing || !enabled} onClick={() => void submit(undefined, {content: retryMessage.content, forceNew: true})}>Retry last message</button>}{failedSynthesis && <button type="button" className="btn btn-ghost" disabled={busy || Boolean(active) || Boolean(coordinating) || unavailable || initializing || !enabled} onClick={() => void retryFinalAnswer(failedSynthesis)}>Retry final answer</button>}</div>}
           {(active ?? lastTurn)?.attempts?.length ? <details className="remote-chat-caption"><summary>Earlier startup attempts ({(active ?? lastTurn)!.attempts!.length})</summary>{(active ?? lastTurn)!.attempts!.map(attempt => <p key={attempt.runName}>{attempt.error} <button type="button" className="btn btn-ghost" onClick={() => {setHistoricalOutput({runName: attempt.runName, backend}); setRawActivityOpen(true);}}>View attempt output</button></p>)}</details> : null}
           {earlierFailures.length > 0 && <details className="remote-chat-caption"><summary>Earlier failed turns ({earlierFailures.length})</summary>{earlierFailures.map(t => <p key={t.id}>Turn failed: {t.error || t.runName}</p>)}</details>}
           {unseen > 0 && <button type="button" className="chat-jump" onClick={jumpToBottom}>{unseen === 1 ? '1 new message' : `${unseen} new messages`}</button>}
         </div>
         <form className="chat-composer plate" onSubmit={e => void submit(e)}>
           <label className="field"><span className="label">Message</span><textarea className="textarea chat-composer-input" rows={3} aria-label="Message" value={draft} disabled={busy || !enabled || initializing} onChange={e => changeDraft(e.target.value)} onKeyDown={e => {if(e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {e.preventDefault(); void submit();}}} placeholder="Message this agent…"/></label>
-          <div className="chat-composer-actions"><span className="chat-composer-hint">Enter to send · Shift + Enter for a new line</span><button className="btn btn-primary" disabled={busy || retryPending || Boolean(active) || unavailable || initializing || !draft.trim() || (!profile && !harness) || !enabled || (coordinate && !peers.length)}>{busy ? 'Sending…' : active ? 'Waiting for reply…' : 'Send'}</button></div>
+          <div className="chat-composer-actions"><span className="chat-composer-hint">Enter to send · Shift + Enter for a new line</span><button className="btn btn-primary" disabled={busy || retryPending || Boolean(active) || Boolean(coordinating) || unavailable || initializing || !draft.trim() || (!profile && !harness) || !enabled || (coordinate && !peers.length)}>{busy ? 'Sending…' : (active || coordinating) ? 'Waiting for reply…' : 'Send'}</button></div>
         </form>
         {outputRun && <details className="remote-run-details" open={rawActivityOpen} onToggle={e => setRawActivityOpen(e.currentTarget.open)}><summary>{outputBackend === 'hermesAgent' ? 'Reasoning and runner output' : 'Runner activity'}</summary>{rawActivityOpen && <><p className="remote-chat-caption">Original runner output for {outputRun}. Access uses your current run-read permissions; older logs may no longer be retained.</p>{historicalOutput && currentOutputRun && currentOutputRun !== outputRun && <button type="button" className="btn btn-ghost" onClick={() => {setHistoricalOutput(undefined); setRawActivityOpen(false);}}>Back to latest turn output</button>}<LiveStream token={token} namespace={namespace} name={outputRun}/></>}</details>}
       </section>
