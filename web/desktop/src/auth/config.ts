@@ -25,6 +25,7 @@ export type UIConfig = {
   };
   chat?: {
     enabled: boolean;
+    subjectRoutingEnabled?: boolean;
     path?: string;
   };
   desktop?: {
@@ -113,6 +114,7 @@ export async function loadUIConfig(force = false): Promise<UIConfig> {
       },
       chat: {
         enabled: Boolean(chat?.enabled),
+        subjectRoutingEnabled: chat?.subjectRoutingEnabled,
         path: chat?.path,
       },
       desktop: {

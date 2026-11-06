@@ -10,6 +10,9 @@ import { AuthCallbackPage } from "./pages/AuthCallbackPage";
 import { EntityChatPage } from "./pages/EntityChatPage";
 import { HarnessesPage } from "./pages/HarnessesPage";
 import { LocalChatPage } from "./pages/LocalChatPage";
+import { LocalManagerPage } from "./pages/LocalManagerPage";
+import { LocalScenarioBench } from "./pages/LocalScenarioBench";
+import { ManagerPage } from "./pages/ManagerPage";
 import { WrapperPage } from "./pages/WrapperPage";
 import { DesktopIcon, HazyForgeMark } from "./components/AgentAvatar";
 import { PRODUCT_TITLE } from "./product";
@@ -168,6 +171,8 @@ export default function App() {
     setChatLocation(next);
     try { localStorage.setItem('anvil-agents-desktop.chat-location', next); } catch { /* In-memory selection remains. */ }
   };
+  const managerReady = signedIn && Boolean(config?.chat?.subjectRoutingEnabled);
+  const manager = snapshot && signedIn && config ? <ManagerPage token={token} config={config}/> : login;
   const chat = <>
     <div className="chat-location" role="group" aria-label="Chat execution location">
       <span className="chat-location-label">Location</span>
@@ -181,14 +186,20 @@ export default function App() {
   </>;
 
   return (
-    <div className={`desktop-shell ${location.pathname === "/chat" ? "desktop-shell-chat" : ""}`}>
+    <div className={`desktop-shell ${location.pathname === "/chat" ? "desktop-shell-chat" : ""}${location.pathname === "/manager" || location.pathname.startsWith("/local-manager") ? " desktop-shell-manager" : ""}`}>
       <aside className="sidebar">
         <div className="brand-lockup" title={snapshot?.productTitle ?? PRODUCT_TITLE}>
           <HazyForgeMark/>
           <div className="wordmark"><strong>Anvil Agents</strong><small>Desktop</small></div>
         </div>
         <nav className="rail" aria-label="Primary">
-          <NavLink to="/chat" className={({ isActive }) => (isActive ? "rail-link active" : "rail-link")}>
+          <NavLink to="/local-manager" aria-disabled={localChatBusy} onClick={event => { if (localChatBusy) event.preventDefault(); }} className={({ isActive }) => isActive ? "rail-link active" : "rail-link"}>
+            <DesktopIcon kind="project"/><span className="rail-label">Local Manager</span>
+          </NavLink>
+          {signedIn && config?.chat?.enabled && <NavLink to="/manager" aria-disabled={localChatBusy} onClick={event => { if (localChatBusy) event.preventDefault(); }} className={({ isActive }) => isActive ? "rail-link active" : "rail-link"}>
+            <DesktopIcon kind="project"/><span className="rail-label">Manager</span>
+          </NavLink>}
+          <NavLink to="/chat" aria-disabled={localChatBusy} onClick={event => { if (localChatBusy) event.preventDefault(); }} className={({ isActive }) => (isActive ? "rail-link active" : "rail-link")}>
             <DesktopIcon kind="chat"/><span className="rail-label">Chat</span>
           </NavLink>
           <NavLink to="/wrapper" aria-disabled={localChatBusy} onClick={e => {if(localChatBusy) e.preventDefault();}} className={({ isActive }) => (isActive ? "rail-link active" : "rail-link")}>
@@ -238,6 +249,9 @@ export default function App() {
           <Route path="/auth/callback" element={<AuthCallbackPage onAuthenticated={handleAuthenticated} />} />
           <Route path="/callback" element={<AuthCallbackPage onAuthenticated={handleAuthenticated} />} />
           <Route path="/chat" element={chat} />
+          <Route path="/manager" element={manager}/>
+          <Route path="/local-manager" element={snapshot ? <LocalManagerPage snapshot={snapshot} onBusyChange={setLocalChatBusy} signedIn={signedIn} config={config} getAccessToken={freshLocalAccessToken}/> : <div className="empty">Loading local conversations…</div>}/>
+          <Route path="/local-manager/scenarios" element={<LocalScenarioBench/>}/>
           <Route
             path="/wrapper"
             element={
@@ -258,7 +272,7 @@ export default function App() {
               )
             }
           />
-          <Route path="/" element={<Navigate to="/chat" replace />} />
+          <Route path="/" element={snapshot && (!snapshot.prefs.apiOrigin || config || configError) ? <Navigate to={managerReady && chatLocation === 'remote' ? '/manager' : snapshot.localManager?.enabled ? '/local-manager' : '/chat'} replace/> : <div className="empty">Loading Anvil Agents Desktop…</div>} />
           <Route path="*" element={<Navigate to="/chat" replace />} />
         </Routes>
       </main>

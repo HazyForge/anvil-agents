@@ -258,6 +258,9 @@ true
 
 {{- define "anvil-agents.validateChat" -}}
 {{- $chatEnabled := dig "chat" "enabled" false .Values.api.config -}}
+{{- if and (dig "chat" "subjectRoutingEnabled" false .Values.api.config) (not $chatEnabled) -}}
+  {{- fail "api.config.chat.subjectRoutingEnabled requires api.config.chat.enabled=true" -}}
+{{- end -}}
 {{- if and $chatEnabled (not .Values.api.enabled) -}}
   {{- fail "api.config.chat.enabled requires api.enabled=true" -}}
 {{- end -}}

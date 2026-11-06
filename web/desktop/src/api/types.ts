@@ -51,6 +51,7 @@ export interface WrapperInfo {
 
 export interface Snapshot {
   productTitle: string;
+  localManager?: { enabled: boolean; available: boolean; reason?: string };
   listenAddr?: string;
   prefs: Prefs;
   api: APIStatus;

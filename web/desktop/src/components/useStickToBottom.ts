@@ -76,7 +76,7 @@ export function useStickToBottom(ref: RefObject<HTMLElement | null>, {resetKey, 
       element.removeEventListener('scroll', onScroll);
       element.removeEventListener('scrollend', onScrollEnd);
     };
-  }, [ref]);
+  }, [ref, resetKey]);
 
   useLayoutEffect(() => {
     lastArrivals.current = arrivals;

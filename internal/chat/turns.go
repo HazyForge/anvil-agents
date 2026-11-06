@@ -19,9 +19,13 @@ var ErrRequestConflict = errors.New("request ID already used with different cont
 // Turn is a durable outbox entry. RunJSON freezes the accepted execution intent;
 // an API restart retries the same Kubernetes name rather than creating new work.
 type Turn struct {
-	ExpectedSequence *int64          `json:"-"`
-	LockKeys         []string        `json:"-"`
-	Deferred         bool            `json:"-"`
+	ExpectedSequence *int64   `json:"-"`
+	LockKeys         []string `json:"-"`
+	Deferred         bool     `json:"-"`
+	// QueueAfterActive is an admission-only opt-in for manager followups. Such
+	// turns persist as waiting and activate in order after earlier work ends.
+	// Ordinary chat keeps rejecting another unfinished turn on the same thread.
+	QueueAfterActive bool            `json:"-"`
 	Delegates        []Delegate      `json:"delegates,omitempty"`
 	ProfileName      string          `json:"profileName"`
 	RunUID           string          `json:"runUid,omitempty"`
@@ -98,7 +102,7 @@ func prepareTurn(t Turn, m Message) (Turn, Message, error) {
 	}
 	sort.Strings(t.LockKeys)
 	t.Status = "queued"
-	if t.Deferred {
+	if t.Deferred || t.QueueAfterActive {
 		t.Status = "waiting"
 	}
 	t.CreatedAt = time.Now().UTC()
@@ -148,7 +152,7 @@ func (s *PostgresStore) QueueTurn(ctx context.Context, t Turn, m Message) (Turn,
 		return Turn{}, Message{}, Thread{}, err
 	}
 	var active bool
-	if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM anvil_agents_chat.turns WHERE namespace=$1 AND ((thread_id=$2 AND status IN ('waiting','queued','running')) OR ($4=false AND (payload->>'profileName'=$3 OR payload->'lockKeys' ?| $5) AND status IN ('queued','running'))))`, t.Namespace, t.ThreadID, t.ProfileName, t.Deferred, t.LockKeys).Scan(&active); err != nil {
+	if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM anvil_agents_chat.turns WHERE namespace=$1 AND $6=false AND ((thread_id=$2 AND status IN ('waiting','queued','running')) OR ($4=false AND (payload->>'profileName'=$3 OR payload->'lockKeys' ?| $5) AND status IN ('queued','running'))))`, t.Namespace, t.ThreadID, t.ProfileName, t.Deferred, t.LockKeys, t.QueueAfterActive).Scan(&active); err != nil {
 		return Turn{}, Message{}, Thread{}, err
 	}
 	if active {
@@ -163,6 +167,13 @@ func (s *PostgresStore) QueueTurn(ctx context.Context, t Turn, m Message) (Turn,
 			return Turn{}, Message{}, Thread{}, ErrConversationChanged
 		}
 	}
+	// Timestamp accepted order using the database clock, after acquiring the
+	// shared resource and thread locks. Client clocks and lock wait times cannot
+	// reverse FIFO order between API replicas.
+	if err = tx.QueryRow(ctx, `SELECT clock_timestamp()`).Scan(&t.CreatedAt); err != nil {
+		return Turn{}, Message{}, Thread{}, err
+	}
+	m.CreatedAt = t.CreatedAt
 	m, err = insertTurnMessage(ctx, tx, thread, m)
 	if err != nil {
 		return Turn{}, Message{}, Thread{}, err
@@ -206,7 +217,7 @@ func (s *PostgresStore) ListTurns(ctx context.Context, namespace, id string) ([]
 	if _, err := s.GetThread(ctx, namespace, id); err != nil {
 		return nil, err
 	}
-	rows, err := s.pool.Query(ctx, `SELECT payload FROM anvil_agents_chat.turns WHERE namespace=$1 AND thread_id=$2 ORDER BY created_at`, namespace, id)
+	rows, err := s.pool.Query(ctx, `SELECT payload FROM anvil_agents_chat.turns WHERE namespace=$1 AND thread_id=$2 ORDER BY created_at,id`, namespace, id)
 	if err != nil {
 		return nil, err
 	}
@@ -214,7 +225,7 @@ func (s *PostgresStore) ListTurns(ctx context.Context, namespace, id string) ([]
 	return readTurns(rows)
 }
 func (s *PostgresStore) PendingTurns(ctx context.Context, limit int) ([]Turn, error) {
-	rows, err := s.pool.Query(ctx, `SELECT payload FROM anvil_agents_chat.turns WHERE status IN ('waiting','queued','running') ORDER BY CASE WHEN status='waiting' THEN 1 ELSE 0 END, created_at LIMIT $1`, limit)
+	rows, err := s.pool.Query(ctx, `SELECT payload FROM anvil_agents_chat.turns WHERE status IN ('waiting','queued','running') ORDER BY CASE WHEN status='waiting' THEN 1 ELSE 0 END, created_at,id LIMIT $1`, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -304,13 +315,15 @@ func (s *MemoryStore) QueueTurn(_ context.Context, t Turn, m Message) (Turn, Mes
 		}
 	}
 	for _, old := range s.turns {
-		if old.Namespace == t.Namespace && ((old.ThreadID == t.ThreadID && Active(old)) || (!t.Deferred && sharedTurnResource(old, t) && Active(old) && old.Status != "waiting")) {
+		if !t.QueueAfterActive && old.Namespace == t.Namespace && ((old.ThreadID == t.ThreadID && Active(old)) || (!t.Deferred && sharedTurnResource(old, t) && Active(old) && old.Status != "waiting")) {
 			return Turn{}, Message{}, Thread{}, ErrTurnActive
 		}
 	}
 	if t.ExpectedSequence != nil && int64(len(s.messages[key])) != *t.ExpectedSequence {
 		return Turn{}, Message{}, Thread{}, ErrConversationChanged
 	}
+	t.CreatedAt = time.Now().UTC()
+	m.CreatedAt = t.CreatedAt
 	m.Sequence = int64(len(s.messages[key]) + 1)
 	s.messages[key] = append(s.messages[key], m)
 	s.turns[t.ID] = t
@@ -333,7 +346,7 @@ func (s *MemoryStore) ListTurns(_ context.Context, namespace, id string) ([]Turn
 			out = append(out, t)
 		}
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.Before(out[j].CreatedAt) })
+	sort.Slice(out, func(i, j int) bool { return turnBefore(out[i], out[j]) })
 	return out, nil
 }
 func (s *MemoryStore) PendingTurns(_ context.Context, limit int) ([]Turn, error) {
@@ -345,7 +358,12 @@ func (s *MemoryStore) PendingTurns(_ context.Context, limit int) ([]Turn, error)
 			out = append(out, t)
 		}
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.Before(out[j].CreatedAt) })
+	sort.Slice(out, func(i, j int) bool {
+		if (out[i].Status == "waiting") != (out[j].Status == "waiting") {
+			return out[i].Status != "waiting"
+		}
+		return turnBefore(out[i], out[j])
+	})
 	if len(out) > limit {
 		out = out[:limit]
 	}
@@ -418,15 +436,25 @@ func (s *PostgresStore) ActivateTurn(ctx context.Context, t Turn) (bool, error) 
 	if err = lockTurnResources(ctx, tx, t); err != nil {
 		return false, err
 	}
-	var status string
-	if err = tx.QueryRow(ctx, `SELECT status FROM anvil_agents_chat.turns WHERE id=$1`, t.ID).Scan(&status); err != nil {
+	var raw []byte
+	if err = tx.QueryRow(ctx, `SELECT payload FROM anvil_agents_chat.turns WHERE id=$1 AND namespace=$2 AND thread_id=$3 FOR UPDATE`, t.ID, t.Namespace, t.ThreadID).Scan(&raw); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			err = ErrNotFound
+		}
 		return false, err
 	}
-	if status != "waiting" {
-		return status == "queued" || status == "running", nil
+	old, err := decodeTurn(raw)
+	if err != nil {
+		return false, err
+	}
+	if !sameTurnAttempt(old, t) {
+		return false, ErrRequestConflict
+	}
+	if old.Status != "waiting" {
+		return old.Status == "queued" || old.Status == "running", nil
 	}
 	var busy bool
-	if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM anvil_agents_chat.turns WHERE namespace=$1 AND (payload->>'profileName'=$2 OR payload->'lockKeys' ?| $3) AND status IN ('queued','running'))`, t.Namespace, t.ProfileName, t.LockKeys).Scan(&busy); err != nil {
+	if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM anvil_agents_chat.turns WHERE namespace=$1 AND id<>$5 AND (thread_id=$4 OR payload->>'profileName'=$2 OR payload->'lockKeys' ?| $3) AND (status IN ('queued','running') OR (status='waiting' AND (created_at,id)<($6,$5))))`, old.Namespace, old.ProfileName, old.LockKeys, old.ThreadID, old.ID, old.CreatedAt).Scan(&busy); err != nil {
 		return false, err
 	}
 	if busy {
@@ -447,8 +475,11 @@ func (s *MemoryStore) ActivateTurn(_ context.Context, t Turn) (bool, error) {
 	if old.Status != "waiting" {
 		return Active(old), nil
 	}
+	if !sameTurnAttempt(old, t) {
+		return false, ErrRequestConflict
+	}
 	for _, other := range s.turns {
-		if other.Namespace == old.Namespace && sharedTurnResource(other, old) && Active(other) && other.Status != "waiting" {
+		if other.ID != old.ID && other.Namespace == old.Namespace && (other.ThreadID == old.ThreadID || sharedTurnResource(other, old)) && Active(other) && (other.Status != "waiting" || turnBefore(other, old)) {
 			return false, nil
 		}
 	}
@@ -458,7 +489,7 @@ func (s *MemoryStore) ActivateTurn(_ context.Context, t Turn) (bool, error) {
 }
 
 func lockTurnResources(ctx context.Context, tx pgx.Tx, t Turn) error {
-	keys := append([]string{"profile:" + t.ProfileName}, t.LockKeys...)
+	keys := append([]string{"profile:" + t.ProfileName, "thread:" + t.ThreadID}, t.LockKeys...)
 	sort.Strings(keys)
 	for _, key := range keys {
 		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`, t.Namespace+"/"+key); err != nil {
@@ -466,6 +497,13 @@ func lockTurnResources(ctx context.Context, tx pgx.Tx, t Turn) error {
 		}
 	}
 	return nil
+}
+
+func turnBefore(a, b Turn) bool {
+	if a.CreatedAt.Equal(b.CreatedAt) {
+		return a.ID < b.ID
+	}
+	return a.CreatedAt.Before(b.CreatedAt)
 }
 func sharedTurnResource(a, b Turn) bool {
 	if a.ProfileName == b.ProfileName {

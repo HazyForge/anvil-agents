@@ -122,3 +122,28 @@ WHERE table_schema = $1 AND table_name = 'checkpoints'`, SchemaName).Scan(&check
 		t.Fatalf("namespace isolation failed: %#v", sameNS)
 	}
 }
+
+func TestPostgresQueuedFollowupsSurviveReconnect(t *testing.T) {
+	databaseURL := os.Getenv("ANVIL_AGENTS_TEST_CHAT_DATABASE_URL")
+	if databaseURL == "" {
+		databaseURL = os.Getenv("ANVIL_AGENTS_TEST_ARCHIVE_DATABASE_URL")
+	}
+	if databaseURL == "" {
+		t.Skip("set ANVIL_AGENTS_TEST_CHAT_DATABASE_URL for PostgreSQL FIFO/reconnect proof")
+	}
+	open := func() *PostgresStore {
+		t.Helper()
+		store, err := OpenPostgresStore(context.Background(), databaseURL)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return store
+	}
+	store := open()
+	t.Cleanup(func() { store.Close() })
+	exerciseQueuedFollowups(t, store, func() Store {
+		store.Close()
+		store = open()
+		return store
+	})
+}

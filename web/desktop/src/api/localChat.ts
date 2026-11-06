@@ -1,12 +1,12 @@
 import { parseSSEChunk } from './stream';
 
-export type LocalChatEvent = {anvilConnected?: boolean; remoteNamespace?: string; action?: string; status?: string; line?: string; workdir?: string; target?: string; wslDistro?: string; stdout?: string; stderr?: string; exitCode?: number; timedOut?: boolean; message?: string; stdoutTruncated?: boolean; stdoutEventsDropped?: boolean};
+export type LocalChatEvent = {code?: string; anvilConnected?: boolean; remoteNamespace?: string; action?: string; status?: string; line?: string; workdir?: string; target?: string; wslDistro?: string; stdout?: string; stderr?: string; exitCode?: number; timedOut?: boolean; message?: string; stdoutTruncated?: boolean; stdoutEventsDropped?: boolean};
 
 // An HTTP rejection confirms that this request never entered the stream.
 // Transport failures after admission provide no such execution guarantee.
 export class LocalChatRequestError extends Error {}
 
-export async function streamLocalChat(body: {harness: string; prompt: string; workdir?: string; remoteNamespace?: string}, signal: AbortSignal, onEvent: (event: string, data: LocalChatEvent) => void, accessToken?: string) {
+export async function streamLocalChat(body: {conversationId?: string; harness: string; prompt: string; workdir?: string; remoteNamespace?: string; expectedRuntime?: {target: string; wslDistro?: string}}, signal: AbortSignal, onEvent: (event: string, data: LocalChatEvent) => void, accessToken?: string) {
   const response = await fetch('/local/v1/chat/stream', {method: 'POST', headers: {'Content-Type': 'application/json', ...(body.remoteNamespace && accessToken ? {Authorization: `Bearer ${accessToken}`} : {})}, body: JSON.stringify({...body, timeoutSeconds: 300}), signal});
   if (!response.ok) {
     let message = `Local harness request failed (${response.status})`;

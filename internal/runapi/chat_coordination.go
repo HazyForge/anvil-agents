@@ -159,6 +159,9 @@ func (s *Server) chatWorkInventory(ctx context.Context, thread chat.Thread) (str
 	items := []work{}
 	sort.Slice(runs.Items, func(i, j int) bool { return runs.Items[i].CreationTimestamp.Before(&runs.Items[j].CreationTimestamp) })
 	for _, run := range runs.Items {
+		if owner := run.Annotations[subjectOwnerAnnotation]; owner != "" && owner != chatSubjectOwner(thread) {
+			continue
+		}
 		if run.Status.Phase == agents.AgentRunPhaseSucceeded || run.Status.Phase == agents.AgentRunPhaseFailed {
 			continue
 		}

@@ -2,6 +2,7 @@ package chat
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sort"
 	"sync"
@@ -10,11 +11,14 @@ import (
 
 // MemoryStore is an in-process standing-chat store for API tests.
 type MemoryStore struct {
-	mu       sync.Mutex
-	threads  map[string]Thread
-	messages map[string][]Message
-	turns    map[string]Turn
-	standing map[string]string
+	mu              sync.Mutex
+	threads         map[string]Thread
+	messages        map[string][]Message
+	turns           map[string]Turn
+	standing        map[string]string
+	subjects        map[string]Subject
+	routingRequests map[string]RoutingRequest
+	routingLocks    map[string]*memoryRoutingLock
 }
 
 func NewMemoryStore() *MemoryStore {
@@ -60,6 +64,15 @@ func (s *MemoryStore) ListThreads(_ context.Context, filter ThreadFilter) ([]Thr
 	for _, thread := range s.threads {
 		if thread.Namespace != filter.Namespace {
 			continue
+		}
+		if filter.VisibleTo != "" {
+			var metadata struct {
+				Owner string `json:"subjectOwner"`
+			}
+			_ = json.Unmarshal(thread.Metadata, &metadata)
+			if metadata.Owner != "" && metadata.Owner != filter.VisibleTo {
+				continue
+			}
 		}
 		if filter.ProfileName != "" && thread.ProfileName != filter.ProfileName {
 			continue
