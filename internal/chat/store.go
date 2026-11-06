@@ -125,6 +125,7 @@ type Store interface {
 	QueueTurn(context.Context, Turn, Message) (Turn, Message, Thread, error)
 	ListTurns(context.Context, string, string) ([]Turn, error)
 	PendingTurns(context.Context, int) ([]Turn, error)
+	PendingTurnsPage(context.Context, int, *PendingTurnCursor) ([]Turn, *PendingTurnCursor, error)
 	CompleteTurn(context.Context, Turn, Message) error
 	CancelCoordination(context.Context, string, string, string) (Turn, error)
 	RecordRun(context.Context, Turn, string) error
@@ -144,6 +145,14 @@ type Store interface {
 	AppendMessages(ctx context.Context, namespace, threadID string, messages []Message) ([]Message, Thread, error)
 	Ping(ctx context.Context) error
 	Close()
+}
+
+// PendingTurnCursor marks the last row visited in the recovery ordering.
+// Restarting a scan with a nil cursor revisits rows whose state changed.
+type PendingTurnCursor struct {
+	Priority  int
+	CreatedAt time.Time
+	ID        string
 }
 
 type Thread struct {

@@ -351,14 +351,20 @@ func (s *Server) prompt(ctx context.Context, w http.ResponseWriter, request mess
 	current.cancelRequested = false
 	current.dispatchCancelled.Store(false)
 	s.mu.Unlock()
-	defer func() {
+	released := false
+	release := func() {
+		if released {
+			return
+		}
 		s.mu.Lock()
 		current.busy = false
 		if current.nativeID == "" && s.sessions[params.SessionID] == current {
 			delete(s.sessions, params.SessionID)
 		}
 		s.mu.Unlock()
-	}()
+		released = true
+	}
+	defer release()
 	catalogCtx := ctx
 	catalogCancel := func() {}
 	if s.selectionEnabled() {
@@ -369,6 +375,7 @@ func (s *Server) prompt(ctx context.Context, w http.ResponseWriter, request mess
 		s.mu.Lock()
 		cancelled := current.cancelRequested
 		s.mu.Unlock()
+		release()
 		if cancelled {
 			rpcResult(w, request.ID, map[string]any{"stopReason": "cancelled"})
 			return
@@ -391,10 +398,12 @@ func (s *Server) prompt(ctx context.Context, w http.ResponseWriter, request mess
 		cancelled := current.cancelRequested
 		s.mu.Unlock()
 		if cancelled {
+			release()
 			rpcResult(w, request.ID, map[string]any{"stopReason": "cancelled"})
 			return
 		}
 		if err != nil {
+			release()
 			rpcFailure(w, request.ID, -32000, "harness selection unavailable")
 			return
 		}
@@ -403,6 +412,7 @@ func (s *Server) prompt(ctx context.Context, w http.ResponseWriter, request mess
 	cancelled := current.cancelRequested
 	s.mu.Unlock()
 	if cancelled {
+		release()
 		rpcResult(w, request.ID, map[string]any{"stopReason": "cancelled"})
 		return
 	}
@@ -505,13 +515,18 @@ func (s *Server) prompt(ctx context.Context, w http.ResponseWriter, request mess
 		if errors.Is(err, ErrProtocol) || errors.Is(err, ErrSelection) {
 			_ = s.client.Close()
 		}
+		release()
 		if err := write(map[string]any{"jsonrpc": "2.0", "id": request.ID, "error": rpcError{Code: -32000, Message: "harness turn failed"}}, true); err != nil {
 			panic(http.ErrAbortHandler)
 		}
 		return
 	}
+	// The native call is complete. Release the session before publishing the
+	// terminal frame so a client can immediately send the next turn.
+	release()
 	if err := write(map[string]any{"jsonrpc": "2.0", "id": request.ID, "result": completed}, true); err != nil {
-		_ = s.client.Close()
+		// The native turn has already completed; a disconnected HTTP client
+		// must not close the shared connection underneath a later turn.
 		panic(http.ErrAbortHandler)
 	}
 }

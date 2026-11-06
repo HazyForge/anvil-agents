@@ -258,12 +258,42 @@ func (s *PostgresStore) ListTurns(ctx context.Context, namespace, id string) ([]
 	return readTurns(rows)
 }
 func (s *PostgresStore) PendingTurns(ctx context.Context, limit int) ([]Turn, error) {
-	rows, err := s.pool.Query(ctx, `SELECT payload FROM anvil_agents_chat.turns WHERE status IN ('waiting','queued','running') OR payload->'coordination'->>'status'='waiting' ORDER BY CASE WHEN status='waiting' THEN 1 ELSE 0 END, created_at,id LIMIT $1`, limit)
+	turns, _, err := s.PendingTurnsPage(ctx, limit, nil)
+	return turns, err
+}
+func (s *PostgresStore) PendingTurnsPage(ctx context.Context, limit int, after *PendingTurnCursor) ([]Turn, *PendingTurnCursor, error) {
+	if limit <= 0 {
+		return []Turn{}, nil, nil
+	}
+	priority, createdAt, id := -1, time.Time{}, ""
+	if after != nil {
+		priority, createdAt, id = after.Priority, after.CreatedAt, after.ID
+	}
+	rows, err := s.pool.Query(ctx, `SELECT payload,CASE WHEN status='waiting' THEN 1 ELSE 0 END,created_at,id
+		FROM anvil_agents_chat.turns
+		WHERE (status IN ('waiting','queued','running') OR payload->'coordination'->>'status'='waiting')
+		AND ($2::int < 0 OR (CASE WHEN status='waiting' THEN 1 ELSE 0 END,created_at,id)>($2::int,$3::timestamptz,$4::text))
+		ORDER BY CASE WHEN status='waiting' THEN 1 ELSE 0 END,created_at,id LIMIT $1`, limit, priority, createdAt, id)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	defer rows.Close()
-	return readTurns(rows)
+	turns := []Turn{}
+	var next *PendingTurnCursor
+	for rows.Next() {
+		var raw []byte
+		cursor := PendingTurnCursor{}
+		if err := rows.Scan(&raw, &cursor.Priority, &cursor.CreatedAt, &cursor.ID); err != nil {
+			return nil, nil, err
+		}
+		turn, err := decodeTurn(raw)
+		if err != nil {
+			return nil, nil, err
+		}
+		turns = append(turns, turn)
+		next = &cursor
+	}
+	return turns, next, rows.Err()
 }
 func readTurns(rows pgx.Rows) ([]Turn, error) {
 	out := []Turn{}
@@ -418,9 +448,16 @@ func (s *MemoryStore) ListTurns(_ context.Context, namespace, id string) ([]Turn
 	sort.Slice(out, func(i, j int) bool { return turnBefore(out[i], out[j]) })
 	return out, nil
 }
-func (s *MemoryStore) PendingTurns(_ context.Context, limit int) ([]Turn, error) {
+func (s *MemoryStore) PendingTurns(ctx context.Context, limit int) ([]Turn, error) {
+	turns, _, err := s.PendingTurnsPage(ctx, limit, nil)
+	return turns, err
+}
+func (s *MemoryStore) PendingTurnsPage(_ context.Context, limit int, after *PendingTurnCursor) ([]Turn, *PendingTurnCursor, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if limit <= 0 {
+		return []Turn{}, nil, nil
+	}
 	out := []Turn{}
 	for _, t := range s.turns {
 		if Active(t) || (t.Coordination != nil && t.Coordination.Status == "waiting") {
@@ -433,10 +470,29 @@ func (s *MemoryStore) PendingTurns(_ context.Context, limit int) ([]Turn, error)
 		}
 		return turnBefore(out[i], out[j])
 	})
+	if after != nil {
+		start := sort.Search(len(out), func(i int) bool {
+			priority := 0
+			if out[i].Status == "waiting" {
+				priority = 1
+			}
+			return priority > after.Priority || (priority == after.Priority && (out[i].CreatedAt.After(after.CreatedAt) || (out[i].CreatedAt.Equal(after.CreatedAt) && out[i].ID > after.ID)))
+		})
+		out = out[start:]
+	}
 	if len(out) > limit {
 		out = out[:limit]
 	}
-	return out, nil
+	var next *PendingTurnCursor
+	if len(out) > 0 {
+		last := out[len(out)-1]
+		priority := 0
+		if last.Status == "waiting" {
+			priority = 1
+		}
+		next = &PendingTurnCursor{Priority: priority, CreatedAt: last.CreatedAt, ID: last.ID}
+	}
+	return out, next, nil
 }
 func (s *MemoryStore) CompleteTurn(_ context.Context, t Turn, m Message) error {
 	s.mu.Lock()

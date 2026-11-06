@@ -67,6 +67,87 @@ func synthesisCandidate(p Turn) Turn {
 
 func exerciseCoordinationJourney(t *testing.T, s Store) {
 	ctx := context.Background()
+	t.Run("recovery pages reach deferred children and revisit moved turns", func(t *testing.T) {
+		var parents, children []Turn
+		for i := 0; i < 3; i++ {
+			parent := makeCoordinationParent(t, s)
+			parents = append(parents, parent)
+			thread, err := s.CreateThread(ctx, Thread{Namespace: parent.Namespace, ProfileName: "peer-" + uuid.NewString(), CreatedBy: "inert-user", Mode: ModePersona})
+			if err != nil {
+				t.Fatal(err)
+			}
+			child, _, _, err := s.QueueTurn(ctx, Turn{Namespace: parent.Namespace, ThreadID: thread.ID, ProfileName: thread.ProfileName, RequestID: uuid.NewString(), RunName: "peer-run", ParentTurnID: parent.ID, ParentThreadID: parent.ThreadID, Deferred: true}, Message{Content: "peer request"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			children = append(children, child)
+		}
+		t.Cleanup(func() {
+			for i, parent := range parents {
+				if _, err := s.CancelCoordination(ctx, parent.Namespace, parent.ThreadID, parent.ID); err != nil {
+					t.Errorf("cancel parent: %v", err)
+				}
+				child := children[i]
+				child.Status = "cancelled"
+				if err := s.CompleteTurn(ctx, child, Message{Role: RoleSystem, Content: "cancelled"}); err != nil {
+					t.Errorf("complete child: %v", err)
+				}
+			}
+		})
+		seen := map[string]bool{}
+		var cursor *PendingTurnCursor
+		var moved string
+		for {
+			page, next, err := s.PendingTurnsPage(ctx, 2, cursor)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, turn := range page {
+				seen[turn.ID] = true
+			}
+			if next != nil && next.Priority == 1 && moved == "" {
+				for _, child := range children {
+					if !seen[child.ID] {
+						if active, err := s.ActivateTurn(ctx, child); err != nil || !active {
+							t.Fatalf("activate moving child: %v %v", active, err)
+						}
+						moved = child.ID
+						break
+					}
+				}
+			}
+			if len(page) < 2 {
+				break
+			}
+			cursor = next
+		}
+		if moved == "" {
+			t.Fatal("no unvisited waiting child to move during scan")
+		}
+		for _, turn := range append(parents, children...) {
+			if turn.ID != moved && !seen[turn.ID] {
+				t.Fatalf("recovery pages skipped pending turn %s", turn.ID)
+			}
+		}
+		cursor = nil
+		foundMoved := false
+		for {
+			page, next, err := s.PendingTurnsPage(ctx, 2, cursor)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, turn := range page {
+				foundMoved = foundMoved || turn.ID == moved
+			}
+			if len(page) < 2 {
+				break
+			}
+			cursor = next
+		}
+		if !foundMoved {
+			t.Fatal("next recovery scan did not revisit the turn that changed priority")
+		}
+	})
 	t.Run("manager followups wait for synthesis without holding shared resources", func(t *testing.T) {
 		thread, err := s.CreateThread(ctx, Thread{Namespace: "coordination-tests", ProfileName: "inert-" + uuid.NewString(), CreatedBy: "inert-user", Mode: ModePersona})
 		if err != nil {

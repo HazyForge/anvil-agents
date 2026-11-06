@@ -556,19 +556,29 @@ func (server *Server) runChatRecovery(ctx context.Context) {
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
 	for {
-		listCtx, listCancel := context.WithTimeout(ctx, chatRecoveryListTimeout)
-		turns, err := server.chatStore.PendingTurns(listCtx, 200)
-		listCancel()
-		if err == nil {
+		var cursor *chat.PendingTurnCursor
+		for {
+			listCtx, listCancel := context.WithTimeout(ctx, chatRecoveryListTimeout)
+			turns, next, err := server.chatStore.PendingTurnsPage(listCtx, 200, cursor)
+			listCancel()
+			if err != nil {
+				server.log.Error(err, "read pending chat turns")
+				break
+			}
 			for i := range turns {
 				turnCtx, turnCancel := context.WithTimeout(ctx, standingDriveTimeout)
 				if err := server.reconcileChatTurn(turnCtx, &turns[i]); err != nil {
 					server.log.Error(err, "reconcile persisted chat turn", "namespace", turns[i].Namespace, "turn", turns[i].ID)
 				}
 				turnCancel()
+				if ctx.Err() != nil {
+					return
+				}
 			}
-		} else {
-			server.log.Error(err, "read pending chat turns")
+			if len(turns) < 200 {
+				break
+			}
+			cursor = next
 		}
 		select {
 		case <-ctx.Done():

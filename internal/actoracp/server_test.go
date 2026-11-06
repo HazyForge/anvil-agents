@@ -13,6 +13,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -192,10 +193,32 @@ func generate(t *testing.T, server *httptest.Server, session, prompt string) (su
 	return client.Generate(ctx, substrate.GenerateRequest{ActorName: "actor", Atespace: "namespace", SessionID: session, Prompt: prompt})
 }
 
+// Hold the first HTTP handler after its terminal frame has reached the client.
+// The next prompt must be admitted even before that handler unwinds.
+type terminalFlushGate struct {
+	http.ResponseWriter
+	terminal bool
+	flushed  chan struct{}
+	release  chan struct{}
+}
+
+func (w *terminalFlushGate) Unwrap() http.ResponseWriter { return w.ResponseWriter }
+func (w *terminalFlushGate) Write(p []byte) (int, error) {
+	w.terminal = bytes.Contains(p, []byte(`"stopReason"`))
+	return w.ResponseWriter.Write(p)
+}
+func (w *terminalFlushGate) Flush() {
+	w.ResponseWriter.(http.Flusher).Flush()
+	if w.terminal {
+		close(w.flushed)
+		<-w.release
+	}
+}
+
 func TestHTTPStreamsBeforeCompletionAndReusesNativeSession(t *testing.T) {
 	t.Parallel()
 	proceed := make(chan struct{})
-	_, peer, server := fixture(t, Config{}, func(p *inertPeer, request message, id string, turn int) {
+	adapter, peer, _ := fixture(t, Config{}, func(p *inertPeer, request message, id string, turn int) {
 		if turn == 1 {
 			p.update(id, "agent_thought_chunk", "PRIVATE_THOUGHT")
 			p.update(id, "tool_call", "PRIVATE_TOOL")
@@ -212,6 +235,16 @@ func TestHTTPStreamsBeforeCompletionAndReusesNativeSession(t *testing.T) {
 		}
 		p.result(request.ID, map[string]any{"stopReason": "end_turn"})
 	})
+	flushed, release := make(chan struct{}), make(chan struct{})
+	defer close(release)
+	var requests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if requests.Add(1) == 1 {
+			w = &terminalFlushGate{ResponseWriter: w, flushed: flushed, release: release}
+		}
+		adapter.ServeHTTP(w, r)
+	}))
+	t.Cleanup(server.Close)
 	response := post(t, server, "turn-a", "session/prompt", promptParams("thread-1", "frozen first prompt"))
 	defer response.Body.Close()
 	reader := bufio.NewReader(response.Body)
@@ -226,6 +259,7 @@ func TestHTTPStreamsBeforeCompletionAndReusesNativeSession(t *testing.T) {
 	if second.Method != "session/update" || string(completed.ID) != `"turn-a"` || string(completed.Result) != `{"stopReason":"end_turn"}` {
 		t.Fatalf("completion %+v / %+v", second, completed)
 	}
+	<-flushed
 	result, err := generate(t, server, "thread-1", "frozen second prompt")
 	if err != nil || result.Text != "continued in the same native conversation" || result.StopReason != "end_turn" {
 		t.Fatalf("second turn %+v %v", result, err)
@@ -237,6 +271,79 @@ func TestHTTPStreamsBeforeCompletionAndReusesNativeSession(t *testing.T) {
 	}
 	if fmt.Sprint(peer.prompts) != "[frozen first prompt frozen second prompt]" {
 		t.Fatalf("prompts %q", peer.prompts)
+	}
+}
+
+// Simulate a disconnected HTTP client after the native turn has completed.
+type terminalWriteFailure struct {
+	http.ResponseWriter
+	started chan struct{}
+	release chan struct{}
+}
+
+func (w *terminalWriteFailure) Unwrap() http.ResponseWriter { return w.ResponseWriter }
+func (w *terminalWriteFailure) Flush()                      { w.ResponseWriter.(http.Flusher).Flush() }
+func (w *terminalWriteFailure) Write(p []byte) (int, error) {
+	if bytes.Contains(p, []byte(`"stopReason"`)) {
+		close(w.started)
+		<-w.release
+		return 0, errors.New("client disconnected")
+	}
+	return w.ResponseWriter.Write(p)
+}
+
+func TestCompletedTurnWriteFailureDoesNotInterruptNextTurn(t *testing.T) {
+	secondStarted, secondRelease := make(chan struct{}), make(chan struct{})
+	var secondOnce sync.Once
+	allowSecond := func() { secondOnce.Do(func() { close(secondRelease) }) }
+	defer allowSecond()
+	adapter, _, _ := fixture(t, Config{}, func(p *inertPeer, request message, id string, turn int) {
+		if turn == 1 {
+			p.update(id, "agent_message_chunk", "first")
+		} else {
+			p.update(id, "agent_message_chunk", "second")
+			close(secondStarted)
+			<-secondRelease
+		}
+		p.result(request.ID, map[string]any{"stopReason": "end_turn"})
+	})
+	writeStarted, writeRelease, firstDone := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	var writeOnce sync.Once
+	allowFailure := func() { writeOnce.Do(func() { close(writeRelease) }) }
+	defer allowFailure()
+	var requests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if requests.Add(1) == 1 {
+			defer close(firstDone)
+			w = &terminalWriteFailure{ResponseWriter: w, started: writeStarted, release: writeRelease}
+		}
+		adapter.ServeHTTP(w, r)
+	}))
+	t.Cleanup(server.Close)
+	first := post(t, server, 1, "session/prompt", promptParams("thread", "first"))
+	defer first.Body.Close()
+	_ = readMessage(t, bufio.NewReader(first.Body))
+	<-writeStarted
+	type generated struct {
+		result substrate.GenerateResult
+		err    error
+	}
+	done := make(chan generated, 1)
+	go func() {
+		result, err := generate(t, server, "thread", "second")
+		done <- generated{result, err}
+	}()
+	select {
+	case <-secondStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("second turn did not start")
+	}
+	allowFailure()
+	<-firstDone
+	allowSecond()
+	got := <-done
+	if got.err != nil || got.result.Text != "second" || got.result.StopReason != "end_turn" {
+		t.Fatalf("second turn interrupted by prior HTTP failure: %+v %v", got.result, got.err)
 	}
 }
 
