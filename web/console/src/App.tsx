@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Navigate, Route, Routes } from "react-router-dom";
+import { Navigate, Route, Routes, useLocation } from "react-router-dom";
+import { BrandLockup } from "./components/BrandMark";
+import { DockNav } from "./components/DockNav";
+import { Icon } from "./components/Icon";
 import { NamespaceTree } from "./components/NamespaceTree";
 import { LoginGate } from "./components/LoginGate";
 import { BoardPage } from "./pages/BoardPage";
@@ -39,6 +42,26 @@ export default function App() {
   const [chatEnabled, setChatEnabled] = useState(false);
   /** Avoid catch-all redirect until /api/v1/ui-config finishes — deep links like /harness-profiles/new must not bounce to /. */
   const [configReady, setConfigReady] = useState(false);
+  /** Narrow layouts: the namespace tree opens as a drawer over the page. */
+  const [navOpen, setNavOpen] = useState(false);
+  const location = useLocation();
+
+  useEffect(() => {
+    setNavOpen(false);
+  }, [location.pathname]);
+
+  useEffect(() => {
+    if (!navOpen) {
+      return;
+    }
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setNavOpen(false);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [navOpen]);
 
   useEffect(() => {
     clearLegacyToken();
@@ -161,31 +184,28 @@ export default function App() {
           !authed ? (
             <LoginGate error={authError} />
           ) : (
-            <div className="app-shell">
-              <header className="topbar">
-                <div className="brand">
-                  <div className="brand-title">{productTitle}</div>
-                  <div className="brand-sub">
-                    {compositionWrite
-                      ? "Operator · profiles"
-                      : compositionRead
-                        ? "Observer · profiles + library"
-                        : "Observer · runs only"}
-                    {activeNamespace ? (
-                      <>
-                        {" · "}
-                        <span className="mono">{activeNamespace}</span>
-                      </>
-                    ) : null}
-                  </div>
-                </div>
-                <div className="topbar-actions">
-                  <button type="button" className="btn btn-danger" onClick={handleLogout}>
-                    Sign out
-                  </button>
-                </div>
-              </header>
-              <div className="app-body">
+            <div className={`app-shell${navOpen ? " nav-open" : ""}`}>
+              <a className="skip-link" href="#console-main">
+                Skip to content
+              </a>
+              <div className="rail">
+                <header className="rail-brand">
+                  <BrandLockup title={productTitle} />
+                </header>
+                <button
+                  type="button"
+                  className="rail-ns-toggle"
+                  aria-expanded={navOpen}
+                  aria-controls="console-namespace-tree"
+                  onClick={() => setNavOpen((open) => !open)}
+                >
+                  <Icon name="folder" />
+                  <span className="rail-ns-copy">
+                    <small>Namespace</small>
+                    <span className="mono">{activeNamespace || "none"}</span>
+                  </span>
+                  <Icon name="chevron" className="rail-ns-chevron" />
+                </button>
                 <NamespaceTree
                   namespaces={namespaces}
                   activeNamespace={activeNamespace}
@@ -197,7 +217,43 @@ export default function App() {
                   onAddNamespace={onAddNamespace}
                   onRemoveNamespace={onRemoveNamespace}
                 />
-                <main className="main">
+                <DockNav
+                  compositionRead={compositionRead}
+                  controlsRead={controlsRead}
+                  chatEnabled={chatEnabled}
+                />
+                <div className="rail-foot">
+                  <div className="identity">
+                    <span className="identity-tile" aria-hidden="true">
+                      <Icon name="user" />
+                    </span>
+                    <div className="identity-copy brand-sub">
+                      <strong>
+                        {compositionWrite
+                          ? "Operator · profiles"
+                          : compositionRead
+                            ? "Observer · profiles + library"
+                            : "Observer · runs only"}
+                      </strong>
+                      {activeNamespace ? <span className="mono">{activeNamespace}</span> : null}
+                    </div>
+                  </div>
+                  <button type="button" className="signout" onClick={handleLogout}>
+                    <Icon name="logout" />
+                    <span className="signout-label">Sign out</span>
+                  </button>
+                </div>
+              </div>
+              {navOpen ? (
+                <button
+                  type="button"
+                  className="rail-scrim"
+                  aria-label="Close namespaces"
+                  onClick={() => setNavOpen(false)}
+                />
+              ) : null}
+              <div className="workspace">
+                <main className="main" id="console-main">
                   <Routes>
                     <Route path="/" element={<BoardPage token={token} namespace={activeNamespace} />} />
                     <Route
@@ -320,7 +376,7 @@ export default function App() {
                     ) : null}
                     <Route path="/cards/*" element={<Navigate to="/profiles" replace />} />
                     {!configReady ? (
-                      <Route path="*" element={<div className="empty">Loading console…</div>} />
+                      <Route path="*" element={<div className="empty empty-loading">Loading console…</div>} />
                     ) : (
                       <Route path="*" element={<Navigate to="/" replace />} />
                     )}

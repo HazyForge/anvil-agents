@@ -28,6 +28,8 @@ interface Props {
    */
   prefill?: { name?: string; description?: string; systemPrompt?: string; nonce: number } | null;
   onCreated?: (result: CreateAgentResult) => void;
+  /** "drawer" folds the panel into a disclosure that opens on a prefill. */
+  variant?: "panel" | "drawer";
 }
 
 export function CreateAgentPanel({
@@ -40,6 +42,7 @@ export function CreateAgentPanel({
   pendingRequests = [],
   prefill = null,
   onCreated,
+  variant = "panel",
 }: Props) {
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
@@ -47,6 +50,7 @@ export function CreateAgentPanel({
   const [busy, setBusy] = useState(false);
   const [receipt, setReceipt] = useState<string | null>(null);
   const [chips, setChips] = useState<ChatChip[]>([]);
+  const [drawerOpen, setDrawerOpen] = useState(false);
   const allowed = isCreateAgentPrincipal(principal);
 
   // Apply a manager-create prefill once per nonce. The panel stays the
@@ -57,6 +61,7 @@ export function CreateAgentPanel({
     if (typeof prefill.name === "string") setName(prefill.name);
     if (typeof prefill.description === "string") setDescription(prefill.description);
     if (typeof prefill.systemPrompt === "string") setSystemPrompt(prefill.systemPrompt);
+    setDrawerOpen(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [prefill?.nonce]);
 
@@ -89,85 +94,107 @@ export function CreateAgentPanel({
     }
   }
 
+  const title = <h2 className="panel-title">{CREATE_AGENT_TOOL}</h2>;
+  const access = (
+    <span className={`chip ${allowed ? "chip-ok" : "chip-warn"}`}>
+      {allowed ? `skill · ${principal}` : "peers request"}
+    </span>
+  );
+  const body = (
+    <div className="panel-body">
+      <p className="muted">{CREATE_AGENT_SKILL_DESCRIPTION}</p>
+      {pendingRequests.length > 0 ? (
+        <div className="chip-row" aria-label="Peer create-agent requests">
+          {pendingRequests.flatMap((request) =>
+            requestedCreateChips(request).map((chip) => (
+              <span key={`${request.name}-${chip.id}`} className={`chip chat-chip chat-chip-${chip.type}`}>
+                {chip.label}
+              </span>
+            )),
+          )}
+        </div>
+      ) : null}
+      {!allowed ? (
+        <p className="muted">This principal cannot create teammates. Request create-agent from Wrapper or manager.</p>
+      ) : !writeEnabled ? (
+        <p className="muted">Composition write is disabled on this API — create-agent cannot POST AgentRunProfiles.</p>
+      ) : (
+        <form className="create-agent-form" onSubmit={(event) => void onSubmit(event)}>
+          <label className="field">
+            <span className="label">Name</span>
+            <input
+              className="input"
+              value={name}
+              onChange={(event) => setName(event.target.value)}
+              placeholder="scout"
+              disabled={busy}
+              aria-label="Agent name"
+            />
+          </label>
+          <label className="field">
+            <span className="label">Description</span>
+            <input
+              className="input"
+              value={description}
+              onChange={(event) => setDescription(event.target.value)}
+              placeholder="Reviews pull requests"
+              disabled={busy}
+              aria-label="Agent description"
+            />
+          </label>
+          <label className="field">
+            <span className="label">System prompt (optional)</span>
+            <textarea
+              className="textarea"
+              rows={2}
+              value={systemPrompt}
+              onChange={(event) => setSystemPrompt(event.target.value)}
+              placeholder="Standing instructions"
+              disabled={busy}
+              aria-label="System prompt"
+            />
+          </label>
+          <div className="btn-row">
+            <button type="submit" className="btn btn-primary" disabled={busy || !name.trim()}>
+              {busy ? "Creating…" : "Create agent"}
+            </button>
+          </div>
+        </form>
+      )}
+      {chips.length > 0 ? (
+        <div className="chip-row" aria-label="create-agent receipt">
+          {chips.map((chip) => (
+            <span key={chip.id} className={`chip chat-chip chat-chip-${chip.type} ${chip.status === "failed" ? "chat-chip-failed" : ""}`}>
+              {chip.label}
+            </span>
+          ))}
+        </div>
+      ) : null}
+      {receipt ? <p className={chips.some((c) => c.status === "failed") ? "banner banner-error" : "muted"}>{receipt}</p> : null}
+    </div>
+  );
+
+  if (variant === "drawer") {
+    return (
+      <details
+        className="create-agent-drawer"
+        id="create-agent-panel"
+        open={drawerOpen}
+        onToggle={(event) => setDrawerOpen(event.currentTarget.open)}
+      >
+        <summary>{title}{access}</summary>
+        {body}
+      </details>
+    );
+  }
+
   return (
     <section className="panel create-agent-panel" id="create-agent-panel">
       <div className="panel-header">
-        <h2 className="panel-title">{CREATE_AGENT_TOOL}</h2>
-        <span className={`chip ${allowed ? "chip-ok" : "chip-fail"}`}>
-          {allowed ? `skill · ${principal}` : "peers request"}
-        </span>
+        {title}
+        {access}
       </div>
-      <div className="panel-body">
-        <p className="muted">{CREATE_AGENT_SKILL_DESCRIPTION}</p>
-        {pendingRequests.length > 0 ? (
-          <div className="chip-row" aria-label="Peer create-agent requests">
-            {pendingRequests.flatMap((request) =>
-              requestedCreateChips(request).map((chip) => (
-                <span key={`${request.name}-${chip.id}`} className={`chip chat-chip chat-chip-${chip.type}`}>
-                  {chip.label}
-                </span>
-              )),
-            )}
-          </div>
-        ) : null}
-        {!allowed ? (
-          <p className="muted">This principal cannot create teammates. Request create-agent from Wrapper or manager.</p>
-        ) : !writeEnabled ? (
-          <p className="muted">Composition write is disabled on this API — create-agent cannot POST AgentRunProfiles.</p>
-        ) : (
-          <form className="create-agent-form" onSubmit={(event) => void onSubmit(event)}>
-            <label className="field">
-              <span className="label">Name</span>
-              <input
-                className="input"
-                value={name}
-                onChange={(event) => setName(event.target.value)}
-                placeholder="scout"
-                disabled={busy}
-                aria-label="Agent name"
-              />
-            </label>
-            <label className="field">
-              <span className="label">Description</span>
-              <input
-                className="input"
-                value={description}
-                onChange={(event) => setDescription(event.target.value)}
-                placeholder="Reviews pull requests"
-                disabled={busy}
-                aria-label="Agent description"
-              />
-            </label>
-            <label className="field">
-              <span className="label">System prompt (optional)</span>
-              <textarea
-                className="textarea"
-                rows={2}
-                value={systemPrompt}
-                onChange={(event) => setSystemPrompt(event.target.value)}
-                placeholder="Standing instructions"
-                disabled={busy}
-                aria-label="System prompt"
-              />
-            </label>
-            <div className="btn-row">
-              <button type="submit" className="btn btn-primary" disabled={busy || !name.trim()}>
-                {busy ? "Creating…" : "Create agent"}
-              </button>
-            </div>
-          </form>
-        )}
-        {chips.length > 0 ? (
-          <div className="chip-row" aria-label="create-agent receipt">
-            {chips.map((chip) => (
-              <span key={chip.id} className={`chip chat-chip chat-chip-${chip.type} ${chip.status === "failed" ? "chat-chip-failed" : ""}`}>
-                {chip.label}
-              </span>
-            ))}
-          </div>
-        ) : null}
-        {receipt ? <p className={chips.some((c) => c.status === "failed") ? "banner banner-error" : "muted"}>{receipt}</p> : null}
-      </div>
+      {body}
     </section>
   );
 }

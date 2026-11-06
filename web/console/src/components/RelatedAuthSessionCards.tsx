@@ -85,7 +85,7 @@ export function RelatedAuthSessionCards({
         <span className="mono">Pending</span> with reason <span className="mono">AuthSessionActive</span>.
         Create reauth/logout with <span className="mono">anvil-agentctl auth</span>, not GitOps.
       </p>
-      {loading ? <div className="empty">Loading auth sessions…</div> : null}
+      {loading ? <div className="empty empty-loading">Loading auth sessions…</div> : null}
       {error ? <div className="banner banner-error">{error}</div> : null}
       {!loading && !error && related.length === 0 ? (
         <div className="ordered-ref-empty">
@@ -102,18 +102,18 @@ export function RelatedAuthSessionCards({
             return (
               <article
                 key={doc.metadata.uid || doc.metadata.name}
-                className={`agent-card agent-card-library${active ? " auth-session-card-active" : ""}`}
+                className={`agent-card agent-card-library card${active ? " auth-session-card-active warn" : ""}`}
               >
                 <header className="agent-card-header">
+                  <h2 className="agent-card-title mono">
+                    <Link to={href}>{doc.metadata.name}</Link>
+                  </h2>
                   <div className="chip-row">
-                    <span className="chip chip-mute">AgentAuthSession</span>
+                    <span className="chip chip-mute mono">AgentAuthSession</span>
                     <span className={`chip ${active ? "chip-warn" : "chip-mute"}`}>{phase}</span>
                     <span className="chip mono">{String(doc.spec?.provider ?? "")}</span>
                     <span className="chip mono">{String(doc.spec?.action ?? "")}</span>
                   </div>
-                  <h2 className="agent-card-title mono">
-                    <Link to={href}>{doc.metadata.name}</Link>
-                  </h2>
                 </header>
                 <p className="agent-card-desc mono">{compositionCardSummary(doc)}</p>
                 <div className="agent-card-meta">

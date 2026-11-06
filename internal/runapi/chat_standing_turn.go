@@ -59,10 +59,11 @@ import (
 type standingTurnGuard struct {
 	mu       sync.Mutex
 	inflight map[string]struct{}
+	cancels  map[string]context.CancelFunc
 }
 
 func newStandingTurnGuard() *standingTurnGuard {
-	return &standingTurnGuard{inflight: map[string]struct{}{}}
+	return &standingTurnGuard{inflight: map[string]struct{}{}, cancels: map[string]context.CancelFunc{}}
 }
 
 func (guard *standingTurnGuard) claim(id string) bool {
@@ -85,6 +86,7 @@ func (guard *standingTurnGuard) release(id string) {
 	guard.mu.Lock()
 	defer guard.mu.Unlock()
 	delete(guard.inflight, id)
+	delete(guard.cancels, id)
 }
 
 // standingTurnEnabled reports whether live standing execution may run. Both
@@ -153,6 +155,21 @@ func (server *Server) reconcileStandingTurn(ctx context.Context, turn *chat.Turn
 		return false, nil
 	}
 	defer server.standingGuard.release(turn.ID)
+	streamCtx, streamCancel := context.WithCancel(ctx)
+	defer streamCancel()
+	server.standingGuard.mu.Lock()
+	server.standingGuard.cancels[turn.ID] = streamCancel
+	server.standingGuard.mu.Unlock()
+	// A cancellation persisted before registration must not be missed.
+	if turn.ParentTurnID != "" {
+		parent, err := server.coordinationParent(ctx, *turn)
+		if err != nil {
+			return false, err
+		}
+		if parent.Coordination != nil && parent.Coordination.Status == "cancelled" {
+			return false, nil
+		}
+	}
 	thread, err := server.chatStore.GetThread(ctx, turn.Namespace, turn.ThreadID)
 	if err != nil {
 		server.log.Error(err, "standing turn cannot load thread; keeping hold behavior", "namespace", turn.Namespace, "turn", turn.ID)
@@ -183,9 +200,39 @@ func (server *Server) reconcileStandingTurn(ctx context.Context, turn *chat.Turn
 	// "I'll check" must not finish the stream before continuation runs.
 	hubSink := &holdDoneSink{inner: server.standingTokenPublisher(turn.Namespace)}
 	sink := &standingRunSink{runName: turn.RunName, downstream: hubSink}
-	reply, err := server.standing.StreamTurn(ctx, handle, turn.ID, prompt, sink)
+	if turn.ParentTurnID != "" {
+		parent, err := server.coordinationParent(ctx, *turn)
+		if err != nil {
+			return false, err
+		}
+		if parent.Coordination != nil && parent.Coordination.Status == "cancelled" {
+			return false, server.failCancelledStanding(ctx, run, spec.HarnessKind)
+		}
+	}
+	reply, err := server.standing.StreamTurn(streamCtx, handle, turn.ID, prompt, sink)
 	if err != nil {
+		if turn.ParentTurnID != "" {
+			// A bounded coordination journey needs a terminal failure receipt;
+			// replaying the peer on the generic hold path can duplicate work.
+			run.Status.Phase = agentsv1alpha1.AgentRunPhaseFailed
+			run.Status.Backend = spec.HarnessKind
+			run.Status.Error = "The coordinated harness could not complete its turn"
+			completed := metav1.NewTime(time.Now())
+			run.Status.CompletedAt = &completed
+			persistCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
+			defer cancel()
+			if updateErr := server.writes.Status().Update(persistCtx, run); updateErr != nil {
+				return false, updateErr
+			}
+			return false, nil
+		}
 		server.log.Error(err, "standing turn stream failed; keeping hold behavior", "namespace", turn.Namespace, "turn", turn.ID)
+		return false, nil
+	}
+	if streamCtx.Err() != nil {
+		if turn.ParentTurnID != "" {
+			return false, server.failCancelledStanding(ctx, run, spec.HarnessKind)
+		}
 		return false, nil
 	}
 	if strings.TrimSpace(reply) == "" {
@@ -193,7 +240,7 @@ func (server *Server) reconcileStandingTurn(ctx context.Context, turn *chat.Turn
 		return false, nil
 	}
 	harnessKind := agentsv1alpha1.AgentRunHarnessBackendKind(handle.HarnessKind)
-	reply = server.completeStandingDeferredWork(ctx, handle, turn, harnessKind, prompt, reply, sink)
+	reply = server.completeStandingDeferredWork(streamCtx, handle, turn, harnessKind, prompt, reply, sink)
 	if err := hubSink.flush(ctx); err != nil {
 		server.log.Error(err, "standing turn could not flush the stream done marker", "namespace", turn.Namespace, "turn", turn.ID)
 	}
@@ -473,4 +520,17 @@ func standingRunOutput(backend agentsv1alpha1.AgentRunHarnessBackendKind, reply 
 	default:
 		return reply
 	}
+}
+
+// Called only before a coordinated stream starts or after it has returned, so
+// the terminal receipt also proves this owner no longer uses the shared home.
+func (server *Server) failCancelledStanding(ctx context.Context, run *agentsv1alpha1.AgentRun, kind string) error {
+	run.Status.Phase = agentsv1alpha1.AgentRunPhaseFailed
+	run.Status.Backend = kind
+	run.Status.Error = "Coordination cancelled"
+	completed := metav1.NewTime(time.Now())
+	run.Status.CompletedAt = &completed
+	persistCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
+	defer cancel()
+	return server.writes.Status().Update(persistCtx, run)
 }

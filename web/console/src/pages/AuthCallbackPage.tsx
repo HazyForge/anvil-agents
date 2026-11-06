@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { completeLoginFromCallback, takeReturnPath } from "../auth/oidc";
+import { BrandMark } from "../components/BrandMark";
 
 interface Props {
   onAuthenticated: (accessToken: string) => void;
@@ -35,12 +36,13 @@ export function AuthCallbackPage({ onAuthenticated }: Props) {
 
   if (error) {
     return (
-      <div className="app-shell">
-        <main className="main">
-          <div className="panel token-gate">
+      <div className="login-shell">
+        <main className="login-card plate danger">
+          <BrandMark className="login-mark" />
+          <div className="token-gate">
             <h1>Sign-in failed</h1>
             <div className="banner banner-error">{error}</div>
-            <button type="button" className="btn btn-primary" onClick={() => navigate("/", { replace: true })}>
+            <button type="button" className="btn btn-primary login-button" onClick={() => navigate("/", { replace: true })}>
               Back to console
             </button>
           </div>
@@ -50,11 +52,12 @@ export function AuthCallbackPage({ onAuthenticated }: Props) {
   }
 
   return (
-    <div className="app-shell">
-      <main className="main">
-        <div className="panel token-gate">
+    <div className="login-shell">
+      <main className="login-card plate">
+        <BrandMark className="login-mark" />
+        <div className="token-gate">
           <h1>Completing sign-in…</h1>
-          <p>Exchanging authorization code for an access token.</p>
+          <p className="empty-loading">Exchanging authorization code for an access token.</p>
         </div>
       </main>
     </div>

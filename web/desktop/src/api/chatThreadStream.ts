@@ -29,9 +29,9 @@ export function chatThreadStreamPath(namespace: string, threadID: string, messag
 }
 
 function streamWebSocketURL(path: string): string | null {
-  const base = apiBase();
-  // Same-origin relative paths (empty base) cannot form a WS URL without a
-  // host; the desktop host proxy serves those over SSE instead.
+  // Same-origin API (the desktop host proxies /api and passes the upgrade
+  // through): derive ws(s):// from the page's own origin.
+  const base = apiBase() || (typeof window !== "undefined" && /^https?:$/.test(window.location?.protocol ?? "") ? window.location.origin : "");
   if (!base) {
     return null;
   }
@@ -250,4 +250,79 @@ function cancelOnEither(first: AbortSignal, second: AbortSignal): AbortSignal {
     signal.addEventListener("abort", () => controller.abort(signal.reason), { once: true });
   }
   return controller.signal;
+}
+
+/** One live token frame of a standing turn (see chat_standing_stream.go). */
+export type ChatTokenFrame = {
+  type: "token";
+  threadId: string;
+  turnId: string;
+  runName?: string;
+  seq: number;
+  token: string;
+  done: boolean;
+};
+
+export type ChatTokenStreamHandlers = {
+  /** standing=false: the thread runs on the Job plane and sends no tokens. */
+  onSnapshot: (standing: boolean) => void;
+  onToken: (frame: ChatTokenFrame) => void;
+  /** The turn finished, the server closed, or the socket failed. */
+  onEnd: (reason: "terminal" | "closed" | "failed") => void;
+};
+
+/**
+ * Live tokens for a standing thread over the WebSocket stream only. Unlike
+ * openChatThreadStream there is no SSE fallback: SSE never carries tokens, and
+ * the durable thread read already covers everything this stream adds.
+ */
+export function openChatTokenStream(
+  token: string,
+  namespace: string,
+  threadID: string,
+  handlers: ChatTokenStreamHandlers,
+): { close: () => void } {
+  const url = typeof WebSocket === "undefined" ? null : streamWebSocketURL(chatThreadStreamPath(namespace, threadID, 0));
+  let ended = false;
+  const end = (reason: "terminal" | "closed" | "failed") => {
+    if (ended) return;
+    ended = true;
+    handlers.onEnd(reason);
+  };
+  if (!url) {
+    queueMicrotask(() => end("failed"));
+    return { close: () => { ended = true; } };
+  }
+  let socket: WebSocket;
+  try {
+    socket = new WebSocket(url, [CHAT_STREAM_PROTOCOL, `bearer.${token}`]);
+  } catch {
+    queueMicrotask(() => end("failed"));
+    return { close: () => { ended = true; } };
+  }
+  socket.onmessage = (message: MessageEvent) => {
+    if (ended || typeof message.data !== "string") return;
+    let payload: Record<string, unknown>;
+    try {
+      payload = JSON.parse(message.data) as Record<string, unknown>;
+    } catch {
+      return;
+    }
+    if (payload.type === "snapshot") handlers.onSnapshot(Boolean(payload.standing));
+    else if (payload.type === "token" && typeof payload.turnId === "string" && typeof payload.seq === "number") {
+      handlers.onToken(payload as unknown as ChatTokenFrame);
+    } else if (payload.type === "terminal") end("terminal");
+  };
+  socket.onerror = () => end("failed");
+  socket.onclose = () => end("closed");
+  return {
+    close: () => {
+      ended = true;
+      try {
+        socket.close(1000, "client closed");
+      } catch {
+        // closing
+      }
+    },
+  };
 }

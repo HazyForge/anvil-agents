@@ -23,6 +23,7 @@ import (
 	"github.com/hazyforge/anvil-agents/internal/chat"
 	"github.com/hazyforge/anvil-agents/internal/jev"
 	"github.com/hazyforge/anvil-agents/internal/standing"
+	"github.com/hazyforge/anvil-agents/internal/subjectrouting"
 )
 
 type principalContextKey struct{}
@@ -54,7 +55,8 @@ type Server struct {
 	// TYPESAFE_API_KEY) the chat-append path keeps today's behavior even
 	// with the gate on. Jev only classifies intent; it never generates
 	// chat text. See docs/jev-intent-routing.md.
-	jev jev.Backend
+	jev              jev.Backend
+	subjectDecisions subjectrouting.Provider
 	// standingGuard serializes live standing execution per turn so a queue,
 	// a read refresh, and background recovery racing on the same turn cannot
 	// stream it twice in this process. It is a pointer so Server stays
@@ -68,6 +70,9 @@ type Server struct {
 	// stream subscribers for the same thread. Process-local, like the guard
 	// above; SSE never subscribes.
 	standingHub *standingTokenHub
+	// chatEvents fans thread change notices out to open chat events
+	// streams. Process-local; the chat store wrapper publishes into it.
+	chatEvents *chatEventHub
 }
 
 func NewServer(config Config, authenticator AccessTokenAuthenticator, runs client.Reader, logs AgentRunLogSource, log logr.Logger) (*Server, error) {
@@ -87,6 +92,7 @@ func NewServer(config Config, authenticator AccessTokenAuthenticator, runs clien
 		limiter:       newStreamLimiter(config.Stream.MaxConnections, config.Stream.MaxConnectionsPerSubject),
 		standingGuard: newStandingTurnGuard(),
 		standingHub:   newStandingTokenHub(),
+		chatEvents:    newChatEventHub(),
 		standingOwner: standing.NewOwnerID(),
 	}
 	if writeClient, ok := runs.(client.Client); ok {
@@ -148,6 +154,7 @@ func (server *Server) routes() http.Handler {
 	server.registerControlRoutes(mux)
 	server.registerExternalTriggerRoutes(mux)
 	server.registerChatRoutes(mux)
+	server.registerSubjectRoutes(mux)
 	// Console SPA at / with client-route fallback. More specific /api and
 	// probe routes take precedence in Go 1.22+ ServeMux.
 	mux.HandleFunc("/", server.handleUI)
@@ -195,7 +202,7 @@ func (server *Server) handleUIConfig(writer http.ResponseWriter, _ *http.Request
 			"createEnabled": server.config.Runs.CreateEnabled,
 		},
 		"externalTriggers": map[string]any{"enabled": server.config.ExternalTriggers.Enabled},
-		"chat":             map[string]any{"enabled": server.config.Chat.Enabled},
+		"chat":             map[string]any{"enabled": server.config.Chat.Enabled, "subjectRoutingEnabled": server.config.Chat.SubjectRoutingEnabled},
 	}
 	if id := strings.TrimSpace(server.config.UI.Desktop.OIDCClientID); id != "" {
 		payload["desktop"] = map[string]any{"oidcClientId": id}
@@ -270,12 +277,15 @@ func (server *Server) handleListRuns(writer http.ResponseWriter, request *http.R
 	sort.Slice(list.Items, func(i, j int) bool {
 		return list.Items[i].CreationTimestamp.After(list.Items[j].CreationTimestamp.Time)
 	})
-	if len(list.Items) > limit {
-		list.Items = list.Items[:limit]
-	}
 	response := AgentRunListResponse{Items: make([]AgentRunView, 0, len(list.Items))}
 	for i := range list.Items {
+		if owner := list.Items[i].Annotations[subjectOwnerAnnotation]; owner != "" && owner != principal.Subject {
+			continue
+		}
 		response.Items = append(response.Items, NewAgentRunView(&list.Items[i], false))
+		if len(response.Items) == limit {
+			break
+		}
 	}
 	writeJSON(writer, http.StatusOK, response)
 }
@@ -309,6 +319,10 @@ func (server *Server) authorizedRun(writer http.ResponseWriter, request *http.Re
 			server.log.Error(err, "get AgentRun", "subject", principal.Subject, "namespace", namespace, "agentRun", name)
 			writeAPIError(writer, http.StatusServiceUnavailable, "kubernetes_unavailable", "AgentRun state is unavailable")
 		}
+		return nil, principal, false
+	}
+	if owner := run.Annotations[subjectOwnerAnnotation]; owner != "" && owner != principal.Subject {
+		writeAPIError(writer, http.StatusNotFound, "not_found", "resource not found")
 		return nil, principal, false
 	}
 	return run, principal, true

@@ -10,6 +10,7 @@ const dist=fileURLToPath(new URL('../web/desktop/dist/',import.meta.url));
 const posts=[],errors=[];let finish;
 const server=createServer(async(req,res)=>{
   const url=new URL(req.url,'http://fixture');
+  if(url.pathname==='/local/v1/manager/loop') {res.setHeader('Content-Type','application/json');res.end(JSON.stringify({revision:0,tasks:[],decisions:[],events:[]}));return;}
   if(url.pathname==='/local/v1/snapshot') {res.setHeader('Content-Type','application/json');res.end(JSON.stringify({productTitle:'Anvil Agents Desktop',prefs:{harnessTarget:'wsl'},api:{reachable:false},harnessTarget:'wsl',wsl:{insideWSL:true,available:true,defaultDistro:'Ubuntu'},harnesses:[{id:'prime',displayName:'Prime Agent',kind:'harness',present:true,delegatable:true,binaries:['prime-agent']}]}));return;}
   if(url.pathname==='/local/v1/chat/stream') {
     assert.equal(req.headers.authorization,undefined);
@@ -28,7 +29,7 @@ const server=createServer(async(req,res)=>{
   try{res.setHeader('Content-Type',({'.js':'application/javascript','.css':'text/css','.html':'text/html'})[extname(path)]||'application/octet-stream');res.end(await readFile(path));}catch{res.writeHead(404).end();}
 });
 await new Promise(r=>server.listen(0,'127.0.0.1',r));
-const browser=await chromium.launch({headless:true});const page=await browser.newPage();
+const browser=await chromium.launch({headless:true,...(process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE?{executablePath:process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE}:{})});const page=await browser.newPage();
 page.on('pageerror',e=>errors.push(e.message));
 await page.addInitScript(()=>localStorage.setItem('anvil-agents-desktop.chat-location','local'));
 try {
@@ -40,10 +41,10 @@ try {
  await page.locator('details.agent-settings summary').click();
  await page.getByRole('combobox',{name:'Local harness'}).waitFor();
  assert.equal(await page.getByRole('combobox',{name:'Local harness'}).inputValue(),'prime');
- await page.getByRole('textbox',{name:'Message',exact:true}).fill('Write and verify a plan');
+ await page.getByRole('textbox',{name:'Message',exact:true}).pressSequentially('Write and verify a plan');
  await page.getByRole('button',{name:'Send',exact:true}).click();
  await page.getByRole('region',{name:'Local agent activity'}).getByText(/Python|ipython/i).first().waitFor();
- assert.equal(posts.length,1);assert.equal(posts[0].harness,'prime');
+ assert.equal(posts.length,1);assert.equal(posts[0].harness,'prime');assert.equal(posts[0].prompt,'Write and verify a plan');
  assert.equal(await page.getByRole('button',{name:'Primaris',exact:true}).isDisabled(),true);
  assert.equal((await page.locator('body').innerText()).includes('PRIVATE_'),false);
  finish();await page.getByText('Fixture verified result',{exact:true}).waitFor();

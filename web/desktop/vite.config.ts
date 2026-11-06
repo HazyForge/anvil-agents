@@ -20,6 +20,8 @@ export default defineConfig(({ mode }) => {
       outDir: "dist",
       emptyOutDir: true,
       sourcemap: false,
+      // Never inline fonts as data: URLs; the host CSP is font-src 'self'.
+      assetsInlineLimit: (filePath: string) => (/\.(woff2?|ttf|otf)$/i.test(filePath) ? false : undefined),
     },
   };
 });

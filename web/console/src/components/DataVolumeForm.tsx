@@ -98,7 +98,7 @@ export function DataVolumeForm({
               <button
                 key={opt.value}
                 type="button"
-                className={["backend-kind-card", selected ? "backend-kind-card-selected" : ""]
+                className={["backend-kind-card card", selected ? "backend-kind-card-selected" : ""]
                   .filter(Boolean)
                   .join(" ")}
                 disabled={disabled}

@@ -43,9 +43,10 @@ func TestChatStreamImmediateOutputAndWorkdir(t *testing.T) {
 			t.Setenv("ANVIL_ACCESS_TOKEN", "must-not-inherit")
 			t.Setenv("AUTHORIZATION", "must-not-inherit")
 			t.Setenv("KUBECONFIG", "must-not-inherit")
+			t.Setenv("TYPESAFE_API_KEY", "host-classifier-key-must-not-inherit")
 			writeExec(t, filepath.Join(binDir, "prime-agent"), `#!/bin/sh
 printf '%s' "$PWD" > "$ANVIL_STREAM_CWD"
-printf '%s/%s/%s' "${ANVIL_ACCESS_TOKEN-unset}" "${AUTHORIZATION-unset}" "${KUBECONFIG-unset}" > "$ANVIL_STREAM_ENV"
+printf '%s/%s/%s/%s' "${ANVIL_ACCESS_TOKEN-unset}" "${AUTHORIZATION-unset}" "${KUBECONFIG-unset}" "${TYPESAFE_API_KEY-unset}" > "$ANVIL_STREAM_ENV"
 printf '{"type":"ready"}\n'
 printf 'diagnostic only\n' >&2
 while [ ! -f "$ANVIL_STREAM_GATE" ]; do sleep 0.01; done
@@ -54,7 +55,11 @@ printf '{"type":"message_end","message":{"role":"assistant","content":[]}}\n'
 			s := streamTestServer(t, binDir, configDir, target)
 			ts := httptest.NewServer(s.Handler())
 			defer ts.Close()
-			body, _ := json.Marshal(DelegateRequest{Harness: "prime", Prompt: "hello", Workdir: workdir})
+			binding := map[string]string{"target": target}
+			if target == HarnessTargetWSL {
+				binding["wslDistro"] = "Ubuntu-24.04"
+			}
+			body, _ := json.Marshal(map[string]any{"harness": "prime", "prompt": "hello", "workdir": workdir, "expectedRuntime": binding})
 			req, _ := http.NewRequest(http.MethodPost, ts.URL+"/local/v1/chat/stream", bytes.NewReader(body))
 			req.Header.Set("Content-Type", "application/json")
 			req.Header.Set("Origin", ts.URL)
@@ -121,7 +126,7 @@ printf '{"type":"message_end","message":{"role":"assistant","content":[]}}\n'
 				t.Fatalf("cwd=%q", cwd)
 			}
 			env, _ := os.ReadFile(envRecord)
-			if string(env) != "unset/unset/unset" {
+			if string(env) != "unset/unset/unset/unset" {
 				t.Fatalf("credential environment was inherited")
 			}
 			if _, err := os.Stat(filepath.Join(workdir, "INJECTED")); !os.IsNotExist(err) {
@@ -133,19 +138,24 @@ printf '{"type":"message_end","message":{"role":"assistant","content":[]}}\n'
 
 func TestChatStreamRequestBoundary(t *testing.T) {
 	s := streamTestServer(t, t.TempDir(), t.TempDir(), HarnessTargetNative)
+	localHost := s.ListenAddr()
 	for _, tc := range []struct{ name, host, origin, site, content string }{
-		{"other origin", "127.0.0.1:1738", "https://evil.invalid", "", "application/json"},
-		{"other port", "127.0.0.1:1738", "http://127.0.0.1:1234", "", "application/json"},
+		{"other origin", localHost, "https://evil.invalid", "", "application/json"},
+		{"other port", localHost, "http://127.0.0.1:1234", "", "application/json"},
 		{"rebound host", "evil.invalid:1738", "http://evil.invalid:1738", "", "application/json"},
-		{"null origin", "127.0.0.1:1738", "null", "", "application/json"},
-		{"cross site", "127.0.0.1:1738", "", "cross-site", "application/json"},
-		{"same site", "127.0.0.1:1738", "", "same-site", "application/json"},
-		{"form", "127.0.0.1:1738", "", "", "text/plain"},
+		{"null origin", localHost, "null", "", "application/json"},
+		{"cross site", localHost, "", "cross-site", "application/json"},
+		{"same site", localHost, "", "same-site", "application/json"},
+		{"form", localHost, "", "", "text/plain"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			req := httptest.NewRequest(http.MethodPost, "http://"+tc.host+"/local/v1/chat/stream", strings.NewReader(`{"harness":"prime","prompt":"hello"}`))
-			req.Header.Set("Origin", tc.origin)
-			req.Header.Set("Sec-Fetch-Site", tc.site)
+			if tc.origin != "" {
+				req.Header.Set("Origin", tc.origin)
+			}
+			if tc.site != "" {
+				req.Header.Set("Sec-Fetch-Site", tc.site)
+			}
 			req.Header.Set("Content-Type", tc.content)
 			rec := httptest.NewRecorder()
 			s.Handler().ServeHTTP(rec, req)
@@ -160,6 +170,39 @@ func TestChatStreamRequestBoundary(t *testing.T) {
 		if !localChatRequest(req) {
 			t.Fatalf("rejected local JSON client %s", host)
 		}
+	}
+}
+
+// Another tab may change the host preference after a wrapper's plan was made.
+// The host must reject a stale binding before a turn reaches the chosen CLI.
+func TestChatStreamRejectsChangedRuntimeBeforeExecution(t *testing.T) {
+	for _, tc := range []struct {
+		name, actual, expected, distro string
+	}{
+		{"native to WSL", HarnessTargetWSL, HarnessTargetNative, ""},
+		{"WSL to native", HarnessTargetNative, HarnessTargetWSL, "Ubuntu-24.04"},
+		{"WSL distro changed", HarnessTargetWSL, HarnessTargetWSL, "debian"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			binDir := t.TempDir()
+			marker := filepath.Join(binDir, "executed")
+			writeExec(t, filepath.Join(binDir, "prime-agent"), "#!/bin/sh\nprintf executed > '"+marker+"'\nprintf '%s\\n' '{\"type\":\"message_end\",\"message\":{\"role\":\"assistant\",\"content\":[]}}'\n")
+			server := streamTestServer(t, binDir, t.TempDir(), tc.actual)
+			body, _ := json.Marshal(map[string]any{
+				"harness": "prime", "prompt": "A message for the original runtime", "workdir": t.TempDir(),
+				"expectedRuntime": map[string]string{"target": tc.expected, "wslDistro": tc.distro},
+			})
+			request := httptest.NewRequest(http.MethodPost, "http://"+server.ListenAddr()+"/local/v1/chat/stream", bytes.NewReader(body))
+			request.Header.Set("Content-Type", "application/json")
+			response := httptest.NewRecorder()
+			server.Handler().ServeHTTP(response, request)
+			if response.Code != http.StatusConflict || !strings.Contains(response.Body.String(), "runtime_changed") {
+				t.Fatalf("stale runtime admitted: HTTP%d %s", response.Code, response.Body.String())
+			}
+			if _, err := os.Stat(marker); !os.IsNotExist(err) {
+				t.Fatalf("stale runtime reached executable: %v", err)
+			}
+		})
 	}
 }
 

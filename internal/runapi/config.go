@@ -68,6 +68,9 @@ type ExternalTriggersConfig struct {
 // into the process environment, never read through the Kubernetes API.
 type ChatConfig struct {
 	Enabled bool `json:"enabled"`
+	// SubjectRoutingEnabled enables the per-user manager and subject vault.
+	// Classification never grants execution authority; existing chat/run gates apply.
+	SubjectRoutingEnabled bool `json:"subjectRoutingEnabled"`
 	// JevIntentEnabled wires the Jev intent router (internal/jev) into the
 	// chat-append path. Off by default; gate off keeps today's prompt and
 	// metadata byte-identical. Gate on still falls back to today's behavior
@@ -318,6 +321,9 @@ func (config *Config) normalize() {
 }
 
 func (config Config) Validate() error {
+	if config.Chat.SubjectRoutingEnabled && !config.Chat.Enabled {
+		return fmt.Errorf("chat.subjectRoutingEnabled requires chat.enabled")
+	}
 	if config.BindAddress == "" {
 		return fmt.Errorf("bindAddress is required")
 	}

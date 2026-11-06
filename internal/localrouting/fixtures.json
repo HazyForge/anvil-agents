@@ -1,0 +1,121 @@
+{
+  "switch-harnesses/garden-change": {
+    "subject": "garden",
+    "intent": "amend_running"
+  },
+  "switch-harnesses/garden-followup": {
+    "subject": "garden",
+    "intent": "amend_running"
+  },
+  "switch-harnesses/film-status": {
+    "subject": "film",
+    "intent": "status"
+  },
+  "switch-harnesses/film-change": {
+    "subject": "film",
+    "intent": "decide"
+  },
+  "switch-harnesses/garden-explicit": {
+    "subject": "garden",
+    "intent": "question"
+  },
+  "new-and-general/greeting": {
+    "subject": "none",
+    "intent": "question"
+  },
+  "new-and-general/new-tool": {
+    "subject": "new_subject",
+    "intent": "new_work"
+  },
+  "new-and-general/followup": {
+    "subject": "opened:new-tool",
+    "intent": "amend_running"
+  },
+  "new-and-general/status": {
+    "subject": "opened:new-tool",
+    "intent": "status"
+  },
+  "busy-vs-status/progress": {
+    "subject": "garden",
+    "intent": "status"
+  },
+  "busy-vs-status/amend": {
+    "subject": "garden",
+    "intent": "amend_running"
+  },
+  "busy-vs-status/other": {
+    "subject": "film",
+    "intent": "amend_running"
+  },
+  "busy-vs-status/finished": {
+    "subject": "garden",
+    "intent": "amend_running"
+  },
+  "unconfirmed/retry": {
+    "subject": "garden",
+    "intent": "amend_running"
+  },
+  "unconfirmed/inspect": {
+    "subject": "garden",
+    "intent": "status"
+  },
+  "unconfirmed/confirmed": {
+    "subject": "garden",
+    "intent": "amend_running"
+  },
+  "runtime-binding/moved": {
+    "subject": "garden",
+    "intent": "amend_running"
+  },
+  "runtime-binding/saved-status": {
+    "subject": "garden",
+    "intent": "status"
+  },
+  "runtime-binding/missing": {
+    "subject": "film",
+    "intent": "amend_running"
+  },
+  "runtime-binding/same-os-other-distro": {
+    "subject": "garden",
+    "intent": "new_work"
+  },
+  "named-old/recall": {
+    "subject": "garden",
+    "intent": "amend_running"
+  },
+  "named-old/pronoun": {
+    "subject": "garden",
+    "intent": "status"
+  },
+  "ambiguity/ambiguous": {
+    "subject": "garden-east",
+    "intent": "amend_running",
+    "subjectProbabilities": {
+      "garden-east": 0.52,
+      "garden-west": 0.48
+    }
+  },
+  "ambiguity/explicit": {
+    "unavailable": true
+  },
+  "ambiguity/vague": {
+    "subject": "garden-east",
+    "intent": "unclear"
+  },
+  "provider-and-manual/failure": {
+    "unavailable": true
+  },
+  "provider-and-manual/manual": {
+    "unavailable": true
+  },
+  "provider-and-manual/manual-new": {
+    "unavailable": true
+  },
+  "provider-and-manual/manual-general": {
+    "unavailable": true
+  },
+  "recent-target-window/followup": {
+    "subject": "garden",
+    "intent": "amend_running"
+  }
+}

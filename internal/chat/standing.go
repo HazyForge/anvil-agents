@@ -10,8 +10,9 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// Standing identity follows the existing namespace-shared visibility of chat.
-// CreatedBy remains provenance, not a new owner or authorization dimension.
+// Standing identity follows namespace-shared chat visibility. Subject-manager
+// conversations have a separate owner boundary and can never become the shared
+// pointer, regardless of who first asks for the standing conversation.
 func standingEligible(thread Thread) bool {
 	if thread.ProfileName == "" {
 		return false
@@ -20,7 +21,7 @@ func standingEligible(thread Thread) bool {
 	if json.Unmarshal(thread.Metadata, &metadata) != nil {
 		return false
 	}
-	for _, field := range []string{"harnessProfileName", "sourceThreadId", "sourceTurnId", "sourceProfileName"} {
+	for _, field := range []string{"harnessProfileName", "sourceThreadId", "sourceTurnId", "sourceProfileName", "subjectOwner", "subjectId"} {
 		if _, exists := metadata[field]; exists {
 			return false
 		}
@@ -50,6 +51,9 @@ func (s *PostgresStore) EnsureStandingThread(ctx context.Context, seed Thread) (
 FROM anvil_agents_chat.standing_threads s JOIN anvil_agents_chat.threads t ON t.id=s.thread_id
 WHERE s.namespace=$1 AND s.profile_name=$2`, seed.Namespace, seed.ProfileName))
 	if err == nil {
+		if thread.Namespace != seed.Namespace || thread.ProfileName != seed.ProfileName || !standingEligible(thread) {
+			return Thread{}, false, fmt.Errorf("%w: standing conversation is not a shared direct agent thread", ErrInvalid)
+		}
 		return thread, false, tx.Commit(ctx)
 	}
 	if !errors.Is(err, pgx.ErrNoRows) {
@@ -57,7 +61,7 @@ WHERE s.namespace=$1 AND s.profile_name=$2`, seed.Namespace, seed.ProfileName))
 	}
 	thread, err = scanThread(tx.QueryRow(ctx, `SELECT id,namespace,profile_name,mode,title,created_at,updated_at,created_by,metadata
 FROM anvil_agents_chat.threads WHERE namespace=$1 AND profile_name=$2
-AND NOT (metadata ?| ARRAY['harnessProfileName','sourceThreadId','sourceTurnId','sourceProfileName'])
+AND NOT (metadata ?| ARRAY['harnessProfileName','sourceThreadId','sourceTurnId','sourceProfileName','subjectOwner','subjectId'])
 ORDER BY updated_at DESC, id ASC LIMIT 1`, seed.Namespace, seed.ProfileName))
 	created := errors.Is(err, pgx.ErrNoRows)
 	if err != nil && !created {
@@ -93,7 +97,11 @@ func (s *MemoryStore) EnsureStandingThread(_ context.Context, seed Thread) (Thre
 	}
 	key := s.threadKey(seed.Namespace, seed.ProfileName)
 	if id := s.standing[key]; id != "" {
-		return cloneThread(s.threads[s.threadKey(seed.Namespace, id)]), false, nil
+		thread := s.threads[s.threadKey(seed.Namespace, id)]
+		if thread.Namespace != seed.Namespace || thread.ProfileName != seed.ProfileName || !standingEligible(thread) {
+			return Thread{}, false, fmt.Errorf("%w: standing conversation is not a shared direct agent thread", ErrInvalid)
+		}
+		return cloneThread(thread), false, nil
 	}
 	var chosen Thread
 	for _, candidate := range s.threads {

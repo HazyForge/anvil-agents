@@ -12,6 +12,7 @@ import type { ChatMessage, ChatThread, ChatTurn } from "../api/types.chat";
 import { formatTime } from "../utils/format";
 import { MarkdownBody } from "../components/MarkdownBody";
 import { ChatAssistantBody } from "../components/ChatAssistantBody";
+import { Icon } from "../components/Icon";
 
 interface Props {
   token: string;
@@ -299,58 +300,45 @@ export function ChatPage({ token, namespace: activeNamespace, onViewNamespace }:
 
   if (!namespace) {
     return (
-      <div className="panel">
-        <div className="panel-body empty">Select or add a namespace to open standing chat.</div>
+      <div className="empty-state plate">
+        <Icon name="chat" />
+        <p className="empty">Select or add a namespace to open standing chat.</p>
       </div>
     );
   }
 
   return (
     <div className="chat-page">
-      <div className="page-header">
+      <header className="page-header">
         <div>
+          <span className="page-kicker">Persona threads</span>
           <h1 className="page-title">Standing chat</h1>
           <p className="page-sub mono">{headerSubtitle}</p>
         </div>
         <div className="chip-row">
-          <span className="chip">ChatGPT-style · AgentRunProfile</span>
+          <span className="chip chip-info">ChatGPT-style · AgentRunProfile</span>
           <span className="chip chip-mute">remote harness execution</span>
         </div>
-      </div>
+      </header>
 
       <div className="banner banner-info">
         Threads and replies are saved. Each message starts the configured remote harness with the conversation history.
       </div>
 
-      <div className="chat-layout">
+      <div className={`chat-layout${threadID ? " has-thread" : ""}`}>
         <aside className="chat-sidebar panel">
           <div className="panel-header">
             <div>
               <h2 className="panel-title">Threads</h2>
-              <div className="panel-subtitle">{listLoading ? "Loading…" : `${threads.length} shown`}</div>
+              <div className="panel-subtitle mono">{listLoading ? "Loading…" : `${threads.length} shown`}</div>
             </div>
             <button type="button" className="btn btn-ghost" onClick={() => void loadThreads()} disabled={listLoading}>
+              <Icon name="refresh" />
               Refresh
             </button>
           </div>
 
           <div className="chat-sidebar-body">
-            <label className="field">
-              <span className="label">Filter profile</span>
-              <select
-                className="select"
-                value={profileFilter}
-                onChange={(event) => setProfileFilter(event.target.value)}
-              >
-                <option value="">All personas</option>
-                {profiles.map((name) => (
-                  <option key={name} value={name}>
-                    {name}
-                  </option>
-                ))}
-              </select>
-            </label>
-
             <form className="chat-create" onSubmit={handleCreate}>
               <label className="field">
                 <span className="label">New thread profile</span>
@@ -394,13 +382,30 @@ export function ChatPage({ token, namespace: activeNamespace, onViewNamespace }:
                 className="btn btn-primary"
                 disabled={creating || !newProfile.trim()}
               >
+                <Icon name="plus" />
                 {creating ? "Creating…" : "New thread"}
               </button>
             </form>
 
+            <label className="field chat-filter">
+              <span className="label">Filter profile</span>
+              <select
+                className="select"
+                value={profileFilter}
+                onChange={(event) => setProfileFilter(event.target.value)}
+              >
+                <option value="">All personas</option>
+                {profiles.map((name) => (
+                  <option key={name} value={name}>
+                    {name}
+                  </option>
+                ))}
+              </select>
+            </label>
+
             {listError ? <div className="banner banner-error">{listError}</div> : null}
 
-            {listLoading && threads.length === 0 ? <div className="empty">Loading threads…</div> : null}
+            {listLoading && threads.length === 0 ? <div className="empty empty-loading">Loading threads…</div> : null}
 
             {!listLoading && threads.length === 0 && !listError ? (
               <div className="empty">No threads yet. Create one with a persona profile.</div>
@@ -415,6 +420,7 @@ export function ChatPage({ token, namespace: activeNamespace, onViewNamespace }:
                       type="button"
                       className={`chat-thread-item${active ? " active" : ""}`}
                       onClick={() => openThread(thread)}
+                      aria-current={active ? "true" : undefined}
                     >
                       <span className="chat-thread-title">{thread.title || "New chat"}</span>
                       <span className="chat-thread-meta mono">
@@ -430,15 +436,18 @@ export function ChatPage({ token, namespace: activeNamespace, onViewNamespace }:
 
         <section className="chat-main panel">
           {!threadID ? (
-            <div className="panel-body empty chat-empty-detail">
-              Select a thread or create one. Routes:{" "}
-              <span className="mono">/chat</span> and{" "}
-              <span className="mono">/ns/&lt;namespace&gt;/chat/&lt;threadId&gt;</span>.
+            <div className="chat-empty-detail">
+              <Icon name="chat" />
+              <p>
+                Select a thread or create one. Routes:{" "}
+                <span className="mono">/chat</span> and{" "}
+                <span className="mono">/ns/&lt;namespace&gt;/chat/&lt;threadId&gt;</span>.
+              </p>
             </div>
           ) : (
             <>
-              <div className="panel-header">
-                <div>
+              <div className="panel-header chat-main-header">
+                <div className="chat-main-heading">
                   <h2 className="panel-title">{selectedThread?.title || "Thread"}</h2>
                   <div className="panel-subtitle mono">
                     {selectedThread?.profileName || "persona"}
@@ -455,9 +464,9 @@ export function ChatPage({ token, namespace: activeNamespace, onViewNamespace }:
                 </div>
               </div>
 
-              {detailError ? <div className="banner banner-error">{detailError}</div> : null}
+              {detailError ? <div className="chat-inline-banner banner banner-error">{detailError}</div> : null}
               {detailLoading && messages.length === 0 ? (
-                <div className="panel-body empty">Loading messages…</div>
+                <div className="panel-body empty empty-loading">Loading messages…</div>
               ) : null}
 
               <div className="chat-messages" aria-live="polite">
@@ -489,28 +498,36 @@ export function ChatPage({ token, namespace: activeNamespace, onViewNamespace }:
                     </article>
                   );
                 })}
+                {activeTurn ? (
+                  <div className="chat-turn" aria-hidden="true">
+                    <span className="led led-pulse" />
+                    <span>Remote harness: {activeTurn.status}</span>
+                  </div>
+                ) : null}
                 <div ref={messagesEndRef} />
               </div>
 
               <form className="chat-composer" onSubmit={handleSend}>
                 {sendError ? <div className="banner banner-error">{sendError}</div> : null}
-                <label className="field">
-                  <span className="label">Message</span>
-                  <textarea
-                    className="textarea chat-composer-input"
-                    rows={3}
-                    value={draft}
-                    onChange={(event) => setDraft(event.target.value)}
-                    onKeyDown={onComposerKeyDown}
-                    placeholder="Write a message… (Enter to send, Shift+Enter for newline)"
-                    disabled={sending || Boolean(detailError)}
-                  />
-                </label>
-                <div className="chat-composer-actions">
-                  <span className="chat-composer-hint">{activeTurn ? `Remote harness: ${activeTurn.status}` : "Your message and the harness reply are saved."}</span>
-                  <button type="submit" className="btn btn-primary" disabled={sending || Boolean(activeTurn) || !draft.trim()}>
+                <div className="chat-composer-row">
+                  <label className="field">
+                    <span className="label">Message</span>
+                    <textarea
+                      className="textarea chat-composer-input"
+                      rows={3}
+                      value={draft}
+                      onChange={(event) => setDraft(event.target.value)}
+                      onKeyDown={onComposerKeyDown}
+                      placeholder="Write a message… (Enter to send, Shift+Enter for newline)"
+                      disabled={sending || Boolean(detailError)}
+                    />
+                  </label>
+                  <button type="submit" className="btn btn-primary chat-send" disabled={sending || Boolean(activeTurn) || !draft.trim()}>
                     {sending ? "Sending…" : activeTurn ? "Waiting for reply…" : "Send"}
                   </button>
+                </div>
+                <div className="chat-composer-actions">
+                  <span className="chat-composer-hint">{activeTurn ? `Remote harness: ${activeTurn.status}` : "Your message and the harness reply are saved."}</span>
                 </div>
               </form>
             </>

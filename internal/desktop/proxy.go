@@ -17,6 +17,24 @@ import (
 
 var errUnsupportedUIConfigEncoding = errors.New("unsupported ui-config content-encoding")
 
+// streamProxyMaxDuration bounds a proxied stream. The API ends its own
+// streams sooner (stream.maxDuration, 15m by default) and clients reconnect.
+const streamProxyMaxDuration = 20 * time.Minute
+
+// isStreamRequest reports a long-lived chat or run stream: an SSE read of an
+// events/stream route, or a WebSocket upgrade of the chat thread stream.
+func isStreamRequest(request *http.Request) bool {
+	if request.Method != http.MethodGet {
+		return false
+	}
+	cleaned := path.Clean(request.URL.Path)
+	if !strings.HasSuffix(cleaned, "/events") && !strings.HasSuffix(cleaned, "/stream") {
+		return false
+	}
+	return strings.Contains(request.Header.Get("Accept"), "text/event-stream") ||
+		strings.EqualFold(strings.TrimSpace(request.Header.Get("Upgrade")), "websocket")
+}
+
 func proxyPathAllowed(method, rawPath string) bool {
 	cleaned := path.Clean("/" + strings.TrimPrefix(strings.TrimSpace(rawPath), "/"))
 	if strings.Contains(rawPath, "..") || strings.Contains(cleaned, "..") {
@@ -55,6 +73,14 @@ func (s *Server) handleAPIProxy(writer http.ResponseWriter, request *http.Reques
 	if err != nil {
 		writeError(writer, http.StatusBadRequest, "invalid_prefs", "api origin is invalid")
 		return
+	}
+	if isStreamRequest(request) {
+		// The host's per-request deadlines (30s read, 6m write) would cut a
+		// live stream mid-reply and turn it into a reconnect loop.
+		controller := http.NewResponseController(writer)
+		deadline := time.Now().Add(streamProxyMaxDuration)
+		_ = controller.SetReadDeadline(deadline)
+		_ = controller.SetWriteDeadline(deadline)
 	}
 	proxy := httputil.NewSingleHostReverseProxy(target)
 	if s.opts.Transport != nil {

@@ -15,6 +15,7 @@ import {
 import { DataVolumeForm } from "../../components/DataVolumeForm";
 import { ExternalTriggerForm } from "../../components/ExternalTriggerForm";
 import { HarnessProfileForm } from "../../components/HarnessProfileForm";
+import { Icon, iconForLeaf } from "../../components/Icon";
 import { IconPicker } from "../../components/IconPicker";
 import { RelatedAuthSessionCards } from "../../components/RelatedAuthSessionCards";
 import { SkillSetForm } from "../../components/SkillSetForm";
@@ -293,8 +294,9 @@ export function CompositionEditorPage({ token, namespace: activeNamespace, write
 
   if (!kind) {
     return (
-      <div className="panel">
-        <div className="panel-body empty">Unknown composition kind.</div>
+      <div className="empty-state plate">
+        <Icon name="library" />
+        <p className="empty">Unknown composition kind.</p>
       </div>
     );
   }
@@ -545,8 +547,8 @@ export function CompositionEditorPage({ token, namespace: activeNamespace, write
       : "View";
 
   return (
-    <div className="library-editor">
-      <div className="page-header">
+    <div className="library-editor editor-page">
+      <header className="page-header">
         <div>
           <div className="breadcrumb">
             <Link to="/library">Library</Link>
@@ -555,7 +557,10 @@ export function CompositionEditorPage({ token, namespace: activeNamespace, write
             <span>/</span>
             <span>{isCreate ? "new" : nameParam}</span>
           </div>
-          <h1 className="page-title">
+          <h1 className={`page-title page-title-icon${isCreate ? "" : " page-title-id"}`}>
+            <span className={`kind-tile${kind.danger ? " kind-tile-warn" : ""}`} aria-hidden="true">
+              <Icon name={iconForLeaf(kind.route)} />
+            </span>
             {isCreate
               ? guided
                 ? CREATE_TITLES[guided]
@@ -573,7 +578,7 @@ export function CompositionEditorPage({ token, namespace: activeNamespace, write
             {isAuthSession ? " · append-only auth maintenance" : null}
           </p>
         </div>
-      </div>
+      </header>
 
       {kind.danger ? (
         <div className="banner banner-warn">
@@ -585,6 +590,7 @@ export function CompositionEditorPage({ token, namespace: activeNamespace, write
 
       {!isCreate && doc && !doc.management.writable ? (
         <div className="banner banner-lock">
+          <Icon name="lock" />
           {doc.management.reason === "gitops_protected"
             ? `GitOps source of truth (${doc.management.managedBy || "gitops"}). Edit the Git
               repository instead of overriding the live object.`
@@ -594,10 +600,10 @@ export function CompositionEditorPage({ token, namespace: activeNamespace, write
 
       {error ? <div className="banner banner-error">{error}</div> : null}
       {info ? <div className="banner banner-ok">{info}</div> : null}
-      {loading ? <div className="empty">Loading…</div> : null}
+      {loading ? <div className="empty empty-loading">Loading…</div> : null}
 
       {!loading ? (
-        <div className="panel">
+        <div className="panel editor-panel">
           <div className="panel-header">
             <h2 className="panel-title">{panelTitle}</h2>
             {!isCreate && doc ? (
@@ -626,7 +632,7 @@ export function CompositionEditorPage({ token, namespace: activeNamespace, write
 
                 {doc ? (
                   <div className="chip-row" style={{ marginBottom: "0.5rem" }}>
-                    <span className="chip chip-mute">AgentAuthSession</span>
+                    <span className="chip chip-mute mono">AgentAuthSession</span>
                     <span className="chip mono">{String(doc.spec?.provider ?? "")}</span>
                     <span className="chip mono">{String(doc.spec?.action ?? "")}</span>
                     <span className="chip">{String(doc.status?.phase ?? "Pending")}</span>
@@ -860,7 +866,10 @@ export function CompositionEditorPage({ token, namespace: activeNamespace, write
 
             {!isCreate && writable && !isAuthSession ? (
               <div className="danger-zone">
-                <div className="label">Delete</div>
+                <div className="label">
+                  <Icon name="alert" />
+                  Delete
+                </div>
                 <p className="page-sub">
                   Type <span className="mono">{doc?.metadata.name}</span> to confirm.
                 </p>

@@ -15,6 +15,10 @@
     "dist:linux": "electron-builder --linux dir --x64"
   },
   "dependencies": {
+    "@fontsource-variable/jetbrains-mono": "^5.3.0",
+    "@fontsource-variable/manrope": "^5.3.0",
+    "@fontsource/barlow": "^5.3.0",
+    "@fontsource/michroma": "^5.3.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "react-markdown": "^10.1.0",
@@ -45,11 +49,16 @@
       {
         "from": "../../dist/desktop/sidecar",
         "to": "sidecar",
-        "filter": ["anvil-desktop*"]
+        "filter": [
+          "anvil-desktop*"
+        ]
       }
     ],
     "win": {
-      "target": ["zip", "nsis"],
+      "target": [
+        "zip",
+        "nsis"
+      ],
       "artifactName": "Anvil-Agents-Desktop-${version}-${os}-${arch}.${ext}"
     },
     "nsis": {
@@ -62,7 +71,9 @@
       "createStartMenuShortcut": true
     },
     "linux": {
-      "target": ["dir"],
+      "target": [
+        "dir"
+      ],
       "artifactName": "Anvil-Agents-Desktop-${version}-${os}-${arch}.${ext}",
       "category": "Utility"
     }

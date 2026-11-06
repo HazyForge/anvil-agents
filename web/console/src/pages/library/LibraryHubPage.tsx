@@ -1,5 +1,6 @@
 import { Link } from "react-router-dom";
 import { COMPOSITION_KINDS } from "../../api/types.composition";
+import { Icon, iconForLeaf } from "../../components/Icon";
 import { CRD_AS_CARD_HELP, CRD_AS_CARD_MANTRA } from "../../design/mantra";
 
 interface Props {
@@ -11,8 +12,9 @@ interface Props {
 export function LibraryHubPage({ namespace, writeEnabled, externalTriggersEnabled }: Props) {
   if (!namespace) {
     return (
-      <div className="panel">
-        <div className="panel-body empty">Select a namespace to browse composition objects.</div>
+      <div className="empty-state plate">
+        <Icon name="library" />
+        <p className="empty">Select a namespace to browse composition objects.</p>
       </div>
     );
   }
@@ -29,8 +31,9 @@ export function LibraryHubPage({ namespace, writeEnabled, externalTriggersEnable
 
   return (
     <div className="library-hub">
-      <div className="page-header">
+      <header className="page-header">
         <div>
+          <span className="page-kicker">Composition CRDs</span>
           <h1 className="page-title">Composition library</h1>
           <p className="page-sub">
             Namespace <span className="mono">{namespace}</span>
@@ -38,33 +41,47 @@ export function LibraryHubPage({ namespace, writeEnabled, externalTriggersEnable
             every composition CRD is a card
           </p>
         </div>
-        <div className="chip-row">
-          <span className="chip">{writeEnabled ? "write enabled" : "read only"}</span>
+        <div className="page-actions">
+          <span className={`chip ${writeEnabled ? "chip-ok" : "chip-mute"}`}>
+            {writeEnabled ? "write enabled" : "read only"}
+          </span>
           <Link className="btn btn-primary" to="/profiles">
+            <Icon name="profiles" />
             Profile cards
           </Link>
         </div>
-      </div>
+      </header>
 
       <div className="banner banner-info">
-        <strong>{CRD_AS_CARD_MANTRA}</strong> {CRD_AS_CARD_HELP}{" "}
-        <Link to="/profiles">AgentRunProfiles</Link> and the kinds below are all CRDs. GitOps-owned
-        objects stay locked; only resources labeled{" "}
-        <span className="mono">control.anvil.hazyforge.io/managed-by=anvil-agents-console</span> can
-        be created or edited here.
+        <span>
+          <strong>{CRD_AS_CARD_MANTRA}</strong> {CRD_AS_CARD_HELP}{" "}
+          <Link to="/profiles">AgentRunProfiles</Link> and the kinds below are all CRDs. GitOps-owned
+          objects stay locked; only resources labeled{" "}
+          <span className="mono">control.anvil.hazyforge.io/managed-by=anvil-agents-console</span> can
+          be created or edited here.
+        </span>
       </div>
 
       <div className="library-grid">
         {kinds.map((kind) => (
           <Link
             key={kind.segment}
-            className={`library-card${kind.danger ? " library-card-danger" : ""}`}
+            className={`library-card card${kind.danger ? " library-card-danger warn" : ""}`}
             to={`/ns/${encodeURIComponent(namespace)}/${kind.route}`}
           >
+            <span className="kind-tile" aria-hidden="true">
+              <Icon name={iconForLeaf(kind.route)} />
+            </span>
             <div className="library-card-title">{kind.title}</div>
             <div className="library-card-kind mono">{kind.kind}</div>
             <div className="library-card-body">{kind.description}</div>
-            {kind.danger ? <div className="library-card-warn">Elevated authority</div> : null}
+            {kind.danger ? (
+              <div className="library-card-warn">
+                <Icon name="alert" />
+                Elevated authority
+              </div>
+            ) : null}
+            <Icon name="chevron" className="library-card-go" />
           </Link>
         ))}
       </div>

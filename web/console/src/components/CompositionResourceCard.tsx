@@ -7,6 +7,7 @@ import {
 } from "../utils/compositionSummary";
 import { formatTime } from "../utils/format";
 import { getIconUrl, getScreenshotUrl, resolveIconSrc } from "../utils/icons";
+import { Icon } from "./Icon";
 import { CompositionAvatar } from "./IconPicker";
 
 interface Props {
@@ -27,12 +28,14 @@ function ManagementChip({ doc }: { doc: CompositionDocument }) {
   if (doc.management.reason === "gitops_protected") {
     return (
       <span className="chip chip-lock" title="GitOps source of truth">
+        <Icon name="lock" />
         gitops · {doc.management.managedBy || "protected"}
       </span>
     );
   }
   return (
     <span className="chip chip-mute" title="Not console-managed">
+      <Icon name="lock" />
       locked · {doc.management.managedBy || "unmanaged"}
     </span>
   );
@@ -60,7 +63,7 @@ export function CompositionResourceCard({
 
   return (
     <article
-      className={`agent-card ${sizeClass}${activeAuth ? " auth-session-card-active" : ""}${isGlobal ? " agent-card-global" : ""}`}
+      className={`agent-card card resource-card ${sizeClass}${activeAuth ? " auth-session-card-active warn" : ""}${isGlobal ? " agent-card-global" : ""}`}
       role="button"
       tabIndex={0}
       onClick={onOpen}
@@ -79,13 +82,15 @@ export function CompositionResourceCard({
       <header className="agent-card-header agent-card-header-with-avatar">
         <CompositionAvatar icon={icon} name={doc.metadata.name} size={size === "lg" ? "lg" : "md"} />
         <div className="agent-card-heading">
-          <div className="chip-row" style={{ marginBottom: "0.15rem" }}>
-            <span className="chip chip-mute">{doc.kind}</span>
+          <h2 className="agent-card-title mono">{doc.metadata.name}</h2>
+          <div className="chip-row">
+            <span className="chip chip-mute mono">{doc.kind}</span>
             {isGlobal ? (
               <span
                 className="chip chip-global"
                 title="Auto-attached to every AgentRun in this namespace"
               >
+                <Icon name="globe" />
                 global
               </span>
             ) : null}
@@ -94,28 +99,29 @@ export function CompositionResourceCard({
             ) : null}
             <ManagementChip doc={doc} />
           </div>
-          <h2 className="agent-card-title mono">{doc.metadata.name}</h2>
         </div>
       </header>
-      <p className="agent-card-desc">
+      <p className={`agent-card-desc${description ? "" : " is-empty"}`}>
         {description ||
           (doc.kind === "AgentAuthSession"
             ? compositionCardSummary(doc)
             : "No description.")}
       </p>
-      <div className="agent-card-meta mono">{compositionCardSummary(doc)}</div>
-      <div className="agent-card-meta">
-        gen {doc.metadata.generation ?? "—"} · {formatTime(doc.metadata.creationTimestamp)}
-      </div>
-      <footer className="agent-card-actions">
-        <Link className="btn btn-primary" to={href} onClick={(event) => event.stopPropagation()}>
-          {primaryLabel}
-        </Link>
-        {secondaryLabel ? (
-          <Link className="btn" to={href} onClick={(event) => event.stopPropagation()}>
-            {secondaryLabel}
+      <div className="agent-card-meta agent-card-summary mono">{compositionCardSummary(doc)}</div>
+      <footer className="agent-card-foot">
+        <div className="agent-card-meta mono">
+          gen {doc.metadata.generation ?? "—"} · {formatTime(doc.metadata.creationTimestamp)}
+        </div>
+        <div className="agent-card-actions">
+          {secondaryLabel ? (
+            <Link className="btn btn-ghost" to={href} onClick={(event) => event.stopPropagation()}>
+              {secondaryLabel}
+            </Link>
+          ) : null}
+          <Link className="btn btn-primary" to={href} onClick={(event) => event.stopPropagation()}>
+            {primaryLabel}
           </Link>
-        ) : null}
+        </div>
       </footer>
     </article>
   );

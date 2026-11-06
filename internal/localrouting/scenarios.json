@@ -1,0 +1,823 @@
+[
+  {
+    "id": "switch-harnesses",
+    "name": "Named routing and follow-ups across native harnesses",
+    "runtime": {
+      "target": "native",
+      "availableHarnesses": [
+        "codex",
+        "opencode",
+        "prime"
+      ],
+      "now": "2026-10-25T12:00:00Z"
+    },
+    "defaultHarness": "codex",
+    "conversations": [
+      {
+        "id": "garden",
+        "label": "Garden controller",
+        "summary": "Build a local irrigation controller with dry-run safeguards",
+        "harness": "codex",
+        "target": "native",
+        "status": "ready",
+        "touchedAt": "2026-10-25T11:45:00Z",
+        "aliases": [
+          "watering"
+        ]
+      },
+      {
+        "id": "film",
+        "label": "Launch film",
+        "summary": "Edit the shader launch movie and its title cards",
+        "harness": "opencode",
+        "target": "native",
+        "status": "ready",
+        "touchedAt": "2026-10-25T11:45:00Z",
+        "aliases": [
+          "movie"
+        ]
+      }
+    ],
+    "turns": [
+      {
+        "id": "garden-change",
+        "content": "For the garden controller, add a dry-run option.",
+        "expect": {
+          "targets": [
+            "garden"
+          ],
+          "intents": [
+            "amend_running"
+          ],
+          "actions": [
+            "continue"
+          ]
+        }
+      },
+      {
+        "id": "garden-followup",
+        "content": "And make it the default.",
+        "expect": {
+          "targets": [
+            "garden"
+          ],
+          "intents": [
+            "amend_running"
+          ],
+          "actions": [
+            "continue"
+          ]
+        },
+        "gapSeconds": 25
+      },
+      {
+        "id": "film-status",
+        "content": "Where did we leave the launch film?",
+        "expect": {
+          "targets": [
+            "film"
+          ],
+          "intents": [
+            "status"
+          ],
+          "actions": [
+            "read_status"
+          ]
+        },
+        "gapSeconds": 20
+      },
+      {
+        "id": "film-change",
+        "content": "Use the shorter title card there.",
+        "expect": {
+          "targets": [
+            "film"
+          ],
+          "intents": [
+            "decide",
+            "amend_running"
+          ],
+          "actions": [
+            "continue"
+          ]
+        },
+        "gapSeconds": 10
+      },
+      {
+        "id": "garden-explicit",
+        "content": "Back to watering: explain the pump timeout.",
+        "expect": {
+          "targets": [
+            "garden"
+          ],
+          "intents": [
+            "question"
+          ],
+          "actions": [
+            "continue"
+          ]
+        },
+        "gapSeconds": 5
+      }
+    ]
+  },
+  {
+    "id": "new-and-general",
+    "name": "New conversation becomes a follow-up target",
+    "runtime": {
+      "target": "native",
+      "availableHarnesses": [
+        "codex",
+        "opencode",
+        "prime"
+      ],
+      "now": "2026-10-25T12:00:00Z"
+    },
+    "defaultHarness": "codex",
+    "conversations": [],
+    "turns": [
+      {
+        "id": "greeting",
+        "content": "Hi there!",
+        "expect": {
+          "targets": [
+            "none"
+          ],
+          "intents": [
+            "question"
+          ],
+          "actions": [
+            "general"
+          ]
+        }
+      },
+      {
+        "id": "new-tool",
+        "content": "Build a small desk timer application.",
+        "expect": {
+          "targets": [
+            "new_subject"
+          ],
+          "intents": [
+            "new_work"
+          ],
+          "actions": [
+            "new_conversation"
+          ]
+        }
+      },
+      {
+        "id": "followup",
+        "content": "Make its display readable from across the room.",
+        "expect": {
+          "targets": [
+            "opened:new-tool"
+          ],
+          "intents": [
+            "amend_running"
+          ],
+          "actions": [
+            "continue"
+          ]
+        },
+        "gapSeconds": 15,
+        "dependsOn": [
+          "new-tool"
+        ]
+      },
+      {
+        "id": "status",
+        "content": "How far did we get with it?",
+        "expect": {
+          "targets": [
+            "opened:new-tool"
+          ],
+          "intents": [
+            "status"
+          ],
+          "actions": [
+            "read_status"
+          ]
+        },
+        "gapSeconds": 40,
+        "dependsOn": [
+          "new-tool"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "busy-vs-status",
+    "name": "Running work is inspected or held unsent",
+    "runtime": {
+      "target": "native",
+      "availableHarnesses": [
+        "codex",
+        "opencode",
+        "prime"
+      ],
+      "now": "2026-10-25T12:00:00Z"
+    },
+    "defaultHarness": "codex",
+    "conversations": [
+      {
+        "id": "garden",
+        "label": "Garden controller",
+        "summary": "Build a local irrigation controller with dry-run safeguards",
+        "harness": "codex",
+        "target": "native",
+        "status": "running",
+        "touchedAt": "2026-10-25T11:45:00Z",
+        "aliases": [
+          "watering"
+        ]
+      },
+      {
+        "id": "film",
+        "label": "Launch film",
+        "summary": "Edit the shader launch movie and its title cards",
+        "harness": "opencode",
+        "target": "native",
+        "status": "ready",
+        "touchedAt": "2026-10-25T11:45:00Z",
+        "aliases": [
+          "movie"
+        ]
+      }
+    ],
+    "turns": [
+      {
+        "id": "progress",
+        "content": "Is the garden controller still working?",
+        "expect": {
+          "targets": [
+            "garden"
+          ],
+          "intents": [
+            "status"
+          ],
+          "actions": [
+            "read_status"
+          ]
+        }
+      },
+      {
+        "id": "amend",
+        "content": "Add another moisture sensor to the garden controller.",
+        "expect": {
+          "targets": [
+            "garden"
+          ],
+          "intents": [
+            "amend_running"
+          ],
+          "actions": [
+            "wait"
+          ]
+        }
+      },
+      {
+        "id": "other",
+        "content": "Change the launch film title to Garden Day.",
+        "expect": {
+          "targets": [
+            "film"
+          ],
+          "intents": [
+            "amend_running"
+          ],
+          "actions": [
+            "wait"
+          ]
+        }
+      },
+      {
+        "id": "finished",
+        "content": "Add that sensor to the garden controller now.",
+        "expect": {
+          "targets": [
+            "garden"
+          ],
+          "intents": [
+            "amend_running"
+          ],
+          "actions": [
+            "continue"
+          ]
+        },
+        "observations": {
+          "garden": "ready"
+        }
+      }
+    ]
+  },
+  {
+    "id": "unconfirmed",
+    "name": "Lost local completion cannot cause duplicate sends",
+    "runtime": {
+      "target": "native",
+      "availableHarnesses": [
+        "codex",
+        "opencode",
+        "prime"
+      ],
+      "now": "2026-10-25T12:00:00Z"
+    },
+    "defaultHarness": "codex",
+    "conversations": [
+      {
+        "id": "garden",
+        "label": "Garden controller",
+        "summary": "Build a local irrigation controller with dry-run safeguards",
+        "harness": "codex",
+        "target": "native",
+        "status": "unconfirmed",
+        "touchedAt": "2026-10-25T11:45:00Z",
+        "aliases": [
+          "watering"
+        ]
+      }
+    ],
+    "turns": [
+      {
+        "id": "retry",
+        "content": "Try the garden controller change again.",
+        "expect": {
+          "targets": [
+            "garden"
+          ],
+          "intents": [
+            "amend_running"
+          ],
+          "actions": [
+            "wait"
+          ]
+        }
+      },
+      {
+        "id": "inspect",
+        "content": "What is the current state of the garden controller?",
+        "expect": {
+          "targets": [
+            "garden"
+          ],
+          "intents": [
+            "status"
+          ],
+          "actions": [
+            "read_status"
+          ]
+        }
+      },
+      {
+        "id": "confirmed",
+        "content": "Use the dry-run option for the garden controller.",
+        "expect": {
+          "targets": [
+            "garden"
+          ],
+          "intents": [
+            "amend_running"
+          ],
+          "actions": [
+            "continue"
+          ]
+        },
+        "observations": {
+          "garden": "ready"
+        }
+      }
+    ]
+  },
+  {
+    "id": "runtime-binding",
+    "name": "Native bindings are checked independently of the topic",
+    "runtime": {
+      "target": "native",
+      "availableHarnesses": [
+        "codex",
+        "opencode",
+        "prime"
+      ],
+      "now": "2026-10-25T12:00:00Z"
+    },
+    "defaultHarness": "codex",
+    "conversations": [
+      {
+        "id": "garden",
+        "label": "Garden controller",
+        "summary": "Build a local irrigation controller with dry-run safeguards",
+        "harness": "codex",
+        "target": "wsl",
+        "status": "ready",
+        "touchedAt": "2026-10-25T11:45:00Z",
+        "aliases": [
+          "watering"
+        ],
+        "wslDistro": "Ubuntu"
+      },
+      {
+        "id": "film",
+        "label": "Launch film",
+        "summary": "Edit the shader launch movie and its title cards",
+        "harness": "missing-harness",
+        "target": "native",
+        "status": "ready",
+        "touchedAt": "2026-10-25T11:45:00Z",
+        "aliases": [
+          "movie"
+        ]
+      }
+    ],
+    "turns": [
+      {
+        "id": "moved",
+        "content": "Add a dry-run check to the garden controller.",
+        "expect": {
+          "targets": [
+            "unclear"
+          ],
+          "intents": [
+            "amend_running"
+          ],
+          "actions": [
+            "clarify"
+          ]
+        }
+      },
+      {
+        "id": "saved-status",
+        "content": "What was the garden controller doing?",
+        "expect": {
+          "targets": [
+            "garden"
+          ],
+          "intents": [
+            "status"
+          ],
+          "actions": [
+            "read_status"
+          ]
+        }
+      },
+      {
+        "id": "missing",
+        "content": "Change the launch film title card.",
+        "expect": {
+          "targets": [
+            "unclear"
+          ],
+          "intents": [
+            "amend_running"
+          ],
+          "actions": [
+            "clarify"
+          ]
+        }
+      },
+      {
+        "id": "same-os-other-distro",
+        "content": "Continue the garden controller work.",
+        "expect": {
+          "targets": [
+            "unclear"
+          ],
+          "intents": [
+            "new_work"
+          ],
+          "actions": [
+            "clarify"
+          ]
+        },
+        "runtime": {
+          "target": "wsl",
+          "availableHarnesses": [
+            "codex",
+            "opencode",
+            "prime"
+          ],
+          "now": "2026-10-25T12:00:00Z",
+          "wslDistro": "Debian"
+        }
+      }
+    ]
+  },
+  {
+    "id": "named-old",
+    "name": "An older alias survives sixty recent conversations",
+    "runtime": {
+      "target": "native",
+      "availableHarnesses": [
+        "codex",
+        "opencode",
+        "prime"
+      ],
+      "now": "2026-10-25T12:00:00Z"
+    },
+    "defaultHarness": "codex",
+    "conversations": [
+      {
+        "id": "garden",
+        "label": "Garden controller",
+        "summary": "Build a local irrigation controller with dry-run safeguards",
+        "harness": "codex",
+        "target": "native",
+        "status": "ready",
+        "touchedAt": "2026-09-01T12:00:00Z",
+        "aliases": [
+          "pelican"
+        ]
+      },
+      {
+        "id": "film",
+        "label": "Launch film",
+        "summary": "Edit the shader launch movie and its title cards",
+        "harness": "opencode",
+        "target": "native",
+        "status": "ready",
+        "touchedAt": "2026-10-25T11:45:00Z",
+        "aliases": [
+          "movie"
+        ]
+      }
+    ],
+    "turns": [
+      {
+        "id": "recall",
+        "content": "For pelican, add a pump stop timeout.",
+        "expect": {
+          "targets": [
+            "garden"
+          ],
+          "intents": [
+            "amend_running"
+          ],
+          "actions": [
+            "continue"
+          ]
+        }
+      },
+      {
+        "id": "pronoun",
+        "content": "Show me its current status.",
+        "expect": {
+          "targets": [
+            "garden"
+          ],
+          "intents": [
+            "status"
+          ],
+          "actions": [
+            "read_status"
+          ]
+        },
+        "gapSeconds": 30
+      }
+    ],
+    "fillers": 60
+  },
+  {
+    "id": "ambiguity",
+    "name": "Similar subjects and uncertain intent stay unsent",
+    "runtime": {
+      "target": "native",
+      "availableHarnesses": [
+        "codex",
+        "opencode",
+        "prime"
+      ],
+      "now": "2026-10-25T12:00:00Z"
+    },
+    "defaultHarness": "codex",
+    "conversations": [
+      {
+        "id": "garden-east",
+        "label": "Garden east",
+        "summary": "Irrigation controller for the east greenhouse",
+        "harness": "codex",
+        "target": "native",
+        "status": "ready",
+        "touchedAt": "2026-10-25T11:45:00Z"
+      },
+      {
+        "id": "garden-west",
+        "label": "Garden west",
+        "summary": "Irrigation controller for the west greenhouse",
+        "harness": "opencode",
+        "target": "native",
+        "status": "ready",
+        "touchedAt": "2026-10-25T11:45:00Z"
+      }
+    ],
+    "turns": [
+      {
+        "id": "ambiguous",
+        "content": "Change the garden timeout to ten seconds.",
+        "expect": {
+          "targets": [
+            "unclear"
+          ],
+          "intents": [
+            "amend_running"
+          ],
+          "actions": [
+            "clarify"
+          ]
+        }
+      },
+      {
+        "id": "explicit",
+        "content": "Use this conversation for the timeout change.",
+        "expect": {
+          "targets": [
+            "garden-east"
+          ],
+          "intents": [
+            "unclassified"
+          ],
+          "actions": [
+            "continue"
+          ]
+        },
+        "targetId": "garden-east"
+      },
+      {
+        "id": "vague",
+        "content": "Hmm, maybe.",
+        "expect": {
+          "targets": [
+            "unclear"
+          ],
+          "intents": [
+            "unclear"
+          ],
+          "actions": [
+            "clarify"
+          ]
+        }
+      }
+    ]
+  },
+  {
+    "id": "provider-and-manual",
+    "name": "Failure abstains; manual choice remains available",
+    "runtime": {
+      "target": "native",
+      "availableHarnesses": [
+        "codex",
+        "opencode",
+        "prime"
+      ],
+      "now": "2026-10-25T12:00:00Z"
+    },
+    "defaultHarness": "codex",
+    "conversations": [
+      {
+        "id": "garden",
+        "label": "Garden controller",
+        "summary": "Build a local irrigation controller with dry-run safeguards",
+        "harness": "codex",
+        "target": "native",
+        "status": "ready",
+        "touchedAt": "2026-10-25T11:45:00Z",
+        "aliases": [
+          "watering"
+        ]
+      }
+    ],
+    "turns": [
+      {
+        "id": "failure",
+        "content": "Add a dry-run option to the garden controller.",
+        "expect": {
+          "targets": [
+            "unclear"
+          ],
+          "intents": [
+            "unclassified"
+          ],
+          "actions": [
+            "clarify"
+          ]
+        }
+      },
+      {
+        "id": "manual",
+        "content": "Add a dry-run option to the garden controller.",
+        "expect": {
+          "targets": [
+            "garden"
+          ],
+          "intents": [
+            "unclassified"
+          ],
+          "actions": [
+            "continue"
+          ]
+        },
+        "targetId": "garden"
+      },
+      {
+        "id": "manual-new",
+        "content": "Build a desk lamp timer.",
+        "expect": {
+          "targets": [
+            "new_subject"
+          ],
+          "intents": [
+            "unclassified"
+          ],
+          "actions": [
+            "new_conversation"
+          ]
+        },
+        "targetId": "new_subject"
+      },
+      {
+        "id": "manual-general",
+        "content": "Hello again.",
+        "expect": {
+          "targets": [
+            "none"
+          ],
+          "intents": [
+            "unclassified"
+          ],
+          "actions": [
+            "general"
+          ]
+        },
+        "targetId": "none"
+      }
+    ],
+    "fixtureOnly": true,
+    "description": "Injects provider failure to verify unsent fallback and offline manual selection; excluded from live accuracy runs."
+  },
+  {
+    "id": "recent-target-window",
+    "name": "Resolved follow-up remains in a crowded window",
+    "runtime": {
+      "target": "native",
+      "availableHarnesses": [
+        "codex",
+        "opencode",
+        "prime"
+      ],
+      "now": "2026-10-25T12:00:00Z"
+    },
+    "defaultHarness": "codex",
+    "conversations": [
+      {
+        "id": "garden",
+        "label": "Garden controller",
+        "summary": "Build a local irrigation controller with dry-run safeguards",
+        "harness": "codex",
+        "target": "native",
+        "status": "ready",
+        "touchedAt": "2026-09-01T12:00:00Z",
+        "aliases": [
+          "watering"
+        ]
+      },
+      {
+        "id": "film",
+        "label": "Launch film",
+        "summary": "Edit the shader launch movie and its title cards",
+        "harness": "opencode",
+        "target": "native",
+        "status": "ready",
+        "touchedAt": "2026-10-25T11:45:00Z",
+        "aliases": [
+          "movie"
+        ]
+      }
+    ],
+    "turns": [
+      {
+        "id": "followup",
+        "content": "Make that timeout configurable too.",
+        "expect": {
+          "targets": [
+            "garden"
+          ],
+          "intents": [
+            "amend_running"
+          ],
+          "actions": [
+            "continue"
+          ]
+        },
+        "gapSeconds": 15
+      }
+    ],
+    "fillers": 60,
+    "context": [
+      {
+        "role": "user",
+        "content": "Add a pump stop timeout to the garden controller.",
+        "conversationId": "garden",
+        "at": "2026-10-25T11:59:50Z"
+      }
+    ]
+  }
+]

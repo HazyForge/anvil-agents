@@ -1,4 +1,5 @@
 import type { RunFilters } from "../utils/filters";
+import { Icon } from "./Icon";
 
 interface Props {
   filters: RunFilters;
@@ -26,15 +27,18 @@ export function FiltersBar({
   }
 
   return (
-    <div className="filters">
-      <label className="field">
+    <div className="filters plate">
+      <label className="field filters-search">
         <span className="label">Search</span>
-        <input
-          className="input"
-          value={filters.search}
-          placeholder="name, intent, error…"
-          onChange={(e) => patch({ search: e.target.value })}
-        />
+        <span className="input-icon">
+          <Icon name="search" />
+          <input
+            className="input"
+            value={filters.search}
+            placeholder="name, intent, error…"
+            onChange={(e) => patch({ search: e.target.value })}
+          />
+        </span>
       </label>
       <label className="field">
         <span className="label">Phase</span>

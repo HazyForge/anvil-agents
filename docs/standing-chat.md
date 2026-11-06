@@ -23,6 +23,15 @@ steering and interruption are not implemented by this chat feature.
    Replies and peer delivery receipts survive reloads and API restarts.
 5. Open a peer conversation to see that agent's independently generated reply.
 
+The open conversation stays current on its own. Desktop subscribes to the
+namespace's chat events and re-reads a thread the moment a peer, another person,
+or a finished run writes to it; a standing turn streams its reply token by token
+until the saved reply replaces it. A header light reads Live while events flow.
+Without the events route (older API) Desktop keeps reading every 2.5s; with it,
+an idle thread is re-read every 20s as a safety net and an active turn every
+1.5s, since a read also completes finished Job-plane runs. Scrolling up to read
+history is never interrupted: new messages raise a jump button instead.
+
 New conversations can select a different harness. Existing conversations retain
 their selected identity and harness. Provider authentication and permissions come
 from the selected harness/profile, including its existing mounted home and
@@ -89,12 +98,17 @@ also requires runs:read for the current-work inventory.
 | `GET /chat/threads/{id}` | Messages, turns, active turn and delegate receipts (chat:read) |
 | `GET /chat/threads/{id}/messages` | Ordered saved messages (chat:read) |
 | `POST /chat/threads/{id}/messages` | Accept a turn (chat:write and runs:create) |
+| `GET /chat/events` | Server-Sent Events: `ready`, then a `thread` notice (`threadId`, `reason`: `created`, `message` or `turn`, optional `turnId`) after every saved change in the namespace; `resync` when notices were dropped; `complete` at `stream.maxDuration`. Identifiers only, never message content (chat:read) |
 
 Create body: `profileName?`, `harnessProfileName?`, `mode` (`persona` or `fleet`),
 `title?`, `metadata?`. At least one execution selector is required. Append body:
 `content`, `requestId?` (UUID; clients should always send one for safe retries).
 The append response is HTTP 202 `{thread,user,turn}`. It does not contain an
 invented immediate assistant reply. Thread detail exposes `turns` and `activeTurn`.
+
+Change notices come from the API process that saved the change (the chart runs
+one replica), so clients keep a slow safety-net read. Each events stream counts
+toward `stream.maxConnectionsPerSubject`.
 
 Threads are namespace-shared under the existing authorization model, not private
 per-user message storage. The creating subject is recorded. Changing a person's

@@ -32,9 +32,11 @@ type CreateChatThreadRequest struct {
 }
 
 type AppendChatMessageRequest struct {
-	RequestID string          `json:"requestId,omitempty"`
-	Content   string          `json:"content"`
-	Metadata  json.RawMessage `json:"metadata"`
+	RetryTurnID string          `json:"retryTurnId,omitempty"`
+	RetryCount  *int            `json:"retryCount,omitempty"`
+	RequestID   string          `json:"requestId,omitempty"`
+	Content     string          `json:"content"`
+	Metadata    json.RawMessage `json:"metadata"`
 }
 
 type ChatThreadListResponse struct {
@@ -63,18 +65,31 @@ func (server *Server) registerChatRoutes(mux *http.ServeMux) {
 	mux.Handle("GET /api/v1/namespaces/{namespace}/chat/threads/{threadID}", server.authenticate(http.HandlerFunc(server.handleGetChatThread)))
 	mux.Handle("GET /api/v1/namespaces/{namespace}/chat/threads/{threadID}/messages", server.authenticate(http.HandlerFunc(server.handleListChatMessages)))
 	mux.Handle("POST /api/v1/namespaces/{namespace}/chat/threads/{threadID}/messages", server.authenticate(http.HandlerFunc(server.handleAppendChatMessage)))
+	mux.Handle("POST /api/v1/namespaces/{namespace}/chat/threads/{threadID}/turns/{turnID}/cancel", server.authenticate(http.HandlerFunc(server.handleCancelChatCoordination)))
 	// Slice-1 standing stream: same snapshot + terminal events over SSE or a
 	// WebSocket upgrade. Browser WebSocket clients cannot set Authorization,
 	// so this route authenticates itself (header bearer or verified bearer
 	// subprotocol) instead of using the shared authenticate middleware.
 	mux.HandleFunc("GET /api/v1/namespaces/{namespace}/chat/threads/{threadID}/stream", server.handleChatThreadStream)
+	// Read-only change notices for the namespace's threads (identifiers
+	// only); clients re-read changed threads through the routes above.
+	mux.Handle("GET /api/v1/namespaces/{namespace}/chat/events", server.authenticate(http.HandlerFunc(server.handleChatEvents)))
 }
 
 func (server *Server) SetChatStore(store chat.Store) {
 	if server == nil {
 		return
 	}
-	server.chatStore = store
+	if store == nil {
+		server.chatStore = nil
+		return
+	}
+	notifying := notifyingChatStore{Store: store, hub: server.chatEvents}
+	if subjects, ok := store.(chat.SubjectStore); ok {
+		server.chatStore = notifyingSubjectChatStore{notifyingChatStore: notifying, SubjectStore: subjects}
+		return
+	}
+	server.chatStore = notifying
 }
 
 func (server *Server) handleListChatThreads(writer http.ResponseWriter, request *http.Request) {
@@ -93,6 +108,7 @@ func (server *Server) handleListChatThreads(writer http.ResponseWriter, request 
 	}
 	threads, err := server.chatStore.ListThreads(request.Context(), chat.ThreadFilter{
 		Namespace:   namespace,
+		VisibleTo:   principal.Subject,
 		ProfileName: strings.TrimSpace(request.URL.Query().Get("profileName")),
 		Mode:        strings.TrimSpace(request.URL.Query().Get("mode")),
 		Limit:       limit,
@@ -143,6 +159,8 @@ func (server *Server) handleCreateChatThread(writer http.ResponseWriter, request
 	delete(metadata, "sourceTurnId")
 	delete(metadata, "sourceThreadId")
 	delete(metadata, "sourceProfileName")
+	delete(metadata, "subjectOwner")
+	delete(metadata, "subjectId")
 	if body.HarnessProfileName != "" {
 		metadata["harnessProfileName"] = strings.TrimSpace(body.HarnessProfileName)
 	}
@@ -315,6 +333,17 @@ func (server *Server) authorizeChat(writer http.ResponseWriter, request *http.Re
 	if server.chatStore == nil {
 		writeAPIError(writer, http.StatusServiceUnavailable, "chat_unavailable", "standing-chat store is unavailable")
 		return "", principal, false
+	}
+	if id := request.PathValue("threadID"); id != "" {
+		thread, err := server.chatStore.GetThread(request.Context(), namespace, id)
+		if err != nil {
+			server.writeChatStoreError(writer, err, principal, namespace)
+			return "", principal, false
+		}
+		if !chatThreadVisibleTo(thread, principal.Subject) {
+			writeAPIError(writer, http.StatusNotFound, "not_found", "resource not found")
+			return "", principal, false
+		}
 	}
 	return namespace, principal, true
 }

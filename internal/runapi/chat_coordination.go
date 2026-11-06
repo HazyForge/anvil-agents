@@ -16,6 +16,7 @@ import (
 // Coordination is explicitly enabled for an ordinary agent or manager thread.
 // Child messages never inherit it, so one accepted turn has bounded fanout.
 type ChatCoordination struct {
+	ReturnReplies   bool     `json:"returnReplies,omitempty"`
 	Enabled         bool     `json:"enabled"`
 	AllowedProfiles []string `json:"allowedProfiles"`
 }
@@ -68,8 +69,12 @@ func coordinationPrompt(thread chat.Thread) string {
 	if !cfg.Enabled {
 		return ""
 	}
+	notice := ""
+	if cfg.ReturnReplies {
+		notice = " After all recipients finish, the service returns their correlated results to you for one final answer in this conversation; do not treat the initial delegation acknowledgement as the final answer."
+	}
 	names, _ := json.Marshal(cfg.AllowedProfiles)
-	return "\nThis thread has explicit permission to message the following profiles in its namespace and application: " + string(names) + ". Coordination is optional. Return a JSON object {\"reply\":\"your reply\",\"messages\":[{\"profileName\":\"allowed target\",\"content\":\"a bounded task or message\"}]}. At most four distinct recipients. Use messages to delegate or coordinate only when useful; avoid duplicate work. Never invent a peer's reply. The service queues each addressed message durably and each recipient runs its own configured harness. Outgoing children cannot delegate further. If no coordination is needed return messages: []. This does not authorize additional targets, credentials or production actions.\n"
+	return notice + "\nThis thread has explicit permission to message the following profiles in its namespace and application: " + string(names) + ". Coordination is optional. Return a JSON object {\"reply\":\"your reply\",\"messages\":[{\"profileName\":\"allowed target\",\"content\":\"a bounded task or message\"}]}. At most four distinct recipients. Use messages to delegate or coordinate only when useful; avoid duplicate work. Never invent a peer's reply. The service queues each addressed message durably and each recipient runs its own configured harness. Outgoing children cannot delegate further. If no coordination is needed return messages: []. This does not authorize additional targets, credentials or production actions.\n"
 }
 func (s *Server) dispatchChatCoordination(ctx context.Context, parent *chat.Turn, reply string) (string, error) {
 	thread, err := s.chatStore.GetThread(ctx, parent.Namespace, parent.ThreadID)
@@ -77,6 +82,17 @@ func (s *Server) dispatchChatCoordination(ctx context.Context, parent *chat.Turn
 		return "", err
 	}
 	cfg := coordinationConfig(thread)
+	if parent.Resumption {
+		// A synthesis turn consumes results once; it cannot open another fanout.
+		var final coordinationReply
+		if json.Unmarshal([]byte(strings.TrimSpace(reply)), &final) == nil && strings.TrimSpace(final.Reply) != "" {
+			if len(final.Messages) != 0 {
+				return "", fmt.Errorf("%w: synthesis cannot delegate", chat.ErrInvalid)
+			}
+			return final.Reply, nil
+		}
+		return reply, nil
+	}
 	if !cfg.Enabled {
 		return reply, nil
 	}
@@ -125,13 +141,22 @@ func (s *Server) dispatchChatCoordination(ctx context.Context, parent *chat.Turn
 			return "", fmt.Errorf("%w: child recipient identity conflict", chat.ErrInvalid)
 		}
 		requestID := uuid.NewSHA1(uuid.NameSpaceURL, []byte("anvil-chat-delivery/"+parent.ID+"/"+m.ProfileName)).String()
-		result, err := s.queueChatTurnInternal(ctx, parent.Namespace, child.ID, AppendChatMessageRequest{Content: m.Content, RequestID: requestID}, true)
+		options := chatTurnOptions{deferred: true}
+		if cfg.ReturnReplies {
+			options.parent = parent.ID
+			options.parentThread = parent.ThreadID
+			options.noDrive = true
+		}
+		result, err := s.queueChatTurnWithOptions(ctx, parent.Namespace, child.ID, AppendChatMessageRequest{Content: m.Content, RequestID: requestID}, options, 0)
 		if err != nil {
 			return "", err
 		}
 		deliveries = append(deliveries, chat.Delegate{ProfileName: m.ProfileName, ThreadID: child.ID, TurnID: result.Turn.ID, RunName: result.Turn.RunName, Status: result.Turn.Status})
 	}
 	parent.Delegates = deliveries
+	if cfg.ReturnReplies && len(deliveries) > 0 {
+		parent.Coordination = &chat.Coordination{Status: "waiting"}
+	}
 	return parsed.Reply, nil
 }
 
@@ -159,6 +184,9 @@ func (s *Server) chatWorkInventory(ctx context.Context, thread chat.Thread) (str
 	items := []work{}
 	sort.Slice(runs.Items, func(i, j int) bool { return runs.Items[i].CreationTimestamp.Before(&runs.Items[j].CreationTimestamp) })
 	for _, run := range runs.Items {
+		if owner := run.Annotations[subjectOwnerAnnotation]; owner != "" && owner != chatSubjectOwner(thread) {
+			continue
+		}
 		if run.Status.Phase == agents.AgentRunPhaseSucceeded || run.Status.Phase == agents.AgentRunPhaseFailed {
 			continue
 		}

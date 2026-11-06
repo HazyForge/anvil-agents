@@ -4,6 +4,7 @@ import { APIError } from "../../api/client";
 import { listComposition } from "../../api/composition";
 import { compositionKindByRoute } from "../../api/types.composition";
 import { CompositionResourceCard } from "../../components/CompositionResourceCard";
+import { Icon, iconForLeaf } from "../../components/Icon";
 import { CRD_AS_CARD_HELP, CRD_AS_CARD_MANTRA } from "../../design/mantra";
 import { compositionCardSummary, compositionIsGlobal } from "../../utils/compositionSummary";
 import type { CompositionDocument } from "../../api/types.composition";
@@ -81,30 +82,37 @@ export function CompositionListPage({ token, namespace: activeNamespace, writeEn
 
   if (!kind) {
     return (
-      <div className="panel">
-        <div className="panel-body empty">Unknown composition kind.</div>
+      <div className="empty-state plate">
+        <Icon name="library" />
+        <p className="empty">Unknown composition kind.</p>
       </div>
     );
   }
 
   if (!namespace) {
     return (
-      <div className="panel">
-        <div className="panel-body empty">Select a namespace first.</div>
+      <div className="empty-state plate">
+        <Icon name="library" />
+        <p className="empty">Select a namespace first.</p>
       </div>
     );
   }
 
   return (
     <div className="library-list">
-      <div className="page-header">
+      <header className="page-header">
         <div>
           <div className="breadcrumb">
             <Link to="/library">Library</Link>
             <span>/</span>
             <span>{kind.title}</span>
           </div>
-          <h1 className="page-title">{kind.title}</h1>
+          <h1 className="page-title page-title-icon">
+            <span className="kind-tile" aria-hidden="true">
+              <Icon name={iconForLeaf(kind.route)} />
+            </span>
+            {kind.title}
+          </h1>
           <p className="page-sub">
             Namespace <span className="mono">{namespace}</span>
             {" · "}
@@ -119,7 +127,7 @@ export function CompositionListPage({ token, namespace: activeNamespace, writeEn
             ) : null}
           </p>
         </div>
-        <div className="chip-row">
+        <div className="page-actions">
           {writeEnabled && !kind.appendOnly ? (
             <button
               type="button"
@@ -128,13 +136,15 @@ export function CompositionListPage({ token, namespace: activeNamespace, writeEn
                 navigate(`/ns/${encodeURIComponent(namespace)}/${kind.route}/new`)
               }
             >
+              <Icon name="plus" />
               Create
             </button>
           ) : null}
         </div>
-      </div>
+      </header>
 
-      <div className="banner banner-info">
+      <div className={`banner ${kind.danger ? "banner-warn" : "banner-info"}`}>
+        <span>
         <strong>{CRD_AS_CARD_MANTRA}</strong> {CRD_AS_CARD_HELP}
         {kind.route === "skill-sets" || kind.route === "tool-sets" ? (
           <>
@@ -162,26 +172,36 @@ export function CompositionListPage({ token, namespace: activeNamespace, writeEn
             blocks AgentRuns on the target volume until the session finishes.
           </>
         ) : null}
+        </span>
       </div>
 
       <div className="filters-bar">
-        <label className="field" style={{ minWidth: "16rem", flex: 1 }}>
+        <label className="field">
           <span className="label">Search</span>
-          <input
-            className="input"
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder="name, description, summary, managed-by"
-          />
+          <span className="input-icon">
+            <Icon name="search" />
+            <input
+              className="input"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="name, description, summary, managed-by"
+            />
+          </span>
         </label>
+        {!loading && !error ? (
+          <span className="count-pill">
+            {filtered.length}/{items.length}
+          </span>
+        ) : null}
       </div>
 
       {error ? <div className="banner banner-error">{error}</div> : null}
-      {loading ? <div className="empty">Loading {kind.plural}…</div> : null}
+      {loading ? <div className="empty empty-loading">Loading {kind.plural}…</div> : null}
 
       {!loading && !error && filtered.length === 0 ? (
-        <div className="panel">
-          <div className="panel-body empty">No {kind.plural} in this namespace.</div>
+        <div className="empty-state plate">
+          <Icon name={iconForLeaf(kind.route)} />
+          <p className="empty">No {kind.plural} in this namespace.</p>
         </div>
       ) : null}
 

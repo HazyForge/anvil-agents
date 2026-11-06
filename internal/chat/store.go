@@ -102,8 +102,10 @@ CREATE TABLE IF NOT EXISTS anvil_agents_chat.turns (
 CREATE UNIQUE INDEX IF NOT EXISTS turns_one_active_per_thread
     ON anvil_agents_chat.turns(thread_id) WHERE status IN ('queued', 'running');
 
-CREATE UNIQUE INDEX IF NOT EXISTS turns_one_unfinished_per_thread
- ON anvil_agents_chat.turns(thread_id) WHERE status IN ('waiting','queued','running');
+-- Subject-manager followups may wait behind the active turn. The active index
+-- above still permits only one executing turn; admission and activation hold
+-- the thread/resource locks and preserve FIFO order.
+DROP INDEX IF EXISTS anvil_agents_chat.turns_one_unfinished_per_thread;
 CREATE UNIQUE INDEX IF NOT EXISTS turns_one_active_per_profile
  ON anvil_agents_chat.turns(namespace, (payload->>'profileName')) WHERE status IN ('queued','running');
 
@@ -123,8 +125,14 @@ type Store interface {
 	QueueTurn(context.Context, Turn, Message) (Turn, Message, Thread, error)
 	ListTurns(context.Context, string, string) ([]Turn, error)
 	PendingTurns(context.Context, int) ([]Turn, error)
+	PendingTurnsPage(context.Context, int, *PendingTurnCursor) ([]Turn, *PendingTurnCursor, error)
 	CompleteTurn(context.Context, Turn, Message) error
+	CancelCoordination(context.Context, string, string, string) (Turn, error)
 	RecordRun(context.Context, Turn, string) error
+	ClaimDispatch(context.Context, Turn, string) (bool, error)
+	FinishDispatch(context.Context, Turn, string, string) error
+	ResolveTerminalDispatch(context.Context, Turn, TerminalRunReceipt) (Turn, error)
+	RetrySynthesis(context.Context, Turn, TurnRetry) (Turn, error)
 	RetryTurn(context.Context, Turn, TurnRetry) (Turn, error)
 	ActivateTurn(context.Context, Turn) (bool, error)
 
@@ -137,6 +145,14 @@ type Store interface {
 	AppendMessages(ctx context.Context, namespace, threadID string, messages []Message) ([]Message, Thread, error)
 	Ping(ctx context.Context) error
 	Close()
+}
+
+// PendingTurnCursor marks the last row visited in the recovery ordering.
+// Restarting a scan with a nil cursor revisits rows whose state changed.
+type PendingTurnCursor struct {
+	Priority  int
+	CreatedAt time.Time
+	ID        string
 }
 
 type Thread struct {
@@ -162,7 +178,9 @@ type Message struct {
 }
 
 type ThreadFilter struct {
-	Namespace   string
+	Namespace string
+	// VisibleTo filters private subject conversations before applying Limit.
+	VisibleTo   string
 	ProfileName string
 	Mode        string
 	Limit       int
@@ -219,7 +237,7 @@ func (s *PostgresStore) Migrate(ctx context.Context) error {
 	if err := s.pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM pg_namespace WHERE nspname=$1)`, SchemaName).Scan(&schemaExists); err != nil {
 		return fmt.Errorf("inspect standing-chat schema: %w", err)
 	}
-	statements := chatSchema
+	statements := chatSchema + subjectSchema
 	if !schemaExists {
 		statements = chatSchemaCreate + statements
 	}
@@ -265,12 +283,14 @@ FROM anvil_agents_chat.threads
 WHERE namespace = $1
   AND ($2::text IS NULL OR profile_name = $2)
   AND ($3::text IS NULL OR mode = $3)
+  AND ($5::text = '' OR COALESCE(metadata->>'subjectOwner','') IN ('', $5))
 ORDER BY updated_at DESC
 LIMIT $4`,
 		filter.Namespace,
 		nullableString(filter.ProfileName),
 		nullableString(filter.Mode),
 		filter.Limit,
+		filter.VisibleTo,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("list standing-chat threads: %w", err)

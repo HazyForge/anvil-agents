@@ -47,7 +47,8 @@ type Snapshot struct {
 	// ChatLatencyJSONLEnabled reports whether the loopback host persists
 	// live chat-latency JSONL (ANVIL_CHAT_LATENCY_JSONL / --chat-latency-jsonl).
 	// The absolute path is never leaked to the SPA.
-	ChatLatencyJSONLEnabled bool `json:"chatLatencyJsonlEnabled"`
+	ChatLatencyJSONLEnabled bool               `json:"chatLatencyJsonlEnabled"`
+	LocalManager            LocalManagerStatus `json:"localManager"`
 }
 
 func defaultWrapper() WrapperInfo {
@@ -80,15 +81,16 @@ func (s *Server) snapshot(ctx context.Context) Snapshot {
 	d.Target = resolveHarnessTarget(prefs, wsl)
 	d.Distro = resolveWSLDistro(prefs, wsl)
 	return Snapshot{
-		ProductTitle:  ProductTitle,
-		ListenAddr:    s.opts.Listen,
-		Prefs:         prefs,
-		API:           s.probeAPI(ctx, prefs.APIOrigin),
-		Harnesses:     d.Discover(ctx),
-		Wrapper:       defaultWrapper(),
-		WSL:           wsl,
-		HarnessTarget: d.Target,
+		ProductTitle:            ProductTitle,
+		ListenAddr:              s.opts.Listen,
+		Prefs:                   prefs,
+		API:                     s.probeAPI(ctx, prefs.APIOrigin),
+		Harnesses:               d.Discover(ctx),
+		Wrapper:                 defaultWrapper(),
+		WSL:                     wsl,
+		HarnessTarget:           d.Target,
 		ChatLatencyJSONLEnabled: s.chatLatencyEnabled(),
+		LocalManager:            s.localManagerStatus(),
 	}
 }
 

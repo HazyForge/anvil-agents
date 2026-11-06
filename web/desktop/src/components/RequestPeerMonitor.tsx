@@ -233,7 +233,7 @@ export function RequestPeerMonitor({ token, namespace, sourceRun, createEnabled,
   const latestPeer = posted[posted.length - 1];
 
   return (
-    <section className="panel" style={{ marginTop: "0.75rem" }}>
+    <section className="panel">
       <div className="panel-header">
         <h2 className="panel-title">requestPeer · live stream</h2>
         <span className={`chip ${running ? "chip-ok" : ""}`}>{phase || "—"}</span>
@@ -284,7 +284,7 @@ export function RequestPeerMonitor({ token, namespace, sourceRun, createEnabled,
           </ul>
         ) : null}
         {latestPeer ? (
-          <div className="stream-dual" style={{ marginTop: "0.75rem" }}>
+          <div className="stream-dual">
             <LiveStream token={token} namespace={namespace} name={sourceRun} title={`${sourceRun} (A)`} />
             <LiveStream
               token={token}
