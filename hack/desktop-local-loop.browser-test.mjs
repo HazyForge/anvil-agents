@@ -15,7 +15,8 @@ const browser = await chromium.launch({headless: true, ...(process.env.PLAYWRIGH
 const context = await browser.newContext({viewport: {width: 1440, height: 1000}});
 const errors = [];
 context.on('page', page => page.on('pageerror', error => errors.push(error.message)));
-await context.addInitScript(({failureDir, sharedDir}) => {
+await context.addInitScript(({fixtureOrigin, failureDir, sharedDir}) => {
+  if (location.origin !== fixtureOrigin) return;
   const key = 'anvil-agents-desktop.local-chat.v1';
   localStorage.setItem('anvil-agents-desktop.chat-location', 'local');
   if (localStorage.getItem('anvil-loop-browser-fixture-seeded')) return;
@@ -26,7 +27,7 @@ await context.addInitScript(({failureDir, sharedDir}) => {
     conversation('gated', 'Gated build', sharedDir, 'Original gated history: run the staged build.'),
     conversation('queued', 'Queued checks', sharedDir, 'Original queued history: check the shared workspace.'),
   ]));
-}, {failureDir, sharedDir});
+}, {fixtureOrigin: new URL(origin).origin, failureDir, sharedDir});
 
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 async function snapshot() {
