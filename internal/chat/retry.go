@@ -25,6 +25,7 @@ func prepareTurnRetry(old, expected Turn, retry TurnRetry) (Turn, error) {
 	old.RecoveryReason = retry.Reason
 	old.RunName, old.RunUID, old.RunJSON = retry.RunName, "", append([]byte(nil), retry.RunJSON...)
 	old.Status, old.Error = "queued", ""
+	old.Dispatch = nil
 	return old, nil
 }
 

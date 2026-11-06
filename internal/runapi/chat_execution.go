@@ -52,13 +52,23 @@ func chatHarness(thread chat.Thread) string {
 }
 
 func (server *Server) queueChatTurn(ctx context.Context, ns, id string, body AppendChatMessageRequest) (ChatAppendResponse, error) {
+	if body.RetryTurnID != "" {
+		return server.queueChatSynthesisRetry(ctx, ns, id, body)
+	}
 	return server.queueChatTurnInternal(ctx, ns, id, body, false)
 }
 func (server *Server) queueChatTurnInternal(ctx context.Context, ns, id string, body AppendChatMessageRequest, deferred bool) (ChatAppendResponse, error) {
-	return server.queueChatTurnAttempt(ctx, ns, id, body, deferred, 0)
+	return server.queueChatTurnWithOptions(ctx, ns, id, body, chatTurnOptions{deferred: deferred}, 0)
 }
-func (server *Server) queueChatTurnAttempt(ctx context.Context, ns, id string, body AppendChatMessageRequest, deferred bool, attempt int) (ChatAppendResponse, error) {
+
+type chatTurnOptions struct {
+	deferred, noDrive, resumption bool
+	parent, parentThread          string
+}
+
+func (server *Server) queueChatTurnWithOptions(ctx context.Context, ns, id string, body AppendChatMessageRequest, options chatTurnOptions, attempt int) (ChatAppendResponse, error) {
 	routed, subjectRouted := ctx.Value(subjectTurnContextKey{}).(subjectTurnContext)
+	subjectRouted = subjectRouted && routed.Subject.ThreadID == id && options.parent == "" && !options.resumption
 	thread, err := server.chatStore.GetThread(ctx, ns, id)
 	if err != nil {
 		return ChatAppendResponse{}, err
@@ -75,14 +85,36 @@ func (server *Server) queueChatTurnAttempt(ctx context.Context, ns, id string, b
 	if err = server.validateChatTarget(ctx, ns, thread.ProfileName, chatHarness(thread)); err != nil {
 		return ChatAppendResponse{}, fmt.Errorf("%w: %v", chat.ErrInvalid, err)
 	}
-	if _, err = server.reconcileChatThreadMode(ctx, ns, id, !subjectRouted); err != nil {
-		return ChatAppendResponse{}, err
+	if !options.resumption {
+		if _, err = server.reconcileChatThreadMode(ctx, ns, id, !subjectRouted); err != nil {
+			return ChatAppendResponse{}, err
+		}
+	}
+	promptThread := thread
+	if options.resumption {
+		// Disable peer dispatch instructions only for this accepted synthesis.
+		var metadata map[string]any
+		_ = json.Unmarshal(thread.Metadata, &metadata)
+		delete(metadata, "coordination")
+		promptThread.Metadata, _ = json.Marshal(metadata)
 	}
 	messages, err := server.chatStore.ListMessages(ctx, ns, id)
 	if err != nil {
 		return ChatAppendResponse{}, err
 	}
-	inventory, err := server.chatWorkInventory(ctx, thread)
+	promptMessages := messages
+	if options.resumption {
+		promptMessages, err = server.synthesisParentHistory(ctx, ns, id, options, messages)
+		if err != nil {
+			return ChatAppendResponse{}, err
+		}
+	}
+	if !options.resumption {
+		if err := rejectSynthesisPromotion(messages, body.Content); err != nil {
+			return ChatAppendResponse{}, err
+		}
+	}
+	inventory, err := server.chatWorkInventory(ctx, promptThread)
 	if err != nil {
 		return ChatAppendResponse{}, err
 	}
@@ -92,11 +124,11 @@ func (server *Server) queueChatTurnAttempt(ctx context.Context, ns, id string, b
 	// error falls back to today's behavior — never a hard fail, never a
 	// route on a guess. See docs/jev-intent-routing.md.
 	var intent jev.Decision
-	classified := false
-	if !subjectRouted {
+	var classified bool
+	if !subjectRouted && !options.resumption {
 		intent, classified = server.classifyChatIntent(ctx, body.Content, messages)
 	}
-	prompt, err := buildChatPromptWithIntent(thread, messages, body.Content, intent, classified)
+	prompt, err := buildChatPromptWithIntent(promptThread, promptMessages, body.Content, intent, classified)
 	if err != nil {
 		return ChatAppendResponse{}, err
 	}
@@ -152,11 +184,13 @@ func (server *Server) queueChatTurnAttempt(ctx context.Context, ns, id string, b
 	if err != nil {
 		return ChatAppendResponse{}, err
 	}
+	// Admission must compare the whole snapshot, including follow-ups excluded
+	// from a synthesis prompt, so concurrent appends still force a retry.
 	expectedSequence := int64(0)
 	if len(messages) > 0 {
 		expectedSequence = messages[len(messages)-1].Sequence
 	}
-	metadata := chatAuthorMetadataWithIntent(thread, deferred, intent, classified)
+	metadata := chatTurnAuthorMetadata(thread, options, intent, classified)
 	if subjectRouted {
 		var values map[string]any
 		_ = json.Unmarshal(metadata, &values)
@@ -166,19 +200,81 @@ func (server *Server) queueChatTurnAttempt(ctx context.Context, ns, id string, b
 		values["subjectId"], values["subjectDecision"] = routed.Subject.ID, routed.Decision
 		metadata, _ = json.Marshal(values)
 	}
-	turn, user, thread, err := server.chatStore.QueueTurn(ctx, chat.Turn{ID: turnID, ExpectedSequence: &expectedSequence, LockKeys: lockKeys, Deferred: deferred, QueueAfterActive: subjectRouted, ProfileName: chatExecutionKey(thread), Namespace: ns, ThreadID: id, RequestID: body.RequestID, RunName: runName, RunJSON: raw}, chat.Message{Content: body.Content, Metadata: metadata})
+	turn, user, thread, err := server.chatStore.QueueTurn(ctx, chat.Turn{ID: turnID, ExpectedSequence: &expectedSequence, LockKeys: lockKeys, Deferred: options.deferred, QueueAfterActive: subjectRouted, ParentTurnID: options.parent, ParentThreadID: options.parentThread, Resumption: options.resumption, ProfileName: chatExecutionKey(thread), Namespace: ns, ThreadID: id, RequestID: body.RequestID, RunName: runName, RunJSON: raw}, chat.Message{Content: body.Content, Metadata: metadata})
 	if errors.Is(err, chat.ErrConversationChanged) && attempt < 3 {
-		return server.queueChatTurnAttempt(ctx, ns, id, body, deferred, attempt+1)
+		return server.queueChatTurnWithOptions(ctx, ns, id, body, options, attempt+1)
 	}
 	if err != nil {
 		return ChatAppendResponse{}, err
 	}
 	// The outbox is committed before Kubernetes creation. A failed request or
 	// process restart cannot lose accepted work or create a second execution.
-	if err = server.reconcileChatTurnMode(ctx, &turn, !subjectRouted); err != nil {
-		server.log.Error(err, "chat turn remains queued for recovery", "namespace", ns, "turn", turn.ID)
+	if !options.noDrive {
+		if err = server.reconcileChatTurnMode(ctx, &turn, !subjectRouted); err != nil {
+			server.log.Error(err, "chat turn remains queued for recovery", "namespace", ns, "turn", turn.ID)
+		}
 	}
 	return ChatAppendResponse{Thread: thread, User: user, Turn: turn}, nil
+}
+
+// synthesisParentHistory freezes a reply-back to the original task. Manager
+// follow-ups may already be queued in this thread before peer replies arrive;
+// they belong to their own turns, not to the parent's synthesis.
+func (server *Server) synthesisParentHistory(ctx context.Context, ns, threadID string, options chatTurnOptions, messages []chat.Message) ([]chat.Message, error) {
+	if options.parent == "" || options.parentThread != threadID {
+		return nil, fmt.Errorf("%w: invalid synthesis parent", chat.ErrRequestConflict)
+	}
+	parent, err := server.coordinationParent(ctx, chat.Turn{Namespace: ns, ParentThreadID: threadID, ParentTurnID: options.parent})
+	if err != nil {
+		return nil, err
+	}
+	if parent.Namespace != ns || parent.ThreadID != threadID || parent.UserMessageID == "" || parent.RunName == "" {
+		return nil, fmt.Errorf("%w: invalid synthesis parent", chat.ErrRequestConflict)
+	}
+
+	var parentSequence int64
+	for _, message := range messages {
+		if message.ThreadID != threadID {
+			return nil, fmt.Errorf("%w: synthesis history thread mismatch", chat.ErrRequestConflict)
+		}
+		if message.ID == parent.UserMessageID && message.ThreadID == threadID && message.Role == chat.RoleUser {
+			parentSequence = message.Sequence
+			break
+		}
+	}
+	if parentSequence <= 0 {
+		return nil, fmt.Errorf("%w: synthesis parent message unavailable", chat.ErrNotFound)
+	}
+
+	history := make([]chat.Message, 0, len(messages))
+	var reply *chat.Message
+	for i := range messages {
+		message := &messages[i]
+		if message.ThreadID != threadID {
+			return nil, fmt.Errorf("%w: synthesis history thread mismatch", chat.ErrRequestConflict)
+		}
+		if message.Sequence <= parentSequence {
+			history = append(history, *message)
+			continue
+		}
+		if message.Role != chat.RoleAssistant {
+			continue
+		}
+		var receipt struct {
+			TurnID  string `json:"turnId"`
+			RunName string `json:"runName"`
+		}
+		if json.Unmarshal(message.Metadata, &receipt) == nil && receipt.TurnID == parent.ID && receipt.RunName == parent.RunName {
+			if reply != nil {
+				return nil, fmt.Errorf("%w: duplicate synthesis parent reply", chat.ErrRequestConflict)
+			}
+			reply = message
+		}
+	}
+	if reply == nil {
+		return nil, fmt.Errorf("%w: synthesis parent reply unavailable", chat.ErrNotFound)
+	}
+	return append(history, *reply), nil
 }
 
 func buildChatPrompt(thread chat.Thread, messages []chat.Message, content string) (string, error) {
@@ -223,7 +319,7 @@ func (server *Server) reconcileChatThreadMode(ctx context.Context, ns, id string
 		return nil, err
 	}
 	for i := range turns {
-		if chat.Active(turns[i]) {
+		if chat.Active(turns[i]) || (driveStanding && chat.CoordinationPending(turns[i])) {
 			if err = server.reconcileChatTurnMode(ctx, &turns[i], driveStanding); err != nil {
 				return nil, err
 			}
@@ -252,7 +348,19 @@ func (server *Server) reconcileChatTurn(ctx context.Context, turn *chat.Turn) er
 
 func (server *Server) reconcileChatTurnMode(ctx context.Context, turn *chat.Turn, driveStanding bool) error {
 	if !chat.Active(*turn) {
+		if driveStanding && chat.CoordinationPending(*turn) {
+			return server.reconcileChatReplyBack(ctx, turn)
+		}
 		return nil
+	}
+	if turn.ParentTurnID != "" {
+		parent, err := server.coordinationParent(ctx, *turn)
+		if err != nil {
+			return err
+		}
+		if parent.Coordination != nil && parent.Coordination.Status == "cancelled" {
+			return server.cancelChatChild(ctx, turn)
+		}
 	}
 	if turn.RetryAt != nil && time.Now().Before(*turn.RetryAt) {
 		return nil
@@ -289,6 +397,20 @@ func (server *Server) reconcileChatTurnMode(ctx context.Context, turn *chat.Turn
 		if err = json.Unmarshal(turn.RunJSON, run); err != nil {
 			return err
 		}
+		dispatchOwner := ""
+		if turn.ParentTurnID != "" {
+			dispatchOwner = uuid.NewString()
+			claimed, claimErr := server.chatStore.ClaimDispatch(ctx, *turn, dispatchOwner)
+			if errors.Is(claimErr, chat.ErrCoordinationCancelled) {
+				return server.cancelChatChild(ctx, turn)
+			}
+			if claimErr != nil {
+				return claimErr
+			}
+			if !claimed {
+				return nil
+			}
+		}
 		err = server.writes.Create(ctx, run)
 		if err != nil && !apierrors.IsInvalid(err) && !apierrors.IsForbidden(err) {
 			// A timeout/reset may follow a successful API-server commit. Resolve that
@@ -302,12 +424,33 @@ func (server *Server) reconcileChatTurnMode(ctx context.Context, turn *chat.Turn
 				err = nil
 			}
 		}
+		if dispatchOwner != "" {
+			state := ""
+			if err == nil {
+				state = "created"
+			}
+			if apierrors.IsInvalid(err) || apierrors.IsForbidden(err) {
+				state = "rejected"
+			}
+			if state != "" {
+				recordCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
+				finishErr := server.chatStore.FinishDispatch(recordCtx, *turn, dispatchOwner, state)
+				cancel()
+				if finishErr != nil {
+					return finishErr
+				}
+			}
+			// Unknown Create outcomes retain the durable ownership fence.
+		}
 	}
 	if err != nil {
 		if apierrors.IsInvalid(err) || apierrors.IsForbidden(err) {
 			return server.failChatTurn(ctx, turn, "AgentRun creation was rejected")
 		}
 		return err
+	}
+	if !chatRunIdentityMatches(*turn, run) {
+		return server.failChatTurn(ctx, turn, "AgentRun identity does not match the accepted chat turn")
 	}
 	// Slice-2 standing turn wiring, beside (never instead of) the durable
 	// turn above: when the thread's harness selects execution.runtime
@@ -319,8 +462,11 @@ func (server *Server) reconcileChatTurnMode(ctx context.Context, turn *chat.Turn
 	if _, err := server.reconcileStandingTurn(ctx, turn, run, driveStanding); err != nil {
 		return err
 	}
-	if (turn.RunUID != "" && turn.RunUID != string(run.UID)) || run.Labels[chatTurnLabel] != turn.ID || run.Labels[chatThreadLabel] != turn.ThreadID || run.Spec.SourceRef.Kind != "ChatThread" || run.Spec.SourceRef.Name != turn.ThreadID {
-		return server.failChatTurn(ctx, turn, "AgentRun identity does not match the accepted chat turn")
+	// This also covers an API that crashed after external Create committed
+	// but before FinishDispatch. Only a verified terminal receipt can resolve
+	// the abandoned fence; an absent/nonterminal run remains reserved.
+	if err = server.resolveTerminalChatDispatch(ctx, turn, run); err != nil {
+		return err
 	}
 	if turn.RunUID == "" && run.UID != "" {
 		if err = server.chatStore.RecordRun(ctx, *turn, string(run.UID)); err != nil {

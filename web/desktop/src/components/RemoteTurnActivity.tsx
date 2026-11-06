@@ -14,7 +14,7 @@ interface Props {
   recoveryPending?: boolean;
 }
 type ActivityRow = RunActivity & { at: number };
-const done = (status?: string) => status === 'succeeded' || status === 'failed';
+const done = (status?: string) => status === 'succeeded' || status === 'failed' || status === 'cancelled';
 
 /** Public runner events, kept separate from the agent's answer. */
 export function RemoteTurnActivity({token, namespace, turn, agentLabel, recoveryPending}: Props) {
@@ -155,6 +155,7 @@ export function RemoteTurnActivity({token, namespace, turn, agentLabel, recovery
   const wait = cannotCheck ? {tone: 'delayed', label: 'Cannot check agent progress right now. Your message is saved.', note: 'Waiting for the server to reconnect to the runner. Keep your draft; sending will become available when the server confirms this turn has finished.'} : turnWaitFeedback(terminalPhase === 'Succeeded' ? 'succeeded' : activityTreatAsFailed(status, terminalPhase) ? 'failed' : status, elapsed, Math.max(0, (now - lastUpdate) / 1000), workObserved);
   const failed = activityTreatAsFailed(status, terminalPhase);
   const label = retrying && status === 'queued' ? `Retrying startup${retrySeconds ? ` in ${retrySeconds}s` : ''} · attempt ${(turn?.retryCount ?? 0) + 1} of 3` : failed ? (chatFailureLabel(turn.error) || terminalLabel)
+    : status === 'cancelled' ? 'Coordination cancelled'
     : status === 'succeeded' ? 'Reply received'
     : terminalPhase === 'Succeeded' ? 'Harness finished; saving the reply'
     : cannotCheck ? 'Cannot check agent progress right now. Your message is saved.'
