@@ -560,7 +560,7 @@ func (s *PostgresStore) ActivateTurn(ctx context.Context, t Turn) (bool, error) 
 						WHERE journey.namespace=other.namespace AND journey.thread_id=other.thread_id AND journey.id<>other.id
 						AND NOT (COALESCE(other.payload->>'resumption','')='true' AND journey.id=COALESCE(other.payload->>'parentTurnId',''))
 						AND journey.payload->'coordination'->>'status' IN ('waiting','resuming')
-					)))
+					))))
 		)
 	)`, old.Namespace, old.ProfileName, old.LockKeys, old.ThreadID, old.ID, old.CreatedAt, resumptionParent).Scan(&busy); err != nil {
 		return false, err

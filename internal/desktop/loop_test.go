@@ -470,10 +470,14 @@ printf '%s\n' '`+loopSuccessfulPrime+`'
 
 func TestLocalLoopCorruptStoreAndReadOriginFailClosed(t *testing.T) {
 	s, host, folder, config := loopFixture(t, "#!/bin/sh\ntouch unexpected-run\n")
-	for _, tc := range []struct{ host, origin, site string }{{"evil.invalid:1738", "http://evil.invalid:1738", ""}, {"127.0.0.1:1738", "https://evil.invalid", ""}, {"127.0.0.1:1738", "", "cross-site"}} {
+	for _, tc := range []struct{ host, origin, site string }{{"evil.invalid:1738", "http://evil.invalid:1738", ""}, {s.ListenAddr(), "https://evil.invalid", ""}, {s.ListenAddr(), "", "cross-site"}} {
 		req := httptest.NewRequest(http.MethodGet, "http://"+tc.host+"/local/v1/manager/loop", nil)
-		req.Header.Set("Origin", tc.origin)
-		req.Header.Set("Sec-Fetch-Site", tc.site)
+		if tc.origin != "" {
+			req.Header.Set("Origin", tc.origin)
+		}
+		if tc.site != "" {
+			req.Header.Set("Sec-Fetch-Site", tc.site)
+		}
 		result := httptest.NewRecorder()
 		s.Handler().ServeHTTP(result, req)
 		if result.Code != 403 {

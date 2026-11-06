@@ -192,7 +192,7 @@ func TestChatStreamRejectsChangedRuntimeBeforeExecution(t *testing.T) {
 				"harness": "prime", "prompt": "A message for the original runtime", "workdir": t.TempDir(),
 				"expectedRuntime": map[string]string{"target": tc.expected, "wslDistro": tc.distro},
 			})
-			request := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:1738/local/v1/chat/stream", bytes.NewReader(body))
+			request := httptest.NewRequest(http.MethodPost, "http://"+server.ListenAddr()+"/local/v1/chat/stream", bytes.NewReader(body))
 			request.Header.Set("Content-Type", "application/json")
 			response := httptest.NewRecorder()
 			server.Handler().ServeHTTP(response, request)

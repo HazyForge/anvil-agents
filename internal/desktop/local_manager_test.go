@@ -156,7 +156,7 @@ func localManagerRequest(t *testing.T, server *Server, body any) *httptest.Respo
 	if err != nil {
 		t.Fatal(err)
 	}
-	request := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:1738/local/v1/manager/route", bytes.NewReader(raw))
+	request := httptest.NewRequest(http.MethodPost, "http://"+server.ListenAddr()+"/local/v1/manager/route", bytes.NewReader(raw))
 	request.Header.Set("Content-Type", "application/json")
 	response := httptest.NewRecorder()
 	server.Handler().ServeHTTP(response, request)
@@ -174,16 +174,18 @@ func TestLocalManagerRequestBoundaryAndManualFallback(t *testing.T) {
 		name, raw, host, origin string
 		want                    int
 	}{
-		{"cross origin", `{"content":"hello","conversations":[]}`, "127.0.0.1:1738", "https://foreign.example", http.StatusForbidden},
+		{"cross origin", `{"content":"hello","conversations":[]}`, server.ListenAddr(), "https://foreign.example", http.StatusForbidden},
 		{"rebound host", `{"content":"hello","conversations":[]}`, "foreign.example", "", http.StatusForbidden},
-		{"workdir field", `{"content":"hello","conversations":[],"workdir":"/private/project"}`, "127.0.0.1:1738", "", http.StatusBadRequest},
-		{"trailing JSON", `{"content":"hello","conversations":[]} {}`, "127.0.0.1:1738", "", http.StatusBadRequest},
-		{"oversized JSON", strings.Repeat(" ", maxLocalManagerJSON+1), "127.0.0.1:1738", "", http.StatusBadRequest},
+		{"workdir field", `{"content":"hello","conversations":[],"workdir":"/private/project"}`, server.ListenAddr(), "http://" + server.ListenAddr(), http.StatusBadRequest},
+		{"trailing JSON", `{"content":"hello","conversations":[]} {}`, server.ListenAddr(), "http://" + server.ListenAddr(), http.StatusBadRequest},
+		{"oversized JSON", strings.Repeat(" ", maxLocalManagerJSON+1), server.ListenAddr(), "http://" + server.ListenAddr(), http.StatusBadRequest},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			request := httptest.NewRequest(http.MethodPost, "http://"+tc.host+"/local/v1/manager/route", strings.NewReader(tc.raw))
 			request.Header.Set("Content-Type", "application/json")
-			request.Header.Set("Origin", tc.origin)
+			if tc.origin != "" {
+				request.Header.Set("Origin", tc.origin)
+			}
 			response := httptest.NewRecorder()
 			server.Handler().ServeHTTP(response, request)
 			if response.Code != tc.want {
@@ -213,7 +215,7 @@ func TestLocalManagerRequestBoundaryAndManualFallback(t *testing.T) {
 	if !strings.Contains(response.Body.String(), `"kind":"clarify"`) || calls.Load() != 1 {
 		t.Fatalf("disabled classifier reached provider or routed automatically: %s", response.Body.String())
 	}
-	request := httptest.NewRequest(http.MethodGet, "http://127.0.0.1:1738/local/v1/snapshot", nil)
+	request := httptest.NewRequest(http.MethodGet, "http://"+server.ListenAddr()+"/local/v1/snapshot", nil)
 	recorder := httptest.NewRecorder()
 	server.Handler().ServeHTTP(recorder, request)
 	var snapshot Snapshot
@@ -231,7 +233,7 @@ func TestLocalManagerBenchModes(t *testing.T) {
 		calls.Add(1)
 		return subjectrouting.Decision{}, errors.New("fixture mode reached live provider")
 	}))
-	get := httptest.NewRequest(http.MethodGet, "http://127.0.0.1:1738/local/v1/manager/bench", nil)
+	get := httptest.NewRequest(http.MethodGet, "http://"+server.ListenAddr()+"/local/v1/manager/bench", nil)
 	response := httptest.NewRecorder()
 	server.Handler().ServeHTTP(response, get)
 	var catalog struct {
@@ -244,7 +246,7 @@ func TestLocalManagerBenchModes(t *testing.T) {
 		if mode == "live" {
 			server.opts.SubjectRoutingEnabled = false
 		}
-		request := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:1738/local/v1/manager/bench", strings.NewReader(`{"mode":"`+mode+`"}`))
+		request := httptest.NewRequest(http.MethodPost, "http://"+server.ListenAddr()+"/local/v1/manager/bench", strings.NewReader(`{"mode":"`+mode+`"}`))
 		request.Header.Set("Content-Type", "application/json")
 		response = httptest.NewRecorder()
 		server.Handler().ServeHTTP(response, request)

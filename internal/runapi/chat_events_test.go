@@ -18,6 +18,9 @@ type sseFrame struct {
 	Data  string
 }
 
+// A backend implementing the required chat contract without subject routing.
+type chatOnlyStore struct{ chat.Store }
+
 // openChatEvents starts a real HTTP server so the handler streams over a
 // connection whose context ends when the test cancels it.
 func openChatEvents(t *testing.T, server *Server, namespace string) (*bufio.Reader, func()) {
@@ -198,5 +201,31 @@ func TestNotifyingChatStoreSkipsFailedWrites(t *testing.T) {
 	case event := <-subscriber.events:
 		t.Fatalf("failed write announced %+v", event)
 	default:
+	}
+}
+
+func TestChatOnlyStoreKeepsEventsWithoutClaimingSubjectRouting(t *testing.T) {
+	server := chatTestServer(t, true)
+	server.config.Chat.SubjectRoutingEnabled = true
+	server.SetChatStore(chatOnlyStore{Store: chat.NewMemoryStore()})
+	reader, closeStream := openChatEvents(t, server, "agents")
+	defer closeStream()
+	readSSEFrame(t, reader)
+
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/namespaces/agents/chat/subjects", nil)
+	request.Header.Set("Authorization", "Bearer valid")
+	response := httptest.NewRecorder()
+	server.routes().ServeHTTP(response, request)
+	if response.Code != http.StatusServiceUnavailable || !strings.Contains(response.Body.String(), "subjects_unavailable") {
+		t.Fatalf("subjects for chat-only backend = %d %s", response.Code, response.Body.String())
+	}
+	thread := createStreamThread(t, server, `{"profileName":"grok45","mode":"persona"}`)
+	frame := readSSEFrame(t, reader)
+	var event chatThreadEvent
+	if err := json.Unmarshal([]byte(frame.Data), &event); err != nil {
+		t.Fatal(err)
+	}
+	if frame.Event != "thread" || event.ThreadID != thread.ID || event.Reason != chatEventReasonCreated {
+		t.Fatalf("create event for chat-only backend = %+v %+v", frame, event)
 	}
 }

@@ -136,6 +136,12 @@ type notifyingChatStore struct {
 	hub *chatEventHub
 }
 
+// Preserve optional subject routing only when the underlying store supports it.
+type notifyingSubjectChatStore struct {
+	notifyingChatStore
+	chat.SubjectStore
+}
+
 func (store notifyingChatStore) notify(namespace, threadID, reason, turnID string) {
 	store.hub.publish(namespace, chatThreadEvent{ThreadID: threadID, Reason: reason, TurnID: turnID})
 }

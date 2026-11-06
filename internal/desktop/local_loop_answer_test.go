@@ -40,7 +40,7 @@ func (f *loopAnswerFixture) ResolveAnswer(ctx context.Context, in subjectrouting
 
 func answerHTTP(s *Server, path string, body any) *httptest.ResponseRecorder {
 	raw, _ := json.Marshal(body)
-	req := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:1738/local/v1/manager/loop"+path, bytes.NewReader(raw))
+	req := httptest.NewRequest(http.MethodPost, "http://"+s.ListenAddr()+"/local/v1/manager/loop"+path, bytes.NewReader(raw))
 	req.Header.Set("Content-Type", "application/json")
 	response := httptest.NewRecorder()
 	s.Handler().ServeHTTP(response, req)

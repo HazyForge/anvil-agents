@@ -84,7 +84,12 @@ func (server *Server) SetChatStore(store chat.Store) {
 		server.chatStore = nil
 		return
 	}
-	server.chatStore = notifyingChatStore{Store: store, hub: server.chatEvents}
+	notifying := notifyingChatStore{Store: store, hub: server.chatEvents}
+	if subjects, ok := store.(chat.SubjectStore); ok {
+		server.chatStore = notifyingSubjectChatStore{notifyingChatStore: notifying, SubjectStore: subjects}
+		return
+	}
+	server.chatStore = notifying
 }
 
 func (server *Server) handleListChatThreads(writer http.ResponseWriter, request *http.Request) {
