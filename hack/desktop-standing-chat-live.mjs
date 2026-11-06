@@ -4,7 +4,7 @@
  *
  * Exercises the real standing WebSocket token path with a caller-supplied
  * OIDC bearer (Kind-local issuer or Zitadel — never the local-only stub
- * session), sends one chat message, measures send → first live token, settles
+ * session), sends a chat message, measures send → first live token, settles
  * from the durable thread record, and appends one JSONL sample to
  * `.runtime/chat-latency.jsonl` with source `desktop-chat-live-signed-in`.
  *

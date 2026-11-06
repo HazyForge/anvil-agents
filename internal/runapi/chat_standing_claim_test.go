@@ -18,7 +18,7 @@ import (
 )
 
 // Slice-4 multi-replica claim tests. Two API replicas share one Kubernetes
-// fake client and one chat store (two processes, one cluster); each keeps its
+// fake client and a chat store (two processes, one cluster); each keeps its
 // own FakeBackend (two processes, two session tables). No live harness, no
 // model calls, no credentials.
 

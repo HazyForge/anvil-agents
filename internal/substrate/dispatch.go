@@ -5,7 +5,7 @@ import (
 	"errors"
 )
 
-// EnsureTurnActor binds one chat turn to its warm actor. Direct turns and peer
+// EnsureTurnActor binds a chat turn to its warm actor. Direct turns and peer
 // deliveries share this path: the caller maps the thread ID (parent thread for
 // a direct message, recipient child thread for a peer delivery) through
 // ActorNameForThread and this helper resumes the existing actor or creates it
