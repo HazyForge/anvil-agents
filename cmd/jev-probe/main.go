@@ -1,4 +1,4 @@
-// Command jev-probe classifies one chat message with the Jev intent router
+// Command jev-probe classifies a chat message with the Jev intent router
 // (internal/jev) and prints the routing decision as JSON.
 //
 // Live calls need TYPESAFE_API_KEY in the environment and perform exactly

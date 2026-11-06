@@ -42,7 +42,7 @@ import (
 	"strings"
 )
 
-// SessionSpec describes the desired standing session for one chat thread.
+// SessionSpec describes the desired standing session for a chat thread.
 // Namespace/ThreadID scope the session; SessionName is the stable process-
 // local name derived from the thread ID (see SessionNameForThread).
 // HarnessKind carries the Anvil harness adapter (codex, openCode, ...) so a
@@ -154,7 +154,7 @@ func SessionKey(namespace, name string) string {
 	return strings.TrimSpace(namespace) + "/" + strings.TrimSpace(name)
 }
 
-// EnsureTurnSession binds one chat turn to its standing session. Direct turns
+// EnsureTurnSession binds a chat turn to its standing session. Direct turns
 // and peer deliveries share this path: the caller maps the thread ID (parent
 // thread for a direct message, recipient child thread for a peer delivery)
 // through SessionNameForThread and this helper resumes the existing session

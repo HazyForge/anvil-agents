@@ -37,7 +37,7 @@ delivery contract live in [Standing Chat](standing-chat.md) and
 
 ## How a standing process owns a thread's harness session across turns
 
-One chat thread owns exactly one standing session, resumed across turns.
+A chat thread owns exactly one standing session, resumed across turns.
 Standing chat today is **turn-based, not a continuously running native CLI
 session**: every accepted message creates one append-only AgentRun, and that
 does not change here. A standing session evolves the model by keeping warm
@@ -710,7 +710,7 @@ go run ./cmd/anvil-desktop --listen 127.0.0.1:1738 --api-origin http://127.0.0.1
 # terminal 2: cd web/desktop && npm run dev  (or --ui-dir web/desktop/dist --open)
 
 # 3. Sign in (Authorization Code + PKCE; stub OIDC denies -> fallback path
-#    with error recorded) and Send one chat message; then:
+#    with error recorded) and send a chat message; then:
 cat .runtime/chat-latency.jsonl
 ```
 
