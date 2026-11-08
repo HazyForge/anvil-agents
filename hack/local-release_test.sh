@@ -61,6 +61,15 @@ done
 
 rg -q '^  primeAgent: ghcr.io/hazyforge/anvil-agent-run-prime@sha256:8888888888888888888888888888888888888888888888888888888888888888$' "${tmp_dir}/deploy.yaml" || fail "Prime image digest was not pinned"
 
+# An explicitly empty runner image is retired and must stay empty.
+sed -E 's|^  grokBuild: .*$|  grokBuild: ""|' "${tmp_dir}/deploy.yaml" > "${tmp_dir}/retired.yaml"
+"${source_root}/hack/pin-deploy-values-from-lock.sh" \
+	--image-lock "${tmp_dir}/dist/images-v9.8.7.lock.tsv" \
+	--values "${tmp_dir}/retired.yaml" >/dev/null || fail "retired runner image was rejected"
+rg -q '^  grokBuild: ""$' "${tmp_dir}/retired.yaml" || fail "retired Grok Build runner image was pinned"
+rg -q '4444444444444444444444444444444444444444444444444444444444444444' "${tmp_dir}/retired.yaml" && fail "retired Grok Build digest leaked into values"
+rg -q '^  codex: ghcr.io/hazyforge/anvil-agent-run-codex@sha256:2222222222222222222222222222222222222222222222222222222222222222$' "${tmp_dir}/retired.yaml" || fail "active runners were not pinned beside a retired runner"
+
 tag_repo="${tmp_dir}/tag-repo"
 mkdir -p "${tag_repo}/hack"
 cp "${source_root}/hack/ensure-release-tag.sh" "${tag_repo}/hack/ensure-release-tag.sh"

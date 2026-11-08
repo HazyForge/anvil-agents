@@ -57,8 +57,8 @@ classes. `standing-chat` is never generated even if listed, so Desktop
 
 ## ActorTemplate
 
-Overlay `ActorTemplate/standing-chat` remains the Job grok-build placeholder
-and is **not** ACP. Generate uses `ActorTemplate/acp-spike`: a digest-pinned
+Overlay `ActorTemplate/standing-chat`, the Job grok-build placeholder that was
+**not** ACP, was retired with Grok Build on 2026-10-27. Generate uses `ActorTemplate/acp-spike`: a digest-pinned
 Python ACP echo on `:80` (atenet ExtProc forwards to `<pod_ip>:80`). Sample
 harness: `config/samples/control_v1alpha1_agentharnessprofile_acp_spike.yaml`.
 

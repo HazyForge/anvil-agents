@@ -113,15 +113,13 @@ func TestConstrainedOverlayForbidsStockInstallAndDefaultRustFSKeys(t *testing.T)
 		t.Fatal("pin-local-storage-sts.yaml must pin valkey PVCs to observability-local")
 	}
 
-	template := read("fleet/base/actortemplate-standing-chat.yaml")
-	if !strings.Contains(template, "name: standing-chat") {
-		t.Fatal("ActorTemplate must be named standing-chat")
+	// The standing-chat ActorTemplate only carried the Grok Build runner image
+	// and was retired with Grok Build on 2026-10-27.
+	if _, err := os.Stat(filepath.Join(root, "fleet/base/actortemplate-standing-chat.yaml")); !os.IsNotExist(err) {
+		t.Fatalf("retired standing-chat ActorTemplate must stay removed (stat err: %v)", err)
 	}
-	if !strings.Contains(template, "@sha256:") {
-		t.Fatal("ActorTemplate images must be digest-pinned")
-	}
-	if !strings.Contains(template, "ProcessBackend") {
-		t.Fatal("standing-chat template must keep Desktop on ProcessBackend")
+	if fleet := read("fleet/base/kustomization.yaml"); strings.Contains(fleet, "standing-chat") {
+		t.Fatal("fleet kustomization must not list the retired standing-chat ActorTemplate")
 	}
 
 	acp := read("fleet/base/actortemplate-acp-spike.yaml")

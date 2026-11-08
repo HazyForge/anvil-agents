@@ -61,11 +61,14 @@ grep -Fq 'createNamespace: true' "${values}" || fail "helm-values.yaml must crea
 grep -Fq 'pod-security.kubernetes.io/enforce=privileged' "${overlay}/README.md" || fail "README must document PSA privileged for ateom workers"
 grep -Fq 'hostPort' "${overlay}/README.md" || fail "README must call out hostPorts"
 
-template="${overlay}/fleet/base/actortemplate-standing-chat.yaml"
-grep -Eq '^[[:space:]]*name: standing-chat[[:space:]]*$' "${template}" || fail "ActorTemplate name must be standing-chat"
+# The standing-chat ActorTemplate only carried the Grok Build runner image and
+# was retired with Grok Build on 2026-10-27.
+[[ ! -e "${overlay}/fleet/base/actortemplate-standing-chat.yaml" ]] || fail "retired standing-chat ActorTemplate is back"
+if grep -Rqs 'anvil-agent-run-grok-build' "${overlay}/fleet"; then
+  fail "fleet must not pin the retired Grok Build runner image"
+fi
+template="${overlay}/fleet/base/actortemplate-acp-spike.yaml"
 grep -Fq 'registry.k8s.io/pause:3.10.2@sha256:' "${template}" || fail "pauseImage must be digest-pinned"
-grep -Fq 'ghcr.io/hazyforge/anvil-agent-run-grok-build@sha256:' "${template}" || fail "standing-chat agent image must be digest-pinned"
-grep -Fq 'NOT an ACP' "${template}" || fail "ActorTemplate must warn that the grok image is not ACP"
 
 pool="${overlay}/fleet/base/workerpool-warm.yaml"
 grep -Eq '^[[:space:]]*name: warm[[:space:]]*$' "${pool}" || fail "WorkerPool name must be warm"

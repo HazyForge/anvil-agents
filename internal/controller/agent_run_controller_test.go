@@ -2095,6 +2095,22 @@ func TestAgentRunImageUsesConfiguredBackendDefault(t *testing.T) {
 	if phase, reason, _ := emptyReconciler.agentRunBlockingValidation(agyRun); phase != controlv1alpha1.AgentRunPhaseNeedsHuman || reason != "AgyImageNotConfigured" {
 		t.Fatalf("validation without configured Agy image = (%q, %q), want NeedsHuman/AgyImageNotConfigured", phase, reason)
 	}
+
+	// An installation retires a runner by passing an empty image flag, as
+	// Anvil Primaris does for Grok Build: matching runs hold instead of
+	// falling back to a development image.
+	grokRun := &controlv1alpha1.AgentRun{Spec: controlv1alpha1.AgentRunSpec{
+		SourceRef: controlv1alpha1.AgentRunSourceRef{Kind: "Manual", Name: "operator"},
+		Harness: controlv1alpha1.AgentRunHarnessSpec{
+			Backend: controlv1alpha1.AgentRunHarnessBackendSpec{Kind: controlv1alpha1.AgentRunHarnessBackendGrokBuild},
+		},
+	}}
+	if got := emptyReconciler.agentRunImage(grokRun); got != "" {
+		t.Fatalf("retired Grok Build image = %q, want empty", got)
+	}
+	if phase, reason, _ := emptyReconciler.agentRunBlockingValidation(grokRun); phase != controlv1alpha1.AgentRunPhaseNeedsHuman || reason != "GrokBuildImageNotConfigured" {
+		t.Fatalf("validation with retired Grok Build image = (%q, %q), want NeedsHuman/GrokBuildImageNotConfigured", phase, reason)
+	}
 }
 
 func TestAgentRunMergeBackendMergesModelProviderAndGrokBuild(t *testing.T) {

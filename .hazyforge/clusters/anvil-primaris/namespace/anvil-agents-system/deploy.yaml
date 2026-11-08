@@ -24,7 +24,10 @@ runnerImages:
   openCode: ghcr.io/hazyforge/anvil-agent-run-opencode@sha256:479cac35c6cc9f8cc5c6591e3bddacb5245ebea8f16f3f590a449df9214b2dc9
   hermesAgent: ghcr.io/hazyforge/anvil-agent-run-hermes@sha256:161860b11fccca46779a5d75a59f672b2cc84e83f411e40cd48b411ade33c322
   openClaw: ghcr.io/hazyforge/anvil-agent-run-openclaw@sha256:7bd2164cc2b21fd2c2f2f20342ff2f2b45c90add452532e64c68c8823a4efc7e
-  grokBuild: ghcr.io/hazyforge/anvil-agent-run-grok-build@sha256:86b8d1a905c5e36af110fd880f2bb3db3efec5bc732bd16bff9ce8dc46f77f22
+  # Grok Build is retired on Primaris (2026-10-27: Grok is unpaid). Empty means
+  # a grokBuild AgentRun without its own image is held NeedsHuman with
+  # GrokBuildImageNotConfigured. The release pin scripts keep it empty.
+  grokBuild: ""
   piAgent: ghcr.io/hazyforge/anvil-agent-run-pi@sha256:1d41394c86d7c5ab66a7186d35097f9f1a6144cba7020e2410c1afdd3734e952
 crds:
   install: true
@@ -93,14 +96,10 @@ api:
       value: "true"
     - name: ANVIL_AGENTS_JEV_MODEL
       value: jev-1.13.0
-    # Standing ProcessBackend: resolve grok from the init-copied CLI dir and
-    # keep prompt-file CreateTemp + GROK_HOME writable under readOnlyRootFilesystem.
-    - name: PATH
-      value: /opt/anvil/standing-cli:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+    # Standing ProcessBackend: keep prompt-file CreateTemp and HOME writable
+    # under readOnlyRootFilesystem.
     - name: HOME
       value: /tmp/anvil-standing-home
-    - name: GROK_HOME
-      value: /tmp/anvil-standing-home/.grok
     - name: TMPDIR
       value: /tmp
   # API-only chat fixes can roll independently of the healthy controller.
@@ -114,20 +113,11 @@ api:
         items:
           - key: ca.crt
             path: ca.crt
-    # Standing ProcessBackend scratch: prompt files + GROK_HOME seed target.
+    # Standing ProcessBackend scratch: prompt files and HOME.
     - name: standing-tmp
       emptyDir: {}
     - name: standing-home
       emptyDir: {}
-    - name: standing-cli
-      emptyDir: {}
-    # Operator-owned Grok OAuth for standing ProcessBackend (Secret not in git).
-    - name: standing-grok-auth
-      secret:
-        secretName: anvil-standing-grok-auth
-        items:
-          - key: auth.json
-            path: auth.json
   extraVolumeMounts:
     - name: chat-database-ca
       mountPath: /etc/anvilhub/inventory-database
@@ -136,54 +126,9 @@ api:
       mountPath: /tmp
     - name: standing-home
       mountPath: /tmp/anvil-standing-home
-    - name: standing-cli
-      mountPath: /opt/anvil/standing-cli
-      readOnly: true
-  # Copy grok from the reviewed runner image into standing-cli emptyDir so the
-  # distroless/base API can exec it. Auth is NOT copied here — seed GROK_HOME
-  # separately (see docs/standing-inprocess-harness.md Primaris section).
-  initContainers:
-    - name: standing-cli-grok
-      image: ghcr.io/hazyforge/anvil-agent-run-grok-build@sha256:86b8d1a905c5e36af110fd880f2bb3db3efec5bc732bd16bff9ce8dc46f77f22
-      imagePullPolicy: IfNotPresent
-      command: ["/bin/sh", "-c"]
-      args:
-        - mkdir -p /standing-cli && cp /usr/local/bin/grok /standing-cli/grok && chmod 0755 /standing-cli/grok
-      volumeMounts:
-        - name: standing-cli
-          mountPath: /standing-cli
-      securityContext:
-        allowPrivilegeEscalation: false
-        capabilities:
-          drop: [ALL]
-        runAsNonRoot: true
-        runAsUser: 10001
-        runAsGroup: 10001
-        readOnlyRootFilesystem: true
-    - name: standing-grok-auth-seed
-      image: ghcr.io/hazyforge/anvil-agent-run-grok-build@sha256:86b8d1a905c5e36af110fd880f2bb3db3efec5bc732bd16bff9ce8dc46f77f22
-      imagePullPolicy: IfNotPresent
-      command: ["/bin/sh", "-c"]
-      args:
-        - |
-          set -eu
-          mkdir -p /standing-home/.grok
-          cp /auth/auth.json /standing-home/.grok/auth.json
-          chmod 600 /standing-home/.grok/auth.json
-      volumeMounts:
-        - name: standing-home
-          mountPath: /standing-home
-        - name: standing-grok-auth
-          mountPath: /auth
-          readOnly: true
-      securityContext:
-        allowPrivilegeEscalation: false
-        capabilities:
-          drop: [ALL]
-        runAsNonRoot: true
-        runAsUser: 65532
-        runAsGroup: 65532
-        readOnlyRootFilesystem: true
+  # The standing Grok CLI and auth-seed init containers were retired with Grok
+  # Build on 2026-10-27. The Secret anvil-standing-grok-auth is no longer mounted.
+  initContainers: []
 
   # Keep the currently deployed scheduling and isolation settings explicit.
   replicaCount: 1
@@ -626,124 +571,6 @@ extraObjects:
         summary: Answer user messages and coordinate with explicitly permitted peers.
       harnessProfileRef:
         name: desktop-agy
-      harness:
-        intent: observe
-        systemPrompt: |
-          Answer the user's message clearly and concisely. Work in text only.
-          Do not mutate files, repositories, services, or cluster resources;
-          do not execute shell commands, contact third-party services, or spend money.
-          Coordinate only with peers explicitly permitted by this conversation.
-
-  - apiVersion: control.anvil.hazyforge.io/v1alpha1
-    kind: AgentHarnessProfile
-    metadata:
-      name: desktop-standing-grok
-      namespace: anvilhub
-      labels:
-        app.kubernetes.io/part-of: desktop-chat
-        control.anvil.hazyforge.io/application: desktop-chat
-        control.anvil.hazyforge.io/ownership: helm
-        control.anvil.hazyforge.io/standing: "true"
-    spec:
-      description: Standing SubstrateActor Grok Build for snappy Desktop chat (no Job cold start). Jobs stay default for scouts/batch.
-      backend:
-        kind: grokBuild
-        modelProvider: xai
-        providerAuthMode: oauth
-        grokBuild:
-          model: grok-4.5
-          reasoningEffort: low
-      execution:
-        runtime: SubstrateActor
-        substrate:
-          actorClass: standing-chat
-          pool: warm
-        serviceAccountName: anvil-opencode-observe
-        timeoutSeconds: 120
-        resources:
-          requests:
-            cpu: 50m
-            memory: 128Mi
-          limits:
-            cpu: "1"
-            memory: 512Mi
-  - apiVersion: control.anvil.hazyforge.io/v1alpha1
-    kind: AgentRunProfile
-    metadata:
-      name: desktop-standing-assistant
-      namespace: anvilhub
-      labels:
-        app.kubernetes.io/part-of: desktop-chat
-        control.anvil.hazyforge.io/application: desktop-chat
-        control.anvil.hazyforge.io/ownership: helm
-        control.anvil.hazyforge.io/standing: "true"
-    spec:
-      description: Interactive Desktop assistant on the standing SubstrateActor Grok path.
-      scope:
-        applicationRef:
-          name: desktop-chat
-        summary: Answer user Desktop chat quickly via standing SubstrateActor harness. No cluster mutations.
-      harnessProfileRef:
-        name: desktop-standing-grok
-      harness:
-        intent: observe
-        systemPrompt: |
-          Answer the user's message clearly and concisely. Work in text only.
-          Do not mutate files, repositories, services, or cluster resources;
-          do not execute shell commands, contact third-party services, or spend money.
-          Coordinate only with peers explicitly permitted by this conversation.
-
-  - apiVersion: control.anvil.hazyforge.io/v1alpha1
-    kind: AgentHarnessProfile
-    metadata:
-      name: desktop-standing-grok
-      namespace: hazy-trade
-      labels:
-        app.kubernetes.io/part-of: desktop-chat
-        control.anvil.hazyforge.io/application: desktop-chat
-        control.anvil.hazyforge.io/ownership: helm
-        control.anvil.hazyforge.io/standing: "true"
-    spec:
-      description: Standing SubstrateActor Grok Build for snappy Desktop chat (no Job cold start). Jobs stay default for scouts/batch.
-      backend:
-        kind: grokBuild
-        modelProvider: xai
-        providerAuthMode: oauth
-        grokBuild:
-          model: grok-4.5
-          reasoningEffort: low
-      execution:
-        runtime: SubstrateActor
-        substrate:
-          actorClass: standing-chat
-          pool: warm
-        serviceAccountName: anvil-opencode-observe
-        timeoutSeconds: 120
-        resources:
-          requests:
-            cpu: 50m
-            memory: 128Mi
-          limits:
-            cpu: "1"
-            memory: 512Mi
-  - apiVersion: control.anvil.hazyforge.io/v1alpha1
-    kind: AgentRunProfile
-    metadata:
-      name: desktop-standing-assistant
-      namespace: hazy-trade
-      labels:
-        app.kubernetes.io/part-of: desktop-chat
-        control.anvil.hazyforge.io/application: desktop-chat
-        control.anvil.hazyforge.io/ownership: helm
-        control.anvil.hazyforge.io/standing: "true"
-    spec:
-      description: Interactive Desktop assistant on the standing SubstrateActor Grok path.
-      scope:
-        applicationRef:
-          name: desktop-chat
-        summary: Answer user Desktop chat quickly via standing SubstrateActor harness. No cluster mutations.
-      harnessProfileRef:
-        name: desktop-standing-grok
       harness:
         intent: observe
         systemPrompt: |

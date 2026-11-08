@@ -2,14 +2,30 @@
 
 See also the Kind-local runbook in [`standing-inprocess-harness.md`](./standing-inprocess-harness.md).
 
+> **Retired on 2026-10-27.** Grok is no longer paid, so the Primaris overlay
+> dropped every Grok Build surface:
+>
+> - the `desktop-standing-grok` harness profiles and `desktop-standing-assistant`
+>   run profiles in `anvilhub` and `hazy-trade`;
+> - the `standing-cli-grok` and `standing-grok-auth-seed` init containers;
+> - the `standing-cli` volume and the `anvil-standing-grok-auth` mount;
+> - `GROK_HOME`;
+> - the `runnerImages.grokBuild` pin.
+>
+> `runnerImages.grokBuild: ""` makes any Grok Build AgentRun without its own
+> image stop as `NeedsHuman`/`GrokBuildImageNotConfigured`. The release pin
+> scripts leave an empty runner image empty. Desktop no longer finds a standing
+> profile on Primaris; `desktop-agy` is the working cloud chat. The rest of this
+> page records the setup as it was.
+
 Standing ProcessBackend + WebSocket is the **primary** interactive Desktop path
 on Primaris as well as Kind-local. Jobs remain the default for scouts/batch.
 Desktop standing harnesses select `SubstrateActor` so turns record
 `executionRuntime: SubstrateActor` and never create a Job.
 
-The Primaris overlay
+Until 2026-10-27 the Primaris overlay
 (`.hazyforge/clusters/anvil-primaris/namespace/anvil-agents-system/deploy.yaml`)
-now sets:
+set:
 
 | Flag / object | Purpose |
 | --- | --- |

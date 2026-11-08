@@ -493,7 +493,8 @@ the same cluster shape:
   JWT ATE no longer fails controller startup for missing ClusterTrustBundle.
 - [x] Constrained Primaris overlay **files** at
   `config/ate-constrained-primaris/` (jwt issuer/audience, one-node pin,
-  `ActorTemplate/standing-chat`, `ActorTemplate/acp-spike`, `WorkerPool/warm`).
+  `ActorTemplate/acp-spike`, `WorkerPool/warm`; `ActorTemplate/standing-chat`
+  was retired with Grok Build on 2026-10-27).
   Do not stock-install. Apply only with a one-node-safe render after this
   generate-on-actor image is live.
 - [x] Generate-on-actor (Resume + atenet/ACP stream, mark AgentRun
