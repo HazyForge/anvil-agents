@@ -28,7 +28,7 @@
     "@vitejs/plugin-react": "^4.5.2",
     "electron": "^45.2.0",
     "typescript": "~5.8.3",
-    "vite": "^8.3.5"
+    "vite": "^8.3.6"
   },
   "build": {
     "appId": "io.hazyforge.anvil-agents-desktop",
