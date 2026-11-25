@@ -157,13 +157,11 @@ Helm apply), prefer the local Docker path in
 
 ```bash
 # Console/controller iteration → build, pin, helm deploy (no Actions, no Kind):
-make release-primaris-hot
 
 # Versioned release, pin Primaris deploy.yaml (commit for Argo):
-VERSION=v0.1.14 make release-primaris-fast
+make kind-e2e
 
 # Apply current pins + CRDs from the local chart:
-make deploy-primaris
 ```
 
 ## Add A Real Harness

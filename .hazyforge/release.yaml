@@ -8,15 +8,12 @@ metadata:
 spec:
   description: >-
     Standalone open-source agent execution operator and runner images.
-    Primaris cluster install is GitOps under .hazyforge/clusters/anvil-primaris/.
+    There is no production deployment target in this checkout.
     Security scanning is independent public GitHub Actions (security.yml).
   testGateSuites:
     - standalone-operator
   notes: |
-    Cluster install (this repo → Primaris GitOps):
-      .hazyforge/clusters/anvil-primaris/namespace/anvil-agents-system/
-    Public security (GitHub Actions — source of truth for consumers):
+    Production installation was withdrawn. Validate changes in isolated Kind.
+    Public security verification remains independent:
       .github/workflows/security.yml
-      docs/security.md  (see security-and-release.md)
-    Local image pin to Primaris overlay:
-      VERSION=vX.Y.Z make release-primaris-fast
+      docs/security.md

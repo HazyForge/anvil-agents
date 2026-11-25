@@ -73,7 +73,7 @@ func TestExampleManifestsParseAndIdentifyObjects(t *testing.T) {
 func TestHazyForgeArtifactBuildUsesCatalogSourceContexts(t *testing.T) {
 	t.Parallel()
 
-	applicationPath := "../../.hazyforge/clusters/anvil-primaris/namespace/anvil-agents-system/manifests/application.yaml"
+	applicationPath := "testdata/artifact-context.yaml"
 	contents, err := os.ReadFile(applicationPath)
 	if err != nil {
 		t.Fatal(err)
