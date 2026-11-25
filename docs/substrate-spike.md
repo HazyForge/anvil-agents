@@ -491,17 +491,10 @@ the same cluster shape:
   `ateapi-ca` trust (CA file, ConfigMap lookup, default `ate-system/ateapi-ca`)
   and a Kind-only insecure-dev loopback dial. Enabling `actorsEnabled` against
   JWT ATE no longer fails controller startup for missing ClusterTrustBundle.
-- [x] Constrained Primaris overlay **files** at
-  `config/ate-constrained-primaris/` (jwt issuer/audience, one-node pin,
-  `ActorTemplate/acp-spike`, `WorkerPool/warm`; `ActorTemplate/standing-chat`
-  was retired with Grok Build on 2026-10-27).
-  Do not stock-install. Apply only with a one-node-safe render after this
-  generate-on-actor image is live.
-- [x] Generate-on-actor (Resume + atenet/ACP stream, mark AgentRun
-  Succeeded). Plan: [substrate-generate-on-actor.md](substrate-generate-on-actor.md).
-  Keep `substrate.actorsEnabled=false` and `substrate.generateOnActor=false`
-  on Primaris until a one-node ATE apply and an `acp-spike` smoke succeed.
-  Desktop `standing-chat` stays on ProcessBackend.
+- Production deployment recipes have been retired. Keep ATE experiments on
+  disposable Kind clusters with synthetic identities and leave the production
+  actor feature gates disabled. Historical measurements below are not a
+  production deployment recommendation.
 - [x] Actor identity in `status.substrateActor` and turn-to-actor binding.
 - [x] Latency harness (Job cold start vs warm actor resume) covering direct
   turns, peer deliveries, and the busy-recipient durable-wait peer path

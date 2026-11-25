@@ -164,8 +164,6 @@ make kind-e2e
 # helm registry login:
 make release-local-all VERSION=vX.Y.Z REGISTRY_PREFIX=registry.example.com/team
 
-# Update the first-party Anvil Primaris deploy overlay from the generated lock:
-make release-pin-deploy VERSION=vX.Y.Z
 ```
 
 `make images` builds the controller plus all eight built-in runner images into
@@ -182,9 +180,8 @@ and chart artifacts, run `make release-local`.
 `publish-release.sh` runs `make verify` and `make kind-e2e`, publishes all
 nine versioned images, verifies their immutable digests and source revision,
 writes a digest lock, and pushes an OCI chart whose nine default image
-references are pinned to that lock. `make release-pin-deploy` updates the
-first-party Anvil Primaris overlay from that lock so the controller and built-in
-runner defaults move together.
+references are pinned to that lock. This repository no longer deploys to
+Anvil Primaris. Use Kind for internal testing.
 
 GitHub workflows use the same repository-owned build and test contracts and are
 optional. The optional release workflow is manual-only for an existing `v*` tag.

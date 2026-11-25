@@ -1,0 +1,43 @@
+---
+apiVersion: infrastructure.anvil.hazyforge.io/v1alpha1
+kind: Repository
+metadata:
+  name: local-test-fixture
+spec:
+  defaultCheckoutPath: /workspace/anvil-agents
+
+---
+apiVersion: control.anvil.hazyforge.io/v1alpha1
+kind: Application
+metadata:
+  name: local-test-fixture
+spec:
+  components:
+  - name: controller
+    source:
+      repository: primary
+      path: .
+  - name: codex-runner
+    source:
+      repository: primary
+      path: .
+  - name: opencode-runner
+    source:
+      repository: primary
+      path: .
+  - name: hermes-runner
+    source:
+      repository: primary
+      path: .
+  - name: openclaw-runner
+    source:
+      repository: primary
+      path: .
+  - name: pi-runner
+    source:
+      repository: primary
+      path: .
+  - name: agy-runner
+    source:
+      repository: primary
+      path: .
